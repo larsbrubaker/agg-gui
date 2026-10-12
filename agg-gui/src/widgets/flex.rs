@@ -39,7 +39,9 @@ use crate::color::Color;
 use crate::draw_ctx::DrawCtx;
 use crate::event::{Event, EventResult};
 use crate::geometry::{Rect, Size};
-use crate::layout_props::{resolve_fit_or_stretch, HAnchor, Insets, VAnchor, WidgetBase};
+use crate::layout_props::{
+    clamp_to_limits, resolve_fit_or_stretch, HAnchor, Insets, VAnchor, WidgetBase,
+};
 use crate::widget::Widget;
 use crate::widgets::flex_share::{share_flex_space, FlexItem};
 
@@ -92,14 +94,22 @@ fn place_cross_h(
     // Determine width.
     let actual_w = if anchor.is_stretch() {
         // LEFT | RIGHT → fill slot
-        slot_w.clamp(min_w, max_w)
+        clamp_to_limits(slot_w, min_w, max_w)
     } else if anchor == HAnchor::MAX_FIT_OR_STRETCH {
-        resolve_fit_or_stretch(natural_w, slot_w, true).clamp(min_w, max_w)
+        clamp_to_limits(
+            resolve_fit_or_stretch(natural_w, slot_w, true),
+            min_w,
+            max_w,
+        )
     } else if anchor == HAnchor::MIN_FIT_OR_STRETCH {
-        resolve_fit_or_stretch(natural_w, slot_w, false).clamp(min_w, max_w)
+        clamp_to_limits(
+            resolve_fit_or_stretch(natural_w, slot_w, false),
+            min_w,
+            max_w,
+        )
     } else {
         // FIT, LEFT, RIGHT, CENTER, ABSOLUTE — use natural width.
-        natural_w.clamp(min_w, max_w)
+        clamp_to_limits(natural_w, min_w, max_w)
     };
 
     // Determine x position.
@@ -404,7 +414,8 @@ impl Widget for FlexColumn {
                 // Measure at natural height; pass inner_h as the available
                 // height so the child can self-report its natural size.
                 let desired = self.children[i].layout(Size::new(slot_w, inner_h));
-                content_heights[i] = desired.height.clamp(
+                content_heights[i] = clamp_to_limits(
+                    desired.height,
                     self.children[i].min_size().height,
                     self.children[i].max_size().height,
                 );

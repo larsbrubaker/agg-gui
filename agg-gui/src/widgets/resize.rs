@@ -1,4 +1,4 @@
-﻿//! `Resize` — a nested, user-draggable resizable container.
+//! `Resize` — a nested, user-draggable resizable container.
 //!
 //! Egui-parity port of `egui::Resize`.  Wraps a single child widget
 //! and exposes a bottom-right grip the user can drag to resize the
@@ -29,7 +29,7 @@ use crate::cursor::{set_cursor_icon, CursorIcon};
 use crate::draw_ctx::DrawCtx;
 use crate::event::{Event, EventResult, MouseButton};
 use crate::geometry::{Point, Rect, Size};
-use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
+use crate::layout_props::{clamp_to_limits, HAnchor, Insets, VAnchor, WidgetBase};
 use crate::widget::Widget;
 
 /// Width (and height) of the bottom-right drag grip, in logical pixels.
@@ -204,10 +204,8 @@ impl Widget for Resize {
         // to fit on the next layout pass.  Matches egui, where the
         // surrounding Window expands when the inner Resize demands
         // more width or height.
-        let w_target = target.width.clamp(self.min_size.width, self.max_size.width);
-        let h_target = target
-            .height
-            .clamp(self.min_size.height, self.max_size.height);
+        let w_target = clamp_to_limits(target.width, self.min_size.width, self.max_size.width);
+        let h_target = clamp_to_limits(target.height, self.min_size.height, self.max_size.height);
 
         // Content-bound floor: measure the child at the requested
         // target, and if its natural size is larger (e.g. wrapped
@@ -294,10 +292,16 @@ impl Widget for Resize {
                     // SE handle semantics:
                     //   cursor right  → width  grows  (+dx)
                     //   cursor down   → height grows  (in Y-up, down = dy<0 → -dy)
-                    let new_w = (self.drag_start_size.width + dx)
-                        .clamp(self.min_size.width, self.max_size.width);
-                    let new_h = (self.drag_start_size.height - dy)
-                        .clamp(self.min_size.height, self.max_size.height);
+                    let new_w = clamp_to_limits(
+                        self.drag_start_size.width + dx,
+                        self.min_size.width,
+                        self.max_size.width,
+                    );
+                    let new_h = clamp_to_limits(
+                        self.drag_start_size.height - dy,
+                        self.min_size.height,
+                        self.max_size.height,
+                    );
                     let new_sz = Size::new(new_w, new_h);
                     self.current_size = Some(new_sz);
                     if let Some(c) = &self.size_cell {

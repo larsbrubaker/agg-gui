@@ -13,7 +13,7 @@
 //! before, and the container reports C#'s `LocalBounds` through it.
 
 use crate::geometry::{Point, Rect, Size};
-use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
+use crate::layout_props::{clamp_to_limits, HAnchor, Insets, VAnchor, WidgetBase};
 use crate::widget::Widget;
 
 /// One axis of a child's anchor, reduced to the three C# position bits.
@@ -148,7 +148,7 @@ fn place_children(
                 margin_low: m.left,
                 margin_high: m.right,
                 origin: origin.x - low.x,
-                natural: natural.width.clamp(min.width, max.width),
+                natural: clamp_to_limits(natural.width, min.width, max.width),
             },
         );
         let (y, h) = place_axis(
@@ -160,7 +160,7 @@ fn place_children(
                 margin_low: m.bottom,
                 margin_high: m.top,
                 origin: origin.y - low.y,
-                natural: natural.height.clamp(min.height, max.height),
+                natural: clamp_to_limits(natural.height, min.height, max.height),
             },
         );
         // A fit-or-stretch child (C# `Fit | Stretch`) never shrinks below
@@ -176,8 +176,8 @@ fn place_children(
         } else {
             h
         };
-        let w = w.clamp(min.width, max.width).max(0.0);
-        let h = h.clamp(min.height, max.height).max(0.0);
+        let w = clamp_to_limits(w, min.width, max.width).max(0.0);
+        let h = clamp_to_limits(h, min.height, max.height).max(0.0);
         if w != room.width || h != room.height {
             // The child arranged its own children against `room`; re-lay
             // it at the box it actually occupies.  Comparing with the

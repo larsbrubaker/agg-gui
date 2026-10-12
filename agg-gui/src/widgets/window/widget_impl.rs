@@ -1,4 +1,5 @@
 use super::*;
+use crate::layout_props::clamp_to_limits;
 
 impl Widget for Window {
     crate::widgets::widget_as_any!();
@@ -443,7 +444,8 @@ impl Widget for Window {
                 let child_h = if child.v_anchor().is_stretch() {
                     content_h
                 } else {
-                    desired.height.clamp(
+                    clamp_to_limits(
+                        desired.height,
                         child.min_size().height,
                         child.max_size().height.min(content_h),
                     )

@@ -21,7 +21,9 @@ use crate::color::Color;
 use crate::draw_ctx::DrawCtx;
 use crate::event::{Event, EventResult};
 use crate::geometry::{Rect, Size};
-use crate::layout_props::{resolve_fit_or_stretch, HAnchor, Insets, VAnchor, WidgetBase};
+use crate::layout_props::{
+    clamp_to_limits, resolve_fit_or_stretch, HAnchor, Insets, VAnchor, WidgetBase,
+};
 use crate::widget::Widget;
 use crate::widgets::flex::DEFAULT_ROW_GAP;
 use crate::widgets::flex_share::{share_flex_space, FlexItem};
@@ -50,13 +52,21 @@ fn place_cross_v(
 
     // Determine height.
     let actual_h = if anchor.is_stretch() {
-        slot_h.clamp(min_h, max_h)
+        clamp_to_limits(slot_h, min_h, max_h)
     } else if anchor == VAnchor::MAX_FIT_OR_STRETCH {
-        resolve_fit_or_stretch(natural_h, slot_h, true).clamp(min_h, max_h)
+        clamp_to_limits(
+            resolve_fit_or_stretch(natural_h, slot_h, true),
+            min_h,
+            max_h,
+        )
     } else if anchor == VAnchor::MIN_FIT_OR_STRETCH {
-        resolve_fit_or_stretch(natural_h, slot_h, false).clamp(min_h, max_h)
+        clamp_to_limits(
+            resolve_fit_or_stretch(natural_h, slot_h, false),
+            min_h,
+            max_h,
+        )
     } else {
-        natural_h.clamp(min_h, max_h)
+        clamp_to_limits(natural_h, min_h, max_h)
     };
 
     // Determine y position (Y-up: BOTTOM = low Y, TOP = high Y).

@@ -12,7 +12,7 @@ use crate::color::Color;
 use crate::draw_ctx::DrawCtx;
 use crate::event::{Event, EventResult, MouseButton};
 use crate::geometry::{Point, Rect, Size};
-use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
+use crate::layout_props::{clamp_to_limits, HAnchor, Insets, VAnchor, WidgetBase};
 use crate::text::Font;
 use crate::widget::Widget;
 use crate::widgets::spacers::Spacer;
@@ -277,7 +277,7 @@ impl Widget for TabView {
         let content_h = (available.height - self.tab_bar_height).max(0.0);
         let showing = self.sidebar_showing();
         let sw = if showing {
-            self.sidebar_w.clamp(MIN_SIDEBAR_W, available.width * 0.8)
+            clamp_to_limits(self.sidebar_w, MIN_SIDEBAR_W, available.width * 0.8)
         } else {
             0.0
         };
@@ -462,7 +462,7 @@ impl Widget for TabView {
                 if self.sidebar_dragging {
                     // Resize: sidebar_w = window_width - cursor_x - divider
                     let new_w = self.bounds.width - pos.x;
-                    self.sidebar_w = new_w.clamp(MIN_SIDEBAR_W, self.bounds.width * 0.8);
+                    self.sidebar_w = clamp_to_limits(new_w, MIN_SIDEBAR_W, self.bounds.width * 0.8);
                     crate::animation::request_draw();
                     return EventResult::Consumed;
                 }

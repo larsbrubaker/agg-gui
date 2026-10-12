@@ -541,6 +541,16 @@ impl Widget for FlowLeftRightWithWrapping {
     fn max_size(&self) -> Size {
         self.base.max_size
     }
+    fn padding(&self) -> Insets {
+        self.padding
+    }
+    /// The inspector's padding edits (C# `Padding = …`). The padding is part
+    /// of every row's chrome width, so the rows wrap again on the next layout.
+    fn try_set_padding(&mut self, padding: Insets) -> bool {
+        self.padding = padding;
+        self.wrapped_width = None;
+        true
+    }
 
     fn layout(&mut self, available: Size) -> Size {
         let width = if self.base.h_anchor == HAnchor::STRETCH {

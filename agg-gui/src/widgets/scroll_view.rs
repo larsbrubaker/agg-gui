@@ -28,7 +28,7 @@ use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
 use crate::widget::Widget;
 
 use super::scrollbar::{
-    paint_prepared_scrollbar, ScrollbarAxis, ScrollbarGeometry, ScrollbarOrientation,
+    overflows, paint_prepared_scrollbar, ScrollbarAxis, ScrollbarGeometry, ScrollbarOrientation,
     DEFAULT_GRAB_MARGIN,
 };
 
@@ -688,8 +688,8 @@ fn solid_bars_showing(v: (bool, f64, f64), h: (bool, f64, f64), room: f64) -> (b
     for _ in 0..2 {
         let other_h = if need_h { room } else { 0.0 };
         let other_v = if need_v { room } else { 0.0 };
-        need_v = v_enabled && v_content > view_h - other_h;
-        need_h = h_enabled && h_content > view_w - other_v;
+        need_v = v_enabled && overflows(v_content, view_h - other_h);
+        need_h = h_enabled && overflows(h_content, view_w - other_v);
     }
     (need_v, need_h)
 }

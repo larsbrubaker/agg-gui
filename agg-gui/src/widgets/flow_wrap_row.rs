@@ -107,6 +107,16 @@ impl Widget for WrapRow {
     fn h_anchor(&self) -> HAnchor {
         HAnchor::STRETCH
     }
+    fn padding(&self) -> Insets {
+        self.padding
+    }
+    /// The inspector's padding edits (C# `Padding = …` on the row's
+    /// `FlowLayoutWidget`). A re-wrap builds fresh rows from the flow's
+    /// `row_padding`, as C#'s `DoWrappingLayout` does.
+    fn try_set_padding(&mut self, padding: Insets) -> bool {
+        self.padding = padding;
+        true
+    }
 
     fn layout(&mut self, available: Size) -> Size {
         let (b, p) = (self.border, self.padding);

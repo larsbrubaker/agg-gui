@@ -513,16 +513,13 @@ impl WidgetBase {
 
     // ----- helpers ----------------------------------------------------------
 
-    /// Clamp `proposed` to `[min_size, max_size]`.
+    /// Clamp `proposed` to `[min_size, max_size]`, the floor winning where
+    /// they cross ([`clamp_to_limits`]).
     #[inline]
     pub fn clamp_size(&self, proposed: Size) -> Size {
         Size::new(
-            proposed
-                .width
-                .clamp(self.min_size.width, self.max_size.width),
-            proposed
-                .height
-                .clamp(self.min_size.height, self.max_size.height),
+            clamp_to_limits(proposed.width, self.min_size.width, self.max_size.width),
+            clamp_to_limits(proposed.height, self.min_size.height, self.max_size.height),
         )
     }
 
@@ -542,6 +539,22 @@ impl Default for WidgetBase {
     fn default() -> Self {
         Self::new()
     }
+}
+
+// ---------------------------------------------------------------------------
+// Helper: hold a size to its limits
+// ---------------------------------------------------------------------------
+
+/// Hold `value` to `[min, max]` with the floor winning where the limits
+/// cross (`min > max`), as `max(min(value, max), min)`.
+///
+/// agg-sharp's `GuiWidget.MinimumSize` / `MaximumSize` setters keep the two
+/// ordered, but a Rust [`Widget`](crate::widget::Widget) reports its limits
+/// through trait methods that can say anything, and `f64::clamp` panics when
+/// `min > max`. Every layout that holds a size to limits uses this instead.
+#[inline]
+pub fn clamp_to_limits(value: f64, min: f64, max: f64) -> f64 {
+    value.min(max).max(min)
 }
 
 // ---------------------------------------------------------------------------

@@ -140,6 +140,11 @@ impl Widget for ReserveInset {
     fn is_visible(&self) -> bool {
         self.child().is_visible()
     }
+    /// Visibility is the child's (see [`is_visible`](Self::is_visible)), so
+    /// the inspector's `visible` row sets it there.
+    fn try_set_visible(&mut self, visible: bool) -> bool {
+        self.children[0].try_set_visible(visible)
+    }
     fn measure_min_height(&self, available_w: f64) -> f64 {
         self.child().measure_min_height(available_w)
     }

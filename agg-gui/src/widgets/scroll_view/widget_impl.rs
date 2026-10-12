@@ -129,10 +129,10 @@ impl Widget for ScrollView {
             return true;
         }
         let (vw, vh) = self.viewport();
-        if self.v.enabled && self.v.content > vh && self.pos_in_v_hover(local_pos) {
+        if self.v.can_scroll(vh) && self.pos_in_v_hover(local_pos) {
             return true;
         }
-        if self.h.enabled && self.h.content > vw && self.pos_in_h_hover(local_pos) {
+        if self.h.can_scroll(vw) && self.pos_in_h_hover(local_pos) {
             return true;
         }
         false
@@ -303,7 +303,7 @@ impl Widget for ScrollView {
                 // moves the view right, as it moves the view down.
                 let (vw, _) = self.viewport();
                 let sideways =
-                    self.h.enabled && *delta_x == 0.0 && modifiers.shift && self.h.content > vw;
+                    self.h.enabled && *delta_x == 0.0 && modifiers.shift && self.h.overflows(vw);
                 let (delta_x, delta_y) = if sideways {
                     (delta_y, &0.0)
                 } else {
@@ -371,8 +371,8 @@ impl Widget for ScrollView {
                 }
 
                 let (vw, vh) = self.viewport();
-                let v_scroll = self.v.enabled && self.v.content > vh;
-                let h_scroll = self.h.enabled && self.h.content > vw;
+                let v_scroll = self.v.can_scroll(vh);
+                let h_scroll = self.h.can_scroll(vw);
                 let v_hover_changed =
                     self.v
                         .update_hover(*pos, vh, self.style, self.v_scrollbar_geometry());
@@ -418,8 +418,8 @@ impl Widget for ScrollView {
                 ..
             } => {
                 let (vw, vh) = self.viewport();
-                let v_scroll = self.v.enabled && self.v.content > vh;
-                let h_scroll = self.h.enabled && self.h.content > vw;
+                let v_scroll = self.v.can_scroll(vh);
+                let h_scroll = self.h.can_scroll(vw);
                 let touch = crate::touch_emulation::touch_pan_travel();
                 if let Some(travel) = touch {
                     if !self.touch_can_pan(*pos, travel, v_scroll, h_scroll) {
@@ -445,8 +445,8 @@ impl Widget for ScrollView {
                 ..
             } => {
                 let (vw, vh) = self.viewport();
-                let v_scroll = self.v.enabled && self.v.content > vh;
-                let h_scroll = self.h.enabled && self.h.content > vw;
+                let v_scroll = self.v.can_scroll(vh);
+                let h_scroll = self.h.can_scroll(vw);
 
                 if v_scroll && self.pos_in_v_hover(*pos) {
                     if self

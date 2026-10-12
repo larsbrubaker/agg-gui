@@ -50,6 +50,7 @@ mod clip_path_software;
 mod color_clickaway;
 mod color_dialog_overlay;
 mod color_wheel_picker;
+mod crossed_limits;
 mod default_action;
 /// A point drawn at Y=10 in a 100×100 buffer must be near the BOTTOM of the
 /// buffer (low row index), not the top. This verifies the Y-up invariant at
@@ -97,6 +98,7 @@ mod logical_root_transform;
 mod mouse_down_focus_grab_tests;
 mod nested_child_transform;
 mod stale_path_removed_widget;
+mod try_set_hooks;
 // Loopback HTTP server: native only.
 mod container_fit_in_row;
 #[cfg(not(target_arch = "wasm32"))]
@@ -127,6 +129,7 @@ mod scroll_bar_device_scale_tests;
 mod scroll_fit_height;
 mod scroll_fixtures;
 mod scroll_offsets;
+mod scroll_overflow_tolerance;
 mod scroll_relayout;
 mod scroll_solid_reserve;
 mod scroll_view;

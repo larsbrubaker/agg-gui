@@ -159,7 +159,7 @@ pub use scroll_view::{
     ScrollBarAxisProperties, ScrollBarColor, ScrollBarKind, ScrollBarProperties, ScrollBarStyle,
     ScrollBarVisibility, ScrollFadedEdges, ScrollThumbRest, ScrollView, DEFAULT_SCROLL_EDGE_GUARD,
 };
-pub use scrollbar::{SCROLL_BAR_FADE_SECS, SCROLL_BAR_GROW_SECS};
+pub use scrollbar::{OVERFLOW_TOLERANCE, SCROLL_BAR_FADE_SECS, SCROLL_BAR_GROW_SECS};
 pub use segmented::SegmentedControl;
 pub use slider::{HandleShape, Slider, SliderClamping, SliderOrientation, SliderStyle};
 pub use spacers::{Separator, Spacer};

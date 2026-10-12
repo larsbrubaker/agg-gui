@@ -3,7 +3,9 @@
 use crate::draw_ctx::DrawCtx;
 use crate::event::{Event, EventResult};
 use crate::geometry::{Rect, Size};
-use crate::layout_props::{resolve_fit_or_stretch, HAnchor, Insets, VAnchor, WidgetBase};
+use crate::layout_props::{
+    clamp_to_limits, resolve_fit_or_stretch, HAnchor, Insets, VAnchor, WidgetBase,
+};
 use crate::widget::Widget;
 
 // ---------------------------------------------------------------------------
@@ -161,14 +163,18 @@ impl Widget for Stack {
                 // narrower than max_size, not go full-bleed off the edges.
                 let slot_w = (available.width - m.left - m.right).max(0.0);
                 let slot_h = (available.height - m.top - m.bottom).max(0.0);
-                let w = desired
-                    .width
-                    .clamp(child.min_size().width, child.max_size().width)
-                    .min(slot_w);
-                let h = desired
-                    .height
-                    .clamp(child.min_size().height, child.max_size().height)
-                    .min(slot_h);
+                let w = clamp_to_limits(
+                    desired.width,
+                    child.min_size().width,
+                    child.max_size().width,
+                )
+                .min(slot_w);
+                let h = clamp_to_limits(
+                    desired.height,
+                    child.min_size().height,
+                    child.max_size().height,
+                )
+                .min(slot_h);
                 child.layout(Size::new(w, h));
 
                 let ha = child.h_anchor();
@@ -516,8 +522,11 @@ impl Widget for SizedBox {
             let m = child.margin();
             let w = self.width.unwrap_or(available_w);
             let slot_w = (w - m.left - m.right).max(0.0);
-            return (child.measure_min_height(slot_w) + m.vertical())
-                .clamp(self.base.min_size.height, self.base.max_size.height);
+            return clamp_to_limits(
+                child.measure_min_height(slot_w) + m.vertical(),
+                self.base.min_size.height,
+                self.base.max_size.height,
+            );
         }
         self.base.min_size.height
     }
@@ -552,8 +561,11 @@ impl Widget for SizedBox {
             // If the caller didn't pin the height, shrink to the child's
             // natural height plus its vertical margin.
             if self.height.is_none() {
-                h = (desired.height + m.vertical())
-                    .clamp(self.base.min_size.height, self.base.max_size.height);
+                h = clamp_to_limits(
+                    desired.height + m.vertical(),
+                    self.base.min_size.height,
+                    self.base.max_size.height,
+                );
             }
 
             // Horizontal placement within the box (margin already limits slot).
@@ -561,13 +573,21 @@ impl Widget for SizedBox {
             let min_w = child.min_size().width;
             let max_w = child.max_size().width;
             let child_w = if h_anchor.is_stretch() {
-                slot_w.clamp(min_w, max_w)
+                clamp_to_limits(slot_w, min_w, max_w)
             } else if h_anchor == HAnchor::MAX_FIT_OR_STRETCH {
-                resolve_fit_or_stretch(desired.width, slot_w, true).clamp(min_w, max_w)
+                clamp_to_limits(
+                    resolve_fit_or_stretch(desired.width, slot_w, true),
+                    min_w,
+                    max_w,
+                )
             } else if h_anchor == HAnchor::MIN_FIT_OR_STRETCH {
-                resolve_fit_or_stretch(desired.width, slot_w, false).clamp(min_w, max_w)
+                clamp_to_limits(
+                    resolve_fit_or_stretch(desired.width, slot_w, false),
+                    min_w,
+                    max_w,
+                )
             } else {
-                desired.width.clamp(min_w, max_w)
+                clamp_to_limits(desired.width, min_w, max_w)
             };
 
             let child_x = if h_anchor.contains(HAnchor::RIGHT) && !h_anchor.contains(HAnchor::LEFT)
@@ -584,13 +604,21 @@ impl Widget for SizedBox {
             let min_h = child.min_size().height;
             let max_h = child.max_size().height;
             let child_h = if v_anchor.is_stretch() {
-                slot_h.clamp(min_h, max_h)
+                clamp_to_limits(slot_h, min_h, max_h)
             } else if v_anchor == VAnchor::MAX_FIT_OR_STRETCH {
-                resolve_fit_or_stretch(desired.height, slot_h, true).clamp(min_h, max_h)
+                clamp_to_limits(
+                    resolve_fit_or_stretch(desired.height, slot_h, true),
+                    min_h,
+                    max_h,
+                )
             } else if v_anchor == VAnchor::MIN_FIT_OR_STRETCH {
-                resolve_fit_or_stretch(desired.height, slot_h, false).clamp(min_h, max_h)
+                clamp_to_limits(
+                    resolve_fit_or_stretch(desired.height, slot_h, false),
+                    min_h,
+                    max_h,
+                )
             } else {
-                desired.height.clamp(min_h, max_h)
+                clamp_to_limits(desired.height, min_h, max_h)
             };
 
             // When a dimension is explicitly pinned, the child must fit —

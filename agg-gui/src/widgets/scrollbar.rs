@@ -78,7 +78,27 @@ impl Default for ScrollbarAxis {
     }
 }
 
+/// How much more than the view the content has to be before it counts as
+/// overflowing (agg-sharp `ScrollableWidget.OverflowTolerance`). Content sized
+/// to exactly fit (a window fitted to it) lands a rounding error either side
+/// of the view, which is not something to show a scroll bar for.
+pub const OVERFLOW_TOLERANCE: f64 = 1e-6;
+
+/// `content` overflows a `viewport` extent by more than
+/// [`OVERFLOW_TOLERANCE`] (agg-sharp `HasVerticalOverflow` /
+/// `HasHorizontalOverflow`).
+#[inline]
+pub fn overflows(content: f64, viewport: f64) -> bool {
+    content > viewport + OVERFLOW_TOLERANCE
+}
+
 impl ScrollbarAxis {
+    /// The content overflows `viewport` ([`overflows`]), whether or not the
+    /// axis scrolls.
+    pub fn overflows(&self, viewport: f64) -> bool {
+        overflows(self.content, viewport)
+    }
+
     pub fn max_scroll(&self, viewport: f64) -> f64 {
         (self.content - viewport).max(0.0)
     }
@@ -92,7 +112,7 @@ impl ScrollbarAxis {
     }
 
     pub fn can_scroll(&self, viewport: f64) -> bool {
-        self.enabled && self.content > viewport
+        self.enabled && self.overflows(viewport)
     }
 
     pub fn clamp_offset(&mut self, viewport: f64) {
@@ -112,7 +132,7 @@ impl ScrollbarAxis {
         style: ScrollBarStyle,
         geom: ScrollbarGeometry,
     ) -> Option<(f64, f64)> {
-        if self.content <= viewport {
+        if !self.overflows(viewport) {
             return None;
         }
         let track_len = geom.track_end - geom.track_start;
@@ -279,7 +299,7 @@ impl ScrollbarAxis {
         style: ScrollBarStyle,
         visibility: ScrollBarVisibility,
     ) -> bool {
-        if self.content <= viewport {
+        if !self.overflows(viewport) {
             return false;
         }
         let floating = style.kind == ScrollBarKind::Floating;
@@ -364,7 +384,7 @@ impl ScrollbarAxis {
         self.hover_anim
             .set_target(if self.interact() { 1.0 } else { 0.0 });
         let t = self.hover_anim.tick();
-        if !self.enabled || self.content <= viewport || alpha <= 0.001 {
+        if !self.enabled || !self.overflows(viewport) || alpha <= 0.001 {
             return None;
         }
         let (track, thumb) = self.bar_rects(viewport, style, geom, t)?;
