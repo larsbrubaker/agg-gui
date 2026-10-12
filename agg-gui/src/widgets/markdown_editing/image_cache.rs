@@ -3,8 +3,9 @@
 //! Loads the images a rich document's image atoms point at, one load per url,
 //! through the markdown viewer's own loading: the host's image provider (the
 //! viewer's `with_image_provider` contract: RGBA8, top row first) and, for an
-//! http(s) url the provider does not supply, the viewer's remote fetcher
-//! (`markdown::image_loader`).  The edit widget hands [`RichImageCache::loaded`]
+//! http(s) url the provider does not supply, the viewer's remote image loader
+//! (`markdown::image_loader`: this cache's own, else the process default;
+//! with neither, the image does not load and no request is made).  The edit widget hands [`RichImageCache::loaded`]
 //! to its painter and layout style.
 //!
 //! Differences from C#, where a loaded image raised a callback that the
@@ -24,7 +25,7 @@ use pulldown_cmark::{Event, Parser, Tag};
 
 use super::block_painter::RichImage;
 use super::inline::InlineAtom;
-use crate::widgets::markdown::image_loader::load_remote_image;
+use crate::widgets::markdown::image_loader::{load_remote_image, RemoteImageLoader};
 use crate::widgets::markdown::{is_fetchable_url, ImagePixels, ImageState};
 
 /// Supplies an image's RGBA8 pixels (top row first) and size, or `None`.
@@ -46,6 +47,10 @@ pub struct RichImageCache {
     loads: RefCell<HashMap<String, Load>>,
     provider: Option<RichImageProvider>,
     resolve_url: Option<RichResolveUrl>,
+    /// Fetches http(s) images; `None` uses the process default
+    /// (`markdown::set_default_remote_image_loader`), and with neither an
+    /// http(s) image does not load.
+    remote_loader: Option<Arc<dyn RemoteImageLoader>>,
 }
 
 impl RichImageCache {
@@ -63,6 +68,12 @@ impl RichImageCache {
     /// relative path to a file or an asset url); C#'s `ResolveUrl`.
     pub fn set_resolve_url(&mut self, resolve: Option<RichResolveUrl>) {
         self.resolve_url = resolve;
+    }
+
+    /// Sets the loader that fetches http(s) images (the viewer's
+    /// `with_remote_image_loader`); `None` uses the process default.
+    pub fn set_remote_image_loader(&mut self, loader: Option<Arc<dyn RemoteImageLoader>>) {
+        self.remote_loader = loader;
     }
 
     /// The image atom's url, read with the markdown parser so titles, angle
@@ -134,8 +145,14 @@ impl RichImageCache {
             None => (ImageState::Failed, true),
         };
         let state = Arc::new(Mutex::new(state));
-        if !reported {
-            load_remote_image(resolved, Arc::clone(&state));
+        let mut reported = reported;
+        if !reported && !load_remote_image(self.remote_loader.clone(), resolved, Arc::clone(&state))
+        {
+            // No loader: nothing is fetched, and nothing will arrive.
+            if let Ok(mut s) = state.lock() {
+                *s = ImageState::Failed;
+            }
+            reported = true;
         }
         Load { state, reported }
     }

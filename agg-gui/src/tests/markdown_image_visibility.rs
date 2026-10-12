@@ -1,7 +1,7 @@
 //! End-to-end: a remote Markdown image that is on screen starts loading at
 //! HiDPI wherever it sits in the viewport, and one that is off screen does not.
 //!
-//! `MarkdownView` only fetches a remote image (`![alt](http://…)`) once paint
+//! `MarkdownView` only asks its loader for a remote image (`![alt](http://…)`) once paint
 //! finds the image rect on screen: `is_rect_visible_in_root` in
 //! `widgets/markdown.rs`, called from `widgets/markdown/paint.rs` to gate
 //! `image_loader::load_remote_image`. That check maps the rect through
@@ -11,14 +11,15 @@
 //! effective scale). This suite drives the real `App` layout/paint path at
 //! device scale 2 (alone and with a 1.5 UX scale) with the image in the
 //! right/top part of the screen, where its device coordinates exceed the
-//! logical viewport, and serves a real PNG from a loopback HTTP server so the
-//! production fetch path (`http_fetch.rs`) runs. A scale-1 control and two
+//! logical viewport. The view loads through a fake [`RemoteImageLoader`] that
+//! records each request and delivers a PNG's bytes from a worker thread, as a
+//! host's network loader does (no socket is opened). A scale-1 control and two
 //! off-screen negative cases pin that the culling itself keeps working: one
 //! behind the root's children clip, and one with no effective clip around the
 //! markdown, so only the device-pixel viewport test rejects it.
 //!
 //! Every test binds its thread to a private UI queue ([`PrivateUiQueue`]):
-//! the fetch's completion wakes the UI thread that started it
+//! the load's completion, delivered on the worker, wakes the UI thread that started it
 //! (`image_loader::load_remote_image` captures that thread's queue), so these
 //! fetches never wake other, concurrently running tests. One test pins that
 //! routing itself.
@@ -26,11 +27,9 @@
 use super::*;
 use crate::draw_ctx::DrawCtx;
 use crate::text::Font;
-use crate::{Event, EventResult, MarkdownView, Rect};
-use std::io::{Read, Write};
-use std::net::TcpListener;
+use crate::{Event, EventResult, MarkdownView, Rect, RemoteImageDone, RemoteImageLoader};
 use std::sync::mpsc;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 /// Logical viewport.
@@ -41,7 +40,7 @@ const VP_H: f64 = 300.0;
 /// because it is narrower than the markdown's wrap width).
 const IMG_PX: u32 = 40;
 
-/// Generous bound for the loopback fetch + decode round trip.
+/// Generous bound for the worker's delivery + decode round trip.
 const LOAD_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Restores the thread-local device and UX scales even if an assertion fails.
@@ -73,11 +72,35 @@ impl Drop for PrivateUiQueue {
     }
 }
 
-/// A one-shot loopback HTTP server: `url` serves `IMG_PX`² of opaque green
-/// PNG, and `requests` receives a message when a request arrives.
+/// A fake remote image loader standing in for a host's network loader:
+/// `requests` receives each url asked for, and every load is answered from a
+/// worker thread with `IMG_PX`² of opaque green PNG.
 struct ImageServer {
     url: String,
-    requests: mpsc::Receiver<()>,
+    requests: mpsc::Receiver<String>,
+    loader: Arc<dyn RemoteImageLoader>,
+}
+
+struct FakeLoader {
+    requests: Mutex<mpsc::Sender<String>>,
+    /// When set, the answer waits for this to fire (or its sender to drop).
+    gate: Mutex<Option<mpsc::Receiver<()>>>,
+}
+
+impl RemoteImageLoader for FakeLoader {
+    fn load(&self, url: &str, done: RemoteImageDone) {
+        if let Ok(requests) = self.requests.lock() {
+            let _ = requests.send(url.to_string());
+        }
+        let gate = self.gate.lock().ok().and_then(|mut gate| gate.take());
+        std::thread::spawn(move || {
+            if let Some(gate) = gate {
+                // A dropped sender (the test failed early) releases it too.
+                let _ = gate.recv();
+            }
+            done.deliver_bytes(&green_png());
+        });
+    }
 }
 
 fn green_png() -> Vec<u8> {
@@ -85,46 +108,27 @@ fn green_png() -> Vec<u8> {
     crate::screenshot::encode_png_rgba(&rgba, IMG_PX, IMG_PX).expect("encode test PNG")
 }
 
-/// Serve one 200 response carrying a green PNG (pattern from the
-/// `http_fetch.rs` tests). If no request ever comes, the accept thread just
-/// stays parked until the test process exits.
+/// A loader that answers at once (from its worker).
 fn serve_png_once() -> ImageServer {
     serve_png(None)
 }
 
-/// Like [`serve_png_once`], but the response is held back until the returned
-/// sender fires, so the test knows the fetch cannot have completed before.
+/// Like [`serve_png_once`], but the answer is held back until the returned
+/// sender fires, so the test knows the load cannot have completed before.
 fn serve_png_once_gated() -> (ImageServer, mpsc::Sender<()>) {
     let (release, gate) = mpsc::channel();
     (serve_png(Some(gate)), release)
 }
 
 fn serve_png(gate: Option<mpsc::Receiver<()>>) -> ImageServer {
-    let body = green_png();
-    let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback");
-    let addr = listener.local_addr().expect("local addr");
     let (tx, requests) = mpsc::channel();
-    std::thread::spawn(move || {
-        if let Ok((mut stream, _)) = listener.accept() {
-            let _ = tx.send(());
-            let mut buf = [0u8; 2048];
-            let _ = stream.read(&mut buf);
-            if let Some(gate) = gate {
-                // A dropped sender (the test failed early) releases it too.
-                let _ = gate.recv();
-            }
-            let head = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: image/png\r\nContent-Length: {}\r\n\
-                 Connection: close\r\n\r\n",
-                body.len()
-            );
-            let _ = stream.write_all(head.as_bytes());
-            let _ = stream.write_all(&body);
-        }
-    });
     ImageServer {
-        url: format!("http://{addr}/img.png"),
+        url: "https://example.com/img.png".to_string(),
         requests,
+        loader: Arc::new(FakeLoader {
+            requests: Mutex::new(tx),
+            gate: Mutex::new(gate),
+        }),
     }
 }
 
@@ -180,14 +184,15 @@ impl Widget for Placer {
 
 /// An app whose only content is a `MarkdownView` holding one remote image,
 /// placed at `slot` (logical, Y-up), inside a root that clips it.
-fn markdown_app(url: &str, slot: Rect) -> App {
-    markdown_app_with_clip(url, slot, true)
+fn markdown_app(server: &ImageServer, slot: Rect) -> App {
+    markdown_app_with_clip(server, slot, true)
 }
 
 /// [`markdown_app`], choosing whether the root clips the markdown.
-fn markdown_app_with_clip(url: &str, slot: Rect, clip_children: bool) -> App {
+fn markdown_app_with_clip(server: &ImageServer, slot: Rect, clip_children: bool) -> App {
     let font = Arc::new(Font::from_slice(TEST_FONT).expect("test font"));
-    let view = MarkdownView::new(format!("![remote]({url})"), font);
+    let view = MarkdownView::new(format!("![remote]({})", server.url), font)
+        .with_remote_image_loader(Arc::clone(&server.loader));
     App::new(Box::new(Placer {
         bounds: Rect::default(),
         children: vec![Box::new(view)],
@@ -245,7 +250,7 @@ fn assert_on_screen_image_loads(label: &str, device_scale: f64, ux_scale: f64, s
     let phys = physical_viewport();
 
     let server = serve_png_once();
-    let mut app = markdown_app(&server.url, slot);
+    let mut app = markdown_app(&server, slot);
     frame(&mut app, phys);
 
     // Synchronous signal: an image whose fetch has started reports
@@ -259,7 +264,7 @@ fn assert_on_screen_image_loads(label: &str, device_scale: f64, ux_scale: f64, s
         .requests
         .recv_timeout(LOAD_TIMEOUT)
         .unwrap_or_else(|_| {
-            panic!("{label}: the image server never received a request");
+            panic!("{label}: the loader was never asked for the image");
         });
 
     // Repaint until the decoded image shows, then one more frame so layout
@@ -340,12 +345,12 @@ fn remote_image_completion_wakes_the_ui_thread_that_started_it() {
     let phys = physical_viewport();
 
     let (server, release) = serve_png_once_gated();
-    let mut app = markdown_app(&server.url, right_top_slot());
+    let mut app = markdown_app(&server, right_top_slot());
     frame(&mut app, phys);
     server
         .requests
         .recv_timeout(LOAD_TIMEOUT)
-        .expect("the image server never received a request");
+        .expect("the loader was never asked for the image");
 
     // The response is held, so the fetch has not completed: start idle.
     crate::animation::clear_draw_request();
@@ -390,7 +395,7 @@ fn assert_image_not_loaded(label: &str, app: &mut App, server: &ImageServer) {
             .requests
             .recv_timeout(Duration::from_millis(500))
             .is_err(),
-        "{label}: the image server received a request for an off-screen image"
+        "{label}: the loader was asked for an off-screen image"
     );
     assert!(
         green_bbox(&fb).is_none(),
@@ -408,7 +413,7 @@ fn off_screen_remote_image_does_not_load_at_device_scale_2() {
     crate::set_device_scale(2.0);
 
     let server = serve_png_once();
-    let mut app = markdown_app(&server.url, Rect::new(VP_W + 10.0, 100.0, 150.0, 100.0));
+    let mut app = markdown_app(&server, Rect::new(VP_W + 10.0, 100.0, 150.0, 100.0));
     assert_image_not_loaded("clipped root, device 2", &mut app, &server);
 }
 
@@ -436,6 +441,6 @@ fn off_screen_remote_image_does_not_load_without_a_clip_at_device_scale_2_ux_sca
     );
 
     let server = serve_png_once();
-    let mut app = markdown_app_with_clip(&server.url, slot, false);
+    let mut app = markdown_app_with_clip(&server, slot, false);
     assert_image_not_loaded("unclipped root, device 2 / ux 1.5", &mut app, &server);
 }

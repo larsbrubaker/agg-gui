@@ -79,7 +79,10 @@ pub use text_demos::{
 pub use text_edit_demo::text_edit;
 pub use tumble_cube_demo::tumble_cube_demo;
 
-use agg_gui::{DrawCtx, Event, EventResult, Font, MarkdownView, Rect, ScrollView, Size, Widget};
+use agg_gui::{
+    DrawCtx, Event, EventResult, Font, HttpRemoteImageLoader, MarkdownView, Rect, ScrollView, Size,
+    Widget,
+};
 
 // ---------------------------------------------------------------------------
 // "Coming Soon" placeholder
@@ -140,7 +143,8 @@ pub fn about(font: Arc<Font>) -> Box<dyn Widget> {
     let readme = about_readme_markdown(include_str!("../../README.md"));
 
     // Base directory for resolving relative image paths (agg-gui workspace root).
-    // HTTP(S) images are resolved asynchronously by MarkdownView itself.
+    // HTTP(S) images load asynchronously through agg-gui's own fetcher
+    // (`HttpRemoteImageLoader`, installed on the view below).
     let base_dir = {
         // CARGO_MANIFEST_DIR is set at compile time for demo-ui; its parent is agg-gui/.
         let manifest = env!("CARGO_MANIFEST_DIR");
@@ -155,6 +159,7 @@ pub fn about(font: Arc<Font>) -> Box<dyn Widget> {
         .with_padding(12.0)
         .on_link_click(crate::url::open_url)
         .on_image_open(crate::url::open_url)
+        .with_remote_image_loader(Arc::new(HttpRemoteImageLoader))
         .with_image_provider(move |url| {
             // Only handle relative paths / local file URLs on native.
             let path = if url.starts_with("http://") || url.starts_with("https://") {

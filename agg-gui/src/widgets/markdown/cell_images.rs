@@ -157,7 +157,8 @@ impl MarkdownView {
     /// Draw image `cache_idx` in the rect at `(x, y)` (bottom-left, Y up):
     /// the decoded pixels when ready, else a shaded box with the alt text
     /// (after the placeholder icon, when the view has one).
-    /// Starts a remote load the first time the rect is on screen.  A
+    /// Starts a remote load through the view's remote image loader the first
+    /// time the rect is on screen.  A
     /// placeholder leaves the font size at `restore_font_size` and the fill
     /// at the text colour.
     #[allow(clippy::too_many_arguments)]
@@ -177,16 +178,16 @@ impl MarkdownView {
         };
         let visible = is_rect_visible_in_root(ctx, x, y, width, height);
         if visible {
-            let should_load = entry.state.lock().is_ok_and(|mut state| {
-                if matches!(*state, ImageState::RemotePending) {
-                    *state = ImageState::Loading;
-                    true
-                } else {
-                    false
-                }
-            });
-            if should_load {
+            let pending = entry
+                .state
+                .lock()
+                .is_ok_and(|state| matches!(*state, ImageState::RemotePending));
+            if pending {
+                // With no loader (the view's or the process default) this
+                // makes no request and the image stays pending: a loader
+                // installed later loads it on a later paint.
                 image_loader::load_remote_image(
+                    self.remote_image_loader.clone(),
                     entry.url.clone(),
                     std::sync::Arc::clone(&entry.state),
                 );

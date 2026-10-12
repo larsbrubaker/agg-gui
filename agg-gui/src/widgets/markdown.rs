@@ -15,6 +15,14 @@
 //! Images are decoded and cached on the first `layout()` call and then drawn
 //! via `DrawCtx::draw_image_rgba()` on every `paint()`.
 //!
+//! **Remote images (`http(s)://`) load only through a host-supplied
+//! [`RemoteImageLoader`]**: the view's own
+//! ([`MarkdownView::with_remote_image_loader`]) or the process default
+//! ([`set_default_remote_image_loader`]). With none installed the view makes
+//! no network request and shows the image's placeholder. Install
+//! [`HttpRemoteImageLoader`] to have agg-gui fetch them itself
+//! (`image_loader.rs`).
+//!
 //! # Supported Markdown features
 //!
 //! - Headings H1–H4 (larger font sizes)
@@ -28,7 +36,7 @@
 //!   ([`MarkdownView::with_code_font`]; the body face when none is given)
 //! - Horizontal rules (thin separator line)
 //! - Images via `image_provider` callback; compact inline placeholder when unavailable
-//! - Animated GIFs (remote, or from [`MarkdownView::with_image_sequence_provider`])
+//! - Animated GIFs (remote, through a [`RemoteImageLoader`], or from [`MarkdownView::with_image_sequence_provider`])
 //!   play at their frame delays once loaded and painted (`animated_image.rs`)
 //! - Links (coloured text, URL is not opened — add `on_link_click` if needed),
 //!   in paragraphs and in table cells (`cell_links.rs`)
@@ -96,6 +104,8 @@ mod placeholder_icon;
 mod placeholder_icon_tests;
 #[cfg(test)]
 mod plain_text_tests;
+#[cfg(test)]
+mod remote_image_tests;
 mod rich_html;
 mod selection;
 #[cfg(test)]
@@ -120,6 +130,10 @@ use block_scroll::{
 };
 pub use emphasis::MarkdownRunStyle;
 pub use html_form::{markdown_html, markdown_html_collapsed};
+pub use image_loader::{
+    default_remote_image_loader, remote_images_in_flight, set_default_remote_image_loader,
+    HttpRemoteImageLoader, RemoteImageDone, RemoteImageLoader,
+};
 pub use introspect::{MarkdownBlockKind, MarkdownTableCell, MarkdownTextBlock, MarkdownWord};
 pub use styled_html::{css_color, style_html_fragment, to_styled_html, HtmlStyleTheme};
 
@@ -349,6 +363,9 @@ pub struct MarkdownView {
     image_provider: Option<ImageProvider>,
     /// Optional animated-image source, asked before `image_provider`.
     sequence_provider: Option<SequenceProvider>,
+    /// Fetches remote images ([`MarkdownView::with_remote_image_loader`]);
+    /// `None` falls back to the process default (`image_loader.rs`).
+    remote_image_loader: Option<Arc<dyn RemoteImageLoader>>,
 
     /// Cached image data, indexed by `LineRun::Image::cache_idx`.
     image_cache: Vec<ImageEntry>,
@@ -395,6 +412,7 @@ impl MarkdownView {
             padding: 8.0,
             image_provider: None,
             sequence_provider: None,
+            remote_image_loader: None,
             image_cache: Vec::new(),
             items: Vec::new(),
             content_h: 0.0,
