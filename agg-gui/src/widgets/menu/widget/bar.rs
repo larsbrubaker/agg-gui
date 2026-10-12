@@ -549,6 +549,12 @@ impl Widget for MenuBar {
         self.popup.is_open()
     }
 
+    /// The open menu's rows, by C#'s `"{Text} Menu Item"` names
+    /// (`named_rows.rs`); the titles are child widgets named `"{label} Menu"`.
+    fn find_named_targets(&self, name: &str, out: &mut Vec<crate::NamedTarget>) {
+        self.popup.named_row_targets(name, current_viewport(), out);
+    }
+
     fn has_active_modal(&self) -> bool {
         self.popup.is_open()
     }

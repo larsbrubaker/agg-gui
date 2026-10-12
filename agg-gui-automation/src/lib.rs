@@ -62,6 +62,7 @@ pub mod tree_query;
 pub mod typed_key_parser;
 pub mod waits;
 
+pub use agg_gui::NamedTarget;
 pub use driver::{
     BackgroundBusy, ClockPolicy, FrameKind, HeadlessDriver, HeadlessPainter, HeadlessWindow,
     SoftwarePainter, UiDriver,

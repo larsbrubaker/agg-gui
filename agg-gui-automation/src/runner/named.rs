@@ -4,11 +4,17 @@
 //! `WaitForWidgetDisappear`, `WaitForWidgetEnabled` and
 //! `WidgetNotFoundMessage` (agg-sharp `GuiAutomation/AutomationRunner.cs`).
 //!
-//! A name is agg-gui's [`Widget::id`] (C# `Name`); the walk and the
+//! A name is agg-gui's [`Widget::id`] (C# `Name`) or the name of a
+//! non-widget target a widget reports through
+//! [`Widget::find_named_targets`] (a drop-down or menu row: C#'s
+//! `NamedObject`, found with `GetObjectByName`); the walk and the
 //! rectangles are [`crate::tree_query`]'s; among same-named widgets the
 //! choice is [`crate::pointer_reach`]'s. Search regions are Y-down window
 //! pixels ([`SearchRegion`]); a widget is in one when its screen rectangle
-//! overlaps it. The polling waits look once per pumped frame (C#'s
+//! overlaps it, a target when its own rectangle does. A target counts as on
+//! show when its widget is actually visible on screen (as C# asks of the
+//! widget behind a `NamedObject`) and its rectangle reaches into the window:
+//! drop-down rows paint in the overlay pass, outside their ancestors' clips. The polling waits look once per pumped frame (C#'s
 //! `WaitForPendingUiWork(50)`), and their answer is the last look, not the
 //! clock, so a zero-second wait reports what is there now. The frame-level
 //! waits they build on are in the sibling `waits.rs`.
@@ -109,6 +115,45 @@ impl AutomationRunner {
         Some((self.window_rect_to_screen(placement.screen_rect), visible))
     }
 
+    /// A hit's screen rectangle (the target's for a target) and whether it
+    /// is on show; `None` once its widget is detached.
+    fn hit_screen_and_visibility(&self, hit: &NamedHit) -> Option<(ScreenRectangle, bool)> {
+        if hit.target.is_none() {
+            return self.screen_and_visibility(&hit.handle);
+        }
+        let (_, widget_visible) = self.screen_and_visibility(&hit.handle)?;
+        let rect = self.hit_window_rect(hit)?;
+        let viewport = self.driver.logical_size();
+        let on_window =
+            tree_query::intersect(Rect::new(0.0, 0.0, viewport.width, viewport.height), rect);
+        let visible = widget_visible && on_window.width > 0.0 && on_window.height > 0.0;
+        Some((self.window_rect_to_screen(rect), visible))
+    }
+
+    /// A hit's rectangle in window space (logical, Y-up): the target's for a
+    /// target, else the widget's.
+    fn hit_window_rect(&self, hit: &NamedHit) -> Option<Rect> {
+        let root = self.driver.root();
+        match &hit.target {
+            Some(target) => tree_query::local_rect_to_screen(root, &hit.handle, target.rect_local),
+            None => tree_query::screen_rect(root, &hit.handle),
+        }
+    }
+
+    /// The area of a hit left on show: a widget's after its ancestors' clips
+    /// and the viewport, a target's after the viewport.
+    fn hit_visible_area(&self, hit: &NamedHit) -> f64 {
+        let root = self.driver.root();
+        let viewport = self.driver.logical_size();
+        let clipped = match &hit.target {
+            Some(_) => self.hit_window_rect(hit).map(|r| {
+                tree_query::intersect(Rect::new(0.0, 0.0, viewport.width, viewport.height), r)
+            }),
+            None => tree_query::clipped_rect(root, &hit.handle, viewport),
+        };
+        clipped.map_or(0.0, |c| c.width * c.height)
+    }
+
     fn in_region(screen: ScreenRectangle, region: Option<&SearchRegion>) -> bool {
         region.is_none_or(|r| ScreenRectangle::intersection(r.screen_rect, screen).is_some())
     }
@@ -127,20 +172,12 @@ impl AutomationRunner {
 
         let root = self.driver.root();
         let mut named_widgets_in_region = Vec::new();
-        for handle in tree_query::find_by_name(root, widget_name) {
-            let Some((screen, visible)) = self.screen_and_visibility(&handle) else {
+        for hit in tree_query::find_named_hits(root, widget_name) {
+            let Some((screen, visible)) = self.hit_screen_and_visibility(&hit) else {
                 continue;
             };
             if (!opts.only_visible || visible) && Self::in_region(screen, opts.search_region) {
-                let Some(widget) = handle.widget(root) else {
-                    continue;
-                };
-                let b = widget.bounds();
-                let offset_hint = agg_gui::Point::new(b.width / 2.0, b.height / 2.0);
-                named_widgets_in_region.push(NamedHit {
-                    handle,
-                    offset_hint,
-                });
+                named_widgets_in_region.push(hit);
             }
         }
         named_widgets_in_region
@@ -162,17 +199,12 @@ impl AutomationRunner {
         if get_results.is_empty() {
             return None;
         }
-        let root = self.driver.root();
-        let get_results = pointer_reach::prefer_reachable(root, get_results);
+        let get_results = pointer_reach::prefer_reachable(self.driver.root(), get_results);
         let mut best = get_results[0].clone();
         if get_results.len() > 1 {
-            let viewport = self.driver.logical_size();
             let mut best_area = 0.0;
             for result in &get_results {
-                let Some(clipped) = tree_query::clipped_rect(root, &result.handle, viewport) else {
-                    continue;
-                };
-                let area = clipped.width * clipped.height;
+                let area = self.hit_visible_area(result);
                 if area > best_area {
                     best_area = area;
                     best = result.clone();
@@ -192,16 +224,27 @@ impl AutomationRunner {
             .map(|hit| hit.handle)
     }
 
-    /// C# `GetRegionByName`: the screen region the named widget covers, to
-    /// limit later searches to it.
+    /// C# `GetRegionByName`: the screen region the named widget (or named
+    /// target) covers, to limit later searches to it.
     pub fn get_region_by_name(
         &mut self,
         widget_name: &str,
         opts: &WaitOpts,
     ) -> Option<SearchRegion> {
-        let named_widget = self.get_widget_by_name(widget_name, opts)?;
-        let child_bounds = tree_query::screen_rect(self.driver.root(), &named_widget)?;
+        let named_widget = self.get_widget_hit_by_name(widget_name, opts)?;
+        let child_bounds = self.hit_window_rect(&named_widget)?;
         Some(SearchRegion::new(self.window_rect_to_screen(child_bounds)))
+    }
+
+    /// C# `GetObjectByName`: the first thing named `widget_name` that passes
+    /// `opts` — a widget, or a non-widget target with its object (C#'s
+    /// `NamedObject`) in [`NamedHit::target`] — with where a click on it
+    /// lands. Unlike [`get_widget_hit_by_name`](Self::get_widget_hit_by_name)
+    /// it takes the first hit, as C# does.
+    pub fn get_object_by_name(&mut self, widget_name: &str, opts: &WaitOpts) -> Option<NamedHit> {
+        self.get_widgets_by_name(widget_name, opts)
+            .into_iter()
+            .next()
     }
 
     /// C# `NameExists`: [`wait_for_name_with`](Self::wait_for_name_with) by
@@ -229,16 +272,16 @@ impl AutomationRunner {
     ) -> bool {
         self.check_not_timed_out();
         let root = self.driver.root();
-        for found_child in tree_query::find_by_name(root, widget_name) {
+        for found_child in tree_query::find_named_hits(root, widget_name) {
             if !only_visible {
                 return true;
             }
-            let Some((screen, visible)) = self.screen_and_visibility(&found_child) else {
+            let Some((screen, visible)) = self.hit_screen_and_visibility(&found_child) else {
                 continue;
             };
             if Self::in_region(screen, search_region)
                 && visible
-                && predicate.is_none_or(|p| found_child.widget(root).is_some_and(p))
+                && predicate.is_none_or(|p| found_child.handle.widget(root).is_some_and(p))
             {
                 return true;
             }

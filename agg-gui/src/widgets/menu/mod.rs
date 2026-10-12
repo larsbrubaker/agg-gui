@@ -31,7 +31,7 @@ pub use style::{
     current_menu_style, reset_menu_style, set_menu_style, MenuSeparatorStyle, SelectionColumn,
     ShortcutFormat, SubmenuArrow,
 };
-pub use widget::{MenuBar, MenuOrientation, MenuTitle, PopupMenu, TopMenu};
+pub use widget::{menu_row_name, MenuBar, MenuOrientation, MenuTitle, PopupMenu, TopMenu};
 
 #[cfg(test)]
 mod tests {

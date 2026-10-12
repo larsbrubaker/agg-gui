@@ -22,11 +22,13 @@ use labels::PopupLabels;
 
 mod bar;
 mod labels;
+mod named_rows;
 mod popup_local;
 mod popup_paint;
 mod top_menu;
 
 pub use bar::MenuBar;
+pub use named_rows::menu_row_name;
 pub use top_menu::{MenuTitle, TopMenu};
 
 /// Layout direction for `MenuBar`.

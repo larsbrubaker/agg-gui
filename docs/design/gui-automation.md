@@ -13,7 +13,7 @@
   - Virtual time: `Delay`, `WaitFor`, timeouts and pointer pacing.
   - Wall time: the hang watchdogs (test budget, bring-up, close).
 - **One thread per test:** `show_window_and_execute_tests` runs each test on a fresh thread. That isolates agg-gui's thread-local state and lets the caller time out a stuck body, which is what C#'s `Task.WhenAny` does.
-- **Order of work:** the remaining slices (20 onward) fill agg-gui's gaps test-first, port the 49 remaining Agg Automation Tests 1:1, then move `mattercad-app-test` onto the runner (section 9).
+- **Order of work:** the remaining slices fill agg-gui's gaps test-first, port the 46 remaining Agg Automation Tests 1:1, then move `mattercad-app-test` onto the runner (section 9).
 
 ## 1. What exists today
 
@@ -61,7 +61,7 @@
 
 ## 2. Where the code goes
 
-**Crate `agg-gui/agg-gui-automation`** (workspace member; consumers use it as a dev-dependency). It exists with `keys`, `key_mapping`, `typed_key_parser`, `search_region`, `waits` (`static_delay`), `driver` (`HeadlessDriver`, `HeadlessPainter`, `SoftwarePainter`, `BackgroundBusy`, `HeadlessWindow`, `ClockPolicy`, `FrameKind`, `UiDriver`), `probe` (`ProbeWidget`) and `tree_query` (`WidgetHandle`, `find_by_name`, `placement`/`screen_rect`/`clipped_rect`, `actually_visible_on_screen`, `parents`/`children` and their `_of_type` forms), `execute` (`show_window_and_execute_tests`, `RunOptions`, `AutomationWindow`, `AutomationError`, the close phase in `execute/close.rs`), `image_match` (`find_least_squares_match`, `LeastSquaresMatch`), `pointer_reach` (`can_reach`, `prefer_reachable`), `pointer_state` (`under_mouse_state`, `mouse_captured`, `child_has_mouse_captured`, `focused` for a handle), `input` (`InputMethod`, `SimulatedInput`, `Point2D`, `MouseAction`) and `runner` (`AutomationRunner` with `AutomationConfig`, `attach`/`into_driver`, `mark_test_complete`, driver access, the waits in `runner/waits.rs`, the name lookups in `runner/named.rs`, `scroll_into_view` in `runner/scroll.rs`, the pointer gestures in `runner/pointer.rs`, the drags in `runner/drag.rs`, the keyboard (`type_text`, `ModifierKeys`, `press_modifier_keys`/`release_modifier_keys`, `select_all`/`select_none`) in `runner/keyboard.rs` the image searches (`get_current_screen`, `get_screen_region`, `capture_region`, `image_exists`, `wait_for_image`) in `runner/images.rs` and the image gestures (`click_image`, `drag_image`, `drop_image`, `drag_drop_image`, `set_image_source`) in `runner/image_gestures.rs`), `image_source` (`ImageNeedle`, `ImageSource`, `DirectoryImageSource`, `decode_needle`); the other modules and members below are still to come.
+**Crate `agg-gui/agg-gui-automation`** (workspace member; consumers use it as a dev-dependency). It exists with `keys`, `key_mapping`, `typed_key_parser`, `search_region`, `waits` (`static_delay`), `driver` (`HeadlessDriver`, `HeadlessPainter`, `SoftwarePainter`, `BackgroundBusy`, `HeadlessWindow`, `ClockPolicy`, `FrameKind`, `UiDriver`), `probe` (`ProbeWidget`) and `tree_query` (`WidgetHandle`, `find_by_name`, `find_named_hits` (widgets and the named targets widgets report), `local_rect_to_screen`, `placement`/`screen_rect`/`clipped_rect`, `actually_visible_on_screen`, `parents`/`children` and their `_of_type` forms), `execute` (`show_window_and_execute_tests`, `RunOptions`, `AutomationWindow`, `AutomationError`, the close phase in `execute/close.rs`), `image_match` (`find_least_squares_match`, `LeastSquaresMatch`), `pointer_reach` (`can_reach`, `prefer_reachable`), `pointer_state` (`under_mouse_state`, `mouse_captured`, `child_has_mouse_captured`, `focused` for a handle), `input` (`InputMethod`, `SimulatedInput`, `Point2D`, `MouseAction`) and `runner` (`AutomationRunner` with `AutomationConfig`, `attach`/`into_driver`, `mark_test_complete`, driver access, the waits in `runner/waits.rs`, the name lookups in `runner/named.rs`, `scroll_into_view` in `runner/scroll.rs`, the pointer gestures in `runner/pointer.rs`, the drags in `runner/drag.rs`, the keyboard (`type_text`, `ModifierKeys`, `press_modifier_keys`/`release_modifier_keys`, `select_all`/`select_none`) in `runner/keyboard.rs` the image searches (`get_current_screen`, `get_screen_region`, `capture_region`, `image_exists`, `wait_for_image`) in `runner/images.rs` and the image gestures (`click_image`, `drag_image`, `drop_image`, `drag_drop_image`, `set_image_source`) in `runner/image_gestures.rs`), `image_source` (`ImageNeedle`, `ImageSource`, `DirectoryImageSource`, `decode_needle`); the other modules and members below are still to come.
 - It keeps test-only code (watchdogs, stack dumps, image matching) out of product builds.
 - Its optional live mode depends on `agg-gui-shell` (winit and wgpu), which core `agg-gui` must not.
 - Features, each added with the slice whose code uses it (none exist yet; headless is the default):
@@ -73,7 +73,7 @@ Modules (each under 800 lines, each opening with a purpose comment):
 ```
 src/lib.rs                 crate docs, re-exports
 src/runner/mod.rs          (exists) AutomationRunner, AutomationConfig, MarkTestComplete
-src/runner/named.rs        (exists) Get*/Wait*/NameExists/NamedWidgetExists/ChildExists/GetRegionByName; GetObjectByName to come
+src/runner/named.rs        (exists) Get*/Wait*/NameExists/NamedWidgetExists/ChildExists/GetRegionByName/GetObjectByName, named targets included
 src/runner/scroll.rs       (exists) ScrollIntoView
 src/runner/pointer.rs      (exists) stepped moves, ClickOrigin/ClickOpts, Click*/DoubleClickByName/RightClick*/MoveToByName/SetMouseCursorPosition
 src/runner/drag.rs         (exists) DragOpts/DragDropOpts, Drag*/Drop*
@@ -81,7 +81,7 @@ src/runner/keyboard.rs     (exists) Type, ModifierKeys, Press/ReleaseModifierKey
 src/runner/waits.rs        (exists) Delay, WaitFor/WaitUntil, Assert, WaitForPendingUiWork, WaitforDraw
 src/input.rs               (exists) InputMethod trait (IInputMethod) + SimulatedInput (AggInputMethods), MouseConsts→MouseAction, keyboard members; current_screen to come
 src/pointer_reach.rs       (exists) PointerReach
-src/tree_query.rs          (exists) WidgetHandle, NamedHit (GetByNameResults; its `target` lands with G11), screen/clip rects, ActuallyVisibleOnScreen, inherited Enabled, Parents/Children
+src/tree_query.rs          (exists) WidgetHandle, NamedHit (GetByNameResults, with its `target`), find_named_hits, screen/clip rects, ActuallyVisibleOnScreen, inherited Enabled, Parents/Children
 src/image_match.rs         (exists) FindLeastSquaresMatch over agg_gui::Framebuffer
 src/driver/mod.rs          (exists) UiDriver trait, FrameKind, ClockPolicy
 src/driver/headless.rs     (exists) HeadlessDriver
@@ -124,8 +124,8 @@ tests/live/*.rs            live tests, `harness = false` (winit on macOS needs t
 
 | C# | Rust |
 |---|---|
-| `GetByNameResults.NamedObject` | `NamedHit` gains `target: Option<NamedTarget>` with G11 |
-| `GetObjectByName` | `get_object_by_name(...) -> Option<NamedHit>`: the non-widget `NamedTarget` |
+| `GetByNameResults.NamedObject` | `NamedHit.target: Option<NamedTarget>` (exists); `None` when the widget carries the name |
+| `GetObjectByName` | `get_object_by_name(name, &WaitOpts) -> Option<NamedHit>` (exists): the first hit, a widget or a `NamedTarget` |
 | `SetTarget` (`DebugShowBounds`) | agg-gui has no bounds overlay; `get_widget_by_name` flashes nothing until one exists |
 | `WidgetNotFoundMessage` | `widget_not_found_message(op, name)` exists; it appends `StartupFailureLog` once that lands (slice 29) |
 
@@ -232,14 +232,15 @@ In live mode each of these pumps `pump_app_events` until the condition holds or 
 **Names**
 - `id()` **is** C#'s `Name` (`WidgetBase.name` by default; `Window` reports its title). MatterCAD's three ad-hoc `Named` structs move to `agg_gui::widgets::Named` in slice M3.
 
-**Non-widget named targets** (C#'s `FindDescendants` override plus `NamedObject`/`OffsetHint`)
-- New in agg-gui: `Widget::find_named_targets(&self, name, out: &mut Vec<NamedTarget>)`, defaulting to nothing.
-- `NamedTarget { rect_local: Rect, enabled: bool, object: Option<Rc<dyn Any>> }`.
+**Non-widget named targets** (C#'s `FindDescendants` overrides plus `NamedObject`/`OffsetHint`), which exist:
+- `Widget::find_named_targets(&self, name: &str, out: &mut Vec<NamedTarget>)`, a default-empty trait method: a widget pushes its own targets named `name` that are on show (children are walked by the caller).
+- `agg_gui::NamedTarget { rect_local: Rect, enabled: bool, object: Option<Rc<dyn Any>> }` (widget-local, Y-up; may lie outside the widget's bounds), with `new`, `with_enabled`, `with_object`, `object_as::<T>()`.
 - Implemented by:
-  - ComboBox popup rows and menu bar/popup rows (MenuTests clicks "item1" by name)
-  - later, MatterCAD's 3D view (Object3D controls and scene children), replacing `CONTROL_KEYS`/`scene_objects` string parsing.
+  - `ComboBox`: the open list's rows in view, named `"{text} Menu Item"` (C#'s `DropDownList.AddItem`) or by `set_item_name`/`with_item_name`, with the row's enabled state and its index (`usize`) as object.
+  - `MenuBar`: its open menu's rows through `PopupMenu::named_row_targets(name, viewport, out)` (any host of a `PopupMenu` can call it), named `"{label} Menu Item"` (`menu_row_name`, C#'s `PopupMenu`), with the item's enabled flag and its path (`Vec<usize>`) as object; the titles are child widgets named `"{label} Menu"`.
+  - later, MatterCAD's 3D view (Object3D controls and scene children), replacing `CONTROL_KEYS`/`scene_objects` string parsing (M3).
 
-**The tree walk** (`tree_query`, used by `runner/named.rs`) gains the named targets with G11: a `NamedTarget`'s `offset_hint` is its rect's center.
+**The tree walk** (`tree_query::find_named_hits`, used by `runner/named.rs`) puts a widget's targets before the widget itself, as C#'s overrides add them before calling the base. A target hit's `offset_hint` is its rect's center. A target is on show when its widget is actually visible on screen and its rect reaches into the window (it is not cut by ancestor clips: drop-down rows paint in the overlay pass); search regions and `get_region_by_name` use the target's own rect.
 
 **Image searches** use `region.image`, or a fresh whole-window capture.
 
@@ -290,7 +291,6 @@ In live mode each of these pumps `pump_app_events` until the condition holds or 
 
 | # | Gap | Slice |
 |---|---|---|
-| G11 | `Widget::find_named_targets`; ComboBox per-item names and enabled state; menu rows | 24 |
 | G12 | Flex reverse directions (RightToLeft, BottomToTop) | 25 |
 | G13 | `NumberField` (number-only edit, text-parser hook, `=`-expression flag) | 20 |
 | G15 | Paint panic containment in `App::paint` (reported through `report_unhandled` with a new `UnhandledOrigin::Paint`), `DrawCtx` state rebalance | 27 |
@@ -304,7 +304,7 @@ In live mode each of these pumps `pump_app_events` until the condition holds or 
 | AutomationRunnerTests (11) | `automation_runner_tests.rs` | via `show_window_and_execute_tests`; 1 to go (AnExpectedTimeoutLeavesNoThreadDump, slice 30c; ImageWaitsSearchTheGivenRegion, VetoedCloseIsForcedAndReportedAsFailure, StaticDelayExpires…, ZeroSecondWaitsReportWhatIsThereNow, WindowLoadTimeIsNotChargedToTheTestBudget, AutomationRunnerTimeoutTest, GetWidgetByNameTestNoRegionSingleWindow, GetWidgetByNameTestRegionSingleWindow, DoubleClickByNameSendsTwoFullClickPairsWithProductionClickCounts and TypeDeliversPunctuationIntoAMultiLineField are ported) |
 | AutomationRunnerTests.Winforms (3) | `live/automation_runner_live_tests.rs` | `harness = false`, all desktop OSes |
 | FlowLayoutTests (24) | `flow_layout_tests.rs` (+ `flow_layout_anchor_tests.rs` when over 800 lines) | FlowLayoutWidget → FlexColumn/FlexRow; image compares via `image_match` |
-| MenuTests (1) | `menu_tests.rs` | DropDownList → ComboBox |
+| MenuTests (1) | `menu_tests.rs` | DropDownList → ComboBox; ported |
 | MouseInteractionTests (13) | `mouse_interaction_tests.rs` (+ `mouse_interaction/*.rs`) | all ported |
 | PaintExceptionContainmentTests (2) | `paint_exception_containment_tests.rs` | headless; live variant when `live` is on |
 | PresentFailureContainmentTests (1) | `live/present_failure_containment_tests.rs` | skipped on a CPU host, as in C# |
@@ -319,7 +319,6 @@ In live mode each of these pumps `pump_app_events` until the condition holds or 
 |---|---|---|
 | 20 | G13 NumberField | NumEditHandlesNonNumberChars, NumEditWithTextParserAcceptsLettersAndCommitsTheParsedValue, NumEditRefusesKeysItCannotRead, NumEditTakesLeadingEqualsOnlyWhenExpressionEntryIsAllowed |
 | 23 | ScrollingToEndShowsEnd (a TextField render compared with `image_match`; needs no gesture) | ScrollingToEndShowsEnd |
-| 24 | G11 named targets plus ComboBox items | OpenAndCloseMenus |
 | 25 | G12, then Flow, part 1 | TopToBottomContainerAppliesExpectedMargin, SpacingClearedAfterLoadPositionsCorrectly, NestedLayoutTopToBottomTests, ChangingChildVisiblityUpdatesFlow, ChangingChildFlowWidgetVisiblityUpdatesParentFlow, NestedLayoutTopToBottomWithResizeTests, LeftToRightTests, RightToLeftTests |
 | 26 | Flow, part 2 | NestedMaxFitOrStretchToChildrenParentWidth, NestedMinFitOrStretchToChildrenParentWidth, LeftToRightAnchorLeftBottomTests, AnchorLeftRightTests, NestedFlowWidgetsTopToBottomTests, NestedFlowWidgetsRightToLeftTests, NestedFlowWidgetsLeftToRightTests, FlowWithMaxSizeChildAllocatesToOthers |
 | 26b | Flow, part 3 | LeftRightWithAnchorLeftRightChildTests, RightLeftWithAnchorLeftRightChildTests, BottomTopWithAnchorBottomTopChildTests, TopBottomWithAnchorBottomTopChildTests, ChildVisibilityChangeCauseResize, EnsureCorrectSizeOnChildrenVisibleChange, ChildHAnchorPriority, TestVAnchorCenter |
@@ -332,7 +331,7 @@ In live mode each of these pumps `pump_app_events` until the condition holds or 
 | 32 | Live pump robustness | IdlePumpSurvivesAnotherWindowsTeardown, ShowFromNonPumpThreadReturnsToItsCaller |
 | 33 | G18 present-failure reset (agg-gui-wgpu) | APresentThatFailsEveryFrameStillStartsEachNextFrameWhole |
 
-**Tally** (47 still to port): AutomationRunnerTests 11 (10 ported), Winforms 3, Flow 24, Mac 12 (12 ported), Menu 1, Mouse 13 (13 ported), Paint 2, Present 1, TextEditFocus 3 (3 ported), TextEdit 13 (8 ported), ThreadStackDump 10, ToolTip 7 (7 ported), WidgetClick 3 (3 ported): **103**.
+**Tally** (46 still to port): AutomationRunnerTests 11 (10 ported), Winforms 3, Flow 24, Mac 12 (12 ported), Menu 1 (1 ported), Mouse 13 (13 ported), Paint 2, Present 1, TextEditFocus 3 (3 ported), TextEdit 13 (8 ported), ThreadStackDump 10, ToolTip 7 (7 ported), WidgetClick 3 (3 ported): **103**.
 
 **Moving `mattercad-app-test` onto the runner**
 

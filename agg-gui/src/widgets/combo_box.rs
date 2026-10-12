@@ -175,6 +175,9 @@ pub struct ComboBox {
     /// Per-row disabled flags (`true` = disabled; missing = enabled) — see
     /// [`ComboBox::set_item_enabled`] (`combo_box/item_enabled.rs`).
     disabled_items: Vec<bool>,
+    /// Per-row automation names (missing = the default `"{text} Menu Item"`)
+    /// — see [`ComboBox::set_item_name`] (`combo_box/item_names.rs`).
+    item_names: Vec<Option<String>>,
 }
 
 impl ComboBox {
@@ -237,6 +240,7 @@ impl ComboBox {
             enabled_fn: None,
             disabled_style: ComboBoxDisabledStyle::default(),
             disabled_items: Vec::new(),
+            item_names: Vec::new(),
         }
     }
 
@@ -410,6 +414,7 @@ mod enabled;
 mod fit;
 mod geometry;
 mod item_enabled;
+mod item_names;
 mod keyboard;
 mod lazy_fonts;
 mod options;
@@ -461,6 +466,10 @@ impl Widget for ComboBox {
 
     fn hit_test(&self, local_pos: Point) -> bool {
         self.in_button(local_pos) || self.pos_in_popup(local_pos)
+    }
+
+    fn find_named_targets(&self, name: &str, out: &mut Vec<crate::NamedTarget>) {
+        self.named_row_targets(name, out);
     }
 
     fn hit_test_global_overlay(&self, local_pos: Point) -> bool {

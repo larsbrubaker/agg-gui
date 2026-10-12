@@ -20,6 +20,7 @@ fn hit(root: &dyn Widget, path: &[usize]) -> NamedHit {
     NamedHit {
         handle: WidgetHandle::new(root, path).expect("widget at path"),
         offset_hint: Point::new(0.0, 0.0),
+        target: None,
     }
 }
 

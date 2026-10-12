@@ -5,6 +5,11 @@
 //! `GetByNameResults`), and the `Parents<T>()` / `Children<T>()` extension
 //! methods (agg-sharp `Gui/ExtensionMethods.cs`).
 //!
+//! Name lookups ([`find_named_hits`]) also find the non-widget targets a
+//! widget reports through [`Widget::find_named_targets`] (C#'s
+//! `FindDescendants` overrides that add a `NamedObject`): a hit then carries
+//! the [`NamedTarget`] and aims at the centre of its rectangle.
+//!
 //! A handle wraps agg-gui's [`WidgetAnchor`]: the child-index path plus the
 //! identity of each widget along it, so a handle follows its widget when a
 //! parent reorders its children and reports it detached once it has left the
@@ -18,7 +23,7 @@
 //! `inspector_child_transform`). Conversion to the runner's Y-down pixel
 //! search regions belongs to the name-lookup layer.
 
-use agg_gui::{Point, Rect, Size, TransAffine, Widget, WidgetAnchor};
+use agg_gui::{NamedTarget, Point, Rect, Size, TransAffine, Widget, WidgetAnchor};
 
 /// A found widget (the Rust side of C# holding a `GuiWidget` reference).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -77,16 +82,86 @@ impl WidgetHandle {
     }
 }
 
-/// A widget found by name — C#'s `GetByNameResults`. Non-widget named
-/// targets (C#'s `NamedObject`) join it with `Widget::find_named_targets`.
+/// A widget, or a named target a widget draws, found by name — C#'s
+/// `GetByNameResults`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct NamedHit {
-    /// The widget that carries the name.
+    /// The widget that carries the name, or that reported `target`.
     pub handle: WidgetHandle,
     /// Where in the widget a click should land, in its local space (Y-up,
     /// from its lower-left corner): its centre (C# `Position`, `Width / 2,
-    /// Height / 2`).
+    /// Height / 2`), or the centre of `target`'s rectangle.
     pub offset_hint: Point,
+    /// The non-widget target the name belongs to (C#'s `NamedObject` when it
+    /// is not the widget itself); `None` when the widget carries the name.
+    pub target: Option<NamedTarget>,
+}
+
+impl NamedHit {
+    /// A hit on the widget itself, aimed at the centre of its `bounds`.
+    pub fn widget(handle: WidgetHandle, bounds: Rect) -> Self {
+        Self {
+            handle,
+            offset_hint: Point::new(bounds.width / 2.0, bounds.height / 2.0),
+            target: None,
+        }
+    }
+
+    /// A hit on `target`, reported by `handle`'s widget, aimed at the centre
+    /// of its rectangle.
+    pub fn target(handle: WidgetHandle, target: NamedTarget) -> Self {
+        let r = target.rect_local;
+        Self {
+            handle,
+            offset_hint: Point::new(r.x + r.width / 2.0, r.y + r.height / 2.0),
+            target: Some(target),
+        }
+    }
+
+    /// Whether the name is enabled: the target's own flag for a target (its
+    /// widget's chain is asked separately, [`actually_enabled`]); true for a
+    /// widget.
+    pub fn target_enabled(&self) -> bool {
+        self.target.as_ref().is_none_or(|t| t.enabled)
+    }
+}
+
+/// Every widget and every named target under `root` (itself included) named
+/// `name`, in paint order (parents before children, earlier siblings first).
+/// A widget's own targets come before the widget, as C#'s overrides add them
+/// before calling the base `FindDescendants`.
+pub fn find_named_hits(root: &dyn Widget, name: &str) -> Vec<NamedHit> {
+    let mut found = Vec::new();
+    collect_hits(root, name, &mut Vec::new(), &mut found);
+    found
+        .into_iter()
+        .filter_map(|(path, target)| {
+            let handle = WidgetHandle::new(root, &path)?;
+            Some(match target {
+                Some(target) => NamedHit::target(handle, target),
+                None => {
+                    let bounds = handle.widget(root)?.bounds();
+                    NamedHit::widget(handle, bounds)
+                }
+            })
+        })
+        .collect()
+}
+
+type FoundName = (Vec<usize>, Option<NamedTarget>);
+
+fn collect_hits(node: &dyn Widget, name: &str, path: &mut Vec<usize>, out: &mut Vec<FoundName>) {
+    let mut targets = Vec::new();
+    node.find_named_targets(name, &mut targets);
+    out.extend(targets.into_iter().map(|t| (path.clone(), Some(t))));
+    if node.id() == Some(name) {
+        out.push((path.clone(), None));
+    }
+    for (i, child) in node.children().iter().enumerate() {
+        path.push(i);
+        collect_hits(child.as_ref(), name, path, out);
+        path.pop();
+    }
 }
 
 /// Every widget under `root` (itself included) whose name is `name`, in paint
@@ -230,6 +305,37 @@ pub fn screen_rect(root: &dyn Widget, handle: &WidgetHandle) -> Option<Rect> {
     placement(root, handle, Size::new(f64::INFINITY, f64::INFINITY)).map(|p| p.screen_rect)
 }
 
+/// `rect_local` (in `handle`'s widget's local space) in window space
+/// (logical, Y-up): where a [`NamedTarget`] sits on screen.
+pub fn local_rect_to_screen(
+    root: &dyn Widget,
+    handle: &WidgetHandle,
+    rect_local: Rect,
+) -> Option<Rect> {
+    let path = handle.resolve(root)?;
+    let mut node = root;
+    let mut parent_to_screen = TransAffine::new();
+    for &idx in &path {
+        let b = node.bounds();
+        let mut local_to_screen = parent_to_screen;
+        local_to_screen.translate(b.x, b.y);
+        local_to_screen.premultiply(&node.inspector_child_transform());
+        parent_to_screen = local_to_screen;
+        node = node.children().get(idx)?.as_ref();
+    }
+    // The same mapping `placement` gives the widget's own bounds (which
+    // are in its parent's space): offset by the widget's origin, then
+    // through its parent's chain.
+    let b = node.bounds();
+    let in_parent = Rect::new(
+        rect_local.x + b.x,
+        rect_local.y + b.y,
+        rect_local.width,
+        rect_local.height,
+    );
+    Some(transform_rect_aabb(&parent_to_screen, in_parent))
+}
+
 /// The part of the widget left after every ancestor's clip and the viewport.
 pub fn clipped_rect(root: &dyn Widget, handle: &WidgetHandle, viewport: Size) -> Option<Rect> {
     placement(root, handle, viewport).map(|p| p.clipped_rect)
@@ -269,7 +375,7 @@ pub fn actually_enabled(root: &dyn Widget, handle: &WidgetHandle) -> bool {
 
 /// The overlap of two rectangles; zero-sized at the nearer edge when they do
 /// not overlap.
-fn intersect(a: Rect, b: Rect) -> Rect {
+pub fn intersect(a: Rect, b: Rect) -> Rect {
     let left = a.left().max(b.left());
     let bottom = a.bottom().max(b.bottom());
     let right = a.right().min(b.right());

@@ -280,6 +280,17 @@ pub trait Widget {
         None
     }
 
+    /// Report the named things this widget draws that are not widgets of
+    /// their own — drop-down rows, menu rows, 3D controls — whose name is
+    /// `name`, by pushing one [`NamedTarget`](super::NamedTarget) per match
+    /// onto `out` (C#'s `FindDescendants` overrides that add a
+    /// `WidgetAndPosition` with a `NamedObject`). GUI automation looks them
+    /// up by name next to the widgets themselves and clicks a target at the
+    /// centre of its rectangle. Only targets that are on show right now
+    /// should be reported. Default: none. Children are walked by the caller,
+    /// so a widget reports only its own targets.
+    fn find_named_targets(&self, _name: &str, _out: &mut Vec<super::NamedTarget>) {}
+
     /// Return `false` to suppress painting this widget **and all its children**.
     /// The widget's own `paint()` will not be called.  Default: `true`.
     fn is_visible(&self) -> bool {
