@@ -75,6 +75,9 @@ struct LcdMaskKey {
     /// for LCD subpixel. Same raster, different finalize — so the two
     /// must not collide in the shared cache.
     gray: bool,
+    /// Sub-pixel x phase of the baseline in sixteenths of a pixel (always
+    /// 0 for LCD masks, whose composite places them on whole pixels).
+    phase_x_16: u8,
 }
 
 struct LcdMaskEntry {
@@ -98,7 +101,7 @@ const MASK_CACHE_MAX: usize = 1024;
 /// caching the result so subsequent calls with the same `(text, font, size)`
 /// return the shared `Arc` without re-running AGG.
 pub fn rasterize_text_lcd_cached(font: &Arc<Font>, text: &str, size: f64) -> CachedLcdText {
-    rasterize_text_mask_cached(font, text, size, false)
+    rasterize_text_mask_cached(font, text, size, false, 0)
 }
 
 /// Grayscale (whole-pixel coverage) sibling of [`rasterize_text_lcd_cached`].
@@ -112,7 +115,26 @@ pub fn rasterize_text_lcd_cached(font: &Arc<Font>, text: &str, size: f64) -> Cac
 /// hi-DPI / touch displays where LCD subpixel order is unknown or the
 /// per-logical-pixel fringe would be visible (e.g. scaled desktops).
 pub fn rasterize_text_gray_cached(font: &Arc<Font>, text: &str, size: f64) -> CachedLcdText {
-    rasterize_text_mask_cached(font, text, size, true)
+    rasterize_text_mask_cached(font, text, size, true, 0)
+}
+
+/// [`rasterize_text_gray_cached`] with the baseline `phase_x` (`0.0..1.0`)
+/// of a pixel to the right of the mask's whole-pixel origin, so a mask
+/// composited on whole pixels still puts the text where an outline fill at
+/// fractional x would (agg-sharp's `TextCoverageMaskCache`, which keys its
+/// masks on the sub-pixel phase). The phase is quantized to sixteenths of
+/// a pixel to bound the variants a string can cache; the returned
+/// `baseline_x_in_mask` includes the quantized phase.
+pub fn rasterize_text_gray_cached_at_phase(
+    font: &Arc<Font>,
+    text: &str,
+    size: f64,
+    phase_x: f64,
+) -> CachedLcdText {
+    // `as` saturates, and the `min` keeps a phase just under 1 from
+    // rounding up to a whole pixel.
+    let phase_16 = ((phase_x * 16.0).round().max(0.0) as u8).min(15);
+    rasterize_text_mask_cached(font, text, size, true, phase_16)
 }
 
 fn rasterize_text_mask_cached(
@@ -120,6 +142,7 @@ fn rasterize_text_mask_cached(
     text: &str,
     size: f64,
     gray: bool,
+    phase_x_16: u8,
 ) -> CachedLcdText {
     // Snapshot the current typography style once so the same values
     // used for the cache key are also used to size the mask below.
@@ -144,6 +167,7 @@ fn rasterize_text_mask_cached(
         primary_weight_bits: pweight_now.to_bits(),
         gamma_bits: gamma_now.to_bits(),
         gray,
+        phase_x_16,
     };
     // Cache hit path — bump LRU, return shared Arc.
     let hit = MASK_CACHE.with(|m| {
@@ -193,9 +217,11 @@ fn rasterize_text_mask_cached(
             ink_descent = ink_descent.max(-y_min);
         }
     }
-    let bw = (m.width + pad_x * 2.0).ceil().max(1.0) as u32;
+    let bw = (m.width + pad_x * 2.0 + phase_x_16 as f64 / 16.0)
+        .ceil()
+        .max(1.0) as u32;
     let bh = (ink_ascent + ink_descent + MASK_PAD * 2.0).ceil().max(1.0) as u32;
-    let bx = pad_x;
+    let bx = pad_x + phase_x_16 as f64 / 16.0;
     // Snap the mask's internal baseline Y to a whole pixel **only when
     // the user has hinting enabled** — the same checkbox that drives
     // the per-glyph `gy` snap inside `shape_text`.  This keeps the

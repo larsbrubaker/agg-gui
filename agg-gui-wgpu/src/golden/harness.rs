@@ -39,9 +39,21 @@ pub(crate) struct Pair {
 /// Software render of `draw` on a `w`×`h` surface cleared to `bg`, flipped
 /// to top-row-first like the GPU readback.
 pub(crate) fn software(w: u32, h: u32, bg: Color, draw: &dyn Fn(&mut dyn DrawCtx)) -> Vec<u8> {
+    software_with(w, h, bg, false, draw)
+}
+
+/// [`software`] with the LCD subpixel text path on (`lcd`) or off.
+pub(crate) fn software_with(
+    w: u32,
+    h: u32,
+    bg: Color,
+    lcd: bool,
+    draw: &dyn Fn(&mut dyn DrawCtx),
+) -> Vec<u8> {
     let mut fb = Framebuffer::new(w, h);
     {
         let mut ctx = GfxCtx::new(&mut fb);
+        ctx.set_lcd_mode(lcd);
         ctx.clear(bg);
         draw(&mut ctx);
     }
@@ -50,6 +62,17 @@ pub(crate) fn software(w: u32, h: u32, bg: Color, draw: &dyn Fn(&mut dyn DrawCtx
 
 /// GPU render of the same scene, or `None` without an adapter.
 pub(crate) fn gpu(w: u32, h: u32, bg: Color, draw: &dyn Fn(&mut dyn DrawCtx)) -> Option<Vec<u8>> {
+    gpu_with(w, h, bg, false, draw)
+}
+
+/// [`gpu`] with the LCD subpixel text path on (`lcd`) or off.
+pub(crate) fn gpu_with(
+    w: u32,
+    h: u32,
+    bg: Color,
+    lcd: bool,
+    draw: &dyn Fn(&mut dyn DrawCtx),
+) -> Option<Vec<u8>> {
     let (device, queue) = try_device()?;
     let target = Target::new(Arc::clone(&device), Arc::clone(&queue), w, h);
     let mut ctx = WgpuGfxCtx::new(
@@ -60,6 +83,7 @@ pub(crate) fn gpu(w: u32, h: u32, bg: Color, draw: &dyn Fn(&mut dyn DrawCtx)) ->
         h as f32,
     );
     ctx.reset(w as f32, h as f32);
+    ctx.set_lcd_mode(lcd);
     ctx.clear(bg);
     draw(&mut ctx);
     ctx.flush_to_surface(&target.view);
@@ -73,14 +97,25 @@ pub(crate) fn render_both(
     bg: Color,
     draw: &dyn Fn(&mut dyn DrawCtx),
 ) -> Option<Pair> {
-    let Some(gpu) = gpu(w, h, bg, draw) else {
+    render_both_with(w, h, bg, false, draw)
+}
+
+/// [`render_both`] with the LCD subpixel text path on (`lcd`) or off.
+pub(crate) fn render_both_with(
+    w: u32,
+    h: u32,
+    bg: Color,
+    lcd: bool,
+    draw: &dyn Fn(&mut dyn DrawCtx),
+) -> Option<Pair> {
+    let Some(gpu) = gpu_with(w, h, bg, lcd, draw) else {
         eprintln!("SKIP: no GPU adapter");
         return None;
     };
     Some(Pair {
         w,
         h,
-        software: software(w, h, bg, draw),
+        software: software_with(w, h, bg, lcd, draw),
         gpu,
     })
 }

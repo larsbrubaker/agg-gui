@@ -5,4 +5,7 @@
 mod harness;
 
 mod golden_2d_primitive_tests;
+mod golden_text_tests;
+mod gpu_clear_tests;
+mod gpu_fill_rule_tests;
 mod transparent_text_tests;

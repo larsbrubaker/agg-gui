@@ -65,7 +65,17 @@ impl WgpuGfxCtx {
                 let cached = if lcd {
                     agg_gui::lcd_coverage::rasterize_text_lcd_cached(&font, text, phys_size)
                 } else {
-                    agg_gui::lcd_coverage::rasterize_text_gray_cached(&font, text, phys_size)
+                    // The composite lands on whole device pixels, so the
+                    // baseline's sub-pixel x goes into the mask itself, as
+                    // the software outline fill would place it.
+                    let (mut px, mut py) = (x, y);
+                    ctx.ctm().transform(&mut px, &mut py);
+                    agg_gui::lcd_coverage::rasterize_text_gray_cached_at_phase(
+                        &font,
+                        text,
+                        phys_size,
+                        px - px.floor(),
+                    )
                 };
                 let mut col = color;
                 col.a *= ctx.global_alpha as f32;

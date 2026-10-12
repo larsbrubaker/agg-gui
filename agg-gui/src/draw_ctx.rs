@@ -138,6 +138,43 @@ pub trait DrawCtx {
     /// Fill the entire render target with `color`, ignoring the current clip.
     fn clear(&mut self, color: Color);
 
+    /// Replace every pixel inside the current clip with `color`, whatever
+    /// the transform (agg-sharp's `Graphics2D.Clear`, which fills the
+    /// clipping rect). With no clip set it fills the whole target. The
+    /// current path is discarded; every other piece of state is kept.
+    ///
+    /// Implemented with drawing calls every backend has: under an identity
+    /// transform, a rectangle far larger than any target is filled in
+    /// `CompOp::Src` (copy) at full alpha, which the clip then trims to
+    /// exactly its own pixels.
+    fn clear_clip(&mut self, color: Color) {
+        // Far past any render target, and inside AGG's 24.8 fixed-point
+        // range (|x| * 256 < 2^31) so the software rasterizer stays exact.
+        const FAR: f64 = 1_000_000.0;
+        self.save();
+        self.reset_transform();
+        self.set_blend_mode(CompOp::Src);
+        self.set_global_alpha(1.0);
+        self.set_fill_color(color);
+        self.begin_path();
+        self.rect(-FAR, -FAR, 2.0 * FAR, 2.0 * FAR);
+        self.fill();
+        self.begin_path();
+        self.restore();
+    }
+
+    /// Replace the pixels of the rectangle `x, y, w, h`, given in the
+    /// target's own pixels (y up) and not through the transform, that lie
+    /// inside the current clip with `color` (agg-sharp's
+    /// `Graphics2D.Clear(RectangleDouble, Color)`).
+    fn clear_rect(&mut self, x: f64, y: f64, w: f64, h: f64, color: Color) {
+        self.save();
+        self.reset_transform();
+        self.clip_rect(x, y, w, h);
+        self.clear_clip(color);
+        self.restore();
+    }
+
     // ── Path building ─────────────────────────────────────────────────────────
 
     fn begin_path(&mut self);
