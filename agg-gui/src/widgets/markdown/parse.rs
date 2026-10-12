@@ -188,35 +188,40 @@ pub(super) fn parse_markdown(markdown: &str) -> Vec<ParagraphItem> {
         }
 
         if let Some(cell) = table_cell.as_mut().filter(|_| in_image.is_none()) {
-            // Each piece of the event with its style: an extension span (`==x==`) is bold.
-            let segments: Vec<(String, MarkdownRunStyle)> = match &ev {
-                MdEvent::Text(t) => {
-                    extensions::pieces(t, &source, event_ranges[idx].clone(), styles.style(), None)
-                        .into_iter()
-                        .map(|piece| {
-                            let style = piece
-                                .extension
-                                .map_or(styles.style(), |extension| extension.style);
-                            (piece.text, style)
-                        })
-                        .collect()
-                }
-                MdEvent::Code(t) => vec![(t.to_string(), styles.style())],
+            // Each piece of the event with its style and link: an extension span (`==x==`) is
+            // bold, a bare url links (C#'s `TextLinkX` inside an `AggTableCell`).
+            let link = link_stack.last().cloned();
+            let segments: Vec<(String, MarkdownRunStyle, Option<String>)> = match &ev {
+                MdEvent::Text(t) => extensions::pieces(
+                    t,
+                    &source,
+                    event_ranges[idx].clone(),
+                    styles.style(),
+                    link.as_deref(),
+                )
+                .into_iter()
+                .map(|piece| match piece.extension {
+                    Some(extension) => (piece.text, extension.style, extension.link),
+                    None => (piece.text, styles.style(), link.clone()),
+                })
+                .collect(),
+                MdEvent::Code(t) => vec![(t.to_string(), styles.style(), link.clone())],
                 MdEvent::SoftBreak | MdEvent::HardBreak => {
                     cell.push(' ');
                     Vec::new()
                 }
                 _ => Vec::new(),
             };
-            for (text, style) in segments {
+            for (text, style, link) in segments {
                 let before = cell.len();
                 append_text(cell, &text);
-                if cell.len() > before && style != MarkdownRunStyle::default() {
+                if cell.len() > before && (style != MarkdownRunStyle::default() || link.is_some()) {
                     let start = before + (cell.len() - before - cell[before..].trim_start().len());
                     cell_spans.push(CellSpan {
                         start,
                         end: cell.len(),
                         style,
+                        link,
                     });
                 }
             }

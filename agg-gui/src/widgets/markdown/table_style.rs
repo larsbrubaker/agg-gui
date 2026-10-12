@@ -67,9 +67,11 @@ pub(super) fn header_bold(
         .iter()
         .enumerate()
         .map(|(ci, text)| {
-            emphasis::cell_pieces(text, emphasis::cell_spans(cell_styles, 0, ci))
+            let spans = emphasis::cell_spans(cell_styles, 0, ci);
+            emphasis::cell_pieces(text, spans)
                 .into_iter()
                 .map(|(range, style)| emphasis::CellSpan {
+                    link: emphasis::link_at(spans, range.start).map(str::to_string),
                     start: range.start,
                     end: range.end,
                     style: MarkdownRunStyle {

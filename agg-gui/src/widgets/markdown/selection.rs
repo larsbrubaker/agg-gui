@@ -89,6 +89,15 @@ pub(super) enum SelectableKind {
 }
 
 impl MarkdownView {
+    /// The face a fragment measures in: the code font for a code-block
+    /// line, else its run's emphasis face.
+    fn fragment_font(&self, fragment: &SelectableFragment) -> Arc<Font> {
+        match fragment.kind {
+            SelectableKind::CodeBlock => self.code_font(),
+            _ => self.run_font(fragment.run_style),
+        }
+    }
+
     pub(super) fn rebuild_selection_model(&mut self) {
         self.selectable_text.clear();
         self.selectable_fragments.clear();
@@ -266,7 +275,7 @@ impl MarkdownView {
                             y: line_top,
                             height: *line_h,
                             width: measure_advance(
-                                &font,
+                                &self.code_font(),
                                 line,
                                 LineStyle::Code.font_size(self.font_size),
                             ),
@@ -508,7 +517,7 @@ impl MarkdownView {
                     0.0,
                     fragment.range.start
                         + byte_at_x(
-                            &self.run_font(fragment.run_style),
+                            &self.fragment_font(fragment),
                             &fragment.text,
                             fragment.font_size,
                             pos.x - x0,
@@ -615,7 +624,7 @@ impl MarkdownView {
                 ctx.set_font_size(fragment.font_size);
                 let before = &fragment.text[..start];
                 let selected = &fragment.text[start..end];
-                let face = self.run_font(fragment.run_style);
+                let face = self.fragment_font(fragment);
                 (
                     fragment.text_x + measure_advance(&face, before, fragment.font_size),
                     measure_advance(&face, selected, fragment.font_size),

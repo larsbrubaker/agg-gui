@@ -254,12 +254,14 @@ impl MarkdownView {
     }
 }
 
-/// A styled byte range of a table cell's text.
+/// A styled or linked byte range of a table cell's text.
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct CellSpan {
     pub(super) start: usize,
     pub(super) end: usize,
     pub(super) style: MarkdownRunStyle,
+    /// The url the range links to (C#'s `TextLinkX` inside an `AggTableCell`).
+    pub(super) link: Option<String>,
 }
 
 /// Per table row, per cell, the cell's styled spans.
@@ -280,6 +282,14 @@ pub(super) fn style_at(spans: &[CellSpan], offset: usize) -> MarkdownRunStyle {
         .find(|span| span.start <= offset && offset < span.end)
         .map(|span| span.style)
         .unwrap_or_default()
+}
+
+/// The url the cell text at byte `offset` links to.
+pub(super) fn link_at(spans: &[CellSpan], offset: usize) -> Option<&str> {
+    spans
+        .iter()
+        .find(|span| span.start <= offset && offset < span.end)
+        .and_then(|span| span.link.as_deref())
 }
 
 /// A cell's text cut into consecutive `(byte range, style)` pieces that

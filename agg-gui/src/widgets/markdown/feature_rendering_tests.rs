@@ -2,7 +2,8 @@
 //! `Tests/Agg.Tests/MarkdigAgg/MarkdownFeatureRenderingTests.cs`
 //! (`HeadingLevelsUseDistinctSizes`, `OrderedListsRenderNumberMarkers`,
 //! `NestedListsIndentNestedItems`, `BlockQuotesRenderContainedText`,
-//! `FencedCodeBlocksRenderCodeBlockWidget`, `HorizontalRulesRenderVisibleLine`,
+//! `FencedCodeBlocksRenderCodeBlockWidget`,
+//! `CodeBlocksPreserveLeadingSpacesAndUseMonospaceFont`, `HorizontalRulesRenderVisibleLine`,
 //! `EmphasisRendersItalicBoldAndBoth`, `PairedHtmlStyleTagsStyleTheWordsBetween`,
 //! `UnpairedAttributedOrCrossedHtmlStyleTagsAreDropped`,
 //! `ItalicWordsDrawSlantedGlyphs`), plus `rust_only_*` tests for the places
@@ -119,6 +120,48 @@ fn fenced_code_blocks_render_code_block_widget() {
         .expect("a code block")
         .iter()
         .any(|line| line == "settings.Save();"));
+}
+
+// A monospace face for code blocks (C# loads Liberation Mono; any monospace face shows the same).
+const MONO_FONT: &[u8] = include_bytes!("../../../../demo/assets/CascadiaCode.ttf");
+
+#[test]
+fn code_blocks_preserve_leading_spaces_and_use_monospace_font() {
+    crate::widget::set_current_viewport(Size::new(2000.0, 600.0));
+    let body = font();
+    let mono = Arc::new(Font::from_slice(MONO_FONT).expect("mono font"));
+    let mut view = MarkdownView::new("```md\n  - Nested bullet\n```\n", Arc::clone(&body))
+        .with_code_font(Arc::clone(&mono));
+    view.layout(Size::new(2000.0, 2000.0));
+
+    let lines = view.code_block_lines();
+    let code_text = lines
+        .iter()
+        .flatten()
+        .find(|line| line.contains("Nested bullet"))
+        .expect("the code line");
+    assert_eq!(code_text, "  - Nested bullet");
+    assert!(!Arc::ptr_eq(&view.code_font(), &body));
+    assert!(Arc::ptr_eq(&view.code_font(), &mono));
+    // The line is taller than its text's bounds (C#'s `Height > Printer.LocalBounds.Height`).
+    let metrics = crate::text::measure_text_metrics(&mono, code_text, view.code_font_size());
+    assert!(view.code_block_line_heights()[0] > metrics.ascent + metrics.descent.abs());
+    // The rows are laid out in the monospace face's own line height.
+    assert_eq!(view.code_block_line_heights()[0], metrics.line_height * 1.35);
+    // Leading spaces take up room: the monospace advance of two spaces.
+    let spaced = measure_advance(&mono, code_text, view.code_font_size());
+    let bare = measure_advance(&mono, code_text.trim_start(), view.code_font_size());
+    assert!(spaced > bare);
+}
+
+#[test]
+fn rust_only_code_blocks_fall_back_to_the_body_face() {
+    let view = render_markdown("```\nx\n```\n");
+    let body = view.code_font();
+    let line_h = view.code_block_line_heights()[0];
+    let metrics = crate::text::measure_text_metrics(&body, "", view.code_font_size());
+    assert_eq!(line_h, metrics.line_height * 1.35);
+    assert_eq!(view.code_block_lines(), vec![vec!["x".to_string()]]);
 }
 
 #[test]

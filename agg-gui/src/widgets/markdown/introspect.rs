@@ -55,6 +55,9 @@ pub struct MarkdownTableCell {
     /// The stripe behind the cell's row (C#'s `AggTableRow.StripeColor`),
     /// in the current theme.
     pub stripe: Color,
+    /// The url of each link in the cell's text, in order (C#'s `TextLinkX`
+    /// children of the cell).
+    pub links: Vec<String>,
 }
 
 /// One laid-out paragraph, heading or list item (C#'s `ParagraphX` /
@@ -219,6 +222,23 @@ impl MarkdownView {
             .collect()
     }
 
+    /// The height of one line of each code block of the last layout, in
+    /// document order (C#'s `CodeBlockX` `TextWidget.Height`).
+    pub fn code_block_line_heights(&self) -> Vec<f64> {
+        self.items
+            .iter()
+            .filter_map(|item| match item {
+                LayoutItem::CodeBlock { line_h, .. } => Some(*line_h),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The size code block text draws at (C#'s `CodeBlockX` point size).
+    pub fn code_font_size(&self) -> f64 {
+        super::LineStyle::Code.font_size(self.font_size)
+    }
+
     /// Every table of the last layout, in document order, each as its cells
     /// row by row.
     pub fn table_cells(&self) -> Vec<Vec<MarkdownTableCell>> {
@@ -262,6 +282,7 @@ impl MarkdownView {
                         content_x: cell_content_x(*width, content_width, align),
                         content_width,
                         stripe: table_style::stripe_color(&visuals, ri, *header),
+                        links: super::cell_links::cell_link_urls(spans),
                     });
                     x += width;
                 }

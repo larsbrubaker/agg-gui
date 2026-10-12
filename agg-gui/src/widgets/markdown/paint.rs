@@ -317,7 +317,9 @@ impl MarkdownView {
                     ctx.save();
                     ctx.clip_rect(pad, content_y, *viewport_width, content_h);
                     ctx.translate(-scroll_x, 0.0);
-                    let metrics = measure_text_metrics(&font, "", fs);
+                    let code_font = self.code_font();
+                    ctx.set_font(Arc::clone(&code_font));
+                    let metrics = measure_text_metrics(&code_font, "", fs);
                     let mut line_top = content_y + content_h - code_pad_y - line_h;
                     for line in lines {
                         let ty = line_top + line_h * 0.5;
@@ -325,6 +327,7 @@ impl MarkdownView {
                         ctx.fill_text(line, pad + code_pad_x, text_y);
                         line_top -= line_h;
                     }
+                    ctx.set_font(Arc::clone(&font));
                     ctx.restore();
 
                     if *content_width > *viewport_width {
@@ -374,8 +377,9 @@ impl MarkdownView {
     }
 
     /// Draw a table cell's text piece by piece, each in its emphasis face,
-    /// from baseline-left `(x, y)`, stepping over the cell's images. The
-    /// caller restores the font.
+    /// from baseline-left `(x, y)`, stepping over the cell's images. A
+    /// linked piece draws in the accent colour, underlined, as a paragraph's
+    /// link does. The caller restores the font.
     fn paint_cell_text(
         &self,
         ctx: &mut dyn DrawCtx,
@@ -383,6 +387,7 @@ impl MarkdownView {
         x: f64,
         y: f64,
     ) {
+        let v = ctx.visuals();
         for between in MarkdownView::cell_text_pieces(text, images) {
             for (range, style) in emphasis::cell_pieces(text, spans) {
                 let start = range.start.max(between.start);
@@ -392,8 +397,18 @@ impl MarkdownView {
                 }
                 let piece = &text[start..end];
                 let pen = x + self.cell_text_x(text, spans, images, start);
+                let linked = emphasis::link_at(spans, start).is_some();
+                ctx.set_fill_color(if linked { v.accent } else { v.text_color });
                 ctx.set_font(self.run_font(style));
                 ctx.fill_text(piece, pen, y);
+                if linked {
+                    let space = piece.len() - piece.trim_start().len();
+                    let skip = self.styled_text_width(&piece[..space], LineStyle::Body, style);
+                    let ink_w = self.styled_text_width(piece.trim_end(), LineStyle::Body, style);
+                    ctx.begin_path();
+                    ctx.rect(pen + skip, y - 2.0, ink_w - skip, 1.0);
+                    ctx.fill();
+                }
                 if style.strikethrough {
                     let space = piece.len() - piece.trim_start().len();
                     let skip = self.styled_text_width(&piece[..space], LineStyle::Body, style);

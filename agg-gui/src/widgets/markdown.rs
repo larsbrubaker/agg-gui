@@ -24,10 +24,12 @@
 //! - Inline code `` `x` `` (highlight)
 //! - Emphasis: italic, bold, both, strikethrough, and paired `<b>`/`<i>`/`<s>`
 //!   style tags ([`MarkdownView::with_bold_font`], `emphasis.rs`)
-//! - Fenced code blocks (background box)
+//! - Fenced code blocks (background box) in a monospace face
+//!   ([`MarkdownView::with_code_font`]; the body face when none is given)
 //! - Horizontal rules (thin separator line)
 //! - Images via `image_provider` callback; compact inline placeholder when unavailable
-//! - Links (coloured text, URL is not opened — add `on_link_click` if needed)
+//! - Links (coloured text, URL is not opened — add `on_link_click` if needed),
+//!   in paragraphs and in table cells (`cell_links.rs`)
 //! - Matching-text highlight boxes ([`MarkdownView::set_matching_text`])
 //! - Pipe and grid tables, whose cells hold inline images (`cell_images.rs`)
 //! - Markdown as inline-styled HTML for the clipboard ([`to_styled_html`],
@@ -58,6 +60,7 @@ mod alignment;
 mod alignment_tests;
 mod block_scroll;
 mod cell_images;
+mod cell_links;
 #[cfg(test)]
 mod clipboard_selection_tests;
 mod emphasis;
@@ -312,6 +315,8 @@ pub struct MarkdownView {
     font: Arc<Font>,
     /// The face bold runs draw with ([`MarkdownView::with_bold_font`]).
     bold_font: Option<Arc<Font>>,
+    /// The monospace face code blocks draw with ([`MarkdownView::with_code_font`]).
+    code_font: Option<Arc<Font>>,
     /// The regular, italic, bold and bold-italic faces, built on first use.
     styled_fonts: emphasis::StyledFontCache,
     font_size: f64,
@@ -358,6 +363,7 @@ impl MarkdownView {
             markdown: markdown.into(),
             font,
             bold_font: None,
+            code_font: None,
             styled_fonts: Default::default(),
             font_size: 14.0,
             padding: 8.0,
@@ -395,6 +401,23 @@ impl MarkdownView {
     /// Change the theme copied HTML is styled with.
     pub fn set_html_theme(&mut self, theme: HtmlStyleTheme) {
         self.html_theme = theme;
+    }
+
+    /// Draw code blocks with `font`, a monospace face (MarkdigAgg's
+    /// `AggCodeBlockRenderer.GetMonoTypeFace`, Liberation Mono), so their
+    /// leading spaces line up. Without one, code blocks use the body face.
+    pub fn with_code_font(mut self, font: Arc<Font>) -> Self {
+        self.code_font = Some(font);
+        self
+    }
+
+    /// The face code blocks measure and draw with: the code font, else the
+    /// body face.
+    pub fn code_font(&self) -> Arc<Font> {
+        match &self.code_font {
+            Some(font) => Arc::clone(font),
+            None => self.active_font(),
+        }
     }
 
     pub fn with_font_size(mut self, size: f64) -> Self {
@@ -569,7 +592,7 @@ impl MarkdownView {
                 }
             }
         }
-        None
+        self.table_link_at(pos)
     }
 }
 

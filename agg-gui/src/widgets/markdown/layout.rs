@@ -486,11 +486,12 @@ impl MarkdownView {
 
     fn layout_code_block(&self, lines: &[String], max_w: f64) -> (f64, f64, f64) {
         let font_size = LineStyle::Code.font_size(self.font_size);
-        let metrics = measure_text_metrics(&self.active_font(), "", font_size);
+        let code_font = self.code_font();
+        let metrics = measure_text_metrics(&code_font, "", font_size);
         let line_h = metrics.line_height * 1.35;
         let max_line_w = lines
             .iter()
-            .map(|line| self.text_width(line, LineStyle::Code))
+            .map(|line| measure_text_metrics(&code_font, line, font_size).width)
             .fold(0.0_f64, f64::max);
         let pad_x = self.font_size;
         let pad_y = self.font_size * 0.75;

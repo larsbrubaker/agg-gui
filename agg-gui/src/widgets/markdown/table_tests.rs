@@ -235,6 +235,50 @@ fn pipe_tables_use_striping_bold_headers_and_semi_transparent_borders() {
 }
 
 #[test]
+fn inline_markdown_inside_cells_still_renders() {
+    let view = render_markdown(
+        "| Item | Notes |\n| --- | --- |\n| Bolt | **Strong** text |\n| Docs | [Guide](https://example.com) |\n",
+    );
+
+    let cells = single_table(&view);
+    let links: usize = cells.iter().map(|cell| cell.links.len()).sum();
+    assert_eq!(links, 1);
+    assert!(view
+        .laid_out_words()
+        .iter()
+        .any(|(w, style)| w == "Strong" && style.bold));
+}
+
+#[test]
+fn rust_only_a_cell_link_is_hit_where_it_is_drawn() {
+    let view = render_markdown(
+        "| Item | Notes |\n| --- | --- |\n| Bolt | **Strong** text |\n| Docs | [Guide](https://example.com) |\n",
+    );
+
+    let cells = single_table(&view);
+    let guide = &row(&cells, 2)[1];
+    assert_eq!(guide.links, vec!["https://example.com".to_string()]);
+    let tops = &view.table_row_tops()[0];
+    let col0 = row(&cells, 2)[0].width;
+    let y = tops[2] - 3.0;
+    let x = 8.0 + col0 + guide.content_x + 3.0;
+    assert_eq!(
+        view.link_at_point(crate::geometry::Point::new(x, y)),
+        Some("https://example.com")
+    );
+    // Past the link's text, in the same cell, and on the row above: no link.
+    let past = 8.0 + col0 + guide.content_x + guide.content_width + 3.0;
+    assert_eq!(
+        view.link_at_point(crate::geometry::Point::new(past, y)),
+        None
+    );
+    assert_eq!(
+        view.link_at_point(crate::geometry::Point::new(x, tops[1] - 3.0)),
+        None
+    );
+}
+
+#[test]
 fn paragraphs_around_tables_still_render() {
     let view = render_markdown(
         "Intro paragraph.\n\n| Name | Qty |\n| --- | --- |\n| Bolt | 4 |\n\nOutro paragraph.\n",
