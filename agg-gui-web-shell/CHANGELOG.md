@@ -10,6 +10,10 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- The canvas surface format follows agg-gui-wgpu's `choose_surface_format`:
+  Bgra8Unorm whichever of the two 8-bit orders the browser lists first, so a
+  browser capture is the same pixels as a native window and a headless golden.
+
 - Window activation: the page's `blur` / `focus` on `window` (a tab or app
   switch) reach the app as `App::on_window_deactivated` /
   `App::on_window_activated`; a drag in progress on blur ends with

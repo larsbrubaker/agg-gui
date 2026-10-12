@@ -10,8 +10,9 @@
 //! use.
 //!
 //! Frame acquisition, and the retry of a failed `Surface::configure` it
-//! drives, live in the child module `gpu_acquire.rs`; the pure retry policy
-//! is `crate::surface_retry`.
+//! drives, live in the child module `gpu_acquire.rs`; the pure policies are
+//! `gpu_surface_acquire.rs` (what to do with each acquire status) and
+//! `crate::surface_retry` (when to retry a failed configure).
 //!
 //! The adapter and device requests run inside agg-sharp's start-up budget
 //! (`crate::gpu_budget::create_within_budget`, [`GpuConfig::startup_budget`]),
@@ -38,9 +39,12 @@ mod acquire;
 pub use acquire::{FrameAcquire, RetryWake, SurfaceError};
 #[path = "gpu_adapter.rs"]
 mod adapter;
+#[path = "gpu_surface_acquire.rs"]
+mod surface_acquire;
 pub(crate) use acquire::watch_device_loss;
 pub(crate) use adapter::adapter_options;
 pub use adapter::{is_fallback_adapter, AdapterSummary};
+pub use surface_acquire::{surface_acquire_action, SurfaceAcquire};
 
 /// How badly the caller needs `COPY_SRC` on the surface texture.
 ///
@@ -245,21 +249,13 @@ impl std::fmt::Display for GpuInitError {
 
 impl std::error::Error for GpuInitError {}
 
-/// Pick the surface format to configure the swap chain with.
-///
-/// A non-sRGB format is preferred so the renderer's linear-space colour maths
-/// isn't gamma-corrected a second time by the surface; when the surface only
-/// offers sRGB formats we take its own first preference. Pure so the choice is
-/// testable without a live surface.
+/// Pick the surface format to configure the swap chain with:
+/// [`crate::choose_surface_format`] (Bgra8Unorm, else non-sRGB, else the
+/// surface's first preference), with an empty list an error.
 fn pick_surface_format(
     formats: &[wgpu::TextureFormat],
 ) -> Result<wgpu::TextureFormat, GpuInitError> {
-    formats
-        .iter()
-        .copied()
-        .find(|f| !f.is_srgb())
-        .or_else(|| formats.first().copied())
-        .ok_or(GpuInitError::NoSurfaceFormats)
+    crate::choose_surface_format(formats).ok_or(GpuInitError::NoSurfaceFormats)
 }
 
 /// Pick the composite alpha mode — the surface's first preference.
@@ -373,6 +369,8 @@ pub struct Gpu {
     surface_format: wgpu::TextureFormat,
     config: wgpu::SurfaceConfiguration,
     device_lost: Arc<std::sync::atomic::AtomicBool>,
+    /// The device's uncaptured wgpu errors, logged and counted.
+    uncaptured_errors: crate::UncapturedErrors,
     /// Whether the swap chain is configured, and if not, the retry backoff
     /// and the latest error. wgpu drops the swap chain on a failed
     /// configure, and acquiring from an unconfigured surface is itself fatal,
@@ -389,9 +387,9 @@ impl Gpu {
     /// `Arc<winit::window::Window>`) and configure the swap chain at
     /// `size` physical pixels, clamped by [`clamp_surface_size`].
     ///
-    /// A non-sRGB surface format is preferred so the renderer's colour maths —
-    /// which writes linear-space values — isn't gamma-corrected twice by the
-    /// surface.
+    /// The surface format is [`crate::choose_surface_format`]'s: Bgra8Unorm
+    /// when offered, else non-sRGB so the renderer's gamma-encoded output
+    /// isn't encoded twice by the surface.
     ///
     /// The adapter and device requests run on their own thread within
     /// [`GpuConfig::startup_budget`]; when it expires this returns
@@ -457,6 +455,9 @@ impl Gpu {
 
         // Device loss is reported out-of-band; see `watch_device_loss`.
         let device_lost = acquire::watch_device_loss(&device);
+        // A rejected submission costs its frame, not the app: wgpu's default
+        // handler panics (see `crate::uncaptured_errors`).
+        let uncaptured_errors = crate::UncapturedErrors::install(&device);
 
         let (cfg_w, cfg_h) =
             clamp_surface_size(size.0, size.1, device.limits().max_texture_dimension_2d);
@@ -486,6 +487,7 @@ impl Gpu {
             surface_format,
             config: surface_config,
             device_lost,
+            uncaptured_errors,
             retry: Mutex::new(acquire::RetryState::new(ConfigureRetry::configured())),
             retry_budget: config.surface_retry_budget,
         })
@@ -510,6 +512,13 @@ impl Gpu {
 
     pub fn device(&self) -> &Arc<wgpu::Device> {
         &self.device
+    }
+
+    /// The wgpu errors this device reported that no error scope captured —
+    /// each one cost the frame it happened in and was logged; a host can
+    /// surface the count or the last message.
+    pub fn uncaptured_errors(&self) -> &crate::UncapturedErrors {
+        &self.uncaptured_errors
     }
 
     pub fn queue(&self) -> &Arc<wgpu::Queue> {
@@ -598,81 +607,11 @@ impl Gpu {
     }
 }
 
-/// How to handle the result of `Surface::get_current_texture`.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-#[non_exhaustive]
-pub enum SurfaceAcquire {
-    /// Texture is usable — render into it.
-    Present,
-    /// The swapchain is stale or gone (`Outdated`/`Lost`): reconfigure the
-    /// surface and try once more THIS frame.
-    Reconfigure,
-    /// Transient (`Timeout`): skip the frame, but ask for another one.
-    SkipAndRetry,
-    /// Skip the frame with no follow-up (`Occluded`/`Validation`): the window
-    /// is not visible / the app must fix the validation error, and a
-    /// self-requested redraw would just burn the CPU.
-    Skip,
-}
-
-/// Decide how to handle a surface-acquire status. A pure function so the
-/// recovery policy is unit-testable without a live GPU surface (the
-/// no-payload variants are constructible in tests).
-///
-/// `Outdated`/`Lost` fire right after a window resize reconfigures the
-/// swapchain, and after a GPU driver reset (TDR), a display-mode change, or an
-/// RDP reconnect. Treating them as a plain skip leaves a reactive shell
-/// (`ControlFlow::Wait` whenever `wants_draw()` is false) frozen or black until
-/// some unrelated event requests another redraw — the resize-black-screen
-/// regression. wgpu documents both as "reconfigure the surface and try again".
-pub fn surface_acquire_action(status: &wgpu::CurrentSurfaceTexture) -> SurfaceAcquire {
-    use wgpu::CurrentSurfaceTexture as T;
-    match status {
-        T::Success(_) | T::Suboptimal(_) => SurfaceAcquire::Present,
-        T::Outdated | T::Lost => SurfaceAcquire::Reconfigure,
-        T::Timeout => SurfaceAcquire::SkipAndRetry,
-        T::Occluded | T::Validation => SurfaceAcquire::Skip,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
-        clamp_surface_size, pick_alpha_mode, pick_present_mode, pick_surface_format,
-        surface_acquire_action, GpuInitError, SurfaceAcquire,
+        clamp_surface_size, pick_alpha_mode, pick_present_mode, pick_surface_format, GpuInitError,
     };
-    use wgpu::CurrentSurfaceTexture as T;
-
-    #[test]
-    fn stale_swapchain_reconfigures_instead_of_skipping() {
-        // The resize-black-screen regression, and the frozen-window case after
-        // a driver reset (TDR) / display-mode change / RDP reconnect: both must
-        // drive a reconfigure-and-retry, NOT a silent skip.
-        assert_eq!(
-            surface_acquire_action(&T::Outdated),
-            SurfaceAcquire::Reconfigure
-        );
-        assert_eq!(
-            surface_acquire_action(&T::Lost),
-            SurfaceAcquire::Reconfigure
-        );
-    }
-
-    #[test]
-    fn timeout_skips_the_frame_but_asks_for_another() {
-        // Timeout is transient: the next acquire usually succeeds, so a
-        // reactive loop has to be woken back up or it waits forever.
-        assert_eq!(
-            surface_acquire_action(&T::Timeout),
-            SurfaceAcquire::SkipAndRetry
-        );
-    }
-
-    #[test]
-    fn occluded_and_validation_skip_without_self_requested_redraw() {
-        assert_eq!(surface_acquire_action(&T::Occluded), SurfaceAcquire::Skip);
-        assert_eq!(surface_acquire_action(&T::Validation), SurfaceAcquire::Skip);
-    }
 
     #[test]
     fn empty_capability_lists_are_an_error_not_a_panic() {

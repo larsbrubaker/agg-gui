@@ -67,14 +67,24 @@ pub use gpu::{
 /// Wall-clock budgets around building a device at start-up and draining the
 /// GPU at close (agg-sharp `GpuStartup` / `GpuTeardown`).
 pub mod gpu_budget;
+/// The swap-chain format rule both shells share (agg-sharp
+/// `WebGpuRenderDevice.PickSurfaceFormat`).
+mod surface_format;
+pub use surface_format::choose_surface_format;
 /// When to retry a failed `Surface::configure`, when to give up, and what to
 /// log — the pure policy behind [`Gpu`]'s surface recovery.
 #[cfg(not(target_arch = "wasm32"))]
 mod surface_retry;
+/// Logs and counts the window device's uncaptured wgpu errors instead of
+/// wgpu's default panic, so a rejected submission costs one frame.
+#[cfg(not(target_arch = "wasm32"))]
+mod uncaptured_errors;
 pub use gpu_budget::{
     create_within_budget, drain_within_budget, BudgetReport, GPU_STARTUP_BUDGET,
     GPU_TEARDOWN_BUDGET,
 };
+#[cfg(not(target_arch = "wasm32"))]
+pub use uncaptured_errors::UncapturedErrors;
 
 pub mod custom_render;
 pub use custom_render::{SharedCustomRenderer, WgpuCustomRender, WgpuCustomRenderCtx};

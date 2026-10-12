@@ -100,15 +100,12 @@ pub struct GpuInfo {
     pub adapter_info: wgpu::AdapterInfo,
 }
 
-/// Pick the swap-chain format: non-sRGB preferred (the renderer writes
-/// linear-space values and must not be gamma-corrected twice), else the
-/// surface's first preference.
+/// Pick the swap-chain format: agg-gui-wgpu's shared rule
+/// ([`agg_gui_wgpu::choose_surface_format`]: Bgra8Unorm, else non-sRGB, else
+/// the surface's first preference), so a browser canvas lands on the same
+/// format as a native window whichever 8-bit order it lists first.
 pub(crate) fn pick_surface_format(formats: &[wgpu::TextureFormat]) -> Option<wgpu::TextureFormat> {
-    formats
-        .iter()
-        .copied()
-        .find(|f| !f.is_srgb())
-        .or_else(|| formats.first().copied())
+    agg_gui_wgpu::choose_surface_format(formats)
 }
 
 /// The device limits to request for `backend`, honouring an explicit override.

@@ -10,6 +10,20 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- `choose_surface_format`, the swap-chain format rule both shells share
+  (agg-sharp `WebGpuRenderDevice.PickSurfaceFormat`): Bgra8Unorm whenever it
+  is offered, else the first non-sRGB format, else the surface's first
+  preference. `Gpu::new` now uses it, so a surface listing `Rgba8Unorm` before
+  `Bgra8Unorm` configures `Bgra8Unorm` (the headless frame's format) where it
+  used to take `Rgba8Unorm`.
+- `UncapturedErrors` (native): a device's uncaptured-error handler that logs
+  and counts wgpu errors instead of wgpu's default panic. `Gpu::new` installs
+  it on the window's device (`Gpu::uncaptured_errors`), so a submission wgpu
+  rejects — a custom renderer recording an invalid copy, say — costs that
+  frame and the next frame starts whole, where it used to panic the app
+  (agg-sharp `PresentFailureContainmentTests`). `HeadlessGpu` keeps wgpu's
+  panicking default so tests fail loudly.
+
 - Software rendering on request (native only), agg-sharp's
   `UseSoftwareAdapter`: `GpuConfig::force_fallback_adapter` /
   `with_force_fallback_adapter` makes `Gpu::new` demand wgpu's fallback
