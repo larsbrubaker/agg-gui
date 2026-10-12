@@ -95,6 +95,7 @@ pub mod persistence;
 pub mod pixel_bounds;
 pub mod platform;
 pub mod screenshot;
+pub mod selection_control_size;
 pub mod shared_size_group;
 pub mod shell_input;
 pub mod snap;
@@ -120,6 +121,7 @@ pub mod wasm_clipboard;
 pub mod wheel;
 pub mod wheel_axes;
 pub mod widget;
+pub mod widget_background;
 pub mod widgets;
 
 /// Adapter helpers bridging `winit` types (keyboard, mouse, modifiers,
@@ -163,6 +165,9 @@ pub use icon_image::{IconImage, IconPixelFilter};
 pub use layout_props::{resolve_fit_or_stretch, HAnchor, Insets, VAnchor, WidgetBase};
 pub use platform::{current_platform, platform_from_name, set_platform, Platform};
 pub use screenshot::ScreenshotHandle;
+pub use selection_control_size::{
+    selection_control_size, set_selection_control_size, SelectionControlSize,
+};
 pub use snap::{
     compute_snap, next_snap_id, ResizeEdge as SnapResizeEdge, SnapGuide, SnapId, SnapMode,
     SnapOverlay, SnapResult, Snappable, DEFAULT_THRESHOLD as SNAP_DEFAULT_THRESHOLD,
@@ -209,6 +214,7 @@ pub use widget::{
     InspectorOverlay, UnderMouseState, Widget, WidgetAnchor, WidgetBaseEdit, WidgetBaseField,
     WidgetId,
 };
+pub use widget_background::{render_background, render_progress_fill};
 pub use widgets::{
     color_wheel_picker_dialog, color_wheel_picker_dialog_with_on_close, current_scroll_style,
     current_scroll_visibility, paint_sparkline, set_scroll_style, set_scroll_visibility,

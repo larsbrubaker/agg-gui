@@ -28,6 +28,14 @@
 //! RadioButton (circle drawn via paths)
 //!   └── Label (text, backbuffered)
 //! ```
+//!
+//! The circle's size is chosen when the button is built, from
+//! [`selection_control_size`]: egui's 14 circle (the default) or agg-sharp's
+//! classic 10 circle in an 11 square with a 10 gap before the label
+//! (`RadioCircleWidget`, `RadioButtonView`), the row as tall as the larger of
+//! the square and the label. The classic border is
+//! `max(1, 1.5 * radius / 8)` wide, inset by half of it, as agg-sharp's
+//! `SelectionControlStyle.DrawRadio` draws it.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -38,6 +46,9 @@ use crate::draw_ctx::DrawCtx;
 use crate::event::{Event, EventResult, Key, MouseButton};
 use crate::geometry::{Point, Rect, Size};
 use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
+use crate::selection_control_size::{
+    selection_control_size, SelectionControlSize, CLASSIC_RADIO_BOX_WIDTH, CLASSIC_RADIO_LABEL_GAP,
+};
 use crate::text::Font;
 use crate::widget::{Widget, WidgetId};
 use crate::widgets::label::Label;
@@ -73,6 +84,8 @@ pub struct RadioButton {
     pressed: bool,
     on_checked_state_changed: Option<Box<dyn FnMut(bool)>>,
     on_click: Option<Box<dyn FnMut()>>,
+    /// The classic agg-sharp geometry, chosen at construction.
+    classic: bool,
 }
 
 impl RadioButton {
@@ -96,6 +109,7 @@ impl RadioButton {
             pressed: false,
             on_checked_state_changed: None,
             on_click: None,
+            classic: selection_control_size() == SelectionControlSize::Classic,
         }
     }
 
@@ -156,6 +170,35 @@ impl RadioButton {
     pub fn with_v_anchor(mut self, v: VAnchor) -> Self {
         self.base.v_anchor = v;
         self
+    }
+
+    /// The width of the square the circle sits in (C#'s
+    /// `RadioCircle.MinimumSize.X`): the circle's diameter plus one.
+    pub fn circle_slot_width(&self) -> f64 {
+        if self.classic {
+            CLASSIC_RADIO_BOX_WIDTH + 1.0
+        } else {
+            (DOT_R + FOCUS_PAD) * 2.0
+        }
+    }
+
+    /// The circle's radius.
+    pub fn circle_radius(&self) -> f64 {
+        if self.classic {
+            CLASSIC_RADIO_BOX_WIDTH / 2.0
+        } else {
+            DOT_R
+        }
+    }
+
+    /// The circle's centre in widget-local coordinates (Y-up), as laid out.
+    pub fn circle_center(&self) -> Point {
+        let cx = if self.classic {
+            self.circle_slot_width() / 2.0
+        } else {
+            FOCUS_PAD + DOT_R
+        };
+        Point::new(cx, self.bounds.height * 0.5)
     }
 
     /// Whether this option is checked (C#'s `Checked`).
@@ -355,32 +398,47 @@ impl Widget for RadioButton {
     }
 
     fn layout(&mut self, available: Size) -> Size {
-        let dot_slot = (DOT_R + FOCUS_PAD) * 2.0;
-        let h = dot_slot.max(self.font_size * 1.25);
-        let label_avail = (available.width - dot_slot - GAP).max(0.0);
-        let s = self.children[0].layout(Size::new(label_avail, h));
+        let dot_slot = self.circle_slot_width();
+        let gap = if self.classic {
+            CLASSIC_RADIO_LABEL_GAP
+        } else {
+            GAP
+        };
+        let (h, s) = if self.classic {
+            // C#'s RadioButtonView is a fit flow row: as tall as its tallest
+            // child, the circle's square or the label.
+            let s = self.children[0].layout(Size::new(
+                (available.width - dot_slot - gap).max(0.0),
+                available.height,
+            ));
+            (dot_slot.max(s.height), s)
+        } else {
+            let h = dot_slot.max(self.font_size * 1.25);
+            let label_avail = (available.width - dot_slot - gap).max(0.0);
+            (h, self.children[0].layout(Size::new(label_avail, h)))
+        };
         self.children[0].set_bounds(Rect::new(
-            dot_slot + GAP,
+            dot_slot + gap,
             (h - s.height) * 0.5,
             s.width,
             s.height,
         ));
-        let w = (dot_slot + GAP + s.width).min(available.width.max(dot_slot));
+        let w = (dot_slot + gap + s.width).min(available.width.max(dot_slot));
         self.bounds = Rect::new(self.bounds.x, self.bounds.y, w, h);
         Size::new(w, h)
     }
 
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
         let v = ctx.visuals();
-        let cx = FOCUS_PAD + DOT_R;
-        let cy = self.bounds.height * 0.5;
+        let Point { x: cx, y: cy } = self.circle_center();
+        let radius = self.circle_radius();
         let checked = self.checked();
 
         if self.focused && self.enabled {
             ctx.set_stroke_color(v.accent_focus);
             ctx.set_line_width(2.0);
             ctx.begin_path();
-            ctx.circle(cx, cy, DOT_R + 1.5);
+            ctx.circle(cx, cy, radius + 1.5);
             ctx.stroke();
         }
 
@@ -403,17 +461,23 @@ impl Widget for RadioButton {
         };
         ctx.set_fill_color(bg);
         ctx.begin_path();
-        ctx.circle(cx, cy, DOT_R);
+        ctx.circle(cx, cy, radius);
         ctx.fill();
+        let (border_width, border_radius) = if self.classic {
+            let w = (1.5 * radius / 8.0).max(1.0);
+            (w, radius - w / 2.0)
+        } else {
+            (1.5, radius)
+        };
         ctx.set_stroke_color(border);
-        ctx.set_line_width(1.5);
+        ctx.set_line_width(border_width);
         ctx.begin_path();
-        ctx.circle(cx, cy, DOT_R);
+        ctx.circle(cx, cy, border_radius);
         ctx.stroke();
         if checked {
             ctx.set_fill_color(v.widget_bg);
             ctx.begin_path();
-            ctx.circle(cx, cy, DOT_R * 0.45);
+            ctx.circle(cx, cy, radius * 0.45);
             ctx.fill();
         }
 

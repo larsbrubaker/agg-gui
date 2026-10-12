@@ -10,6 +10,20 @@
 //! Checkbox (box + checkmark drawn via paths)
 //!   └── Label (text, backbuffered)
 //! ```
+//!
+//! # Size
+//!
+//! The geometry is chosen when the box is built, from
+//! [`selection_control_size`]: egui's 16 box (the default) or agg-sharp's
+//! classic 12 box in a 20 wide slot, sized to its label's height
+//! (`CheckBoxViewText`). The classic box draws the same look scaled to its
+//! size, as agg-sharp's `SelectionControlStyle.DrawCheckBox` does: radius,
+//! border and tick widths are the 16 box's times `box / 16`, the border and
+//! tick never thinner than 1.
+//!
+//! A disabled box ([`Checkbox::with_enabled`]) ignores input and draws its
+//! box at 40% opacity (agg-gui's non-interactive dim, which
+//! `SelectionControlStyle` copies).
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -20,6 +34,9 @@ use crate::draw_ctx::DrawCtx;
 use crate::event::{Event, EventResult, Key, MouseButton};
 use crate::geometry::{Rect, Size};
 use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
+use crate::selection_control_size::{
+    selection_control_size, SelectionControlSize, CLASSIC_CHECK_BOX_WIDTH, LEADING_PAD,
+};
 use crate::text::Font;
 use crate::widget::Widget;
 use crate::widgets::label::Label;
@@ -28,6 +45,8 @@ const BOX_SIZE: f64 = 16.0;
 const FOCUS_PAD: f64 = 2.0;
 const GAP: f64 = 8.0;
 const BOX_STROKE_WIDTH: f64 = 1.5;
+/// agg-gui's opacity for a control that is not interactive.
+const DISABLED_OPACITY: f32 = 0.4;
 
 /// Inspector-visible properties of a [`Checkbox`].  See [`SliderProps`] for
 /// the rationale of the companion-props pattern.
@@ -64,6 +83,9 @@ pub struct Checkbox {
     /// Tracked label text — used for empty-check during layout and to rebuild
     /// the Label child when font size changes.
     label_text: String,
+    /// The classic agg-sharp geometry, chosen at construction.
+    classic: bool,
+    enabled: bool,
 }
 
 impl Checkbox {
@@ -87,6 +109,8 @@ impl Checkbox {
             on_change: None,
             indeterminate_fn: None,
             label_text,
+            classic: selection_control_size() == SelectionControlSize::Classic,
+            enabled: true,
         }
     }
 
@@ -130,6 +154,39 @@ impl Checkbox {
     pub fn with_max_size(mut self, s: Size) -> Self {
         self.base.max_size = s;
         self
+    }
+
+    /// Enable or disable the box (C#'s `Enabled`). A disabled box ignores
+    /// the pointer and keys and draws its box dimmed.
+    pub fn with_enabled(mut self, enabled: bool) -> Self {
+        self.enabled = enabled;
+        self
+    }
+
+    /// Whether the box takes input.
+    pub fn is_enabled(&self) -> bool {
+        self.enabled
+    }
+
+    /// Enable or disable the box; see [`with_enabled`](Self::with_enabled).
+    pub fn set_enabled(&mut self, enabled: bool) {
+        self.enabled = enabled;
+        if !enabled {
+            self.hovered = false;
+        }
+    }
+
+    /// The box's rect in widget-local coordinates (Y-up), as laid out.
+    pub fn box_rect(&self) -> Rect {
+        let h = self.bounds.height;
+        if self.classic {
+            let size = 1.2 * CLASSIC_CHECK_BOX_WIDTH;
+            // C#'s Math.Round is banker's rounding.
+            let bottom = ((h - size) / 2.0).round_ties_even();
+            Rect::new(LEADING_PAD, bottom, size, size)
+        } else {
+            Rect::new(FOCUS_PAD, (h - BOX_SIZE) * 0.5, BOX_SIZE, BOX_SIZE)
+        }
     }
 
     pub fn on_change(mut self, cb: impl FnMut(bool) + 'static) -> Self {
@@ -183,6 +240,19 @@ impl Checkbox {
         }
     }
 
+    /// agg-sharp's `CheckBoxViewText` layout: a slot twice
+    /// `CheckBoxWidth` wide, then the label, the whole as tall as the label.
+    fn layout_classic(&mut self, available: Size) -> Size {
+        let slot = CLASSIC_CHECK_BOX_WIDTH * 2.0;
+        let label_avail_w = (available.width - slot).max(0.0);
+        let s = self.children[0].layout(Size::new(label_avail_w, available.height));
+        self.children[0].set_bounds(Rect::new(slot, 0.0, s.width, s.height));
+        let w = slot + s.width;
+        let h = s.height;
+        self.bounds = Rect::new(0.0, 0.0, w, h);
+        Size::new(w, h)
+    }
+
     fn unchecked_colors(v: &crate::theme::Visuals, hovered: bool) -> (Color, Color) {
         let luma = v.bg_color.r * 0.299 + v.bg_color.g * 0.587 + v.bg_color.b * 0.114;
         if luma < 0.5 {
@@ -226,10 +296,6 @@ impl Widget for Checkbox {
         Some(&mut self.props)
     }
 
-    fn is_focusable(&self) -> bool {
-        true
-    }
-
     fn margin(&self) -> Insets {
         self.base.margin
     }
@@ -252,7 +318,14 @@ impl Widget for Checkbox {
         self.base.max_size
     }
 
+    fn is_focusable(&self) -> bool {
+        self.enabled
+    }
+
     fn layout(&mut self, available: Size) -> Size {
+        if self.classic {
+            return self.layout_classic(available);
+        }
         let box_slot_w = BOX_SIZE + FOCUS_PAD * 2.0;
         let h = (BOX_SIZE + FOCUS_PAD * 2.0).max(self.props.font_size * 1.25);
         let label_avail_w = (available.width - box_slot_w - GAP).max(0.0);
@@ -276,22 +349,24 @@ impl Widget for Checkbox {
 
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
         let v = ctx.visuals();
-        let h = self.bounds.height;
-        let box_x = FOCUS_PAD;
-        let box_y = (h - BOX_SIZE) * 0.5;
+        let r = self.box_rect();
+        let (box_x, box_y, size) = (r.x, r.y, r.width);
+        // The 16 box's lengths scaled to this one (1 for egui's box).
+        let unit = size / BOX_SIZE;
+        let dim = |c: Color| {
+            if self.enabled {
+                c
+            } else {
+                c.with_alpha(c.a * DISABLED_OPACITY)
+            }
+        };
 
         // Focus ring
-        if self.focused {
+        if self.focused && self.enabled {
             ctx.set_stroke_color(v.accent_focus);
             ctx.set_line_width(2.0);
             ctx.begin_path();
-            ctx.rounded_rect(
-                box_x - 1.5,
-                box_y - 1.5,
-                BOX_SIZE + 3.0,
-                BOX_SIZE + 3.0,
-                4.0,
-            );
+            ctx.rounded_rect(box_x - 1.5, box_y - 1.5, size + 3.0, size + 3.0, 4.0);
             ctx.stroke();
         }
 
@@ -300,13 +375,14 @@ impl Widget for Checkbox {
         // The indeterminate state renders with the "on" (accent) fill, matching
         // our checked look, so it reads as a partial selection rather than empty.
         let filled = checked || indeterminate;
+        let radius = 3.0 * unit;
 
         // Box background
         let (unchecked_bg, unchecked_border) = Self::unchecked_colors(&v, self.hovered);
         let bg = if filled { v.accent } else { unchecked_bg };
-        ctx.set_fill_color(bg);
+        ctx.set_fill_color(dim(bg));
         ctx.begin_path();
-        ctx.rounded_rect(box_x, box_y, BOX_SIZE, BOX_SIZE, 3.0);
+        ctx.rounded_rect(box_x, box_y, size, size, radius);
         ctx.fill();
 
         // Box border
@@ -315,38 +391,45 @@ impl Widget for Checkbox {
         } else {
             unchecked_border
         };
-        ctx.set_stroke_color(border);
-        ctx.set_line_width(BOX_STROKE_WIDTH);
+        let border_width = (BOX_STROKE_WIDTH * unit).max(1.0);
+        // egui's box keeps its 3 radius on the border; the classic box takes
+        // the half stroke off it, as SelectionControlStyle does.
+        let border_radius = if self.classic {
+            radius - border_width * 0.5
+        } else {
+            radius
+        };
+        ctx.set_stroke_color(dim(border));
+        ctx.set_line_width(border_width);
         ctx.begin_path();
-        let stroke_inset = BOX_STROKE_WIDTH * 0.5;
+        let stroke_inset = border_width * 0.5;
         ctx.rounded_rect(
             box_x + stroke_inset,
             box_y + stroke_inset,
-            BOX_SIZE - BOX_STROKE_WIDTH,
-            BOX_SIZE - BOX_STROKE_WIDTH,
-            3.0,
+            size - border_width,
+            size - border_width,
+            border_radius,
         );
         ctx.stroke();
 
         // Mark — coordinates in Y-up space (origin = box bottom-left).
         // Indeterminate takes visual priority: draw a horizontal dash rather
         // than the checkmark, matching egui's tri-state look.
+        let mark_width = (2.0 * unit).max(1.0);
         if indeterminate {
-            ctx.set_stroke_color(Color::white());
-            ctx.set_line_width(2.0);
+            ctx.set_stroke_color(dim(Color::white()));
+            ctx.set_line_width(mark_width);
             ctx.begin_path();
-            ctx.move_to(box_x + 3.0, box_y + BOX_SIZE * 0.5);
-            ctx.line_to(box_x + BOX_SIZE - 3.0, box_y + BOX_SIZE * 0.5);
+            ctx.move_to(box_x + 3.0 * unit, box_y + size * 0.5);
+            ctx.line_to(box_x + size - 3.0 * unit, box_y + size * 0.5);
             ctx.stroke();
         } else if checked {
-            ctx.set_stroke_color(Color::white());
-            ctx.set_line_width(2.0);
+            ctx.set_stroke_color(dim(Color::white()));
+            ctx.set_line_width(mark_width);
             ctx.begin_path();
-            let bx = box_x;
-            let by = box_y;
-            ctx.move_to(bx + 3.0, by + BOX_SIZE * 0.55);
-            ctx.line_to(bx + BOX_SIZE * 0.42, by + BOX_SIZE * 0.28);
-            ctx.line_to(bx + BOX_SIZE - 3.0, by + BOX_SIZE * 0.75);
+            ctx.move_to(box_x + 3.0 * unit, box_y + size * 0.55);
+            ctx.line_to(box_x + size * 0.42, box_y + size * 0.28);
+            ctx.line_to(box_x + size - 3.0 * unit, box_y + size * 0.75);
             ctx.stroke();
         }
 
@@ -356,6 +439,9 @@ impl Widget for Checkbox {
     }
 
     fn on_event(&mut self, event: &Event) -> EventResult {
+        if !self.enabled {
+            return EventResult::Ignored;
+        }
         match event {
             Event::MouseMove { pos } => {
                 let was = self.hovered;
