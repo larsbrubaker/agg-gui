@@ -10,6 +10,10 @@
 //! Siblings: `golden/*_tests.rs` hold the ported test classes.
 //!
 //! Skipped (the render returns `None`) when no GPU adapter is available.
+//! Widget trees paint through `paint_subtree` on both backends
+//! ([`render_tree_both`]); [`GpuFrames`] keeps one GPU context across frames
+//! so retained layers can be checked frame to frame.
+//!
 //! Set `GOLDEN_DUMP_DIR` to a directory to have `assert_matches` write both
 //! renders there as PPM images, for looking at a failure.
 
@@ -19,6 +23,7 @@ use agg_gui::color::Color;
 use agg_gui::draw_ctx::DrawCtx;
 use agg_gui::framebuffer::Framebuffer;
 use agg_gui::gfx_ctx::GfxCtx;
+use agg_gui::widget::{paint_subtree, Widget};
 
 use crate::layer_text_readback_tests::{try_device, Target};
 use crate::WgpuGfxCtx;
@@ -189,4 +194,81 @@ impl Pair {
         }
         out
     }
+}
+
+/// A GPU context kept across frames, for widget trees whose retained layers
+/// (`BackbufferKind::GlFbo`) must survive from one frame to the next — C#'s
+/// `WebGpuOffscreenCapture` drawing several `BeginWidgetFrame`s.
+pub(crate) struct GpuFrames {
+    w: u32,
+    h: u32,
+    ctx: WgpuGfxCtx,
+    target: Target,
+}
+
+impl GpuFrames {
+    /// A `w`×`h` capture, or `None` (with a SKIP line) without an adapter.
+    pub(crate) fn new(w: u32, h: u32) -> Option<Self> {
+        let Some((device, queue)) = try_device() else {
+            eprintln!("SKIP: no GPU adapter");
+            return None;
+        };
+        let target = Target::new(Arc::clone(&device), Arc::clone(&queue), w, h);
+        let ctx = WgpuGfxCtx::new(
+            device,
+            queue,
+            wgpu::TextureFormat::Rgba8Unorm,
+            w as f32,
+            h as f32,
+        );
+        Some(Self { w, h, ctx, target })
+    }
+
+    /// One frame: clear to `bg`, apply `before` (a transform, say), paint
+    /// `root`'s subtree, read back top-row-first RGBA8.
+    pub(crate) fn paint(
+        &mut self,
+        bg: Color,
+        root: &mut dyn Widget,
+        before: &dyn Fn(&mut dyn DrawCtx),
+    ) -> Vec<u8> {
+        self.ctx.reset(self.w as f32, self.h as f32);
+        self.ctx.clear(bg);
+        before(&mut self.ctx);
+        paint_subtree(root, &mut self.ctx);
+        self.ctx.flush_to_surface(&self.target.view);
+        self.target.read()
+    }
+}
+
+/// Software render of `root`'s subtree, flipped top-row-first like the GPU
+/// readback.
+pub(crate) fn software_tree(w: u32, h: u32, bg: Color, root: &mut dyn Widget) -> Vec<u8> {
+    let mut fb = Framebuffer::new(w, h);
+    {
+        let mut ctx = GfxCtx::new(&mut fb);
+        ctx.set_lcd_mode(false);
+        ctx.clear(bg);
+        paint_subtree(root, &mut ctx);
+    }
+    fb.pixels_flipped()
+}
+
+/// Both renders of a widget tree, built fresh for each backend by `build`
+/// (each backend paints its own tree, so no retained state is shared), or
+/// `None` without an adapter.
+pub(crate) fn render_tree_both(
+    w: u32,
+    h: u32,
+    bg: Color,
+    build: &dyn Fn() -> Box<dyn Widget>,
+) -> Option<Pair> {
+    let mut frames = GpuFrames::new(w, h)?;
+    let gpu = frames.paint(bg, build().as_mut(), &|_| {});
+    Some(Pair {
+        w,
+        h,
+        software: software_tree(w, h, bg, build().as_mut()),
+        gpu,
+    })
 }

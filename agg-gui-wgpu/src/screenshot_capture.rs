@@ -126,7 +126,7 @@ impl WgpuGfxCtx {
             texture,
             view,
             nearest: false,
-            tint: [1.0, 1.0, 1.0, alpha],
+            tint: [alpha; 4],
             clip,
         });
         true

@@ -40,7 +40,7 @@
 //! - 1 → [`draw_1_edge_triangle`] with the right vertex permutation
 //! - 2 → [`draw_2_edge_triangle`] — two AA edges + non-AA filler
 //! - 3 → [`draw_3_edge_triangle`] — three AA edges meeting at the
-//!   centroid
+//!   incentre (agg-sharp uses the centroid; see the helpers for why)
 
 use crate::draw_ctx::FillRule;
 use crate::gl_renderer::tess2_bridge::{
@@ -214,6 +214,27 @@ fn draw_1_edge_triangle(
     }
     let edge_n = [edge[0] / len, edge[1] / len];
 
+    // Where the third point falls along the edge, as a fraction of it.  The
+    // fan's interior triangle ramps alpha by distance from the edge's
+    // *line*; when the third point lies beyond either end of the edge (an
+    // obtuse angle at `aa_p0` or `aa_p1`, as tess2 makes beside a reflex
+    // vertex) part of the triangle sits near that line's extension, far
+    // from the edge itself, and would draw translucent there: a faint
+    // stripe running into the solid interior from the reflex vertex
+    // (`golden_2d_primitive_tests::filled_paths_test`).  agg-sharp's
+    // `Draw1EdgeTriangle` has the same flaw.  Such a triangle instead ramps
+    // toward its incentre, which always projects inside the edge, and the
+    // two triangles from the incentre to the third point are opaque.
+    let along =
+        (edge_n[0] * (non_aa_point[0] - aa_p0[0]) + edge_n[1] * (non_aa_point[1] - aa_p0[1])) / len;
+    if !(0.0..=1.0).contains(&along) {
+        let centre = incentre(aa_p0, aa_p1, non_aa_point);
+        draw_1_edge_triangle(verts, indices, aa_p0, aa_p1, centre);
+        draw_non_aa_triangle(verts, indices, aa_p1, non_aa_point, centre);
+        draw_non_aa_triangle(verts, indices, non_aa_point, aa_p0, centre);
+        return;
+    }
+
     // PerpendicularRight in agg-sharp Vector2 convention: (x, y) → (y, -x).
     let mut normal = [edge_n[1], -edge_n[0]];
     let dot_n_third =
@@ -281,11 +302,19 @@ fn draw_1_edge_triangle(
 
 /// Two adjacent edges are AA: `p0→p1` and `p1→p2`.  `p2→p0` is interior.
 ///
-/// Strategy is a direct port of agg-sharp's `Draw2EdgeTriangle`: emit a
-/// Draw1Edge fan for each AA edge with a non-AA point placed just
-/// inward of that edge's midpoint (so the fan's "interior triangle"
-/// is essentially degenerate — covers a sliver near the edge only).
-/// Then a non-AA triangle covers the full polygon interior.
+/// Each AA edge gets a Draw1Edge fan whose interior triangle runs to the
+/// triangle's incentre, and a non-AA triangle `(p2, p0, incentre)` fills
+/// the rest — the [`draw_3_edge_triangle`] split with one edge left opaque.
+///
+/// agg-sharp's `Draw2EdgeTriangle` instead fans each edge to a point a
+/// hair inside its midpoint and covers the whole triangle with one opaque
+/// triangle, so nothing ramps on the inside of either edge.  At an acute
+/// corner (an arrow's barb) that paints the corner pixel fully even when
+/// its centre is only just inside, where its true coverage can be a
+/// quarter: the GPU-against-software golden
+/// (`golden_2d_primitive_tests::transforms_test`) caught a difference past
+/// the halo tolerance there.  With the fans the inside ramps toward both
+/// edges, as on any other AA edge.
 fn draw_2_edge_triangle(
     verts: &mut Vec<AaTexVertex>,
     indices: &mut Vec<u32>,
@@ -293,27 +322,20 @@ fn draw_2_edge_triangle(
     p1: [f32; 2],
     p2: [f32; 2],
 ) {
-    let centroid = [(p0[0] + p1[0] + p2[0]) / 3.0, (p0[1] + p1[1] + p2[1]) / 3.0];
-    let mid_p0p1 = [(p0[0] + p1[0]) * 0.5, (p0[1] + p1[1]) * 0.5];
-    let mid_p1p2 = [(p1[0] + p2[0]) * 0.5, (p1[1] + p2[1]) * 0.5];
-    // Same `.001` fudge agg-sharp uses so the inner point isn't
-    // co-linear with the AA edge (which would zero out the fan).
-    let inner_p0p1 = [
-        mid_p0p1[0] + (centroid[0] - mid_p0p1[0]) * 0.001,
-        mid_p0p1[1] + (centroid[1] - mid_p0p1[1]) * 0.001,
-    ];
-    let inner_p1p2 = [
-        mid_p1p2[0] + (centroid[0] - mid_p1p2[0]) * 0.001,
-        mid_p1p2[1] + (centroid[1] - mid_p1p2[1]) * 0.001,
-    ];
-    draw_1_edge_triangle(verts, indices, p0, p1, inner_p0p1);
-    draw_1_edge_triangle(verts, indices, p1, p2, inner_p1p2);
-    draw_non_aa_triangle(verts, indices, p0, p1, p2);
+    let centre = incentre(p0, p1, p2);
+    draw_1_edge_triangle(verts, indices, p0, p1, centre);
+    draw_1_edge_triangle(verts, indices, p1, p2, centre);
+    draw_non_aa_triangle(verts, indices, p2, p0, centre);
 }
 
 /// All three edges are AA — port of `Draw3EdgeTriangle`.  Each edge
-/// gets its own Draw1Edge fan with the centroid as the non-AA point;
+/// gets its own Draw1Edge fan with the incentre as the non-AA point;
 /// together the three fans tile the triangle interior exactly.
+///
+/// agg-sharp fans to the centroid, which in a thin obtuse triangle can
+/// project beyond the end of a short edge (see [`draw_1_edge_triangle`]);
+/// the incentre's projection onto every edge is the incircle's tangent
+/// point, always inside the edge.
 fn draw_3_edge_triangle(
     verts: &mut Vec<AaTexVertex>,
     indices: &mut Vec<u32>,
@@ -321,8 +343,23 @@ fn draw_3_edge_triangle(
     p1: [f32; 2],
     p2: [f32; 2],
 ) {
-    let centroid = [(p0[0] + p1[0] + p2[0]) / 3.0, (p0[1] + p1[1] + p2[1]) / 3.0];
-    draw_1_edge_triangle(verts, indices, p0, p1, centroid);
-    draw_1_edge_triangle(verts, indices, p1, p2, centroid);
-    draw_1_edge_triangle(verts, indices, p2, p0, centroid);
+    let centre = incentre(p0, p1, p2);
+    draw_1_edge_triangle(verts, indices, p0, p1, centre);
+    draw_1_edge_triangle(verts, indices, p1, p2, centre);
+    draw_1_edge_triangle(verts, indices, p2, p0, centre);
+}
+
+/// The triangle's incentre: its vertices weighted by the opposite sides'
+/// lengths.  The centroid for a triangle with no extent.
+fn incentre(p0: [f32; 2], p1: [f32; 2], p2: [f32; 2]) -> [f32; 2] {
+    let dist = |a: [f32; 2], b: [f32; 2]| ((b[0] - a[0]).powi(2) + (b[1] - a[1]).powi(2)).sqrt();
+    let (w0, w1, w2) = (dist(p1, p2), dist(p2, p0), dist(p0, p1));
+    let sum = w0 + w1 + w2;
+    if sum <= 0.0 {
+        return [(p0[0] + p1[0] + p2[0]) / 3.0, (p0[1] + p1[1] + p2[1]) / 3.0];
+    }
+    [
+        (p0[0] * w0 + p1[0] * w1 + p2[0] * w2) / sum,
+        (p0[1] * w0 + p1[1] * w1 + p2[1] * w2) / sum,
+    ]
 }

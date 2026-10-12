@@ -7,8 +7,13 @@
 //! - [`WgpuGfxCtx::draw_image_rgba_arc_impl`] — Arc-pointer-keyed hot path for
 //!   `Label` backbuffers; one GPU upload per unique raster, lifetime tied to
 //!   the `Arc<Vec<u8>>` strong-count via a `Weak` sentinel.
+//!
+//! Images arrive straight-alpha and are uploaded premultiplied; see
+//! [`upload_rgba_texture`].
 
 use std::sync::Arc;
+
+use agg_gui::framebuffer::premultiply_rgba_inplace;
 
 use crate::{ArcTextureEntry, DrawCommand, WgpuGfxCtx};
 
@@ -129,7 +134,7 @@ impl WgpuGfxCtx {
             texture,
             view,
             nearest: false,
-            tint: [1.0, 1.0, 1.0, alpha],
+            tint: [alpha; 4],
             clip: self.current_clip(),
         });
     }
@@ -227,7 +232,7 @@ impl WgpuGfxCtx {
             texture,
             view,
             nearest: use_nearest,
-            tint: [1.0, 1.0, 1.0, alpha],
+            tint: [alpha; 4],
             clip: self.current_clip(),
         });
     }
@@ -309,7 +314,7 @@ impl WgpuGfxCtx {
             texture,
             view,
             nearest: false,
-            tint: [1.0, 1.0, 1.0, alpha],
+            tint: [alpha; 4],
             clip: self.current_clip(),
         });
     }
@@ -334,6 +339,14 @@ pub(crate) fn should_use_mipmaps(w: u32, h: u32) -> bool {
 /// the `Arc<Texture>` and its default view.  Used by both the slice and arc
 /// blit paths; the texture is always created with `TEXTURE_BINDING | COPY_DST`.
 ///
+/// `data` is straight alpha (the `DrawCtx::draw_image_rgba` convention); the
+/// texture holds it **premultiplied**, drawn by `image_pipeline`'s
+/// `One / OneMinusSrcAlpha` blend.  Bilinear filtering and the box-filtered
+/// mips then weight each texel's colour by its alpha, as the software
+/// `GfxCtx` does when it premultiplies each sample: a fully transparent
+/// texel adds nothing, instead of tinting a magnified edge with its
+/// invisible colour.
+///
 /// Generates a CPU-side box-filtered mipmap chain when [`should_use_mipmaps`]
 /// returns true.  The mips are cheap one-shot work at upload (screenshots
 /// upload rarely; the L1 image cache reuses the texture across frames) and
@@ -347,6 +360,15 @@ fn upload_rgba_texture(
     w: u32,
     h: u32,
 ) -> (Arc<wgpu::Texture>, wgpu::TextureView) {
+    let premultiplied;
+    let data = if data.chunks_exact(4).all(|px| px[3] == 255) {
+        data
+    } else {
+        let mut copy = data.to_vec();
+        premultiply_rgba_inplace(&mut copy);
+        premultiplied = copy;
+        premultiplied.as_slice()
+    };
     let with_mipmaps = should_use_mipmaps(w, h);
     let mip_level_count = if with_mipmaps {
         // floor(log2(max(w, h))) + 1 levels — the WebGPU rule for a full

@@ -286,9 +286,6 @@ fn lines_test() {
 }
 
 #[test]
-#[ignore = "halo AA tessellator bug: at the star's reflex vertices the GPU leaves interior \
-            pixels about 3 px inside the fill partly uncovered (GPU [222, 68, 49] where the \
-            software fill is solid [220, 60, 40]); fix upstream in gl_renderer"]
 fn filled_paths_test() {
     check("Primitives2D.FilledPaths", &filled_paths);
 }
@@ -309,9 +306,6 @@ fn image_blits_test() {
 }
 
 #[test]
-#[ignore = "halo AA tessellator bug: next to a sharp arrow corner the GPU paints a pixel the \
-            software render covers about 15% (channel difference 131, over C#'s halo \
-            tolerance of 128); fix upstream in gl_renderer"]
 fn transforms_test() {
     check("Primitives2D.Transforms", &transforms);
 }

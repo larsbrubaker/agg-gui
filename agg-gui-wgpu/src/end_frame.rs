@@ -583,7 +583,7 @@ fn execute_one(
             if !apply_clip(pass, *clip, vp) {
                 return;
             }
-            pass.set_pipeline(&pipelines.tex_pipeline);
+            pass.set_pipeline(&pipelines.image_pipeline);
             pass.set_bind_group(0, bg0, &[]);
             pass.set_bind_group(1, bg1, &[]);
             pass.set_vertex_buffer(0, vb.wgpu_slice());

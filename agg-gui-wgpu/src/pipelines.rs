@@ -172,8 +172,15 @@ pub struct WgpuPipelines {
     pub gradient_bgl0: wgpu::BindGroupLayout,
     pub gradient_bgl1: wgpu::BindGroupLayout,
 
-    // ── Textured quad (image blit, Label backbuffer) ──────────────────────────
+    // ── Textured quad (SSAA framebuffer composite) ────────────────────────────
     pub tex_pipeline: wgpu::RenderPipeline,
+    /// Image blits (`DrawCommand::Textured`: images, Label backbuffers,
+    /// screenshots): the `tex` shader with a premultiplied blend
+    /// (`One / OneMinusSrcAlpha`). Image textures are uploaded premultiplied
+    /// (`image_blit::upload_rgba_texture`) so bilinear filtering never pulls
+    /// the colour of a transparent texel into a magnified edge, and the tint
+    /// is premultiplied too (`[a, a, a, a]`).
+    pub image_pipeline: wgpu::RenderPipeline,
     pub tex_bgl0: wgpu::BindGroupLayout,
     pub tex_bgl1: wgpu::BindGroupLayout,
 
@@ -426,6 +433,18 @@ impl WgpuPipelines {
             wgpu::ColorWrites::ALL,
             sample_count,
         );
+        let image_pipeline = build_pipeline(
+            device,
+            "image",
+            &tex_pl,
+            &tex_sm,
+            &tex_sm,
+            &[vbl_pos2_uv2()],
+            surface_format,
+            Some(BLEND_PREMUL),
+            wgpu::ColorWrites::ALL,
+            sample_count,
+        );
         let tex_ds3_sm = mk_shader(device, "tex_downsample_3x", TEX_DOWNSAMPLE_3X_WGSL);
         let tex_downsample_3x_pipeline = build_pipeline(
             device,
@@ -588,6 +607,7 @@ impl WgpuPipelines {
             gradient_bgl0,
             gradient_bgl1,
             tex_pipeline,
+            image_pipeline,
             tex_bgl0,
             tex_bgl1,
             tex_downsample_3x_pipeline,

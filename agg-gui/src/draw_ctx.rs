@@ -580,8 +580,8 @@ pub trait DrawCtx {
     /// **Alpha convention: straight (non-premultiplied).**  Every backend
     /// treats `data` as straight alpha: the software [`crate::GfxCtx`]
     /// premultiplies each sample before its premultiplied src-over
-    /// composite, and the wgpu textured-quad pipeline blends with
-    /// `SrcAlpha / OneMinusSrcAlpha`.  Render targets themselves
+    /// composite, and the wgpu backend uploads the texels premultiplied and
+    /// blends them with `One / OneMinusSrcAlpha`.  Render targets themselves
     /// ([`crate::Framebuffer`], layers) store **premultiplied** RGBA, so a
     /// buffer rendered by agg-gui goes through
     /// [`crate::framebuffer::unpremultiply_rgba_inplace`] (after

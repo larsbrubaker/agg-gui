@@ -126,7 +126,6 @@ fn origin_offset_places_the_image_like_software() {
 /// The invisible green beside an opaque red texel must not tint the
 /// magnified edge between them.
 #[test]
-#[ignore = "wgpu image blit bug: textures are uploaded and bilinear-filtered as straight alpha, so a fully transparent green texel tints the magnified edge beside an opaque red one (green minus blue 64 where C# allows 2); fix by uploading premultiplied texels and blending One / OneMinusSrcAlpha in image_blit.rs and the textured-quad pipeline"]
 fn transparent_pixels_do_not_bleed_when_magnified() {
     let source: Vec<u8> = vec![255, 0, 0, 255, 0, 255, 0, 0];
     let Some(image) = gpu(W, H, Color::white(), &|ctx| {

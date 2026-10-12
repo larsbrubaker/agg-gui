@@ -18,6 +18,8 @@
 //! `halo_aa_tesselator_tests.rs`.
 
 pub mod aa_texture_mesh;
+#[cfg(test)]
+mod aa_texture_mesh_tests;
 pub mod glyph_cache;
 #[cfg(test)]
 mod halo_aa_tesselator_tests;
