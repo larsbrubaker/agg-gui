@@ -141,6 +141,9 @@ where
         screenshot_done: false,
         screenshot_last_paint: Instant::now(),
         input: agg_gui::shell_input::InputForwarder::new(),
+        pointer_capture: crate::out_of_view_capture::OutOfViewMouseCapture::new(),
+        last_pointer: (0.0, 0.0),
+        window_cursor: agg_gui::WindowCursor::new(),
         click_policy_reader: config
             .os_click_policy
             .then_some(crate::click_policy::read_os_double_click as _),

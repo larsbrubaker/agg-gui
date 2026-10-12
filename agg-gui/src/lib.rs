@@ -150,7 +150,10 @@ mod web_key_policy;
 // Re-export the most commonly used types at the crate root.
 pub use app_state::{OsWindowHandle, OsWindowState};
 pub use color::Color;
-pub use cursor::{current_cursor_icon, reset_cursor_icon, set_cursor_icon, CursorIcon};
+pub use cursor::{
+    current_cursor_icon, invalidate_cursor, reset_cursor_icon, set_cursor_icon, CursorIcon,
+    WindowCursor,
+};
 pub use device_scale::{device_scale, set_device_scale};
 pub use draw_cell::{DrawCell, DrawRefCell, DrawRefMut};
 pub use draw_ctx::{DrawCtx, FillRule, GlPaint};

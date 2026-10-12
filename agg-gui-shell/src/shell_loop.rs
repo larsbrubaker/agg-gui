@@ -27,6 +27,7 @@ use crate::bounds::{BoundsAutoSave, SavedBounds, WindowBoundsStore, WindowedSize
 use crate::config::{RedrawPolicy, ScreenshotConfig};
 use crate::host::{ExitAction, ShellControl, ShellHost, WindowGeometry};
 use crate::input::{shift_held, touch_event, wheel_delta};
+use crate::out_of_view_capture::{OutOfViewMouseCapture, PointerEventKind};
 use crate::paint::{schedule_skipped_frame, PaintRequest, Painter};
 use crate::redraw_schedule::{next_control_flow, paint_blocked, LoopState};
 use crate::screenshot::capture_exhausted;
@@ -56,6 +57,16 @@ pub(crate) struct ShellLoop<H: ShellHost> {
     /// Cursor position, held modifiers and buttons, click counting, and the
     /// real-input gate (`agg_gui::shell_input`).
     pub(crate) input: InputForwarder,
+    /// Which pointer events reach agg-gui: a drag that leaves the window
+    /// keeps delivering, a hover outside it is dropped
+    /// (`out_of_view_capture.rs`).
+    pub(crate) pointer_capture: OutOfViewMouseCapture,
+    /// winit's last reported pointer position (physical pixels), including
+    /// moves the filter dropped: what decides whether a press is inside.
+    pub(crate) last_pointer: (f64, f64),
+    /// The cursor last pushed to the OS, so the platform is only called
+    /// when it changes.
+    pub(crate) window_cursor: agg_gui::WindowCursor,
     /// Where the forwarder's click policy comes from: the OS setting
     /// (`click_policy::read_os_double_click`), or `None` to keep agg-gui's
     /// default (`ShellConfig::os_click_policy` off).
@@ -171,12 +182,17 @@ impl<H: ShellHost> ShellLoop<H> {
                         paths,
                     });
                 }
-                self.forward(ForwarderEvent::MouseMove {
-                    x: position.x,
-                    y: position.y,
-                    modifiers: None,
-                });
-                winit_adapter::apply_cursor(&self.window, agg_gui::current_cursor_icon());
+                self.last_pointer = (position.x, position.y);
+                let (kind, button) = self.pointer_capture.move_kind();
+                let inside = self.pointer_inside();
+                if self.pointer_capture.should_deliver(kind, button, inside) {
+                    self.forward(ForwarderEvent::MouseMove {
+                        x: position.x,
+                        y: position.y,
+                        modifiers: None,
+                    });
+                }
+                self.apply_cursor();
             }
 
             // The window gaining / losing key status (an app switch, a click
@@ -212,6 +228,17 @@ impl<H: ShellHost> ShellLoop<H> {
             WindowEvent::MouseInput { state, button, .. } => {
                 let button = winit_adapter::mouse_button(button);
                 self.input_since_frame = true;
+                let kind = match state {
+                    ElementState::Pressed => PointerEventKind::Down,
+                    ElementState::Released => PointerEventKind::Up,
+                };
+                let inside = self.pointer_inside();
+                if !self
+                    .pointer_capture
+                    .should_deliver(kind, Some(button), inside)
+                {
+                    return;
+                }
                 // At the tracked cursor, with the held modifiers.
                 self.forward(match state {
                     ElementState::Pressed => ForwarderEvent::MouseDown {
@@ -229,7 +256,7 @@ impl<H: ShellHost> ShellLoop<H> {
                 // Press can claim a drag cursor and release re-resolves the
                 // hover cursor at the release point; reflect either now
                 // rather than waiting for the next move.
-                winit_adapter::apply_cursor(&self.window, agg_gui::current_cursor_icon());
+                self.apply_cursor();
             }
 
             WindowEvent::MouseWheel { delta, .. } => {
@@ -474,6 +501,20 @@ impl<H: ShellHost> ShellLoop<H> {
         self.input.platform(&mut self.app, event);
     }
 
+    /// Whether winit's last pointer position lies in the content area.
+    fn pointer_inside(&self) -> bool {
+        let size = self.window.inner_size();
+        let (x, y) = self.last_pointer;
+        OutOfViewMouseCapture::is_inside(x, y, size.width as f64, size.height as f64)
+    }
+
+    /// Push agg-gui's current cursor to the OS when it changed.
+    fn apply_cursor(&mut self) {
+        if let Some(icon) = self.window_cursor.update(agg_gui::current_cursor_icon()) {
+            winit_adapter::apply_cursor(&self.window, icon);
+        }
+    }
+
     /// Paint one frame, recovering the device first if it was lost. Returns
     /// whether a frame actually reached the compositor.
     pub(crate) fn paint(&mut self, elwt: &ActiveEventLoop) -> bool {
@@ -481,6 +522,10 @@ impl<H: ShellHost> ShellLoop<H> {
         // `RedrawRequested` paint does not pass through `about_to_wait`), so
         // what queued work changes shows in this frame.
         agg_gui::ui_thread::invoke_pending_actions();
+        // A cursor changed by code (`agg_gui::invalidate_cursor`) reaches
+        // the OS even while the mouse rests and painting is blocked.
+        self.app.refresh_cursor();
+        self.apply_cursor();
         // Minimized with a configure-failure run in progress: every retry
         // against the minimized window would fail and spend the surface
         // retry budget. Restore delivers a nonzero `Resized`, whose arm
@@ -513,6 +558,7 @@ impl<H: ShellHost> ShellLoop<H> {
                 capture: capture.as_ref(),
             },
         );
+        self.apply_cursor();
         match outcome {
             Ok(outcome) => {
                 self.surface_retry_at = outcome.retry_at;

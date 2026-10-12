@@ -285,6 +285,35 @@ impl App {
         self.refresh_hover_after_release(pos);
     }
 
+    /// Re-resolve the cursor at the last pointer position when a widget
+    /// asked for it with [`crate::invalidate_cursor`] since the last call.
+    ///
+    /// The move goes where a real one would (the captured widget, else the
+    /// widget under the pointer), so a widget the mouse is not over cannot
+    /// claim the cursor, and a captured one can wherever the pointer is.
+    /// [`App::paint`] runs this first; a test or shell may call it directly.
+    /// Nothing is re-dispatched while the pointer is outside the window.
+    pub fn refresh_cursor(&mut self) {
+        if !crate::cursor::take_cursor_invalidation() {
+            return;
+        }
+        if self.captured.is_none() && self.hovered.is_none() {
+            return;
+        }
+        let Some(pos) = crate::widget::tree_inspector::current_mouse_world() else {
+            return;
+        };
+        self.resolve_tracked_paths();
+        if let Some(cap_path) = self.captured.clone() {
+            // A drag's cursor belongs to its captured widget, which gets
+            // the move wherever the pointer is (as `on_mouse_move` does).
+            crate::cursor::reset_cursor_icon();
+            dispatch_event(&mut self.root, &cap_path, &Event::MouseMove { pos }, pos);
+        } else {
+            self.refresh_hover_after_release(pos);
+        }
+    }
+
     /// Re-resolve hover (and with it the cursor icon) at the release
     /// point. Capture has just ended, so the widget that owned the drag
     /// (a splitter bar, a text selection) no longer gets every move; a

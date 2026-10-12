@@ -83,6 +83,7 @@ mod config;
 mod host;
 mod input;
 mod lcd_display;
+mod out_of_view_capture;
 pub mod menu_bar;
 mod paint;
 mod redraw_schedule;

@@ -7,6 +7,11 @@
 //! The framework resets the cursor to [`CursorIcon::Default`] before each
 //! mouse-move dispatch so the deepest hovered widget always wins without any
 //! explicit reset in widget code.
+//!
+//! A cursor changed by code while the mouse rests goes through
+//! [`invalidate_cursor`] (re-resolved by `App::refresh_cursor` on the next
+//! paint), and shells push the result to the OS through [`WindowCursor`],
+//! which only reports real changes.
 
 use std::cell::Cell;
 
@@ -157,4 +162,65 @@ pub fn current_cursor_icon() -> CursorIcon {
 /// opt-in to a custom cursor without needing to opt-out.
 pub fn reset_cursor_icon() {
     CURSOR_ICON.with(|c| c.set(CursorIcon::Default));
+}
+
+thread_local! {
+    static CURSOR_INVALIDATED: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Ask for the hover cursor to be re-resolved without a mouse move.
+///
+/// For a widget whose cursor changes while the pointer rests on it (a
+/// picking mode starting from a key press, a drop target refusing the
+/// dragged item): change the state its `MouseMove` handler reads, then
+/// call this. [`crate::App::refresh_cursor`] (run at the start of every
+/// paint) re-dispatches a move at the last pointer position to the
+/// captured widget, or else the hovered one, so only a widget the mouse
+/// is over (or that holds the capture) can claim the cursor (agg-sharp's
+/// `HoverCursorTests.CursorSetByCodeWhileTheMouseRestsOverTheWidgetReachesTheWindow`).
+/// Also requests a frame so the shell wakes to apply it. Call it when the
+/// state changes, not from every `MouseMove`, or every frame re-resolves.
+pub fn invalidate_cursor() {
+    CURSOR_INVALIDATED.with(|c| c.set(true));
+    crate::animation::request_draw();
+}
+
+/// Take (and clear) a pending [`invalidate_cursor`] request.
+pub(crate) fn take_cursor_invalidation() -> bool {
+    CURSOR_INVALIDATED.with(|c| c.replace(false))
+}
+
+/// What the platform window is showing, so a shell calls the platform only
+/// when the cursor actually changes.
+///
+/// Shells feed [`current_cursor_icon`] in after every input event and every
+/// paint; [`WindowCursor::update`] returns the icon only when it differs
+/// from the one last applied (agg-sharp's `HoverCursorTests`: "moving
+/// without a cursor change must not call the platform again").
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct WindowCursor {
+    applied: Option<CursorIcon>,
+}
+
+impl WindowCursor {
+    /// A window that has not had a cursor applied yet.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// `Some(icon)` when `icon` must be pushed to the platform (it differs
+    /// from the last applied one, or nothing has been applied yet).
+    pub fn update(&mut self, icon: CursorIcon) -> Option<CursorIcon> {
+        if self.applied == Some(icon) {
+            None
+        } else {
+            self.applied = Some(icon);
+            Some(icon)
+        }
+    }
+
+    /// The cursor last applied to the window, if any.
+    pub fn applied(&self) -> Option<CursorIcon> {
+        self.applied
+    }
 }

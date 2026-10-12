@@ -278,6 +278,9 @@ impl App {
     /// after `paint` returns to decide whether to schedule continuous draws.
     pub fn paint(&mut self, ctx: &mut dyn DrawCtx) {
         crate::animation::clear_draw_request();
+        // A cursor changed by code since the last frame (see
+        // `crate::invalidate_cursor`); shells apply the cursor after paint.
+        self.refresh_cursor();
         // Async-state dirty walk: an image load (or other async source)
         // that finished outside event dispatch bumped
         // `async_state_epoch`.  Walk the whole tree and mark every
@@ -515,12 +518,17 @@ impl App {
 
     /// Call when the cursor leaves the window to clear hover state.
     ///
-    /// A widget holding the pointer capture (a window being dragged by its
-    /// title bar or a resize edge, a slider thumb) does not get the leave as
-    /// a move to (-1, -1): that is not where the pointer is, and taking it
-    /// for one threw a dragged window at the corner of the screen. It keeps
-    /// its last position until the next real move or the release.
+    /// A drag holding the capture owns the pointer until its button comes
+    /// up, wherever the pointer went, so it is not told the pointer left:
+    /// the `(-1, -1)` sentinel would reach the captured widget as a real
+    /// move and snap its drag, throwing a window dragged by its title bar or
+    /// an edge at the corner of the screen (agg-sharp's
+    /// `OutOfViewMouseCapture.IsRealPointerExit`, `dragInFlight`). The
+    /// release's hover refresh clears hover once the drag ends.
     pub fn on_mouse_leave(&mut self) {
+        if self.captured.is_some() {
+            return;
+        }
         self.resolve_tracked_paths();
         crate::cursor::reset_cursor_icon();
         self.dispatch_pointer_move(Point::new(-1.0, -1.0), false);
