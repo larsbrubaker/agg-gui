@@ -39,6 +39,9 @@
 //!     `copy_selection`; and `Widget::scroll_rect_into_view` (`scroll.rs`).
 //!   * a frameless mode ([`with_frame`](TextArea::with_frame), `frame.rs`): no
 //!     background and no border, for a host that draws its own field frame.
+//!   * an unwrapped mode ([`with_word_wrap`](TextArea::with_word_wrap)`(false)`,
+//!     `no_wrap.rs`, agg-sharp `TextEditWidget.WordWrap = false`): each line
+//!     stays whole and the area scrolls sideways to keep the caret in view.
 //!
 //!   * undo / redo (`undo.rs`, agg-sharp's `TextEditUndoHistory`): every
 //!     edit one step, Cmd/Ctrl+Z, Cmd/Ctrl+Shift+Z and Ctrl+Y, and
@@ -163,6 +166,9 @@ struct TextAreaSig {
     /// taken at that offset (a frameless area scrolls without a band), so a
     /// scroll must re-raster. Always `0` bits while the band is active.
     unbanded_offset_bits: u64,
+    /// How far the text has scrolled sideways (`no_wrap.rs`); always `0`
+    /// bits while the area wraps.
+    h_offset_bits: u64,
 }
 
 /// A callback handed the current text.
@@ -320,6 +326,13 @@ pub struct TextArea {
     /// Paint the background fill and the border (the default). `false` leaves
     /// both to the host; see [`with_frame`](Self::with_frame) in `frame.rs`.
     frame: bool,
+
+    /// Wrap lines at the inner width (the default). `false` keeps each line
+    /// whole and scrolls sideways to the caret; see `no_wrap.rs`.
+    word_wrap: bool,
+    /// How far the text has scrolled left while unwrapped (C#'s
+    /// `-TopLeftOffset.X`): `0` shows the start of every line.
+    h_offset: f64,
 }
 
 impl TextArea {
@@ -374,6 +387,8 @@ impl TextArea {
             context_menu: crate::widgets::text_context_menu::TextContextMenu::new(),
             context_menu_enabled: true,
             frame: true,
+            word_wrap: true,
+            h_offset: 0.0,
         }
     }
 
@@ -401,6 +416,7 @@ impl TextArea {
             } else {
                 self.vbar.offset.to_bits()
             },
+            h_offset_bits: self.h_offset.to_bits(),
         }
     }
 
@@ -579,7 +595,12 @@ impl TextArea {
             // the change range the first, re-wrapping call recorded.
             return;
         }
-        let lines = wrap_text_indexed(&self.font, &st.text, self.font_size, inner_w.max(1.0));
+        let lines = wrap_text_indexed(
+            &self.font,
+            &st.text,
+            self.font_size,
+            self.wrap_width(inner_w),
+        );
         // Diff old vs new visual lines to find the changed range, so an in-place
         // edit can re-raster just that strip. Runs whenever we re-wrap over an
         // existing wrap (a fresh build has nothing to diff). The re-wrap flag
@@ -678,7 +699,7 @@ impl TextArea {
             TextHAlign::Center => slack * 0.5,
             TextHAlign::Right => slack,
         };
-        self.padding + shift
+        self.padding + shift - self.h_offset
     }
 }
 
@@ -693,6 +714,7 @@ mod edit_ops;
 mod frame;
 mod geometry;
 mod highlight;
+mod no_wrap;
 mod scroll;
 mod undo;
 mod widget_impl;
@@ -709,6 +731,8 @@ mod edit_complete_tests;
 #[cfg(test)]
 mod frame_tests;
 #[cfg(test)]
+mod no_wrap_tests;
+#[cfg(test)]
 mod redraw_tests;
 #[cfg(test)]
 mod scroll_watch_tests;
@@ -720,3 +744,5 @@ mod selection_tests;
 mod tests;
 #[cfg(test)]
 mod undo_tests;
+#[cfg(test)]
+mod word_wrap_tests;

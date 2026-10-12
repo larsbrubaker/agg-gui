@@ -205,6 +205,7 @@ impl TextArea {
         }
         self.vbar.offset = off.clamp(0.0, self.max_scroll_y());
         self.publish_scroll_offset();
+        self.scroll_caret_into_view_sideways();
     }
 
     /// Wheel handler. Positive `delta_y` means "see content above" (decrease

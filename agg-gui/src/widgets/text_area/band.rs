@@ -223,7 +223,8 @@ impl TextArea {
             && prev.h_bits == self.bounds.height.to_bits()
             && prev.h_align == self.resolved_h_align()
             && prev.v_align == self.resolved_v_align()
-            && prev.font_size_bits == self.font_size.to_bits();
+            && prev.font_size_bits == self.font_size.to_bits()
+            && prev.h_offset_bits == self.h_offset.to_bits();
         if !stable || self.cached_lines.is_empty() {
             return;
         }
