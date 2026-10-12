@@ -19,13 +19,18 @@
 //!    returns [`AutomationError::Timeout`]; the thread cannot be killed, so it
 //!    finishes detached and its next runner call panics
 //!    [`TEST_TIMED_OUT`](crate::runner::TEST_TIMED_OUT).
-//! 4. The close phase drops the window's tree on its own thread.
+//! 4. The close phase (`close.rs`) asks the window to close, honours its
+//!    `on_close_requested` veto while the close budget lasts, and then force
+//!    closes it; the tree is dropped on its own thread either way. The
+//!    caller waits for that, and gives up on a UI thread stuck in a frame
+//!    after a second budget, reporting [`AutomationError::CloseTimeout`].
 //! 5. The outcome is ranked as C# ranks it ([`rank_outcome`]).
 //!
 //! The window is [`window::AutomationWindow`]; the failures are
 //! [`error::AutomationError`]; the body's handle is
 //! [`AutomationRunner`](crate::runner::AutomationRunner).
 
+mod close;
 mod error;
 #[cfg(test)]
 mod tests;
@@ -74,6 +79,12 @@ pub struct RunOptions {
     /// The clock the run's UI thread uses (virtual unless the test's
     /// background workers need real time).
     pub clock: ClockPolicy,
+    /// C# `CloseWindowTimeoutSeconds` (15): how long, in wall-clock seconds,
+    /// the window may take to close after the body finished before it is
+    /// force closed and the run fails with [`AutomationError::CloseTimeout`].
+    /// A per-run setting rather than C#'s static, so parallel runs cannot
+    /// change each other's.
+    pub close_window_timeout: f64,
 }
 
 impl Default for RunOptions {
@@ -83,6 +94,7 @@ impl Default for RunOptions {
             timeout_is_the_expected_outcome: false,
             config: AutomationConfig::default(),
             clock: ClockPolicy::Virtual,
+            close_window_timeout: 15.0,
         }
     }
 }
@@ -106,7 +118,19 @@ enum Report<R> {
     /// The body finished (returned or panicked).
     Finished(BodyOutcome<R>),
     /// The close phase is over.
+    Closed(CloseReport),
+}
+
+/// How the close phase ended, as [`rank_outcome`] needs it.
+pub(crate) enum CloseReport {
+    /// The window closed when asked.
     Closed,
+    /// The window was still open when the close budget ran out (or its UI
+    /// thread never came back to report); it was force closed.
+    TimedOut(Duration),
+    /// Closing the window panicked (a close hook, a frame, or the tree's
+    /// drop), with the panic's message.
+    Panicked(String),
 }
 
 /// How a body ended, as [`rank_outcome`] needs it.
@@ -151,9 +175,12 @@ where
     let thread_cancel = Arc::clone(&cancel);
     let config = opts.config.clone();
     let clock = opts.clock;
+    let close_timeout = secs_to_duration(opts.close_window_timeout);
     thread::Builder::new()
         .name(UI_THREAD_NAME.to_string())
-        .spawn(move || run_on_ui_thread(build, body, config, clock, thread_cancel, tx))
+        .spawn(move || {
+            run_on_ui_thread(build, body, config, clock, close_timeout, thread_cancel, tx)
+        })
         .map_err(|e| {
             AutomationError::BringUpFailed(format!("could not start the UI thread: {e}"))
         })?;
@@ -182,24 +209,51 @@ where
         }
     };
 
-    // Close: the tree is dropped on its own thread. A thread that ends
-    // without saying so has finished closing too.
-    while let Ok(report) = rx.recv() {
-        if matches!(report, Report::Closed) {
-            break;
+    // Close: the UI thread closes (or force closes) the window within the
+    // close budget. Should it never come back from a frame, give up after a
+    // second budget, as C# does after its posted force close. A thread that
+    // ends without saying so has finished closing too.
+    let close_deadline = Instant::now() + close_timeout.saturating_mul(2);
+    let close = loop {
+        let wait = close_deadline.saturating_duration_since(Instant::now());
+        match rx.recv_timeout(wait) {
+            Ok(Report::Closed(report)) => break report,
+            Ok(_) => continue,
+            Err(RecvTimeoutError::Disconnected) => break CloseReport::Closed,
+            Err(RecvTimeoutError::Timeout) => {
+                eprintln!(
+                    "AutomationRunner: FORCED CLOSE DID NOT RELEASE THE UI THREAD after {} seconds - it is stuck in a frame.",
+                    close_timeout.as_secs_f64()
+                );
+                cancel.store(true, Ordering::SeqCst);
+                break CloseReport::TimedOut(close_timeout);
+            }
         }
-    }
+    };
 
-    rank_outcome(outcome)
+    rank_outcome(outcome, close)
 }
 
 /// C#'s order of failures, first match wins: the test timing out (returned
 /// before this is reached), a UI-thread failure (slice 27), the body's own
-/// failure, a close that timed out (slice 28), and last a body that never
+/// failure, a close that panicked or timed out, and last a body that never
 /// called `mark_test_complete` — a real failure is more useful than the
-/// generic "did not complete" message.
-pub(crate) fn rank_outcome<R>(outcome: BodyOutcome<R>) -> Result<R, AutomationError> {
+/// generic "did not complete" message, and a blocked shutdown is the more
+/// useful diagnosis than a missing completion.
+pub(crate) fn rank_outcome<R>(
+    outcome: BodyOutcome<R>,
+    close: CloseReport,
+) -> Result<R, AutomationError> {
     let value = outcome.result.map_err(AutomationError::BodyPanicked)?;
+    match close {
+        CloseReport::Closed => {}
+        CloseReport::TimedOut(timeout) => return Err(AutomationError::CloseTimeout(timeout)),
+        CloseReport::Panicked(message) => {
+            return Err(AutomationError::BodyPanicked(format!(
+                "the window panicked while closing: {message}"
+            )))
+        }
+    }
     if outcome.require_test_completion && !outcome.test_was_completed {
         return Err(AutomationError::TestNotCompleted);
     }
@@ -214,6 +268,7 @@ fn run_on_ui_thread<S, R>(
     body: impl FnOnce(&mut AutomationRunner, &S) -> R,
     config: AutomationConfig,
     clock: ClockPolicy,
+    close_timeout: Duration,
     cancel: Arc<AtomicBool>,
     tx: Sender<Report<R>>,
 ) {
@@ -221,7 +276,7 @@ fn run_on_ui_thread<S, R>(
         let (window, state) = build();
         (window.bring_up(clock), state)
     }));
-    let (driver, state) = match brought_up {
+    let ((driver, close_hooks), state) = match brought_up {
         Ok(up) => up,
         Err(payload) => {
             let _ = tx.send(Report::BringUpFailed(panic_message(&*payload)));
@@ -245,9 +300,17 @@ fn run_on_ui_thread<S, R>(
     let _ = tx.send(Report::Finished(outcome));
 
     // The close phase: the window's tree goes on the thread that owns it.
-    drop(runner);
+    let driver = runner.into_driver();
+    let closed = catch_unwind(AssertUnwindSafe(|| {
+        close::close_window(driver, close_hooks, close_timeout)
+    }));
+    let report = match closed {
+        Ok(close::CloseResult::Closed) => CloseReport::Closed,
+        Ok(close::CloseResult::Forced) => CloseReport::TimedOut(close_timeout),
+        Err(payload) => CloseReport::Panicked(panic_message(&*payload)),
+    };
     drop(state);
-    let _ = tx.send(Report::Closed);
+    let _ = tx.send(Report::Closed(report));
 }
 
 enum LoadWait {
@@ -276,7 +339,7 @@ fn wait_for_load<R>(rx: &Receiver<Report<R>>, bring_up: Duration, quiet: bool) -
         match rx.recv_timeout(wait) {
             Ok(Report::Loaded) => return LoadWait::Loaded,
             Ok(Report::BringUpFailed(message)) => return LoadWait::Failed(message),
-            Ok(Report::Finished(_) | Report::Closed) | Err(RecvTimeoutError::Disconnected) => {
+            Ok(Report::Finished(_) | Report::Closed(_)) | Err(RecvTimeoutError::Disconnected) => {
                 return LoadWait::Failed("the UI thread ended before its window loaded".to_string())
             }
             Err(RecvTimeoutError::Timeout) if watchdog_fired => return LoadWait::TimedOut,

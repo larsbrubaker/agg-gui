@@ -3,8 +3,8 @@
 //! run control; `waits.rs` the frame-pumping waits (`delay`, `wait_for`,
 //! `assert`, ...) and `named.rs` the name lookups and the waits that poll
 //! them, `pointer.rs` the pointer gestures (stepped moves, clicks),
-//! `drag.rs` the drags and drops built on them, and `keyboard.rs` typing
-//! and held modifiers.
+//! `drag.rs` the drags and drops built on them, `keyboard.rs` typing and
+//! held modifiers, and `images.rs` the screen capture and image searches.
 //!
 //! A runner is created by [`crate::execute::show_window_and_execute_tests`]
 //! on the run's own UI thread and handed to the test body. It owns the
@@ -23,6 +23,7 @@ use crate::input::{InputMethod, SimulatedInput};
 use crate::tree_query::WidgetHandle;
 
 mod drag;
+mod images;
 mod keyboard;
 mod named;
 mod pointer;
@@ -117,6 +118,12 @@ impl AutomationRunner {
         if self.cancel.load(Ordering::SeqCst) {
             panic!("{TEST_TIMED_OUT}");
         }
+    }
+
+    /// The window's driver, once the body is done with the runner (the
+    /// close phase takes it over).
+    pub(crate) fn into_driver(self) -> HeadlessDriver {
+        self.driver
     }
 
     /// C# `MarkTestComplete`: the body reached its final statement. Must be

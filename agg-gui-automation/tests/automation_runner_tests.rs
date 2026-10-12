@@ -1,8 +1,8 @@
 //! Port of agg-sharp `Tests/Agg.Tests/Agg Automation Tests/AutomationRunnerTests.cs`.
 //!
 //! Only the tests whose subjects have landed are here; the rest of the class
-//! (image waits, the close protocol) arrives with the runner slices listed
-//! in `docs/design/gui-automation.md`. C#'s `SystemWindow` is an
+//! (the thread-dump test) arrives with the runner slice listed in
+//! `docs/design/gui-automation.md`. C#'s `SystemWindow` is an
 //! [`AutomationWindow`], built on the run's own UI thread; C#'s captured
 //! locals are shared atomics when the calling thread sets them, and state
 //! `build` returns beside the window (a click counter) when the widgets do,
@@ -10,20 +10,20 @@
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
 use agg_gui::event::{self, Event, EventResult};
 use agg_gui::widgets::{Button, TextArea};
-use agg_gui::{Font, Rect, Size, Widget};
+use agg_gui::{Color, Font, Framebuffer, GfxCtx, Rect, Size, Widget};
 use agg_gui_automation::runner::DEFAULT_WIDGET_WAIT_SECONDS;
 use agg_gui_automation::tree_query::find_by_name;
 use agg_gui_automation::WaitOpts;
 use agg_gui_automation::{
     show_window_and_execute_tests, static_delay, AutomationError, AutomationRunner,
-    AutomationWindow, ProbeWidget, RunOptions,
+    AutomationWindow, ProbeWidget, RunOptions, ScreenRectangle, SearchRegion,
 };
 
 #[test]
@@ -339,4 +339,107 @@ fn text_area_text(test_runner: &AutomationRunner, name: &str) -> String {
         .and_then(|handle| handle.downcast::<TextArea>(root))
         .map(TextArea::text)
         .unwrap_or_else(|| panic!("no TextArea named {name}"))
+}
+
+/// An image of `width` × `height` cleared to `color` (C#
+/// `new ImageBuffer(w, h)` then `NewGraphics2D().Clear(color)`).
+fn cleared_image(width: u32, height: u32, color: Color) -> Framebuffer {
+    let mut image = Framebuffer::new(width, height);
+    GfxCtx::new(&mut image).clear(color);
+    image
+}
+
+/// Image waits search the region they are given and come back, zero seconds
+/// or not.
+///
+/// WaitForImage looked through ImageExists with its default two seconds,
+/// which waited through WaitForImage again - a stack overflow on any image
+/// wait - and dropped the caller's region.
+#[test]
+fn image_waits_search_the_given_region() {
+    show_window_and_execute_tests(
+        RunOptions::default(),
+        || (AutomationWindow::new(100.0, 100.0), ()),
+        |test_runner, _| {
+            let mut haystack = cleared_image(40, 30, Color::white());
+            {
+                // C# `FillRectangle(10, 10, 16, 16, Black)`: left, bottom,
+                // right, top.
+                let mut graphics = GfxCtx::new(&mut haystack);
+                graphics.set_fill_color(Color::black());
+                graphics.begin_path();
+                graphics.rect(10.0, 10.0, 6.0, 6.0);
+                graphics.fill();
+            }
+
+            let black_needle = cleared_image(6, 6, Color::black());
+            let red_needle = cleared_image(6, 6, Color::rgb(1.0, 0.0, 0.0));
+
+            let region = SearchRegion::with_image(haystack, ScreenRectangle::new(0, 0, 40, 30));
+
+            assert!(
+                test_runner.wait_for_image(&black_needle, 0.0, Some(&region)),
+                "the black square is in the given region"
+            );
+            assert!(
+                test_runner.image_exists(&black_needle, 1.0, Some(&region)),
+                "ImageExists with a wait looks the same way"
+            );
+            assert!(
+                !test_runner.image_exists(&red_needle, 0.0, Some(&region)),
+                "nothing red is in the region"
+            );
+
+            test_runner.mark_test_complete();
+        },
+    )
+    .expect("image waits search the region they are given");
+}
+
+/// A window whose close handler cancels the close (the shape of a "do you
+/// want to save?" prompt) used to hang the whole run: the close was vetoed,
+/// the message pump never exited, and the test reported Passed only after a
+/// human closed the app by hand. The close phase watchdog must force the
+/// window closed and surface the hang as a failure.
+#[test]
+fn vetoed_close_is_forced_and_reported_as_failure() {
+    let veto_count = Arc::new(AtomicUsize::new(0));
+    let has_been_closed = Arc::new(AtomicBool::new(false));
+
+    let vetoes = Arc::clone(&veto_count);
+    let closed = Arc::clone(&has_been_closed);
+    let result = show_window_and_execute_tests(
+        RunOptions {
+            secs_to_test_failure: 30.0,
+            // C# sets the static CloseWindowTimeoutSeconds to 2 for this test.
+            close_window_timeout: 2.0,
+            ..RunOptions::default()
+        },
+        move || {
+            let system_window = AutomationWindow::new(300.0, 200.0)
+                .on_close_requested(move |_| {
+                    // Always cancel - only a force close should be able to
+                    // get past this.
+                    vetoes.fetch_add(1, Ordering::SeqCst);
+                    false
+                })
+                .on_closed(move |_| closed.store(true, Ordering::SeqCst));
+            (system_window, ())
+        },
+        |test_runner, _| test_runner.mark_test_complete(),
+    );
+
+    assert_eq!(
+        result,
+        Err(AutomationError::CloseTimeout(Duration::from_secs(2))),
+        "the vetoed close should have been reported as a close timeout"
+    );
+    assert!(
+        veto_count.load(Ordering::SeqCst) > 0,
+        "the test window must actually have vetoed a close for this to be a valid repro"
+    );
+    assert!(
+        has_been_closed.load(Ordering::SeqCst),
+        "the watchdog must force the window closed so the run does not hang"
+    );
 }

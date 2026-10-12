@@ -5,7 +5,7 @@
 //! shells use, find widgets by name, and wait on conditions.  This crate is
 //! test-only: consumers take it as a dev-dependency so watchdogs and image
 //! matching stay out of product builds.  The design, including the slices
-//! still to land (image search, the live driver, the close protocol), is
+//! still to land (the image gestures, the live driver, stack dumps), is
 //! `docs/design/gui-automation.md`.
 //!
 //! Modules:
@@ -19,8 +19,8 @@
 //!   tests).
 //! - [`probe`] — `ProbeWidget`, the stand-in for a plain C# `GuiWidget`.
 //! - [`execute`] — `show_window_and_execute_tests`: one run on its own UI
-//!   thread, with the bring-up and test budgets, `AutomationWindow`, and
-//!   `AutomationError`.
+//!   thread, with the bring-up and test budgets, the close protocol (veto,
+//!   close budget, forced close), `AutomationWindow`, and `AutomationError`.
 //! - [`runner`] — `AutomationRunner`, what a test body drives: its
 //!   configuration (`AutomationConfig` with C#'s defaults), its waits
 //!   (`delay`, `wait_for`, `assert`, `wait_for_draw`) and its name lookups
@@ -30,7 +30,9 @@
 //!   (`drag_by_name`, `drop_by_name`, `drag_drop_by_name`, `drag_widget`,
 //!   `drag_to_position`, `drop`) and keyboard (`type_text`,
 //!   `press_modifier_keys`/`release_modifier_keys` with `ModifierKeys`,
-//!   `select_all`, `select_none`).
+//!   `select_all`, `select_none`) and image searches (`get_current_screen`,
+//!   `image_exists`, `wait_for_image`).
+//! - [`image_match`] — `FindLeastSquaresMatch`: one image inside another.
 //! - [`input`] — `InputMethod` (C# `IInputMethod`) and `SimulatedInput`
 //!   (`AggInputMethods`): pointer and keyboard input through the shells'
 //!   input forwarder.
@@ -43,6 +45,7 @@
 
 pub mod driver;
 pub mod execute;
+pub mod image_match;
 pub mod input;
 mod key_mapping;
 pub mod keys;
@@ -57,6 +60,7 @@ pub mod waits;
 
 pub use driver::{ClockPolicy, FrameKind, HeadlessDriver, HeadlessWindow, UiDriver};
 pub use execute::{show_window_and_execute_tests, AutomationError, AutomationWindow, RunOptions};
+pub use image_match::{find_least_squares_match, LeastSquaresMatch};
 pub use input::{InputMethod, MouseAction, Point2D, SimulatedInput};
 pub use keys::Keys;
 pub use probe::{ProbeLog, ProbeWidget};

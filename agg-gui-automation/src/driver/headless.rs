@@ -115,6 +115,13 @@ impl HeadlessDriver {
         self.close_requested
     }
 
+    /// Take the pending close request, if any: true once per request. The
+    /// run's close phase answers each request it takes by asking the window
+    /// whether it may close.
+    pub fn take_close_request(&mut self) -> bool {
+        std::mem::take(&mut self.close_requested)
+    }
+
     /// Frames pumped so far.
     pub fn frames(&self) -> u64 {
         self.frames

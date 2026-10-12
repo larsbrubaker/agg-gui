@@ -6,6 +6,7 @@
 
 use std::error::Error;
 use std::fmt;
+use std::time::Duration;
 
 /// C#'s message when a body did not call `MarkTestComplete`.
 pub const TEST_NOT_COMPLETED_MESSAGE: &str = "Test did not call MarkTestComplete(). The test may have exited before reaching its last statement.";
@@ -25,6 +26,12 @@ pub enum AutomationError {
     /// The body panicked, with the panic's message (C# rethrows the body's
     /// exception).
     BodyPanicked(String),
+    /// The window was still open when the close budget (C#
+    /// `CloseWindowTimeoutSeconds`, here `RunOptions::close_window_timeout`)
+    /// ran out after the body finished — it vetoed its close or never
+    /// answered it — so the run force closed it (C# `TimeoutException`
+    /// "Test window failed to close within ..."). Holds the budget.
+    CloseTimeout(Duration),
     /// The body returned without calling `mark_test_complete` while
     /// `require_test_completion` was set.
     TestNotCompleted,
@@ -39,6 +46,11 @@ impl fmt::Display for AutomationError {
                 write!(f, "The test window failed to come up: {message}")
             }
             Self::BodyPanicked(message) => f.write_str(message),
+            Self::CloseTimeout(timeout) => write!(
+                f,
+                "Test window failed to close within {} seconds after the test completed. The window vetoed its close or never answered it, so it was force closed.",
+                timeout.as_secs_f64()
+            ),
             Self::TestNotCompleted => f.write_str(TEST_NOT_COMPLETED_MESSAGE),
         }
     }
