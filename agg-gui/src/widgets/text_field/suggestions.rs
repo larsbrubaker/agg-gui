@@ -57,6 +57,9 @@ impl TextField {
             return;
         }
         let insert = self.apply_char_filter(&insert.replace("\r\n", "\n").replace('\r', "\n"));
+        if !self.text_filter_accepts_range(start, len, &insert) {
+            return;
+        }
         self.flush_pending();
         let before = self.snap();
         let changed = {

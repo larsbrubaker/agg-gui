@@ -176,6 +176,8 @@ pub struct TextField {
 
     /// Per-character allow-list. See [`with_char_filter`].
     char_filter: Option<Rc<dyn Fn(char) -> bool>>,
+    /// Whole-edit judge. See [`with_text_filter`](Self::with_text_filter).
+    text_filter: Option<Rc<filter::TextFilter>>,
 
     /// Stable id for the programmatic focus channel
     /// ([`crate::focus::request_focus`]). `None` opts out. See
@@ -253,6 +255,7 @@ impl TextField {
             text_cell: None,
             on_key_intercept: None,
             char_filter: None,
+            text_filter: None,
             focus_request_id: None,
             keyboard_mode: Rc::new(Cell::new(
                 crate::widgets::on_screen_keyboard::KeyboardInputMode::default(),
@@ -426,6 +429,9 @@ impl TextField {
             return;
         }
         let s = filtered.as_str();
+        if !self.text_filter_accepts(s) {
+            return;
+        }
         let before = self.snap();
         let had_selection = before.cursor != before.anchor;
 

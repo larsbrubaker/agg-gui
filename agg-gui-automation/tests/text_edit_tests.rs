@@ -19,8 +19,8 @@
 //! test and are noted where they occur, and `Focused == false` after the
 //! focus moved away is asserted as `!ContainsFocus` (stronger).
 //!
-//! The tests of the multi-line editor and the special keys live in
-//! `text_edit/`.
+//! The tests of the multi-line editor, the special keys and the number
+//! edit (`NumberEdit`) live in `text_edit/`.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -33,6 +33,8 @@ use agg_gui_automation::{HeadlessWindow, UiDriver, WidgetHandle};
 
 #[path = "text_edit/multi_line.rs"]
 mod multi_line;
+#[path = "text_edit/num_edit.rs"]
+mod num_edit;
 #[path = "text_edit/scrolling_to_end.rs"]
 mod scrolling_to_end;
 #[path = "text_edit/special_keys.rs"]

@@ -47,6 +47,7 @@ pub mod menu;
 pub mod modal_sheet;
 pub mod multi_click;
 pub mod named;
+pub mod number_edit;
 pub mod on_screen_keyboard;
 pub mod performance;
 pub mod popup;
@@ -119,6 +120,9 @@ pub use menu::{
 };
 pub use modal_sheet::ModalSheet;
 pub use named::Named;
+pub use number_edit::{
+    NumberCommit, NumberEdit, NumberEditError, NumberEditOptions, TextValueParser,
+};
 pub use performance::{
     paint_sparkline, shared_frame_history, shared_run_mode, FrameHistory, PerformanceView, RunMode,
     RunModeDesc, RunModeRow, SharedFrameHistory,
