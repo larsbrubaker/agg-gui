@@ -1,8 +1,8 @@
 //! Free-function bodies for [`crate::draw_ctx::DrawCtx`]'s default methods.
 //!
 //! The `DrawCtx` trait deliberately ships working defaults for a handful of
-//! methods (elliptical arcs, pixel snapping, the corner-quad and LCD-plane
-//! fallbacks) so every backend gets them for free.  Their *logic* lives here,
+//! methods (elliptical arcs, pixel snapping, the clip-respecting clear, the
+//! corner-quad and LCD-plane fallbacks) so every backend gets them for free.  Their *logic* lives here,
 //! as plain functions, and the trait defaults are thin adapters that replay
 //! the result through the backend's own primitives.
 //!
@@ -225,4 +225,24 @@ pub fn collapse_lcd_planes(color: &[u8], alpha: &[u8], w: u32, h: u32) -> Option
         rgba[di..di + 4].copy_from_slice(&px);
     }
     Some(rgba)
+}
+
+/// Body of [`crate::draw_ctx::DrawCtx::clear_clip`]: under an identity
+/// transform, a rectangle far past any render target is filled in
+/// `CompOp::Src` (copy) at full alpha, and the clip trims it to exactly its
+/// own pixels.
+pub fn clear_clip<C: crate::draw_ctx::DrawCtx + ?Sized>(ctx: &mut C, color: crate::color::Color) {
+    // Far past any render target, and inside AGG's 24.8 fixed-point range
+    // (|x| * 256 < 2^31) so the software rasterizer stays exact.
+    const FAR: f64 = 1_000_000.0;
+    ctx.save();
+    ctx.reset_transform();
+    ctx.set_blend_mode(agg_rust::comp_op::CompOp::Src);
+    ctx.set_global_alpha(1.0);
+    ctx.set_fill_color(color);
+    ctx.begin_path();
+    ctx.rect(-FAR, -FAR, 2.0 * FAR, 2.0 * FAR);
+    ctx.fill();
+    ctx.begin_path();
+    ctx.restore();
 }

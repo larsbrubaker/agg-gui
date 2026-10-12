@@ -148,19 +148,7 @@ pub trait DrawCtx {
     /// `CompOp::Src` (copy) at full alpha, which the clip then trims to
     /// exactly its own pixels.
     fn clear_clip(&mut self, color: Color) {
-        // Far past any render target, and inside AGG's 24.8 fixed-point
-        // range (|x| * 256 < 2^31) so the software rasterizer stays exact.
-        const FAR: f64 = 1_000_000.0;
-        self.save();
-        self.reset_transform();
-        self.set_blend_mode(CompOp::Src);
-        self.set_global_alpha(1.0);
-        self.set_fill_color(color);
-        self.begin_path();
-        self.rect(-FAR, -FAR, 2.0 * FAR, 2.0 * FAR);
-        self.fill();
-        self.begin_path();
-        self.restore();
+        defaults::clear_clip(self, color);
     }
 
     /// Replace the pixels of the rectangle `x, y, w, h`, given in the
