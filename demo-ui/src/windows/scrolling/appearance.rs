@@ -164,6 +164,8 @@ impl StyleCells {
             color: self.color.get(),
             fade_strength: self.fade_strength.get(),
             fade_size: self.fade_size.get(),
+            // the panel has no control for it: keep whatever is in force
+            thumb_rest: agg_gui::current_scroll_style().thumb_rest,
         }
     }
 

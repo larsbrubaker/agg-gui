@@ -150,7 +150,7 @@ pub use scene::{Scene, SceneTransform};
 pub use scroll_view::{
     current_scroll_style, current_scroll_visibility, set_scroll_style, set_scroll_visibility,
     ScrollBarAxisProperties, ScrollBarColor, ScrollBarKind, ScrollBarProperties, ScrollBarStyle,
-    ScrollBarVisibility, ScrollFadedEdges, ScrollView,
+    ScrollBarVisibility, ScrollFadedEdges, ScrollThumbRest, ScrollView,
 };
 pub use scrollbar::{SCROLL_BAR_FADE_SECS, SCROLL_BAR_GROW_SECS};
 pub use segmented::SegmentedControl;

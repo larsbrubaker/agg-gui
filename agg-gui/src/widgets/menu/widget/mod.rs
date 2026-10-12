@@ -249,6 +249,8 @@ mod tests_anchor_edges;
 #[cfg(test)]
 mod tests_bar_children;
 #[cfg(test)]
+mod tests_bar_drag_overlap;
+#[cfg(test)]
 mod tests_cancelled_release;
 #[cfg(test)]
 mod tests_bar_flip;

@@ -15,15 +15,13 @@
 //! `ScrollBarWidth`'s legacy default a `Solid` bar; `ScrollBar.Clock` is the
 //! virtual UI clock, and `StepFade` a paint after advancing it.
 //! agg-sharp's own defaults (no margins, no handle minimum, no fade) are
-//! [`legacy`].
+//! [`legacy`]; its classic resting thumb, inset by `GrowThumbBy` on both
+//! sides of a full-width track, is [`classic`] (`ScrollThumbRest::Inset`),
+//! which the tests reading the resting thumb's band use.
 //!
 //! Behaviour tests where agg-gui's bar differs by design:
-//! - `DefaultsKeepTheLegacyGeometry` and
-//!   `WidthAndMarginsWidenTheStripAndReserveIt`: a Solid agg-gui bar is drawn
-//!   at its full width with no `GrowThumbBy` inset at rest (the inset exists
-//!   only as a Floating bar's dormant `floating_width`), and the bar adds no
-//!   children, so those legs check the thumb fills the track and the view's
-//!   one child stays alone.
+//! - `DefaultsKeepTheLegacyGeometry`: the bar adds no children, so the
+//!   child-count leg checks the view's one child stays alone.
 //! - `AFloatingBarTakesNoRoomAndIsThinUntilHovered`: agg-gui paints nothing
 //!   of a dormant auto-hiding bar, so the "no track" leg is its opacity 0.
 //! - `AFloatingBarIsHoveredFromItsGrabMarginButNotBeyond`: agg-gui's track
@@ -37,10 +35,9 @@
 //!   override are checked. Fading to the background without an override is
 //!   `tests::scroll_view::test_scroll_fade_uses_window_background`.
 //!
-//! Not ported: `ANarrowBarKeepsAVisibleThumb` (the `GrowThumbBy` inset it
-//! guards is mattercad-app's `floating_width` formula, not agg-gui code) and
-//! `ColorOverridesPaintTheBar` (agg-gui has no per-bar colour overrides and
-//! MatterCAD sets none on a scroll bar).
+//! Not ported: `ColorOverridesPaintTheBar` (agg-gui has no per-bar colour
+//! overrides and MatterCAD sets none on a scroll bar: its only `TrackColor` /
+//! `ThumbColor` writes are on sliders).
 
 use std::time::Duration;
 
@@ -48,9 +45,12 @@ use super::scroll_fixtures::Resizable;
 use crate::geometry::Point;
 use crate::{
     clock, Event, Framebuffer, GfxCtx, Modifiers, MouseButton, ScrollBarKind, ScrollBarProperties,
-    ScrollBarStyle, ScrollBarVisibility, ScrollView, Size, SizedBox, Widget, SCROLL_BAR_FADE_SECS,
-    SCROLL_BAR_GROW_SECS,
+    ScrollBarStyle, ScrollBarVisibility, ScrollThumbRest, ScrollView, Size, SizedBox, Widget,
+    SCROLL_BAR_FADE_SECS, SCROLL_BAR_GROW_SECS,
 };
+
+/// agg-sharp's `ScrollBar.GrowThumbBy` at device scale 1.
+const GROW_THUMB_BY: f64 = 3.0;
 
 /// agg-sharp's `ScrollBar` defaults: a 15 wide Solid bar, no margins, no
 /// handle minimum and no edge fade.
@@ -64,6 +64,17 @@ fn legacy() -> ScrollBarStyle {
         kind: ScrollBarKind::Solid,
         fade_strength: 0.0,
         ..ScrollBarStyle::default()
+    }
+}
+
+/// [`legacy`] with agg-sharp's classic resting thumb (`ScrollBar.ThumbBand`
+/// off the floating path).
+fn classic() -> ScrollBarStyle {
+    ScrollBarStyle {
+        thumb_rest: ScrollThumbRest::Inset {
+            grow_thumb_by: GROW_THUMB_BY,
+        },
+        ..legacy()
     }
 }
 
@@ -155,14 +166,13 @@ fn close(actual: f64, expected: f64, tolerance: f64) {
 
 #[test]
 fn defaults_keep_the_legacy_geometry() {
-    let scroll = make(100.0, 500.0, legacy());
+    let scroll = make(100.0, 500.0, classic());
     let p = props(&scroll);
     let bar = p.vertical;
-    assert_eq!(legacy().kind, ScrollBarKind::Solid);
-    assert_eq!(bar.strip.width, legacy().bar_width);
+    assert_eq!(classic().kind, ScrollBarKind::Solid);
+    assert_eq!(bar.strip.width, classic().bar_width);
     assert_eq!(bar.strip.height, 100.0);
-    // agg-gui's Solid thumb fills the track: no rest inset (see the header)
-    assert_eq!(bar.thumb.x, bar.strip.x);
+    assert_eq!(bar.thumb.x - bar.strip.x, GROW_THUMB_BY);
     close(bar.thumb.height, 100.0 * 100.0 / 500.0, 1e-9);
     // the strip is reserved: the content stops where it begins
     close(p.viewport.x + p.viewport.width, bar.strip.x, 1e-9);
@@ -179,7 +189,7 @@ fn width_and_margins_widen_the_strip_and_reserve_it() {
         bar_width: 20.0,
         inner_margin: 4.0,
         outer_margin: 3.0,
-        ..legacy()
+        ..classic()
     };
     let scroll = make(100.0, 500.0, style);
     let p = props(&scroll);
@@ -190,8 +200,22 @@ fn width_and_margins_widen_the_strip_and_reserve_it() {
     // the track sits past the inner margin; the outer margin is left clear at the view's edge
     assert_eq!(bar.track.x - bar.strip.x, 4.0);
     assert_eq!(bar.track.x + bar.track.width - bar.strip.x, 24.0);
-    assert_eq!(bar.thumb.x - bar.strip.x, 4.0);
-    assert_eq!(bar.thumb.x + bar.thumb.width - bar.strip.x, 24.0);
+    assert_eq!(bar.thumb.x - bar.strip.x, 4.0 + GROW_THUMB_BY);
+    assert_eq!(
+        bar.thumb.x + bar.thumb.width - bar.strip.x,
+        24.0 - GROW_THUMB_BY
+    );
+}
+
+#[test]
+fn a_narrow_bar_keeps_a_visible_thumb() {
+    // the legacy inset on both sides would eat a bar this thin whole
+    let style = ScrollBarStyle {
+        bar_width: 2.0 * GROW_THUMB_BY,
+        ..classic()
+    };
+    let scroll = make(100.0, 500.0, style);
+    close(props(&scroll).vertical.thumb.width, GROW_THUMB_BY, 1e-9);
 }
 
 #[test]
@@ -517,4 +541,27 @@ fn the_edge_fade_is_opt_in_and_follows_the_scroll() {
         props(&ScrollView::new(Box::new(SizedBox::new()))).fade_color,
         None
     );
+}
+
+/// agg-sharp's classic `ThumbBand`: at rest the thumb is inset on both sides
+/// of a full-width track; hovered it fills the bar.
+#[test]
+fn rust_only_a_classic_thumb_rests_inset_and_fills_the_bar_on_hover() {
+    let _clock = clock::scoped_virtual(None);
+    let mut scroll = make(100.0, 500.0, classic());
+    paint(&mut scroll);
+    let bar = props(&scroll).vertical;
+    assert_eq!(bar.track.x - bar.strip.x, 0.0);
+    assert_eq!(bar.track.width, 15.0);
+    assert_eq!(bar.thumb.x - bar.strip.x, GROW_THUMB_BY);
+    assert_eq!(bar.thumb.width, 15.0 - 2.0 * GROW_THUMB_BY);
+
+    mouse_move(&mut scroll, bar.strip.x + 5.0, 50.0);
+    paint(&mut scroll);
+    advance(SCROLL_BAR_GROW_SECS);
+    paint(&mut scroll);
+    let bar = props(&scroll).vertical;
+    assert_eq!(bar.thumb.x - bar.strip.x, 0.0);
+    assert_eq!(bar.thumb.width, 15.0);
+    assert_eq!(bar.track.width, 15.0);
 }

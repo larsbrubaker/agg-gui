@@ -12,13 +12,15 @@
 //! nested-menu content, host it with a [`PopupMenu`](super::super::menu::PopupMenu),
 //! which reuses the whole menu machinery. `Popup` adds the one thing the menu
 //! system can't express on its own: arbitrary [`RectAlign`] placement plus a
-//! selectable close behavior. Like the menu system it flips and clamps against
+//! selectable close behavior, with an optional agg-sharp `AltMate`
+//! ([`Popup::with_fallback_align`]) tried before the overflow flip's mirror
+//! images. Like the menu system it flips and clamps against
 //! [`visible_root_rect`](crate::widget::visible_root_rect), so it stays on
 //! screen while the on-screen keyboard lifts the tree.
 
 use crate::geometry::{Point, Rect, Size};
 
-use super::align::{clamp_rect_in, RectAlign};
+use super::align::{clamp_rect_in, Align2, RectAlign};
 
 /// When a popup should dismiss itself in response to clicks. Mirrors egui's
 /// `PopupCloseBehavior`.
@@ -92,6 +94,9 @@ pub struct Popup {
     pub align: RectAlign,
     pub gap: f64,
     pub close_behavior: PopupCloseBehavior,
+    /// agg-sharp's `AltMate`: tried per axis before the mirror images of
+    /// `align` (see [`Popup::with_fallback_align`]).
+    pub fallback_align: Option<RectAlign>,
 }
 
 impl Default for Popup {
@@ -103,6 +108,7 @@ impl Default for Popup {
             align: RectAlign::BOTTOM_START,
             gap: 4.0,
             close_behavior: PopupCloseBehavior::default(),
+            fallback_align: None,
         }
     }
 }
@@ -110,6 +116,17 @@ impl Default for Popup {
 impl Popup {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// agg-sharp's `MatePoint.AltMate` pair: the placement tried when `align`
+    /// does not fit, before its mirror images.  As in agg-sharp's
+    /// `BestPopupPosition` it applies per axis: an axis that fits keeps
+    /// `align`'s mates and only the overflowing axis takes `fallback`'s, so a
+    /// popup with no room to the side moves sideways without changing which
+    /// way it hangs.
+    pub fn with_fallback_align(mut self, fallback: RectAlign) -> Self {
+        self.fallback_align = Some(fallback);
+        self
     }
 
     pub fn is_open(&self) -> bool {
@@ -152,9 +169,11 @@ impl Popup {
     }
 
     /// The placement actually used this frame: the configured `align` if the
-    /// popup fits on-screen with it, otherwise the first of its
-    /// [`RectAlign::symmetries`] (then [`RectAlign::MENU_ALIGNS`]) that does —
-    /// egui's overflow-flip (`Popup::get_best_align` in
+    /// popup fits on-screen with it, otherwise the first that does of the
+    /// [`fallback_align`](Self::fallback_align) (horizontal axis only, then
+    /// vertical only, then both: agg-sharp's per-axis `AltMate`), `align`'s
+    /// [`RectAlign::symmetries`] and [`RectAlign::MENU_ALIGNS`] — egui's
+    /// overflow-flip (`Popup::get_best_align` in
     /// egui/src/containers/popup.rs).
     ///
     /// "On-screen" is [`visible_root_rect`](crate::widget::visible_root_rect)
@@ -163,9 +182,36 @@ impl Popup {
     /// on-screen keyboard lifts the tree.
     pub fn effective_align(&self, viewport: Size) -> RectAlign {
         let content = crate::widget::visible_root_rect(viewport);
+        let align = self.align;
+        let alternates = self.fallback_align.map(|alt| {
+            [
+                RectAlign {
+                    parent: Align2 {
+                        x: alt.parent.x,
+                        y: align.parent.y,
+                    },
+                    child: Align2 {
+                        x: alt.child.x,
+                        y: align.child.y,
+                    },
+                },
+                RectAlign {
+                    parent: Align2 {
+                        x: align.parent.x,
+                        y: alt.parent.y,
+                    },
+                    child: Align2 {
+                        x: align.child.x,
+                        y: alt.child.y,
+                    },
+                },
+                alt,
+            ]
+        });
         RectAlign::find_best_align(
-            std::iter::once(self.align)
-                .chain(self.align.symmetries())
+            std::iter::once(align)
+                .chain(alternates.into_iter().flatten())
+                .chain(align.symmetries())
                 .chain(RectAlign::MENU_ALIGNS),
             content,
             self.anchor,

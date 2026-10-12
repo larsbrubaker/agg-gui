@@ -237,3 +237,28 @@ fn with_id_names_the_bar() {
     // the per-title children keep their own names
     assert!(find_widget_by_id(&bar, "Edit Menu").is_some());
 }
+
+#[test]
+fn rust_only_default_title_id_drops_a_leading_icon_glyph() {
+    let _guard = crate::input_profile::profile_test_lock();
+    reset_env();
+    let mut bar = MenuBar::new(
+        test_font(),
+        vec![
+            TopMenu::new("\u{F009} Demos", Vec::new()),
+            TopMenu::new("\u{F009}", Vec::new()),
+            TopMenu::new("A \u{F009}", Vec::new()),
+        ],
+        |_| {},
+    );
+    bar.layout(Size::new(300.0, BAR_H));
+    let ids: Vec<_> = bar.children().iter().map(|c| c.id()).collect();
+    assert_eq!(
+        ids,
+        [
+            Some("Demos Menu"),
+            Some("\u{F009} Menu"),
+            Some("A \u{F009} Menu")
+        ]
+    );
+}

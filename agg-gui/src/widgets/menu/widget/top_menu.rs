@@ -5,7 +5,8 @@
 //! apps, inspectors and headless UI tests need to *find* a title: its
 //! screen rect, its name.  So the bar keeps one [`MenuTitle`] child per
 //! [`TopMenu`], positioned on the title's rect and carrying its id
-//! (default `"{label} Menu"`, override with [`TopMenu::with_id`]).  The
+//! (default `"{label} Menu"` with a leading icon glyph dropped, override
+//! with [`TopMenu::with_id`]).  The
 //! children paint nothing and never claim the pointer, so every click and
 //! hover still reaches the bar exactly as before; clicking at a title
 //! child's centre opens that menu.
@@ -30,7 +31,8 @@ pub struct TopMenu {
     pub label: String,
     pub items: Vec<MenuEntry>,
     pub(super) rect: Rect,
-    /// Explicit id for the title's child widget; `None` → `"{label} Menu"`.
+    /// Explicit id for the title's child widget; `None` → `"{label} Menu"`
+    /// (see [`TopMenu::title_id`]).
     id: Option<String>,
     provider: Option<ItemsProvider>,
 }
@@ -47,17 +49,21 @@ impl TopMenu {
     }
 
     /// Name the title's child widget (what [`Widget::id`] returns for it).
-    /// Defaults to `"{label} Menu"`.
+    /// Defaults to `"{label} Menu"`, see [`TopMenu::title_id`].
     pub fn with_id(mut self, id: impl Into<String>) -> Self {
         self.id = Some(id.into());
         self
     }
 
-    /// The id the title's child widget carries.
+    /// The id the title's child widget carries: the explicit id, else
+    /// `"{label} Menu"`.  A label that leads with an icon glyph (a
+    /// private-use code point, as Font Awesome's are) drops it and the space
+    /// after it, so `"\u{F009} Demos"` is `"Demos Menu"`: C# keeps the icon
+    /// out of the text (`MenuItemModel.IconGlyph`), so its name never had one.
     pub fn title_id(&self) -> String {
         self.id
             .clone()
-            .unwrap_or_else(|| format!("{} Menu", self.label))
+            .unwrap_or_else(|| format!("{} Menu", strip_leading_icon(&self.label)))
     }
 
     /// Build the menu's entries when it opens instead of using the static
@@ -78,6 +84,24 @@ impl TopMenu {
             self.items = provider();
         }
     }
+}
+
+/// `label` without a leading private-use glyph and the whitespace after it.
+/// A label that is nothing but the glyph keeps it, so the id still names it.
+fn strip_leading_icon(label: &str) -> &str {
+    let mut chars = label.chars();
+    match chars.next() {
+        Some(c) if is_private_use(c) => match chars.as_str().trim_start() {
+            "" => label,
+            rest => rest,
+        },
+        _ => label,
+    }
+}
+
+/// Unicode's private-use areas: the BMP block and planes 15 and 16.
+fn is_private_use(c: char) -> bool {
+    matches!(c, '\u{E000}'..='\u{F8FF}' | '\u{F0000}'..='\u{FFFFD}' | '\u{100000}'..='\u{10FFFD}')
 }
 
 /// The child widget standing for one bar title.  Invisible and

@@ -308,7 +308,12 @@ impl ScrollbarAxis {
     }
 
     /// Track and thumb rects at hover-animation parameter `t` (see
-    /// [`ScrollBarStyle::bar_width_at`]), or `None` when the content fits.
+    /// [`ScrollBarStyle::thumb_width_at`] and
+    /// [`ScrollBarStyle::track_width_at`]), or `None` when the content fits.
+    /// The track lies against the outer edge (`cross_end`); the thumb is
+    /// centred across it, which for
+    /// [`ScrollThumbRest::OuterEdge`](super::scroll_view::ScrollThumbRest)'s equal
+    /// widths is the same edge.
     pub fn bar_rects(
         &self,
         viewport: f64,
@@ -317,19 +322,21 @@ impl ScrollbarAxis {
         t: f64,
     ) -> Option<(Rect, Rect)> {
         let (thumb_start, thumb_len) = self.thumb_metrics(viewport, style, geom)?;
-        let bar_w = style.bar_width_at(t);
+        let track_w = style.track_width_at(t);
+        let thumb_w = style.thumb_width_at(t);
+        let inset = (track_w - thumb_w) * 0.5;
         let track_len = geom.track_end - geom.track_start;
         Some(match geom.orientation {
             ScrollbarOrientation::Vertical => {
-                let bar_x = geom.cross_end - bar_w;
+                let bar_x = geom.cross_end - track_w;
                 (
-                    Rect::new(bar_x, geom.track_start, bar_w, track_len),
-                    Rect::new(bar_x, thumb_start, bar_w, thumb_len),
+                    Rect::new(bar_x, geom.track_start, track_w, track_len),
+                    Rect::new(bar_x + inset, thumb_start, thumb_w, thumb_len),
                 )
             }
             ScrollbarOrientation::Horizontal => (
-                Rect::new(geom.track_start, geom.cross_end, track_len, bar_w),
-                Rect::new(thumb_start, geom.cross_end, thumb_len, bar_w),
+                Rect::new(geom.track_start, geom.cross_end, track_len, track_w),
+                Rect::new(thumb_start, geom.cross_end + inset, thumb_len, thumb_w),
             ),
         })
     }
@@ -364,7 +371,7 @@ impl ScrollbarAxis {
         Some(PreparedScrollbar {
             track,
             thumb,
-            radius: style.bar_width_at(t) * 0.5,
+            radius: style.thumb_width_at(t) * 0.5,
             alpha,
             color: style.color,
             hovered_thumb: self.hovered_thumb,

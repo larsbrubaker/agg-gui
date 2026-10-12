@@ -234,7 +234,7 @@ pub use widgets::{
     Rebuilder, RectAlign, Resize, ResponsiveImageWidget, RichCommand, RichDoc, RichEditHandle,
     RichTextEdit, RichTextToolbar, RichTextView, RunMode, RunModeDesc, RunModeRow, Scene,
     SceneTransform, ScrollAlign, ScrollBarColor, ScrollBarKind, ScrollBarStyle,
-    ScrollBarVisibility, ScrollView, SegmentedControl, Separator, SharedFrameHistory,
+    ScrollBarVisibility, ScrollThumbRest, ScrollView, SegmentedControl, Separator, SharedFrameHistory,
     SharedResolver, ShortcutKey, SizedBox, SkipIfFirstSpace, Slider, SliderClamping,
     SliderOrientation, SliderStyle, Spacer, Spinner, SpinnerSize, Splitter, SplitterRatio, Stack,
     TabView, Table, TableBuilder, TableColumn, TableRows, TextArea, TextAreaScrollInfo,

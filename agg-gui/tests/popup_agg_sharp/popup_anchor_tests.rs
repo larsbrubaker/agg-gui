@@ -11,17 +11,13 @@
 //! laid-out rect (root space, the root at the origin) is its anchor, so each
 //! case runs the same edge mating through the same layout C# does.
 //!
-//! Behaviour conversions, both deliberate agg-gui placement rules:
-//! - agg-gui has no explicit `AltMate`. A popup that does not fit tries the
-//!   mirror images of its own alignment ([`RectAlign::symmetries`], egui's
-//!   overflow flip). Every C# vertical alt mate in this class is the mirror
-//!   of its mate, so the vertical redirects land where C# puts them. Two
-//!   horizontal legs differ: `left_right_redirect_test` case 0 (popup right
-//!   edge on the button's left, no room) flips to the button's *right* edge
-//!   where C#'s fixed alt puts it left-aligned with the button, and
-//!   `right_left_redirect_test` case 1 (left-aligned, no room) flips to
-//!   right-aligned where C#'s alt hangs it off the button's left. Both stay
-//!   mated to a button edge and fully on screen.
+//! C#'s `AltMate` pair is [`Popup::with_fallback_align`]; the redirect tests
+//! set it to C#'s alt mates and get C#'s placements. Where a case sets no alt
+//! mate agg-gui's own overflow flip (the mirror images of the alignment,
+//! [`RectAlign::symmetries`]) stands in for C#'s default `AltMate`, and every
+//! such case here lands where C# puts it.
+//!
+//! Behaviour conversion, a deliberate agg-gui placement rule:
 //! - agg-gui clamps popups 4 px inside the window (`MARGIN`); C# clamps at 0.
 //!   The `left_right_redirect_test` button sits 2 px from the window's left,
 //!   so a left-aligned popup there lands at 4, not 2.
@@ -102,7 +98,21 @@ fn button_in_window(size: Size, padding: Insets, margin: Insets, h: HAnchor, v: 
 /// C#'s `ShowPopup` with `anchor_mate` on the button and `popup_mate` on the
 /// popup: the placed popup rect in the window.
 fn show_popup(button: Rect, window: Size, anchor_mate: Align2, popup_mate: Align2) -> Rect {
+    show_popup_with_alt(button, window, anchor_mate, popup_mate, None)
+}
+
+/// [`show_popup`] with C#'s `AltMate` pair (anchor, popup) when `alt` is set.
+fn show_popup_with_alt(
+    button: Rect,
+    window: Size,
+    anchor_mate: Align2,
+    popup_mate: Align2,
+    alt: Option<(Align2, Align2)>,
+) -> Rect {
     let mut popup = Popup::new();
+    if let Some((parent, child)) = alt {
+        popup = popup.with_fallback_align(RectAlign { parent, child });
+    }
     popup.set_anchor(button);
     popup.set_size(POPUP);
     popup.gap = 0.0;
@@ -172,12 +182,25 @@ fn row_at(v: VAnchor) -> Rect {
 /// Run the four horizontal cases with the vertical mates `anchor_v` /
 /// `popup_v`, checking each placed popup with `check(case, button, popup)`.
 fn anchor_tests(button: Rect, anchor_v: Edge, popup_v: Edge, check: impl Fn(usize, Rect, Rect)) {
+    anchor_tests_with_alt(button, anchor_v, popup_v, None, check);
+}
+
+/// [`anchor_tests`] with C#'s fixed `AltMate` pair (anchor, popup), which
+/// C#'s loop leaves alone while it walks the mates.
+fn anchor_tests_with_alt(
+    button: Rect,
+    anchor_v: Edge,
+    popup_v: Edge,
+    alt: Option<(Align2, Align2)>,
+    check: impl Fn(usize, Rect, Rect),
+) {
     for (i, (anchor_h, popup_h)) in CASES.into_iter().enumerate() {
-        let popup = show_popup(
+        let popup = show_popup_with_alt(
             button,
             WINDOW,
             mate(anchor_h, anchor_v),
             mate(popup_h, popup_v),
+            alt,
         );
         check(i, button, popup);
     }
@@ -280,14 +303,15 @@ fn left_right_redirect_test() {
         VAnchor::CENTER | VAnchor::FIT,
     );
     assert_eq!(left(button), 2.0);
-    anchor_tests(button, Edge::Bottom, Edge::Top, |i, b, p| {
+    let alt = (mate(Edge::Left, Edge::Top), mate(Edge::Left, Edge::Bottom));
+    anchor_tests_with_alt(button, Edge::Bottom, Edge::Top, Some(alt), |i, b, p| {
         let expected = match i {
-            // Right edge on the button's left has no room: mirrored, the
-            // left edge goes on the button's right (C#'s alt: left-aligned).
-            0 => right(b),
-            // Left-aligned, clamped to agg-gui's 4 px gutter (C#: 2).
+            // Right edge on the button's left has no room: C#'s alt
+            // left-aligns it, clamped to agg-gui's 4 px gutter (C#: 2).
+            0 => left(b).max(MARGIN),
+            // Left-aligned, clamped.
             1 => left(b).max(MARGIN),
-            // Right-aligned has no room: mirrored to left-aligned, clamped.
+            // Right-aligned has no room: the alt left-aligns it, clamped.
             2 => left(b).max(MARGIN),
             _ => right(b),
         };
@@ -309,17 +333,18 @@ fn right_left_redirect_test() {
     );
     // The button's origin is rounded to a whole pixel, as C#'s is.
     assert!((right(button) - 790.0).abs() < 1.0, "{button:?}");
-    anchor_tests(button, Edge::Bottom, Edge::Bottom, |i, b, p| {
+    let alt = (mate(Edge::Left, Edge::Top), mate(Edge::Right, Edge::Top));
+    anchor_tests_with_alt(button, Edge::Bottom, Edge::Bottom, Some(alt), |i, b, p| {
         let expected = match i {
             // Right edge on the button's left fits.
             0 => left(b),
-            // Left-aligned has no room: mirrored to right-aligned (C#'s alt
-            // hangs it off the button's left).
-            1 => right(b),
+            // Left-aligned has no room: C#'s alt hangs it off the button's
+            // left, the bottoms still mated (the vertical mate fits).
+            1 => left(b),
             // Right-aligned fits.
             2 => right(b),
-            // Left edge on the button's right has no room: mirrored, the
-            // right edge goes on the button's left.
+            // Left edge on the button's right has no room: the alt puts the
+            // right edge on the button's left.
             _ => left(b),
         };
         assert_eq!(right(p), expected, "case {i}");

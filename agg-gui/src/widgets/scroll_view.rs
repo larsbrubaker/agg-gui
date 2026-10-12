@@ -58,6 +58,24 @@ pub enum ScrollBarKind {
     Floating,
 }
 
+/// Where a resting (unhovered) thumb sits across its bar.
+#[derive(Clone, Copy, Debug, PartialEq, Default)]
+pub enum ScrollThumbRest {
+    /// The thumb is [`ScrollBarStyle::bar_width_at`] wide against the bar's
+    /// outer edge, and the track is as wide as the thumb.  Default.
+    #[default]
+    OuterEdge,
+    /// agg-sharp's classic `ScrollBar.ThumbBand`: the track is always the
+    /// full `bar_width`, and the resting thumb is centred in it, inset on
+    /// both sides by `min(grow_thumb_by, bar_width / 4)` (so a narrow bar
+    /// keeps half its width as a visible thumb).  It grows to the full width
+    /// as the hover tween runs; `floating_width` is not used.
+    Inset {
+        /// agg-sharp's `ScrollBar.GrowThumbBy`: the inset on each side at rest.
+        grow_thumb_by: f64,
+    },
+}
+
 /// Which pair of colours is used for the track vs thumb.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum ScrollBarColor {
@@ -99,6 +117,8 @@ pub struct ScrollBarStyle {
     pub fade_strength: f64,
     /// Length of the fade region in pixels at each end.
     pub fade_size: f64,
+    /// Where the resting thumb sits across the bar.
+    pub thumb_rest: ScrollThumbRest,
 }
 
 impl ScrollBarStyle {
@@ -118,6 +138,31 @@ impl ScrollBarStyle {
         let t = t.clamp(0.0, 1.0);
         from + (self.bar_width - from) * t
     }
+
+    /// The thumb's width across the bar at hover-animation parameter `t`.
+    /// [`ScrollThumbRest::OuterEdge`]: [`Self::bar_width_at`].
+    /// [`ScrollThumbRest::Inset`]: `bar_width` less the rest inset on both
+    /// sides at `t = 0`, easing to `bar_width` at `t = 1`, for either kind.
+    pub fn thumb_width_at(&self, t: f64) -> f64 {
+        match self.thumb_rest {
+            ScrollThumbRest::OuterEdge => self.bar_width_at(t),
+            ScrollThumbRest::Inset { grow_thumb_by } => {
+                let full = self.bar_width;
+                let rest = full - 2.0 * grow_thumb_by.min(full / 4.0).max(0.0);
+                rest + (full - rest) * t.clamp(0.0, 1.0)
+            }
+        }
+    }
+
+    /// The track's width across the bar at hover-animation parameter `t`:
+    /// the thumb's width ([`ScrollThumbRest::OuterEdge`]) or the full
+    /// `bar_width` ([`ScrollThumbRest::Inset`]).
+    pub fn track_width_at(&self, t: f64) -> f64 {
+        match self.thumb_rest {
+            ScrollThumbRest::OuterEdge => self.bar_width_at(t),
+            ScrollThumbRest::Inset { .. } => self.bar_width,
+        }
+    }
 }
 
 impl Default for ScrollBarStyle {
@@ -134,6 +179,7 @@ impl Default for ScrollBarStyle {
             color: ScrollBarColor::Foreground,
             fade_strength: 0.5,
             fade_size: 20.0,
+            thumb_rest: ScrollThumbRest::OuterEdge,
         }
     }
 }
@@ -155,6 +201,7 @@ impl ScrollBarStyle {
             color: ScrollBarColor::Background,
             fade_strength: 0.5,
             fade_size: 20.0,
+            thumb_rest: ScrollThumbRest::OuterEdge,
         }
     }
     /// Preset matching egui's `ScrollStyle::thin` — a narrow floating bar
@@ -176,6 +223,7 @@ impl ScrollBarStyle {
             color: ScrollBarColor::Background,
             fade_strength: 0.5,
             fade_size: 20.0,
+            thumb_rest: ScrollThumbRest::OuterEdge,
         }
     }
     /// Preset matching egui's `ScrollStyle::floating` — wide floating overlay
