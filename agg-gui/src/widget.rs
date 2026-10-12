@@ -45,7 +45,6 @@ pub use backbuffer::{
 pub use event_observer::{observe_events, EventObserver};
 pub use event_root::{event_pointer_local, event_rect_to_root, event_root_transform};
 pub(crate) use paint::paint_subtree_forced;
-pub(crate) use tree_inspector::inspector_node_on_screen;
 pub use paint::{
     current_paint_clip, is_local_rect_in_paint_clip, logical_root_transform, paint_global_overlays,
     paint_subtree, visible_root_rect,
@@ -55,6 +54,7 @@ pub use tree::{
     dispatch_event_broadcast, dispatch_event_dyn, dispatch_unconsumed_key, global_overlay_hit_path,
     hit_test_subtree, mark_subtree_dirty,
 };
+pub(crate) use tree_inspector::inspector_node_on_screen;
 #[cfg(feature = "reflect")]
 pub use tree_inspector::{apply_inspector_edit, reflect_fields, InspectorEdit};
 pub use tree_inspector::{

@@ -149,8 +149,8 @@ pub use rich_text::{
 pub use scene::{Scene, SceneTransform};
 pub use scroll_view::{
     current_scroll_style, current_scroll_visibility, set_scroll_style, set_scroll_visibility,
-    ScrollBarAxisProperties, DEFAULT_SCROLL_EDGE_GUARD, ScrollBarColor, ScrollBarKind, ScrollBarProperties, ScrollBarStyle,
-    ScrollBarVisibility, ScrollFadedEdges, ScrollThumbRest, ScrollView,
+    ScrollBarAxisProperties, ScrollBarColor, ScrollBarKind, ScrollBarProperties, ScrollBarStyle,
+    ScrollBarVisibility, ScrollFadedEdges, ScrollThumbRest, ScrollView, DEFAULT_SCROLL_EDGE_GUARD,
 };
 pub use scrollbar::{SCROLL_BAR_FADE_SECS, SCROLL_BAR_GROW_SECS};
 pub use segmented::SegmentedControl;
