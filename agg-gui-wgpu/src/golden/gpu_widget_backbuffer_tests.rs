@@ -208,10 +208,21 @@ fn render(frames: &mut GpuFrames, root: &mut Root) -> Vec<u8> {
 
 /// C#'s `AssertImagesClose`: the worst RGB channel difference.
 fn assert_images_close(expected: &[u8], actual: &[u8], what: &str, tolerance: i32) {
+    assert_images_close_sized(expected, actual, (FRAME_W, FRAME_H), what, tolerance);
+}
+
+/// [`assert_images_close`] for a capture of `(w, h)`.
+fn assert_images_close_sized(
+    expected: &[u8],
+    actual: &[u8],
+    (w, h): (u32, u32),
+    what: &str,
+    tolerance: i32,
+) {
     let mut worst = (0, 0, 0);
-    for y in 0..FRAME_H {
-        for x in 0..FRAME_W {
-            let (a, b) = (at(expected, FRAME_W, x, y), at(actual, FRAME_W, x, y));
+    for y in 0..h {
+        for x in 0..w {
+            let (a, b) = (at(expected, w, x, y), at(actual, w, x, y));
             let d = (0..3)
                 .map(|c| (a[c] as i32 - b[c] as i32).abs())
                 .max()
@@ -225,8 +236,8 @@ fn assert_images_close(expected: &[u8], actual: &[u8], what: &str, tolerance: i3
     assert!(
         d <= tolerance,
         "{what}: worst channel delta {d} at ({x}, {y}) top-row-first, expected {:?} got {:?}",
-        at(expected, FRAME_W, x, y),
-        at(actual, FRAME_W, x, y)
+        at(expected, w, x, y),
+        at(actual, w, x, y)
     );
 }
 
@@ -392,4 +403,195 @@ fn a_coordinate_scale_change_repaints_the_layer() {
     let (mut plain, _) = build_tree(false, 40.0);
     let expected = render(&mut frames, &mut plain);
     assert_images_close(&expected, &image, "the layer back at scale 1", 1);
+}
+
+fn font() -> std::sync::Arc<agg_gui::text::Font> {
+    let bytes: &[u8] = include_bytes!("../../assets/fonts/NotoSans-Regular.ttf");
+    std::sync::Arc::new(agg_gui::text::Font::from_slice(bytes).expect("parse the test font"))
+}
+
+/// A frame root of `w`×`h` holding `child`.
+fn root_with(w: u32, h: u32, child: Box<dyn Widget>) -> Root {
+    Root {
+        bounds: Rect::new(0.0, 0.0, w as f64, h as f64),
+        children: vec![child],
+    }
+}
+
+/// C#'s styled `WindowWidget` sets its body, corner radius, shadow and title
+/// bar colours one by one; agg-gui's `Window` takes all of them from the
+/// theme (rounded corners, drop shadow, title bar), so the port builds a
+/// themed window and checks the same thing: drawn through its retained GPU
+/// layer it matches the window drawn straight onto the frame, with no CPU
+/// copy of its pixels.
+#[test]
+fn a_styled_window_widget_renders_through_its_gpu_layer() {
+    let (w, h) = (FRAME_W * 2, FRAME_W);
+    let Some(mut frames) = GpuFrames::new(w, h) else {
+        return;
+    };
+    let build = |double_buffer: bool| {
+        let content = Box::new(Root {
+            bounds: Rect::default(),
+            children: Vec::new(),
+        });
+        let mut window = agg_gui::widgets::Window::new("Styled", font(), content)
+            .with_bounds(Rect::new(30.0, 20.0, 170.0, 90.0))
+            .with_gl_backbuffer(double_buffer);
+        window.layout(Size::new(w as f64, h as f64));
+        root_with(w, h, Box::new(window))
+    };
+    let expected = frames.paint(Color::white(), &mut build(false), &|_| {});
+    let mut root = build(true);
+    let actual = frames.paint(Color::white(), &mut root, &|_| {});
+
+    let inked = actual
+        .chunks(4)
+        .filter(|p| p[..3] != [255, 255, 255])
+        .count();
+    assert!(
+        inked > 170 * 90 / 2,
+        "the window is drawn ({inked} non-white pixels)"
+    );
+    let window = &mut root.children[0];
+    assert_eq!(window.backbuffer_spec().kind, BackbufferKind::GlFbo);
+    assert!(
+        window.backbuffer_cache_mut().is_none(),
+        "the window keeps no CPU backbuffer"
+    );
+    assert!(
+        window
+            .backbuffer_state_mut()
+            .is_some_and(|s| s.repaint_count == 1),
+        "the window painted into its GPU layer"
+    );
+    // 2, not 1: at the rounded corners the background, border and title bar
+    // each lay a partial halo on the same pixel, and the layer stores that
+    // stack in 8 bits before compositing it - one more rounding than drawing
+    // direct, worth up to a level on a pixel only ~20% covered.
+    assert_images_close_sized(
+        &expected,
+        &actual,
+        (w, h),
+        "a styled window through its GPU layer",
+        2,
+    );
+}
+
+/// With LCD text on, labels inside a rounded window's GPU layer are subpixel
+/// (the window paints its opaque body into the layer first). The window
+/// composites the same whether or not it buffers itself, and the label's
+/// subpixel pixels match the software path's. One label crosses the
+/// window's rounded corner: the LCD passes write colour, never alpha, so
+/// they are only safe because the body fills the whole layer opaque.
+#[test]
+fn lcd_text_in_a_rounded_windows_gpu_layer_is_subpixel_and_matches_the_cpu_path() {
+    use agg_gui::font_settings::{clear_lcd_enabled_override, set_lcd_enabled};
+    use agg_gui::widgets::Label;
+
+    struct Restore;
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            clear_lcd_enabled_override();
+        }
+    }
+    let _restore = Restore;
+    let (w, h) = (FRAME_W * 2, FRAME_W);
+    let Some(mut frames) = GpuFrames::new(w, h) else {
+        return;
+    };
+    set_lcd_enabled(true);
+    frames.set_lcd_mode(true);
+
+    let label_at = |text: &str, x: f64, y: f64| -> Box<dyn Widget> {
+        let mut label = Label::new(text, font())
+            .with_font_size(12.0)
+            .with_color(Color::black());
+        let size = label.layout(Size::new(200.0, 90.0));
+        label.set_bounds(Rect::new(x, y, size.width, size.height));
+        Box::new(label)
+    };
+    // The label's screen rect: the window's content origin (20, 10) plus the
+    // label's (20, 40).
+    let text_rect = {
+        let probe = label_at("Hello World", 0.0, 0.0);
+        Rect::new(40.0, 50.0, probe.bounds().width, probe.bounds().height)
+    };
+    let build = |double_buffer: bool| {
+        let content = Box::new(Root {
+            bounds: Rect::default(),
+            children: vec![
+                label_at("Hello World", 20.0, 40.0),
+                label_at("Corner", -6.0, -4.0),
+            ],
+        });
+        let mut window = agg_gui::widgets::Window::new("LCD", font(), content)
+            .with_bounds(Rect::new(20.0, 10.0, 200.0, 90.0 + 28.0))
+            .with_gl_backbuffer(double_buffer);
+        window.layout(Size::new(w as f64, h as f64));
+        root_with(w, h, Box::new(window))
+    };
+
+    let plain = frames.paint(Color::white(), &mut build(false), &|_| {});
+    let gpu = frames.paint(Color::white(), &mut build(true), &|_| {});
+    let cpu =
+        super::harness::software_tree_with(w, h, Color::white(), true, &mut build(true), &|_| {});
+
+    let chroma = gpu
+        .chunks(4)
+        .any(|p| (p[0] as i32 - p[2] as i32).abs() > 24);
+    assert!(
+        chroma,
+        "black LCD text on a white body has coloured fringes"
+    );
+    assert_images_close_sized(
+        &plain,
+        &gpu,
+        (w, h),
+        "a rounded window with LCD text through its own GPU layer",
+        2,
+    );
+
+    // Over the label only: vector edges (the border's corner) tessellate on
+    // the GPU and scanline in software, but the LCD text is the same
+    // CPU-built mask on both. Rows are top-row-first.
+    let mut worst = 0;
+    for y in text_rect.y as u32..(text_rect.y + text_rect.height) as u32 {
+        for x in text_rect.x as u32..(text_rect.x + text_rect.width) as u32 {
+            let row = h - 1 - y;
+            let (a, b) = (at(&cpu, w, x, row), at(&gpu, w, x, row));
+            let d = (0..3)
+                .map(|c| (a[c] as i32 - b[c] as i32).abs())
+                .max()
+                .unwrap_or(0);
+            worst = worst.max(d);
+        }
+    }
+    assert!(
+        worst <= 3,
+        "the GPU layer's LCD text matches the software path's (worst {worst})"
+    );
+}
+
+/// C# gives a double-buffered widget on a software surface (no retained
+/// layers) an RGBA CPU backbuffer. agg-gui's retained layers are GPU only
+/// (`BackbufferKind::GlFbo`); on the software `GfxCtx`, which supports no
+/// retained layers, such a widget paints straight into the frame, once, with
+/// no layer and no CPU copy. Software surfaces have no compositor to save,
+/// so the CPU copy C# keeps would only cost memory.
+#[test]
+fn software_surfaces_keep_the_rgba_backbuffer() {
+    use agg_gui::framebuffer::Framebuffer;
+    use agg_gui::gfx_ctx::GfxCtx;
+    use agg_gui::widget::paint_subtree;
+
+    let (mut root, paints) = build_tree(true, 40.0);
+    let mut fb = Framebuffer::new(FRAME_W, FRAME_H);
+    let mut ctx = GfxCtx::new(&mut fb);
+    assert!(!ctx.supports_retained_layers());
+    paint_subtree(&mut root, &mut ctx);
+    assert_eq!(paints.get(), 1);
+    let child = child_mut(&mut root);
+    assert_eq!(child.backbuffer.repaint_count, 0, "no layer was painted");
+    assert!(child.backbuffer.cache.pixels.is_none());
 }

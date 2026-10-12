@@ -224,6 +224,11 @@ impl GpuFrames {
         Some(Self { w, h, ctx, target })
     }
 
+    /// Turns the LCD subpixel text path on or off for the following frames.
+    pub(crate) fn set_lcd_mode(&mut self, on: bool) {
+        self.ctx.set_lcd_mode(on);
+    }
+
     /// One frame: clear to `bg`, apply `before` (a transform, say), paint
     /// `root`'s subtree, read back top-row-first RGBA8.
     pub(crate) fn paint(
@@ -244,22 +249,23 @@ impl GpuFrames {
 /// Software render of `root`'s subtree, flipped top-row-first like the GPU
 /// readback.
 pub(crate) fn software_tree(w: u32, h: u32, bg: Color, root: &mut dyn Widget) -> Vec<u8> {
-    software_tree_with(w, h, bg, root, &|_| {})
+    software_tree_with(w, h, bg, false, root, &|_| {})
 }
 
-/// [`software_tree`] with `before` (a transform, say) applied first, as
-/// [`GpuFrames::paint`] does.
+/// [`software_tree`] with the LCD subpixel text path on (`lcd`) or off and
+/// `before` (a transform, say) applied first, as [`GpuFrames::paint`] does.
 pub(crate) fn software_tree_with(
     w: u32,
     h: u32,
     bg: Color,
+    lcd: bool,
     root: &mut dyn Widget,
     before: &dyn Fn(&mut dyn DrawCtx),
 ) -> Vec<u8> {
     let mut fb = Framebuffer::new(w, h);
     {
         let mut ctx = GfxCtx::new(&mut fb);
-        ctx.set_lcd_mode(false);
+        ctx.set_lcd_mode(lcd);
         ctx.clear(bg);
         before(&mut ctx);
         paint_subtree(root, &mut ctx);

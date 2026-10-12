@@ -144,7 +144,7 @@ pub struct BackbufferCache {
     /// to subscribe to theme-change events.
     pub theme_epoch: u64,
     /// Typography epoch (see
-    /// [`crate::font_settings::current_typography_epoch`]) — same
+    /// [`crate::font_settings::current_thread_typography_epoch`]) — same
     /// pattern as `theme_epoch` but for font / size scale / LCD /
     /// hinting / gamma / width / interval / faux-* globals.  Lets a
     /// slider drag in the System window's typography controls invalidate

@@ -72,7 +72,10 @@ fn paint_subtree_gl_backbuffer(
     let layer_h = (b.height + spec.outsets.bottom + spec.outsets.top).max(1.0);
     let subtree_needs_draw = widget.needs_draw();
     let theme_epoch = crate::theme::current_visuals_epoch();
-    let typography_epoch = crate::font_settings::current_typography_epoch();
+    // The calling thread's epoch: the typography settings are thread-local,
+    // so another thread's change (a parallel test) must not repaint this
+    // thread's caches.
+    let typography_epoch = crate::font_settings::current_thread_typography_epoch();
     let async_state_epoch = crate::animation::async_state_epoch();
     let (key, needs_draw) = {
         let Some(state) = widget.backbuffer_state_mut() else {
@@ -250,7 +253,10 @@ pub(super) fn paint_subtree_backbuffered(widget: &mut dyn Widget, ctx: &mut dyn 
     let mode = widget.backbuffer_mode();
     let mode_is_lcd = matches!(mode, BackbufferMode::LcdCoverage);
     let theme_epoch = crate::theme::current_visuals_epoch();
-    let typography_epoch = crate::font_settings::current_typography_epoch();
+    // The calling thread's epoch: the typography settings are thread-local,
+    // so another thread's change (a parallel test) must not repaint this
+    // thread's caches.
+    let typography_epoch = crate::font_settings::current_thread_typography_epoch();
     let async_state_epoch = crate::animation::async_state_epoch();
     let (needs_raster, has_bitmap) = {
         let cache = widget

@@ -195,11 +195,13 @@ fn snapping_case(display_scale: f64, double_buffer: bool) {
     let mut root = build_label(double_buffer);
     set_hinting_enabled(true);
     let snapped_gpu = frames.paint(Color::white(), &mut root, &before);
-    let snapped_cpu = software_tree_with(FRAME_W, FRAME_H, Color::white(), &mut root, &before);
+    let snapped_cpu =
+        software_tree_with(FRAME_W, FRAME_H, Color::white(), false, &mut root, &before);
 
     set_hinting_enabled(false);
     let unsnapped_gpu = frames.paint(Color::white(), &mut root, &before);
-    let unsnapped_cpu = software_tree_with(FRAME_W, FRAME_H, Color::white(), &mut root, &before);
+    let unsnapped_cpu =
+        software_tree_with(FRAME_W, FRAME_H, Color::white(), false, &mut root, &before);
 
     let snapped = bottom_row_coverage(&snapped_gpu);
     let unsnapped = bottom_row_coverage(&unsnapped_gpu);
