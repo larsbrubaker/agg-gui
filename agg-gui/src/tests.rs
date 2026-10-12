@@ -89,6 +89,7 @@ mod label_theme;
 mod layer_compositing;
 mod layout_lcd;
 mod layout_request;
+mod lcd_rounded_window;
 mod lcd_backbuffer_collapse;
 mod logical_root_transform;
 mod mouse_down_focus_grab_tests;

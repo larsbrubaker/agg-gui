@@ -23,15 +23,12 @@
 //! Either way, the buffer is the single intermediate that decouples
 //! "what was painted" from "how it lands on the destination."
 //!
-//! # Status
+//! # Layers and clears
 //!
-//! Step 2 of the LCD-architecture migration.  The MVP implements the
-//! primitives needed to drive an end-to-end equivalence test against
-//! the legacy `GfxCtx + lcd_mode=true` path: state setters, transform
-//! stack, axis-aligned `rect`/`fill`, `fill_text`, `clear`, and
-//! `draw_lcd_mask`.  Curve / stroke / image-blit / clip primitives are
-//! marked `// TODO step 2c` and will land before any widget actually
-//! paints into an `LcdGfxCtx`.
+//! Compositing layers (`push_layer`, `push_layer_with_alpha`,
+//! `set_layer_rounded_clip`, `pop_layer`) and the plane-fill `clear_rect`
+//! live in `layers.rs`, so a rounded `Window` painted inside an LCD
+//! backbuffer is cut to its corners as it is on an RGBA target.
 
 use std::sync::Arc;
 
@@ -53,6 +50,7 @@ use crate::text::{measure_text_metrics, Font, TextMetrics};
 
 mod gradient;
 mod image;
+mod layers;
 mod stroke;
 
 // ── State ──────────────────────────────────────────────────────────────────
@@ -128,10 +126,10 @@ impl Default for LcdState {
 // Mirrors the role of `gfx_ctx::LayerEntry` — the field shape is kept
 // close so widget code that uses `push_layer` / `pop_layer` has the
 // same mental model on either ctx type.  The compositing semantics
-// differ (see `LcdBuffer::composite_buffer`): RGBA layers do
-// alpha-aware SrcOver, LCD layers do full-replace, because the
-// coverage buffer has no alpha to distinguish "untouched" from
-// "intentionally black".
+// differ: an RGBA layer starts transparent and pops with SrcOver, an
+// LCD layer starts as a copy of its parent's pixels and pops with a
+// per-pixel weighted blend (`layers.rs`), because per-subpixel alpha
+// planes have no single alpha to scale.
 
 struct LcdLayer {
     buffer: LcdBuffer,
@@ -144,6 +142,10 @@ struct LcdLayer {
     /// coords.  Captured from the CTM's translation at push time.
     origin_x: f64,
     origin_y: f64,
+    /// Weight the whole layer is blended back with (`push_layer_with_alpha`).
+    alpha: f64,
+    /// The rounded clip set by `set_layer_rounded_clip`, if any.
+    rounded_clip: Option<layers::RoundedClip>,
 }
 
 // ── LcdGfxCtx ──────────────────────────────────────────────────────────────
@@ -349,6 +351,9 @@ impl<'a> DrawCtx for LcdGfxCtx<'a> {
     // ── Clear ─────────────────────────────────────────────────────────────
     fn clear(&mut self, color: Color) {
         self.active_buffer().clear(color);
+    }
+    fn clear_rect(&mut self, x: f64, y: f64, w: f64, h: f64, color: Color) {
+        self.clear_rect_impl(x, y, w, h, color);
     }
 
     // ── Path building ─────────────────────────────────────────────────────
@@ -608,68 +613,23 @@ impl<'a> DrawCtx for LcdGfxCtx<'a> {
 
     // ── Compositing layers ────────────────────────────────────────────────
     //
-    // `push_layer` redirects subsequent paint into a fresh `LcdBuffer`;
-    // `pop_layer` flushes that buffer back into the previously-active
-    // one at the layer's recorded origin (the CTM translation at push
-    // time).  Compositing is full-replace — see `LcdBuffer::composite_buffer`
-    // for why LCD layers can't do alpha-aware SrcOver and what that
-    // means for callers.
+    // A layer is a parent-seeded `LcdBuffer`; popping it blends it back by
+    // its alpha and rounded clip. See `layers.rs`.
 
-    fn push_layer(&mut self, width: f64, height: f64) {
-        let origin_x = self.state.transform.tx;
-        let origin_y = self.state.transform.ty;
-        let lw = width.ceil().max(1.0) as u32;
-        let lh = height.ceil().max(1.0) as u32;
-        let mut layer_buffer = LcdBuffer::new(lw, lh);
-
-        // Seed the layer with the parent's pixels at the layer's bounds.
-        // Without this, an LCD layer would composite-replace the parent
-        // region with its zero-init (black) wherever the user didn't paint —
-        // any "untouched" pixel inside the layer would visibly clear the
-        // parent on pop.  GfxCtx's RGBA layer dodges this with
-        // alpha=0 + SrcOver; LcdBuffer has no alpha, so we inherit the
-        // parent's content as the "neutral" starting state instead.
-        let dx = -(origin_x.round() as i32);
-        let dy = -(origin_y.round() as i32);
-        let parent_ref: &LcdBuffer = if let Some(layer) = self.layer_stack.last() {
-            &layer.buffer
-        } else {
-            &*self.base_buffer
-        };
-        layer_buffer.composite_buffer(parent_ref, dx, dy, None);
-
-        let saved_state = self.state.clone();
-        let saved_stack = std::mem::take(&mut self.state_stack);
-        self.layer_stack.push(LcdLayer {
-            buffer: layer_buffer,
-            saved_state,
-            saved_stack,
-            origin_x,
-            origin_y,
-        });
-        // Drawing inside the layer uses local coords (origin = layer's
-        // bottom-left).  Match `GfxCtx::push_layer` semantics — the new
-        // sub-region paints into a clean transform / no clip.
-        self.state.transform = TransAffine::new();
-        self.state.clip = None;
+    fn supports_compositing_layers(&self) -> bool {
+        true
     }
-
+    fn push_layer(&mut self, width: f64, height: f64) {
+        self.push_layer_impl(width, height, 1.0);
+    }
+    fn push_layer_with_alpha(&mut self, width: f64, height: f64, alpha: f64) {
+        self.push_layer_impl(width, height, alpha);
+    }
+    fn set_layer_rounded_clip(&mut self, x: f64, y: f64, w: f64, h: f64, r: f64) {
+        self.set_layer_rounded_clip_impl(x, y, w, h, r);
+    }
     fn pop_layer(&mut self) {
-        let Some(layer) = self.layer_stack.pop() else {
-            return;
-        };
-        // Restore the state snapshot captured at push time.
-        self.state = layer.saved_state;
-        self.state_stack = layer.saved_stack;
-        // Composite the layer onto whatever buffer is now active (could
-        // be the base buffer, or another layer if we were nested).
-        // Origin is in the parent's coords; round so the layer lands on
-        // the integer pixel grid (same reason `draw_lcd_mask` rounds).
-        let dst_x = layer.origin_x.round() as i32;
-        let dst_y = layer.origin_y.round() as i32;
-        let clip_i = self.state.clip.map(crate::lcd_coverage::rect_to_pixel_clip);
-        self.active_buffer()
-            .composite_buffer(&layer.buffer, dst_x, dst_y, clip_i);
+        self.pop_layer_impl();
     }
 
     // ── LCD mask compositing — native format for this ctx ─────────────────
@@ -777,5 +737,7 @@ fn configure_dashes<VS: VertexSource>(dash: &mut ConvDash<VS>, dashes: &[f64], d
 
 // ── Tests ──────────────────────────────────────────────────────────────────
 
+#[cfg(test)]
+mod layer_tests;
 #[cfg(test)]
 mod tests;

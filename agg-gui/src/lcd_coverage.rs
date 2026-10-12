@@ -688,6 +688,7 @@ mod lcd_coverage_tests;
 mod lcd_mask_builder_tests;
 mod mask;
 mod mask_builder;
+mod plane_ops;
 #[cfg(test)]
 mod tests;
 
