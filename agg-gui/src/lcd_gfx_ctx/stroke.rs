@@ -1,7 +1,8 @@
 //! Stroke rendering for `LcdGfxCtx`.
 //!
 //! Strokes are materialized as filled outlines so solid and gradient strokes
-//! can share the same LCD coverage mask pipeline as ordinary path fills.
+//! can share the same LCD coverage mask pipeline (and blend mode handling,
+//! `fill.rs`) as ordinary path fills.
 
 use super::*;
 use crate::curve_flattening::curve_approximation_scale;
@@ -38,41 +39,21 @@ pub(super) fn stroke(ctx: &mut LcdGfxCtx<'_>) {
         }
     }
 
-    let xform = ctx.state.transform;
-    let clip = ctx.state.clip;
-    let global_alpha = ctx.state.global_alpha as f32;
+    let spec = super::fill::FillSpec {
+        transform: ctx.state.transform,
+        clip: ctx.state.clip,
+        fill_rule: FillRule::NonZero,
+        global_alpha: ctx.state.global_alpha as f32,
+        src: ctx.state.blend_mode == CompOp::Src,
+    };
+    let buffer = &mut materialized;
     if let Some(gradient) = ctx.state.stroke_linear_gradient.clone() {
-        gradient::fill_linear_gradient(
-            ctx.active_buffer(),
-            &mut materialized,
-            &gradient,
-            global_alpha,
-            &xform,
-            clip,
-            FillRule::NonZero,
-        );
+        gradient::fill_linear_gradient(ctx.active_buffer(), buffer, &gradient, &spec);
     } else if let Some(gradient) = ctx.state.stroke_radial_gradient.clone() {
-        gradient::fill_radial_gradient(
-            ctx.active_buffer(),
-            &mut materialized,
-            &gradient,
-            global_alpha,
-            &xform,
-            clip,
-            FillRule::NonZero,
-        );
+        gradient::fill_radial_gradient(ctx.active_buffer(), buffer, &gradient, &spec);
     } else if let Some(pattern) = ctx.state.stroke_pattern.clone() {
-        gradient::fill_pattern(
-            ctx.active_buffer(),
-            &mut materialized,
-            &pattern,
-            global_alpha,
-            &xform,
-            clip,
-            FillRule::NonZero,
-        );
+        gradient::fill_pattern(ctx.active_buffer(), buffer, &pattern, &spec);
     } else {
-        ctx.active_buffer()
-            .fill_path(&mut materialized, color, &xform, clip, FillRule::NonZero);
+        super::fill::fill_solid(ctx.active_buffer(), buffer, color, &spec);
     }
 }

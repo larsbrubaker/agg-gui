@@ -48,6 +48,7 @@ use crate::draw_ctx::{DrawCtx, FillRule, LinearGradientPaint, PatternPaint, Radi
 use crate::lcd_coverage::{rasterize_text_lcd_cached, LcdBuffer, LcdMask};
 use crate::text::{measure_text_metrics, Font, TextMetrics};
 
+mod fill;
 mod gradient;
 mod image;
 mod layers;
@@ -405,54 +406,7 @@ impl<'a> DrawCtx for LcdGfxCtx<'a> {
 
     // ── Path drawing ──────────────────────────────────────────────────────
     fn fill(&mut self) {
-        let xform = self.state.transform;
-        let clip = self.state.clip;
-        let rule = self.state.fill_rule;
-        // Borrow gymnastics: `fill_path` needs `&mut path` AND `&mut buffer`,
-        // both fields of `self`.  Take the path out, fill into the active
-        // buffer, then put the path back — preserves the "path persists
-        // across fill calls" GfxCtx contract.
-        let mut path = std::mem::replace(&mut self.path, PathStorage::new());
-        if let Some(gradient) = self.state.fill_linear_gradient.clone() {
-            let global_alpha = self.state.global_alpha as f32;
-            gradient::fill_linear_gradient(
-                self.active_buffer(),
-                &mut path,
-                &gradient,
-                global_alpha,
-                &xform,
-                clip,
-                rule,
-            );
-        } else if let Some(gradient) = self.state.fill_radial_gradient.clone() {
-            let global_alpha = self.state.global_alpha as f32;
-            gradient::fill_radial_gradient(
-                self.active_buffer(),
-                &mut path,
-                &gradient,
-                global_alpha,
-                &xform,
-                clip,
-                rule,
-            );
-        } else if let Some(pattern) = self.state.fill_pattern.clone() {
-            let global_alpha = self.state.global_alpha as f32;
-            gradient::fill_pattern(
-                self.active_buffer(),
-                &mut path,
-                &pattern,
-                global_alpha,
-                &xform,
-                clip,
-                rule,
-            );
-        } else {
-            let mut color = self.state.fill_color;
-            color.a *= self.state.global_alpha as f32;
-            self.active_buffer()
-                .fill_path(&mut path, color, &xform, clip, rule);
-        }
-        self.path = path;
+        fill::fill(self);
     }
     fn stroke(&mut self) {
         stroke::stroke(self);
@@ -705,6 +659,48 @@ impl<'a> DrawCtx for LcdGfxCtx<'a> {
             dst_w,
             dst_h,
             &transform,
+            global_alpha,
+            clip,
+        );
+    }
+
+    /// agg-sharp `LcdBufferGraphics2D.CanCompositeLcdBuffer`: the target *is*
+    /// per-channel coverage, so an icon's LCD composite needs no opaque
+    /// pixels under it and the footprint is not consulted.  An LCD layer is
+    /// seeded with its parent's pixels, never a transparent compositing
+    /// layer, so nothing here refuses.
+    fn takes_lcd_image_over(&mut self, _left: i32, _bottom: i32, _right: i32, _top: i32) -> bool {
+        true
+    }
+
+    /// Plane into plane, 1:1 at the CTM-mapped origin (see
+    /// [`image::composite_lcd_planes`]); `dst_w`/`dst_h` are not resampled
+    /// to, as on `GfxCtx`, since the planes are finished device pixels.
+    fn draw_lcd_backbuffer_arc(
+        &mut self,
+        color: &Arc<Vec<u8>>,
+        alpha: &Arc<Vec<u8>>,
+        _content_version: u64,
+        w: u32,
+        h: u32,
+        dst_x: f64,
+        dst_y: f64,
+        _dst_w: f64,
+        _dst_h: f64,
+    ) {
+        let t = self.state.transform;
+        let dev_x = dst_x * t.sx + dst_y * t.shx + t.tx;
+        let dev_y = dst_x * t.shy + dst_y * t.sy + t.ty;
+        let global_alpha = self.state.global_alpha as f32;
+        let clip = self.state.clip;
+        image::composite_lcd_planes(
+            self.active_buffer(),
+            color,
+            alpha,
+            w,
+            h,
+            dev_x,
+            dev_y,
             global_alpha,
             clip,
         );

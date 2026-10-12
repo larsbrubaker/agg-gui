@@ -16,6 +16,8 @@
 use std::sync::Arc;
 
 use crate::geometry::Size;
+use crate::lcd_coverage::LcdBuffer;
+use crate::lcd_gfx_ctx::LcdGfxCtx;
 use crate::{Color, DrawCtx, Framebuffer, GfxCtx, IconImage};
 
 const ICON_SIZE: u32 = 32;
@@ -390,4 +392,111 @@ fn white_to_alpha_keeps_the_subpixel_edges() {
     let mut canvas = opaque(Color::white());
     render(&mut canvas, &cleared, 8.0, 8.0, true);
     assert!(count_chroma_pixels(&canvas) > 0);
+}
+
+/// Draw `icon` (LCD-aware when `lcd_icon`, else its plain blit) onto a fresh
+/// opaque white canvas with LCD `lcd`, after `place` sets up the CTM, at
+/// `(x, y)`.
+fn draw_placed(
+    icon: &IconImage,
+    lcd: bool,
+    lcd_icon: bool,
+    place: &dyn Fn(&mut dyn DrawCtx),
+    x: f64,
+    y: f64,
+) -> Framebuffer {
+    let mut fb = opaque(Color::white());
+    {
+        let mut ctx = GfxCtx::new(&mut fb);
+        ctx.set_lcd_mode(lcd);
+        place(&mut ctx);
+        if lcd_icon {
+            icon.draw(&mut ctx, x, y);
+        } else {
+            render_plain(&mut ctx, icon, x, y);
+        }
+    }
+    fb
+}
+
+/// The LCD composite lands where the plain blit does — same footprint, same
+/// ink per pixel give or take the subpixel spread — whether the placement
+/// comes from the position, the transform's translation or the image's
+/// hotspot.  C#'s `OriginOffset` hotspot is subtracted from the placement,
+/// so here it is a CTM translation by `-hotspot` after the graphics
+/// transform's own translation.
+#[test]
+fn the_lcd_composite_lands_where_the_plain_blit_does() {
+    for (x, y, translate_x, translate_y, hotspot_x, hotspot_y) in
+        [(8, 8, 0, 0, 0, 0), (3, 4, 5, 3, 0, 0), (10, 11, 0, 0, 2, 3)]
+    {
+        let icon = load_svg_icon(CORNER, false);
+        let place = |ctx: &mut dyn DrawCtx| {
+            ctx.translate(translate_x as f64, translate_y as f64);
+            ctx.translate(-hotspot_x as f64, -hotspot_y as f64);
+        };
+        let lcd = draw_placed(&icon, true, true, &place, x as f64, y as f64);
+        let expected = draw_placed(&icon, true, false, &place, x as f64, y as f64);
+        assert!(
+            count_chroma_pixels(&lcd) > 0,
+            "the composite has to have been the LCD one for this to test it ({x}, {y})"
+        );
+        assert_same_footprint(&lcd, &expected, WHITE);
+    }
+}
+
+/// Anywhere the LCD composite does not apply — LCD off, a fractional
+/// position, a scaled draw — the icon draws byte for byte as the same pixels
+/// without coverage do.  C#'s `Render(icon, x, y, 0, scale, scale)` places
+/// the image at `(x, y)` scaled about its origin: here a CTM translation to
+/// `(x, y)` and a scale, with the icon drawn at the origin.
+#[test]
+fn without_the_lcd_path_the_icon_draws_as_a_plain_blit() {
+    for (lcd_enabled, x, y, scale) in [
+        (false, 8.0, 8.0, 1.0),
+        (true, 8.5, 8.0, 1.0),
+        (true, 8.0, 8.25, 1.0),
+        (true, 8.0, 8.0, 1.25),
+    ] {
+        let icon = load_svg_icon(CORNER, false);
+        let place = |ctx: &mut dyn DrawCtx| {
+            ctx.translate(x, y);
+            ctx.scale(scale, scale);
+        };
+        let with_coverage = draw_placed(&icon, lcd_enabled, true, &place, 0.0, 0.0);
+        let expected = draw_placed(&icon, lcd_enabled, false, &place, 0.0, 0.0);
+        assert_painted_and_identical(&with_coverage, &expected, WHITE);
+    }
+}
+
+/// Inside an LCD widget backbuffer ([`LcdGfxCtx`]) the icon's coverage
+/// merges per channel.  C#'s `LcdBuffer.ToImageBufferCollapsed` is
+/// [`LcdBuffer::to_rgba8_top_down_collapsed`], flipped into a Y-up
+/// framebuffer for the footprint check.
+#[test]
+fn an_lcd_buffer_destination_keeps_the_chroma() {
+    let icon = load_svg_icon(CORNER, false);
+    let mut buffer = LcdBuffer::new(CANVAS_SIZE, CANVAS_SIZE);
+    {
+        let mut graphics = LcdGfxCtx::new(&mut buffer);
+        graphics.clear(Color::white());
+        icon.draw(&mut graphics, 8.0, 8.0);
+    }
+    let chroma = buffer
+        .color_plane()
+        .chunks_exact(3)
+        .filter(|p| p[0] != p[2])
+        .count();
+    assert!(chroma > 0);
+
+    let mut expected = opaque(Color::white());
+    render_plain_onto(&mut expected, &icon, 8.0, 8.0);
+    let collapsed = buffer.to_rgba8_top_down_collapsed();
+    let mut actual = Framebuffer::new(CANVAS_SIZE, CANVAS_SIZE);
+    let row = CANVAS_SIZE as usize * 4;
+    for (y, dst) in actual.pixels_mut().chunks_exact_mut(row).enumerate() {
+        let src_y = CANVAS_SIZE as usize - 1 - y;
+        dst.copy_from_slice(&collapsed[src_y * row..(src_y + 1) * row]);
+    }
+    assert_same_footprint(&actual, &expected, WHITE);
 }

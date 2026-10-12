@@ -173,3 +173,37 @@ fn rust_only_lcd_layer_keeps_the_device_scale() {
     assert_eq!(px(&buf, 32, 20).0, [255; 3]);
     assert_eq!(px(&buf, 8, 20).0, [255; 3]);
 }
+
+/// A fractional `clear_rect` takes the clipped full-coverage fill in
+/// `CompOp::Src`, so a translucent colour replaces the pixels it fully
+/// covers (its own premultiplied colour and alpha, as `LcdBuffer::clear`
+/// writes them) rather than blending over them; the partly covered edge
+/// lies between the old pixel and the new one, and outside is untouched.
+#[test]
+fn rust_only_lcd_fractional_clear_rect_replaces_with_a_translucent_colour() {
+    let mut buf = LcdBuffer::new(12, 10);
+    {
+        let mut ctx = LcdGfxCtx::new(&mut buf);
+        ctx.clear(Color::white());
+        ctx.clear_rect(1.5, 2.0, 6.0, 5.0, Color::rgba(1.0, 0.0, 0.0, 0.5));
+    }
+    let mut fresh = LcdBuffer::new(1, 1);
+    fresh.clear(Color::rgba(1.0, 0.0, 0.0, 0.5));
+    let replaced = px(&fresh, 0, 0);
+    assert_eq!(px(&buf, 4, 4), replaced, "a covered pixel is replaced");
+    let white = ([255; 3], [255; 3]);
+    assert_eq!(px(&buf, 4, 8), white, "outside the rect is untouched");
+    // The edge pixel is covered on its right half only, so per subpixel
+    // column: red (left third) barely, blue (right third) fully.
+    let (edge_c, edge_a) = px(&buf, 1, 4);
+    for ch in 0..3 {
+        assert!(
+            edge_a[ch] >= replaced.1[ch] && edge_c[ch] >= replaced.0[ch],
+            "the edge lies between the old pixel and the new: {edge_c:?} {edge_a:?}"
+        );
+    }
+    assert!(
+        edge_a[0] > replaced.1[0] && edge_a[0] < 255,
+        "the left subpixel column is only partly covered: {edge_a:?}"
+    );
+}

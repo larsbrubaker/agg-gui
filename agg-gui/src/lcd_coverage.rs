@@ -689,6 +689,7 @@ mod lcd_mask_builder_tests;
 mod mask;
 mod mask_builder;
 mod plane_ops;
+mod src_composite;
 #[cfg(test)]
 mod tests;
 

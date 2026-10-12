@@ -293,14 +293,13 @@ fn make_label(text: &str, font: &Arc<Font>, font_size: f64) -> Label {
 ///
 /// Identical to [`make_label`] except the Label is created *non-buffered*
 /// (`with_has_backbuffer(false)`).  The `MenuBar` is itself a backbuffered
-/// widget that rasterises into an `LcdGfxCtx` (when LCD is on); a *buffered*
-/// child Label would rasterise into its own `LcdCoverage` cache and then
-/// composite back through the default `draw_lcd_backbuffer_arc`, which
-/// collapses per-channel coverage to a single alpha — making the bar text
-/// grayscale while the popup (painted onto the real ctx) stays subpixel.
-/// Painting the bar label directly via `LcdGfxCtx::fill_text` preserves LCD
-/// chroma.  No caching is lost: the bar's own backbuffer holds the composited
-/// pixels, so the label only re-rasterises when the bar does.
+/// widget that rasterises into an `LcdGfxCtx` (when LCD is on), so a second
+/// cache per label would only duplicate it: painting the bar label directly
+/// via `LcdGfxCtx::fill_text` keeps its LCD chroma, and no caching is lost —
+/// the bar's own backbuffer holds the composited pixels, so the label only
+/// re-rasterises when the bar does.  (`LcdGfxCtx::draw_lcd_backbuffer_arc`
+/// merges a buffered child's planes per channel too, so either way the bar
+/// text stays subpixel.)
 fn make_bar_label(text: &str, font: &Arc<Font>, font_size: f64) -> Label {
     make_label(text, font, font_size).with_has_backbuffer(false)
 }
@@ -353,15 +352,10 @@ mod lcd_tests {
     /// `LcdCoverage` backbuffer (an [`LcdGfxCtx`]), must keep its LCD
     /// subpixel coverage.
     ///
-    /// The bug: bar labels were *buffered*, so each rasterised into its
-    /// own `LcdCoverage` cache and was then composited into the bar's
-    /// `LcdGfxCtx` via the default `draw_lcd_backbuffer_arc`, which
-    /// collapses per-channel coverage to a single alpha
-    /// (`a = ra.max(ga).max(ba)`).  That left the bar text grayscale
-    /// while every other (real-ctx) label rendered LCD — exactly the
-    /// "top menu is blurry / not subpixel" report.  Painting the label
-    /// *directly* (non-buffered) routes through `LcdGfxCtx::fill_text`,
-    /// preserving subpixel chroma.
+    /// Grayscale bar text while every other (real-ctx) label rendered
+    /// LCD was the "top menu is blurry / not subpixel" report.  The bar
+    /// label paints *directly* (non-buffered) through
+    /// `LcdGfxCtx::fill_text`, preserving subpixel chroma.
     #[test]
     fn bar_label_keeps_lcd_subpixel_inside_backbuffer_ctx() {
         set_lcd_enabled(true);

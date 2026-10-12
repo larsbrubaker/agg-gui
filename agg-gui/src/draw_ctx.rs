@@ -547,9 +547,9 @@ pub trait DrawCtx {
     /// Whether an icon's 1:1 LCD-coverage composite
     /// ([`draw_lcd_backbuffer_arc`](DrawCtx::draw_lcd_backbuffer_arc)) may land
     /// on the device-pixel rect `left..right × bottom..top` (half-open, Y-up)
-    /// and keep its subpixel coverage: LCD is on for this target and every
-    /// pixel the composite can touch is opaque, since one alpha per pixel
-    /// cannot carry three channel coverages.  agg-sharp's
+    /// and keep its subpixel coverage: on RGBA, LCD is on and every pixel it
+    /// can touch is opaque (one alpha cannot carry three channel coverages);
+    /// an LCD-buffer target always takes it.  agg-sharp's
     /// `CanCompositeLcdBuffer` + `TakesLcdImageOver`; see [`crate::IconImage`].
     /// Default `false`: the icon takes its plain blit.
     fn takes_lcd_image_over(&mut self, _left: i32, _bottom: i32, _right: i32, _top: i32) -> bool {
@@ -704,9 +704,9 @@ pub trait DrawCtx {
     /// that want full subpixel quality through the cache override this with a
     /// two-texture shader path.
     ///
-    /// This default is live CPU code, not a fallback stub: `LcdGfxCtx` does not
-    /// override it, so a nested `BackbufferMode::LcdCoverage` widget blitting
-    /// into a parent LCD backbuffer lands here.
+    /// This default is live code, not a stub: any backend without its own
+    /// override (`GfxCtx`, `LcdGfxCtx` and wgpu have one) blits through it,
+    /// so an LCD backbuffer still lands there, chroma-free.
     // Public API: the signature is shared with downstream callers.
     #[allow(clippy::too_many_arguments)]
     fn draw_lcd_backbuffer_arc(

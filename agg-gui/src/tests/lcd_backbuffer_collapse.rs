@@ -4,10 +4,9 @@
 //! itself an LCD backbuffer.
 //!
 //! `paint_subtree_backbuffered` calls `draw_lcd_backbuffer_arc` on whatever ctx
-//! it is handed.  The wgpu backend overrides it with the two-texture
-//! `lcb_flatten` shader, but `LcdGfxCtx` does not, so this default body is live
-//! CPU code — see the workaround note on `menu/widget/labels.rs::make_bar_label`,
-//! which disables a child Label's backbuffer specifically to avoid it.
+//! it is handed.  `GfxCtx`, `LcdGfxCtx` and the wgpu backend (its two-texture
+//! `lcb_flatten` shader) override it; this default body is what every other
+//! `DrawCtx` (recorders, third-party backends) gets.
 //!
 //! It has to collapse the per-channel planes the same way
 //! [`crate::lcd_coverage::LcdBuffer::to_rgba8_top_down_collapsed`] and the
