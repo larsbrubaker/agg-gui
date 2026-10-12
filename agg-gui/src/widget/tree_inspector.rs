@@ -31,6 +31,16 @@ pub struct InspectorNode {
     pub path: Vec<usize>,
     /// Type-specific display properties from [`Widget::properties`].
     pub properties: Vec<(&'static str, String)>,
+    /// The widget's own [`Widget::is_visible`] flag.  Always `true` in a
+    /// collected snapshot, which leaves hidden widgets out; kept so the
+    /// properties pane shows (and toggles) it as C#'s `InspectorNode.Visible`.
+    pub visible: bool,
+    /// The widget's own [`Widget::is_enabled`] flag (an ancestor may still
+    /// disable it), C#'s `InspectorNode.Enabled`.
+    pub enabled: bool,
+    /// How many children the widget holds, hidden ones included (C#'s
+    /// `InspectorNode.ChildCount`, `widget.Children.Count`).
+    pub child_count: usize,
 }
 
 /// Walk a reflected struct's fields and produce `(name, display)` pairs
@@ -417,6 +427,9 @@ fn collect_inspector_nodes_with_path(
         depth,
         path: path_prefix.to_vec(),
         properties: props,
+        visible: widget.is_visible(),
+        enabled: widget.is_enabled(),
+        child_count: widget.children().len(),
     });
 
     // Widgets that are part of the inspector infrastructure opt out of child
@@ -638,8 +651,10 @@ impl std::fmt::Debug for InspectorEdit {
 // WidgetBase live editing (no reflect feature required)
 // ---------------------------------------------------------------------------
 
-/// One field in a widget's [`crate::layout_props::WidgetBase`] that the
-/// inspector can change at runtime.
+/// One field of a widget that the inspector can change at runtime: its
+/// [`crate::layout_props::WidgetBase`] (margin, anchors, size constraints,
+/// width and height) or, through the [`Widget`] trait's `try_set_*` hooks,
+/// its padding, visibility and enabled flag (agg-sharp's `InspectorEditField`).
 #[derive(Clone, Debug)]
 pub enum WidgetBaseField {
     MarginLeft(f64),
@@ -652,6 +667,21 @@ pub enum WidgetBaseField {
     MinHeight(f64),
     MaxWidth(f64),
     MaxHeight(f64),
+    /// One side of the padding, through [`Widget::try_set_padding`].
+    PaddingLeft(f64),
+    PaddingRight(f64),
+    PaddingTop(f64),
+    PaddingBottom(f64),
+    /// An explicit width (C# `GuiWidget.Width = …`): agg-gui has no width
+    /// property, so this pins `min_size.width` and `max_size.width` to the
+    /// value and the parent assigns exactly that width.
+    Width(f64),
+    /// An explicit height, pinning `min_size.height` and `max_size.height`.
+    Height(f64),
+    /// Show or hide the widget, through [`Widget::try_set_visible`].
+    Visible(bool),
+    /// Enable or disable the widget, through [`Widget::try_set_enabled`].
+    Enabled(bool),
 }
 
 /// Queued mutation for a widget's `WidgetBase`.  The inspector pushes these;
@@ -665,15 +695,44 @@ pub struct WidgetBaseEdit {
 
 /// Apply a single queued `WidgetBaseEdit` against the live widget tree.
 /// Returns `true` when the edit landed, `false` if the path was stale or the
-/// widget does not expose a `WidgetBase`.
+/// widget does not carry the field (no `WidgetBase`, or a `try_set_*` hook it
+/// does not implement).  Sizes, margins and paddings never go below zero.
 pub fn apply_widget_base_edit(root: &mut dyn Widget, edit: &WidgetBaseEdit) -> bool {
     let Some(target) = walk_path_mut(root, &edit.path) else {
         return false;
     };
-    let Some(base) = target.widget_base_mut() else {
-        return false;
-    };
-    match &edit.field {
+    if !apply_trait_field(target, &edit.field) {
+        let Some(base) = target.widget_base_mut() else {
+            return false;
+        };
+        if !apply_base_field(base, &edit.field) {
+            return false;
+        }
+    }
+    target.mark_dirty();
+    crate::animation::request_draw();
+    true
+}
+
+/// The fields set through the `Widget` trait's `try_set_*` hooks.  `false`
+/// for a `WidgetBase` field or a hook the widget leaves at its default.
+fn apply_trait_field(target: &mut dyn Widget, field: &WidgetBaseField) -> bool {
+    let mut padding = target.padding();
+    match field {
+        WidgetBaseField::PaddingLeft(v) => padding.left = v.max(0.0),
+        WidgetBaseField::PaddingRight(v) => padding.right = v.max(0.0),
+        WidgetBaseField::PaddingTop(v) => padding.top = v.max(0.0),
+        WidgetBaseField::PaddingBottom(v) => padding.bottom = v.max(0.0),
+        WidgetBaseField::Visible(on) => return target.try_set_visible(*on),
+        WidgetBaseField::Enabled(on) => return target.try_set_enabled(*on),
+        _ => return false,
+    }
+    target.try_set_padding(padding)
+}
+
+/// The fields stored in the widget's `WidgetBase`; `false` for the others.
+fn apply_base_field(base: &mut crate::layout_props::WidgetBase, field: &WidgetBaseField) -> bool {
+    match field {
         // A size never goes below zero (agg-sharp's `InspectorEdit.Apply`).
         WidgetBaseField::MarginLeft(v) => base.margin.left = v.max(0.0),
         WidgetBaseField::MarginRight(v) => base.margin.right = v.max(0.0),
@@ -685,9 +744,16 @@ pub fn apply_widget_base_edit(root: &mut dyn Widget, edit: &WidgetBaseEdit) -> b
         WidgetBaseField::MinHeight(v) => base.min_size.height = v.max(0.0),
         WidgetBaseField::MaxWidth(v) => base.max_size.width = v.max(0.0),
         WidgetBaseField::MaxHeight(v) => base.max_size.height = v.max(0.0),
+        WidgetBaseField::Width(v) => {
+            base.min_size.width = v.max(0.0);
+            base.max_size.width = v.max(0.0);
+        }
+        WidgetBaseField::Height(v) => {
+            base.min_size.height = v.max(0.0);
+            base.max_size.height = v.max(0.0);
+        }
+        _ => return false,
     }
-    target.mark_dirty();
-    crate::animation::request_draw();
     true
 }
 

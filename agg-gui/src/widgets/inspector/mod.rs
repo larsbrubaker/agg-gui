@@ -277,6 +277,30 @@ pub(super) enum PropHitKind {
     HAnchorCycle { current: HAnchor },
     /// Click anywhere on the row to advance to the next VAnchor preset.
     VAnchorCycle { current: VAnchor },
+    /// Click left half → shrink the width or height by `step`; right half →
+    /// grow it (agg-sharp's editable size rows, `NumericStep`).
+    SizeStep {
+        axis: SizeAxis,
+        current: f64,
+        step: f64,
+    },
+    /// Click anywhere on the value to flip the widget's visible or enabled
+    /// flag (agg-sharp's `visible` / `enabled` rows).
+    FlagToggle { flag: WidgetFlag, current: bool },
+}
+
+/// Which size a [`PropHitKind::SizeStep`] row edits.
+#[derive(Clone, Copy, Debug)]
+pub(super) enum SizeAxis {
+    Width,
+    Height,
+}
+
+/// Which flag a [`PropHitKind::FlagToggle`] row flips.
+#[derive(Clone, Copy, Debug)]
+pub(super) enum WidgetFlag {
+    Visible,
+    Enabled,
 }
 
 /// Which Insets struct the edit targets.
@@ -604,6 +628,27 @@ impl InspectorPanel {
             PropHitKind::VAnchorCycle { current } => {
                 crate::widget::WidgetBaseField::VAnchor(next_v_anchor(*current))
             }
+            PropHitKind::SizeStep {
+                axis,
+                current,
+                step,
+            } => {
+                let mid = hit.rect.x + hit.rect.width * 0.5;
+                let new_v = (if pos.x < mid {
+                    *current - *step
+                } else {
+                    *current + *step
+                })
+                .max(0.0);
+                match axis {
+                    SizeAxis::Width => crate::widget::WidgetBaseField::Width(new_v),
+                    SizeAxis::Height => crate::widget::WidgetBaseField::Height(new_v),
+                }
+            }
+            PropHitKind::FlagToggle { flag, current } => match flag {
+                WidgetFlag::Visible => crate::widget::WidgetBaseField::Visible(!*current),
+                WidgetFlag::Enabled => crate::widget::WidgetBaseField::Enabled(!*current),
+            },
             _ => return false,
         };
         queue.borrow_mut().push(crate::widget::WidgetBaseEdit {

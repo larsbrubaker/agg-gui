@@ -12,6 +12,10 @@
 //! `InspectorPanel`, and synthetic events in panel-local coordinates.  Where the
 //! two differ the comment at the assertion says how.  Invisible widgets are left
 //! out of agg-gui's snapshot, so the C# five nodes are four here (no "Hidden").
+//! `Fixed` carries its own padding, visible and enabled flags and honours its
+//! `WidgetBase` size constraints, so it overrides the `Widget` trait's
+//! `try_set_padding` / `try_set_visible` / `try_set_enabled` hooks the padding,
+//! visible and enabled edits go through; a width edit pins the min and max width.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -44,6 +48,7 @@ struct Fixed {
     size: Size,
     padding: Insets,
     visible: bool,
+    enabled: bool,
     base: WidgetBase,
     children: Vec<Box<dyn Widget>>,
 }
@@ -60,6 +65,7 @@ impl Fixed {
             size: Size::new(w, h),
             padding: Insets::ZERO,
             visible: true,
+            enabled: true,
             base,
             children: Vec::new(),
         }
@@ -97,13 +103,33 @@ impl Widget for Fixed {
     fn is_visible(&self) -> bool {
         self.visible
     }
+    fn is_enabled(&self) -> bool {
+        self.enabled
+    }
+    fn try_set_visible(&mut self, visible: bool) -> bool {
+        self.visible = visible;
+        true
+    }
+    fn try_set_enabled(&mut self, enabled: bool) -> bool {
+        self.enabled = enabled;
+        true
+    }
+    fn try_set_padding(&mut self, padding: Insets) -> bool {
+        self.padding = padding;
+        true
+    }
     fn layout(&mut self, _available: Size) -> Size {
         for child in &mut self.children {
             let origin = child.widget_base().map(|b| b.origin).unwrap_or_default();
             let size = child.layout(self.size);
             child.set_bounds(Rect::new(origin.x, origin.y, size.width, size.height));
         }
-        self.size
+        // C#'s `GuiWidget(width, height)` size, within the size constraints.
+        let (min, max) = (self.base.min_size, self.base.max_size);
+        Size::new(
+            self.size.width.min(max.width).max(min.width),
+            self.size.height.min(max.height).max(min.height),
+        )
     }
     fn paint(&mut self, _: &mut dyn DrawCtx) {}
     fn on_event(&mut self, _: &Event) -> EventResult {
@@ -125,8 +151,9 @@ fn sample_tree() -> Fixed {
     let mut hidden = Fixed::new("Hidden", 10.0, 10.0, 0.0, 0.0);
     hidden.visible = false;
     page.children.push(Box::new(hidden));
-    page.children
-        .push(Box::new(Fixed::new("Disabled", 20.0, 12.0, 0.0, 0.0)));
+    let mut disabled = Fixed::new("Disabled", 20.0, 12.0, 0.0, 0.0);
+    disabled.enabled = false;
+    page.children.push(Box::new(disabled));
     page.layout(Size::new(600.0, 400.0));
     page
 }
@@ -337,13 +364,9 @@ fn edits_apply_every_field_and_stop_at_zero() {
         &mut page,
         &edit(&box_path, WidgetBaseField::MarginLeft(9.0))
     ));
-    // C# steps padding.top to -3 here; agg-gui's padding belongs to each
-    // container and is read-only in the inspector, so the zero floor is
-    // checked on a margin side instead.  C#'s Visible and Width fields have
-    // no agg-gui counterpart (no generic visibility or size setter).
     apply_widget_base_edit(
         &mut page,
-        &edit(&box_path, WidgetBaseField::MarginBottom(-3.0)),
+        &edit(&box_path, WidgetBaseField::PaddingTop(-3.0)),
     );
     apply_widget_base_edit(
         &mut page,
@@ -353,26 +376,46 @@ fn edits_apply_every_field_and_stop_at_zero() {
         &mut page,
         &edit(&box_path, WidgetBaseField::VAnchor(VAnchor::TOP)),
     );
+    apply_widget_base_edit(
+        &mut page,
+        &edit(&leaf_path, WidgetBaseField::Visible(false)),
+    );
+    apply_widget_base_edit(&mut page, &edit(&leaf_path, WidgetBaseField::Width(75.0)));
+    // C#'s Width setter lays the widget out at once; here the next layout does.
+    page.layout(Size::new(600.0, 400.0));
 
-    let base = page.children[0].widget_base().unwrap();
+    let boxed = &page.children[0];
+    let base = boxed.widget_base().unwrap();
     assert_eq!(
         base.margin,
         Insets {
             left: 9.0,
             right: 4.0,
             top: 4.0,
-            bottom: 0.0
+            bottom: 4.0
+        }
+    );
+    assert_eq!(
+        boxed.padding(),
+        Insets {
+            left: 6.0,
+            right: 6.0,
+            top: 0.0,
+            bottom: 6.0
         },
         "a size never goes below zero"
     );
     assert_eq!(base.h_anchor, HAnchor::STRETCH);
     assert_eq!(base.v_anchor, VAnchor::TOP);
+    let leaf = &boxed.children()[0];
+    assert!(!leaf.is_visible());
+    assert_eq!(leaf.bounds().width, 75.0);
     assert_eq!(next_h_anchor(HAnchor::RIGHT), HAnchor::ABSOLUTE);
     assert_eq!(next_v_anchor(VAnchor::ABSOLUTE), VAnchor::FIT);
 
     // A removed widget is left alone.
     page.children[0].children_mut().remove(0);
-    let stale = edit(&leaf_path, WidgetBaseField::MarginLeft(1.0));
+    let stale = edit(&leaf_path, WidgetBaseField::Visible(true));
     assert!(
         !apply_widget_base_edit(&mut page, &stale),
         "a closed widget is left alone"
@@ -421,16 +464,23 @@ fn clicking_a_value_queues_an_edit_that_lands_on_idle() {
         "the pane re-collects after the edit lands"
     );
 
-    // The left half steps down; an anchor picks the next in the cycle.
-    // (C#'s visible row has no agg-gui counterpart.)
+    // The left half steps down; an anchor picks the next in the cycle; visible toggles.
     click_value(&mut panel, "margin.top", false);
     click_value(&mut panel, "h_anchor", false);
+    click_value(&mut panel, "visible", true);
     land(&mut page, &mut panel);
     assert_eq!(page.children[0].margin().top, 4.0 - inset_step(4.0));
     assert_eq!(
         page.children[0].h_anchor(),
         next_h_anchor(HAnchor::ABSOLUTE)
     );
+    assert!(!page.children[0].is_visible());
+
+    // agg-gui's snapshot leaves a hidden widget out, so its rows are gone
+    // until it shows again (C# keeps listing it); show it to go on.
+    assert!(page.children[0].try_set_visible(true));
+    refresh(&mut page, &nodes, &mut panel);
+    panel.select(Some(BOX));
 
     // A read-only row (x, and padding, as agg-gui's) queues nothing.
     let rec = paint(&mut panel);
@@ -518,16 +568,23 @@ fn rows_keep_agg_gui_order_and_the_box_preview_shows_the_widget_shape() {
         "pad.bottom",
         "h_anchor",
         "v_anchor",
+        "visible",
+        "enabled",
+        "children",
     ];
-    // C# ends with visible, enabled and children; agg-gui follows the anchors
-    // with each widget's own properties, led by its backbuffer flag.
+    // After C#'s rows agg-gui lists each widget's own properties, led by its
+    // backbuffer flag.
     assert_eq!(&labels[..expected.len()], &expected[..]);
     assert_eq!(labels[expected.len()], "backbuffer");
+    assert_eq!(row_value(&rec, "visible").as_deref(), Some("true"));
+    assert_eq!(row_value(&rec, "children").as_deref(), Some("1"));
 
-    // Margins and anchors are editable; padding is read-only.
+    // Margins, anchors and flags are editable; padding is read-only.
     assert!(panel.value_bounds("margin.top").is_some());
     assert!(panel.value_bounds("pad.top").is_none());
     assert!(panel.value_bounds("h_anchor").is_some());
+    assert!(panel.value_bounds("visible").is_some());
+    assert!(panel.value_bounds("children").is_none());
 
     // A widget with no padding has no padding rows.
     panel.select(Some(LEAF));

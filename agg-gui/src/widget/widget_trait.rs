@@ -294,6 +294,32 @@ pub trait Widget {
         true
     }
 
+    /// Show or hide this widget from a generic caller (the inspector's
+    /// `visible` row, C# `GuiWidget.Visible = …`).  Returns `false`, changing
+    /// nothing, when the widget has no visibility of its own to set — the
+    /// default; widgets whose [`is_visible`](Self::is_visible) reads a flag
+    /// they own override this to set it.
+    fn try_set_visible(&mut self, _visible: bool) -> bool {
+        false
+    }
+
+    /// Enable or disable this widget from a generic caller (the inspector's
+    /// `enabled` row, C# `GuiWidget.Enabled = …`).  Returns `false`, changing
+    /// nothing, when the widget cannot be disabled — the default; widgets
+    /// whose [`is_enabled`](Self::is_enabled) reads a flag override this.
+    fn try_set_enabled(&mut self, _enabled: bool) -> bool {
+        false
+    }
+
+    /// Replace this widget's inner padding from a generic caller (the
+    /// inspector's padding edits, C# `GuiWidget.Padding = …`).  Padding
+    /// belongs to each container, stored its own way, so the default returns
+    /// `false` and changes nothing; containers whose
+    /// [`padding`](Self::padding) reads a stored `Insets` override this.
+    fn try_set_padding(&mut self, _padding: Insets) -> bool {
+        false
+    }
+
     /// Return type-specific properties for the inspector properties pane.
     ///
     /// Each entry is `(name, display_value)`.  The default returns an empty

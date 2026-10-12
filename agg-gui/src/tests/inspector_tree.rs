@@ -28,6 +28,9 @@ fn test_inspector_row0_at_top() {
             v_anchor: crate::layout_props::VAnchor::FIT,
             path: vec![],
             properties: vec![],
+            visible: true,
+            enabled: true,
+            child_count: 0,
         },
         InspectorNode {
             type_name: "Child",
@@ -39,6 +42,9 @@ fn test_inspector_row0_at_top() {
             v_anchor: crate::layout_props::VAnchor::FIT,
             path: vec![],
             properties: vec![],
+            visible: true,
+            enabled: true,
+            child_count: 0,
         },
     ]));
 
@@ -122,6 +128,9 @@ fn test_inspector_tree_populates_from_nodes() {
             v_anchor: crate::layout_props::VAnchor::FIT,
             path: vec![],
             properties: vec![],
+            visible: true,
+            enabled: true,
+            child_count: 0,
         },
         InspectorNode {
             type_name: "Child",
@@ -133,6 +142,9 @@ fn test_inspector_tree_populates_from_nodes() {
             v_anchor: crate::layout_props::VAnchor::FIT,
             path: vec![],
             properties: vec![],
+            visible: true,
+            enabled: true,
+            child_count: 0,
         },
         InspectorNode {
             type_name: "Sibling",
@@ -144,6 +156,9 @@ fn test_inspector_tree_populates_from_nodes() {
             v_anchor: crate::layout_props::VAnchor::FIT,
             path: vec![],
             properties: vec![],
+            visible: true,
+            enabled: true,
+            child_count: 0,
         },
     ]));
 
@@ -210,6 +225,9 @@ fn test_inspector_tree_default_expanded() {
             v_anchor: crate::layout_props::VAnchor::FIT,
             path: vec![],
             properties: vec![],
+            visible: true,
+            enabled: true,
+            child_count: 0,
         },
         InspectorNode {
             type_name: "Child",
@@ -221,6 +239,9 @@ fn test_inspector_tree_default_expanded() {
             v_anchor: crate::layout_props::VAnchor::FIT,
             path: vec![],
             properties: vec![],
+            visible: true,
+            enabled: true,
+            child_count: 0,
         },
     ]));
 
@@ -255,6 +276,9 @@ fn test_inspector_tree_drag_disabled() {
         v_anchor: crate::layout_props::VAnchor::FIT,
         path: vec![],
         properties: vec![],
+        visible: true,
+        enabled: true,
+        child_count: 0,
     }]));
 
     let panel = InspectorPanel::new(Arc::clone(&font), Rc::clone(&nodes), hovered_bounds);
@@ -386,6 +410,9 @@ fn test_inspector_top_row_appears_at_top_of_tree_area() {
         v_anchor: crate::layout_props::VAnchor::FIT,
         path: vec![],
         properties: vec![],
+        visible: true,
+        enabled: true,
+        child_count: 0,
     }]));
     let hovered = Rc::new(RefCell::new(None));
     let mut panel = InspectorPanel::new(Arc::clone(&font), Rc::clone(&nodes), Rc::clone(&hovered));

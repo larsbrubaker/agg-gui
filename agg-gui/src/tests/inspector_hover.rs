@@ -38,6 +38,9 @@ fn make_nodes() -> Rc<RefCell<Vec<InspectorNode>>> {
             v_anchor: crate::layout_props::VAnchor::FIT,
             path: vec![],
             properties: vec![],
+            visible: true,
+            enabled: true,
+            child_count: 0,
         },
         InspectorNode {
             type_name: "Child",
@@ -49,6 +52,9 @@ fn make_nodes() -> Rc<RefCell<Vec<InspectorNode>>> {
             v_anchor: crate::layout_props::VAnchor::FIT,
             path: vec![],
             properties: vec![],
+            visible: true,
+            enabled: true,
+            child_count: 0,
         },
     ]))
 }

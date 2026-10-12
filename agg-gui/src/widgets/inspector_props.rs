@@ -2,9 +2,11 @@
 //!
 //! Extracted from `inspector.rs` to keep both files within the project's
 //! 800-line limit.  The single entry point is [`paint_properties`], which
-//! renders the lower half of the inspector panel: section header, the static
-//! geometry rows (x/y/width/height/depth), editable margin and anchor rows,
-//! the widget-specific properties list, and the box-model preview, whose
+//! renders the lower half of the inspector panel: section header, the
+//! geometry rows (x/y/depth read-only, width/height editable), editable
+//! margin and anchor rows, read-only padding rows, the visible / enabled /
+//! children rows (agg-sharp's `InspectorPropertiesView.RowsOf` order), the
+//! widget-specific properties list, and the box-model preview, whose
 //! rectangle it returns.
 
 use std::sync::Arc;
@@ -16,8 +18,16 @@ use crate::text::Font;
 use crate::widget::InspectorNode;
 
 use super::inspector::{
-    c_border, c_dim_text, c_text, InsetsSide, InsetsTarget, PropHit, PropHitKind, FONT_SIZE,
+    c_border, c_dim_text, c_text, InsetsSide, InsetsTarget, PropHit, PropHitKind, SizeAxis,
+    WidgetFlag, FONT_SIZE,
 };
+
+/// Strip behind an editable value without a kind of its own (agg-sharp's
+/// `InspectorStyle.EditableValue`); margins share it.
+const EDITABLE_TINT: Color = Color::rgba(0.9, 0.55, 0.1, 0.15);
+/// Value colours of a `true` / `false` flag row.
+const TRUE_VALUE: Color = Color::rgb(0.10, 0.52, 0.10);
+const FALSE_VALUE: Color = Color::rgb(0.65, 0.18, 0.18);
 
 // Each argument is a distinct drawing/geometry input; a struct would only rename them.
 #[allow(clippy::too_many_arguments)]
@@ -66,20 +76,39 @@ pub(super) fn paint_properties(
     let row_h = 18.0;
     let mut ry = available_h - 56.0;
 
-    // ── static geometry rows ──────────────────────────────────────────────────
+    // ── geometry rows: position and depth read-only, sizes editable ─────────
     let b = &node.screen_bounds;
-    let geom_rows: &[(&str, String)] = &[
-        ("x", format!("{:.1}", b.x)),
-        ("y", format!("{:.1}", b.y)),
-        ("width", format!("{:.1}", b.width)),
-        ("height", format!("{:.1}", b.height)),
-        ("depth", format!("{}", node.depth)),
+    let geom_rows: &[(&str, String, Option<SizeAxis>)] = &[
+        ("x", format!("{:.1}", b.x), None),
+        ("y", format!("{:.1}", b.y), None),
+        ("width", format!("{:.1}", b.width), Some(SizeAxis::Width)),
+        ("height", format!("{:.1}", b.height), Some(SizeAxis::Height)),
+        ("depth", format!("{}", node.depth), None),
     ];
-    for (label, value) in geom_rows {
+    for (label, value, axis) in geom_rows {
         if ry < 4.0 {
             break;
         }
-        paint_row_static(ctx, w, ry, label, value, &v);
+        match axis {
+            Some(axis) => {
+                let current = match axis {
+                    SizeAxis::Width => b.width,
+                    SizeAxis::Height => b.height,
+                };
+                let hit = paint_row_editable(ctx, w, ry, label, value, &v, EDITABLE_TINT);
+                hits.push(PropHit {
+                    rect: hit,
+                    field: (*label).to_string(),
+                    kind: PropHitKind::SizeStep {
+                        axis: *axis,
+                        current,
+                        // agg-sharp's NumericStep: 5% of the value, at least 0.1
+                        step: (current.abs().max(1.0) * 0.05).max(0.1),
+                    },
+                });
+            }
+            None => paint_row_static(ctx, w, ry, label, value, &v),
+        }
         ry -= row_h;
     }
 
@@ -96,15 +125,7 @@ pub(super) fn paint_properties(
             break;
         }
         let step = (val.abs() * 0.5 + 0.5).clamp(0.5, 4.0);
-        let hit = paint_row_editable(
-            ctx,
-            w,
-            ry,
-            label,
-            &format!("{:.1}", val),
-            &v,
-            Color::rgba(0.9, 0.55, 0.1, 0.15),
-        );
+        let hit = paint_row_editable(ctx, w, ry, label, &format!("{:.1}", val), &v, EDITABLE_TINT);
         hits.push(PropHit {
             rect: hit,
             field: (*label).to_string(),
@@ -184,6 +205,33 @@ pub(super) fn paint_properties(
         }
     }
 
+    // ── visible / enabled flags and the child count ───────────────────────────
+    for (label, flag, on) in [
+        ("visible", WidgetFlag::Visible, node.visible),
+        ("enabled", WidgetFlag::Enabled, node.enabled),
+    ] {
+        if ry < 4.0 {
+            break;
+        }
+        let (text, color) = if on {
+            ("true", TRUE_VALUE)
+        } else {
+            ("false", FALSE_VALUE)
+        };
+        paint_row_colored_value(ctx, w, ry, label, text, color, &v);
+        hits.push(PropHit {
+            rect: Rect::new(w * 0.5, ry - 4.0, w * 0.5 - 2.0, 16.0),
+            field: label.to_string(),
+            kind: PropHitKind::FlagToggle { flag, current: on },
+        });
+        ry -= row_h;
+    }
+    if ry >= 4.0 {
+        let children = node.child_count.to_string();
+        paint_row_static(ctx, w, ry, "children", &children, &v);
+        ry -= row_h;
+    }
+
     // ── widget-specific properties ────────────────────────────────────────────
     for (prop_label, prop_value) in &node.properties {
         if ry < 4.0 {
@@ -192,9 +240,9 @@ pub(super) fn paint_properties(
         let is_bool = *prop_value == "true" || *prop_value == "false";
         if is_bool {
             let color = if *prop_value == "true" {
-                Color::rgb(0.10, 0.52, 0.10)
+                TRUE_VALUE
             } else {
-                Color::rgb(0.65, 0.18, 0.18)
+                FALSE_VALUE
             };
             paint_row_colored_value(ctx, w, ry, prop_label, prop_value, color, &v);
             let hit_rect = Rect::new(w * 0.5, ry - 4.0, w * 0.5 - 2.0, 16.0);
