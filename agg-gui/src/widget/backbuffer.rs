@@ -136,7 +136,7 @@ pub struct BackbufferCache {
     /// (`set_text`, `set_color`, focus/hover changes, etc.) and the
     /// framework clears it after a successful re-raster.
     pub dirty: bool,
-    /// Visuals epoch (see [`crate::theme::current_visuals_epoch`]) recorded
+    /// Visuals epoch (see [`crate::theme::current_thread_visuals_epoch`]) recorded
     /// the last time this cache was populated.  `paint_subtree_backbuffered`
     /// compares it against the live epoch and forces a re-raster on mismatch,
     /// so widgets whose text/fill colours come from `ctx.visuals()` refresh

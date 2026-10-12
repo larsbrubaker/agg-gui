@@ -454,6 +454,20 @@ pub fn current_visuals_epoch() -> u64 {
     VISUALS_EPOCH.load(Ordering::Relaxed)
 }
 
+thread_local! {
+    /// Per-thread twin of [`VISUALS_EPOCH`]. The visuals themselves are
+    /// thread-local, so a retained layer painted on this thread only needs
+    /// to see *this* thread's palette changes, and must not be repainted by
+    /// another thread's `set_visuals` (parallel tests).
+    static THREAD_VISUALS_EPOCH: std::cell::Cell<u64> = const { std::cell::Cell::new(1) };
+}
+
+/// Epoch of the calling thread's visuals: bumped by [`set_visuals`] like
+/// [`current_visuals_epoch`], but only for changes made on this thread.
+pub fn current_thread_visuals_epoch() -> u64 {
+    THREAD_VISUALS_EPOCH.with(|e| e.get())
+}
+
 /// Replace the active [`Visuals`].
 ///
 /// Call this once per frame *before* painting, typically from the platform
@@ -461,6 +475,7 @@ pub fn current_visuals_epoch() -> u64 {
 pub fn set_visuals(v: Visuals) {
     VISUALS.with(|cell| *cell.borrow_mut() = v);
     VISUALS_EPOCH.fetch_add(1, Ordering::Relaxed);
+    THREAD_VISUALS_EPOCH.with(|e| e.set(e.get() + 1));
 }
 
 /// Clone and return the active [`Visuals`].

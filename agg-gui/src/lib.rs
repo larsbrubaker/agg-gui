@@ -197,7 +197,8 @@ pub use text::{
     EllipsisMode, Font, TextMetrics,
 };
 pub use theme::{
-    current_visuals, current_visuals_epoch, set_visuals, AccentColor, ThemePreference, Visuals,
+    current_thread_visuals_epoch, current_visuals, current_visuals_epoch, set_visuals, AccentColor,
+    ThemePreference, Visuals,
 };
 pub use timestep::{FixedTimestep, StepBatch, FIXED_DT, MAX_STEPS_PER_DRAW, SIMULATION_HZ};
 pub use touch_emulation::{touch_pan_travel, EmuCmd, TouchMouseEmu, TOUCH_SCROLL_THRESHOLD};

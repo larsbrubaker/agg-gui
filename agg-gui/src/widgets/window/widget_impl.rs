@@ -222,6 +222,15 @@ impl Widget for Window {
             && local_pos.y <= b.height
     }
 
+    /// A closing window is still painted while it fades out, but nothing in
+    /// it can be used any more: keyboard focus leaves it (`App` drops focus
+    /// in a blocked subtree) and Tab skips it. Its pointer input already
+    /// passes through, because `hit_test` misses while it is not requested
+    /// visible (agg-sharp `DemoWindowFadeTests`).
+    fn blocks_child_interaction(&self) -> bool {
+        !self.requested_visible()
+    }
+
     fn claims_pointer_exclusively(&self, local_pos: Point) -> bool {
         self.requested_visible()
             && (self.drag_mode != DragMode::None || self.resize_dir(local_pos).is_some())

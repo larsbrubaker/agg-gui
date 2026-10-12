@@ -69,18 +69,21 @@ impl Widget for RetainedProbe {
     }
 }
 
-struct RetainedLayerCtx {
+pub(super) struct RetainedLayerCtx {
     transform: TransAffine,
     stack: Vec<TransAffine>,
     has_retained_layer: bool,
+    /// The alpha of the most recent retained-layer composite or push.
+    pub(super) last_alpha: f64,
 }
 
 impl RetainedLayerCtx {
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self {
             transform: TransAffine::new(),
             stack: Vec::new(),
             has_retained_layer: false,
+            last_alpha: 1.0,
         }
     }
 }
@@ -171,17 +174,13 @@ impl DrawCtx for RetainedLayerCtx {
         _key: u64,
         _width: f64,
         _height: f64,
-        _alpha: f64,
+        alpha: f64,
     ) -> bool {
+        self.last_alpha = alpha;
         self.has_retained_layer
     }
-    fn push_retained_layer_with_alpha(
-        &mut self,
-        _key: u64,
-        _width: f64,
-        _height: f64,
-        _alpha: f64,
-    ) {
+    fn push_retained_layer_with_alpha(&mut self, _key: u64, _width: f64, _height: f64, alpha: f64) {
+        self.last_alpha = alpha;
         self.has_retained_layer = true;
     }
     fn pop_layer(&mut self) {}

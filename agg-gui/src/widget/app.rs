@@ -222,6 +222,7 @@ impl App {
         // Layout is where containers adopt queued reorders; follow them.
         self.resolve_tracked_paths();
         self.apply_pending_focus();
+        self.drop_unreachable_focus();
         // Re-evaluate the keyboard-avoidance lift against FRESH bounds
         // (see `keyboard_scroll::relift_after_layout` for the why).
         crate::widget::keyboard_scroll::relift_after_layout(

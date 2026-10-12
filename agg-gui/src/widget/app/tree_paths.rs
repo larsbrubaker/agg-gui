@@ -4,7 +4,8 @@
 //! cap. These walk the `App` root by `Vec<usize>` child-index paths: collect
 //! every focusable widget in paint order, and resolve a path to a (mutable or
 //! shared) widget reference, or `None` when the path has gone stale. Used by `App`'s focus, hit-test, and
-//! bring-to-front logic.
+//! bring-to-front logic. Also drops focus whose path can no longer take it
+//! (a hidden or interaction-blocked subtree, such as a closing `Window`).
 
 use crate::widget::Widget;
 
@@ -30,6 +31,41 @@ pub(super) fn collect_focusable(
         current_path.push(i);
         collect_focusable(child.as_ref(), current_path, out);
         current_path.pop();
+    }
+}
+
+/// `true` while every widget on `path`, the target included, could still
+/// take focus under [`collect_focusable`]'s rules: visible and not inside a
+/// subtree that [`Widget::blocks_child_interaction`]. A stale path is not
+/// reachable. `App` drops focus that loses this (agg-sharp's `GuiWidget`
+/// unfocuses a subtree that is hidden), so a closing `Window` or a hidden
+/// panel keeps no keyboard focus.
+pub(super) fn focus_path_reachable(root: &dyn Widget, path: &[usize]) -> bool {
+    let mut widget = root;
+    for &idx in path {
+        if !widget.is_visible() || widget.blocks_child_interaction() {
+            return false;
+        }
+        match widget.children().get(idx) {
+            Some(child) => widget = child.as_ref(),
+            None => return false,
+        }
+    }
+    widget.is_visible() && !widget.blocks_child_interaction()
+}
+
+impl super::App {
+    /// Let go of focus held inside a subtree that can no longer take it (see
+    /// [`focus_path_reachable`]); the widget receives `FocusLost`. Run by
+    /// `App::layout` after pending focus requests are applied.
+    pub(super) fn drop_unreachable_focus(&mut self) {
+        let unreachable = self
+            .focus
+            .as_deref()
+            .is_some_and(|p| !focus_path_reachable(self.root.as_ref(), p));
+        if unreachable {
+            self.set_focus(None);
+        }
     }
 }
 

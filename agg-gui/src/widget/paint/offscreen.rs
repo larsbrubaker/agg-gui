@@ -71,7 +71,8 @@ fn paint_subtree_gl_backbuffer(
     let layer_w = (b.width + spec.outsets.left + spec.outsets.right).max(1.0);
     let layer_h = (b.height + spec.outsets.bottom + spec.outsets.top).max(1.0);
     let subtree_needs_draw = widget.needs_draw();
-    let theme_epoch = crate::theme::current_visuals_epoch();
+    // The calling thread's epoch: the visuals are thread-local.
+    let theme_epoch = crate::theme::current_thread_visuals_epoch();
     // The calling thread's epoch: the typography settings are thread-local,
     // so another thread's change (a parallel test) must not repaint this
     // thread's caches.
@@ -252,7 +253,8 @@ pub(super) fn paint_subtree_backbuffered(widget: &mut dyn Widget, ctx: &mut dyn 
     // `cache.lcd_alpha`: `Some` means LCD cache, `None` means Rgba.
     let mode = widget.backbuffer_mode();
     let mode_is_lcd = matches!(mode, BackbufferMode::LcdCoverage);
-    let theme_epoch = crate::theme::current_visuals_epoch();
+    // The calling thread's epoch: the visuals are thread-local.
+    let theme_epoch = crate::theme::current_thread_visuals_epoch();
     // The calling thread's epoch: the typography settings are thread-local,
     // so another thread's change (a parallel test) must not repaint this
     // thread's caches.
