@@ -531,26 +531,24 @@ impl ScrollView {
             return (0.0, 0.0);
         }
         let span = self.style.bar_width + self.style.outer_margin + self.style.inner_margin;
-        // We reserve vertical bar width on the right when vertical scrolling
-        // is potentially active (has content overflow).
-        let need_v = self.v.enabled && self.v.content > self.bounds.height - self.h_bar_thickness();
-        let need_h = self.h.enabled && self.h.content > self.bounds.width - self.v_bar_thickness();
         // The bar's strip sits inside the resize-grip guard, so the room it
         // takes from the content includes the guard: without it the content
         // ran under the strip's inner margin (agg-sharp's
         // `ScrollBarAppearanceTests.WidthAndMarginsWidenTheStripAndReserveIt`).
-        let guard = self.edge_guard();
-        let rx = if need_v { span + guard } else { 0.0 };
-        let ry = if need_h { span + guard } else { 0.0 };
+        let room = span + self.edge_guard();
+        let (need_v, need_h) = solid_bars_showing(
+            (self.v.enabled, self.v.content, self.bounds.height),
+            (self.h.enabled, self.h.content, self.bounds.width),
+            room,
+        );
+        let rx = if need_v { room } else { 0.0 };
+        let ry = if need_h { room } else { 0.0 };
         (rx, ry)
     }
 
     /// Just the bar width + margins (not conditional on overflow).  Used for
     /// hover-zone/paint placement when visibility says "AlwaysVisible".
     fn v_bar_thickness(&self) -> f64 {
-        self.style.bar_width + self.style.outer_margin + self.style.inner_margin
-    }
-    fn h_bar_thickness(&self) -> f64 {
         self.style.bar_width + self.style.outer_margin + self.style.inner_margin
     }
 
@@ -669,3 +667,29 @@ mod touch_pan;
 pub use bar_properties::{ScrollBarAxisProperties, ScrollBarProperties, ScrollFadedEdges};
 
 pub mod scroll_offsets;
+
+/// Which Solid bars show, as `(vertical, horizontal)`, for each axis's
+/// `(enabled, content, view extent)` and the room a showing bar takes.
+///
+/// agg-sharp's `ScrollableWidget` steps its scroll area in only for a bar that
+/// is `Visible` (`ScrollBar.ReservesSpace`), and a bar is visible when its
+/// axis overflows the view counting that margin (`HasVerticalOverflow`,
+/// `MaxScrollFromLeft`). So the other bar's room is taken off an axis only
+/// when that other bar itself shows: a disabled or fitting axis takes none.
+/// Each bar's appearance can bring up the other (content within one bar of
+/// the view on both axes); C# settles that through the bars'
+/// `VisibleChanged` handlers, starting from no bars, which reaches the least
+/// stable state. Two rounds reach the same state here: a bar can only be
+/// brought up by the other one, never put away, so the second round is final.
+fn solid_bars_showing(v: (bool, f64, f64), h: (bool, f64, f64), room: f64) -> (bool, bool) {
+    let (v_enabled, v_content, view_h) = v;
+    let (h_enabled, h_content, view_w) = h;
+    let (mut need_v, mut need_h) = (false, false);
+    for _ in 0..2 {
+        let other_h = if need_h { room } else { 0.0 };
+        let other_v = if need_v { room } else { 0.0 };
+        need_v = v_enabled && v_content > view_h - other_h;
+        need_h = h_enabled && h_content > view_w - other_v;
+    }
+    (need_v, need_h)
+}

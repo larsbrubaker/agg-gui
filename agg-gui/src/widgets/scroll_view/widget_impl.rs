@@ -164,32 +164,22 @@ impl Widget for ScrollView {
         // For horizontal scrolling, content width is unconstrained (the child
         // may return a width larger than our viewport).  For vertical-only, we
         // pin child to the viewport width so wrapping widgets behave.
-        let (vw_guess, _vh_guess) = self.viewport();
-        let child_in_w = if self.h.enabled {
-            f64::MAX / 2.0
-        } else {
-            vw_guess
-        };
-        let child_in_h = f64::MAX / 2.0;
-
-        if let Some(child) = self.children.first_mut() {
-            let natural = child.layout(Size::new(child_in_w, child_in_h));
-            self.v.content = natural.height;
-            self.h.content = if self.h.enabled {
-                natural.width
-            } else {
-                vw_guess
-            };
-            // Content that places its children from the top (or right) of
-            // the unbounded measuring size — a top-anchored `FlexColumn`, a
-            // vertical `MenuBar` — leaves them near 1e308.  Lay it out again
-            // at the measured size it is about to be given.  Only when a
-            // direct child actually lies outside that box, so ordinary
-            // natural-anchored content keeps its single layout pass.
-            let measured = Size::new(self.h.content, self.v.content);
-            if children_outside(child.as_ref(), measured) {
-                child.layout(measured);
+        //
+        // The viewport width depends on whether a Solid vertical bar shows,
+        // which depends on the content height just measured — and the guess
+        // below comes from the previous layout's content (none at all on the
+        // first). When measuring changes the reserve, lay the child out again
+        // at the new width so this pass is already right. Narrower content
+        // only grows taller, so the bar settles on the second pass; the third
+        // is a bound, never an unbounded loop.
+        let mut vw_guess = self.viewport().0;
+        for _ in 0..3 {
+            self.layout_content(vw_guess);
+            let vw_now = self.viewport().0;
+            if self.h.enabled || vw_now == vw_guess {
+                break;
             }
+            vw_guess = vw_now;
         }
 
         // Re-query viewport now that content dimensions are known (Solid bars
@@ -560,6 +550,29 @@ impl Widget for ScrollView {
 }
 
 impl ScrollView {
+    /// Measure the content child with the viewport width `vw` (unbounded
+    /// when horizontal scrolling is on) and record its size as the content.
+    fn layout_content(&mut self, vw: f64) {
+        let child_in_w = if self.h.enabled { f64::MAX / 2.0 } else { vw };
+        let child_in_h = f64::MAX / 2.0;
+        let h_enabled = self.h.enabled;
+        if let Some(child) = self.children.first_mut() {
+            let natural = child.layout(Size::new(child_in_w, child_in_h));
+            self.v.content = natural.height;
+            self.h.content = if h_enabled { natural.width } else { vw };
+            // Content that places its children from the top (or right) of
+            // the unbounded measuring size — a top-anchored `FlexColumn`, a
+            // vertical `MenuBar` — leaves them near 1e308.  Lay it out again
+            // at the measured size it is about to be given.  Only when a
+            // direct child actually lies outside that box, so ordinary
+            // natural-anchored content keeps its single layout pass.
+            let measured = Size::new(self.h.content, self.v.content);
+            if children_outside(child.as_ref(), measured) {
+                child.layout(measured);
+            }
+        }
+    }
+
     /// Paint a gradient fade at the scroll-axis edges using thin horizontal or
     /// vertical strips with linearly interpolated alpha.  The strip closest to
     /// the clip edge is most opaque; the strip furthest inside the viewport is

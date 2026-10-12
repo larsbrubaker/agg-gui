@@ -190,11 +190,16 @@ impl Widget for TextField {
             self.cache.invalidate();
         }
         // Honour this field's own `min_size` floor (a themed field design
-        // height, or a minimum width) without relying on the parent to clamp.
+        // height, or a minimum width) and `max_size` cap (a fixed-width
+        // field, agg-sharp's `HAnchor.Absolute`) without relying on the
+        // parent to clamp: a wrapper between the field and its row reports
+        // the default limits, so the row cannot see them. The floor wins
+        // where the two cross, as in `WidgetBase::clamp_size`.
         let min = self.base.min_size;
+        let max = self.base.max_size;
         Size::new(
-            available.width.max(min.width),
-            self.natural_height().max(min.height),
+            available.width.min(max.width).max(min.width),
+            self.natural_height().min(max.height).max(min.height),
         )
     }
 

@@ -167,6 +167,37 @@ fn layout_honours_min_size() {
 }
 
 #[test]
+fn layout_honours_max_size() {
+    // A width cap narrower than the room: the field stops at the cap rather
+    // than stretching (MatterCAD's 350 wide GitHub token field).
+    let mut capped = TextField::new(font())
+        .with_font_size(12.0)
+        .with_line_box(LineBox::Standard)
+        .with_max_size(Size::new(350.0, f64::INFINITY));
+    assert_eq!(capped.layout(ROOM).width, 350.0);
+    // A cap wider than the room changes nothing.
+    let mut loose = TextField::new(font())
+        .with_font_size(12.0)
+        .with_line_box(LineBox::Standard)
+        .with_max_size(Size::new(1000.0, f64::INFINITY));
+    assert_eq!(loose.layout(ROOM).width, ROOM.width);
+    // Min and max equal: exactly that width whatever the room.
+    let mut fixed = TextField::new(font())
+        .with_font_size(12.0)
+        .with_line_box(LineBox::Standard)
+        .with_min_size(Size::new(350.0, 0.0))
+        .with_max_size(Size::new(350.0, f64::INFINITY));
+    assert_eq!(fixed.layout(ROOM).width, 350.0);
+    assert_eq!(fixed.layout(Size::new(100.0, 50.0)).width, 350.0);
+    // A height cap below the natural height holds the height.
+    let mut short = TextField::new(font())
+        .with_font_size(12.0)
+        .with_line_box(LineBox::Standard)
+        .with_max_size(Size::new(f64::INFINITY, 20.0));
+    assert_eq!(short.layout(ROOM).height, 20.0);
+}
+
+#[test]
 fn set_text_insets_after_build_relayouts_and_drops_the_cache_signature() {
     let mut f = TextField::new(font())
         .with_font_size(12.0)
