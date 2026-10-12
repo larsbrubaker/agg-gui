@@ -674,10 +674,11 @@ pub fn apply_widget_base_edit(root: &mut dyn Widget, edit: &WidgetBaseEdit) -> b
         return false;
     };
     match &edit.field {
-        WidgetBaseField::MarginLeft(v) => base.margin.left = *v,
-        WidgetBaseField::MarginRight(v) => base.margin.right = *v,
-        WidgetBaseField::MarginTop(v) => base.margin.top = *v,
-        WidgetBaseField::MarginBottom(v) => base.margin.bottom = *v,
+        // A size never goes below zero (agg-sharp's `InspectorEdit.Apply`).
+        WidgetBaseField::MarginLeft(v) => base.margin.left = v.max(0.0),
+        WidgetBaseField::MarginRight(v) => base.margin.right = v.max(0.0),
+        WidgetBaseField::MarginTop(v) => base.margin.top = v.max(0.0),
+        WidgetBaseField::MarginBottom(v) => base.margin.bottom = v.max(0.0),
         WidgetBaseField::HAnchor(a) => base.h_anchor = *a,
         WidgetBaseField::VAnchor(a) => base.v_anchor = *a,
         WidgetBaseField::MinWidth(v) => base.min_size.width = v.max(0.0),

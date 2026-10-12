@@ -78,6 +78,12 @@ pub(crate) struct PaintRecorder {
     pub path_ops: Vec<PathOp>,
     /// Every `fill_text` call: the text and its baseline origin.
     pub texts: Vec<(String, f64, f64)>,
+    /// Every `fill_text` call: the text, its baseline origin in device
+    /// space, and the device clip in force as it painted.
+    pub text_clips: Vec<(String, (f64, f64), Option<DeviceRect>)>,
+    /// Every image blit (a backbuffered widget's cached bitmap): its device
+    /// destination and the device clip in force.
+    pub image_clips: Vec<(DeviceRect, Option<DeviceRect>)>,
     /// When set ([`PaintRecorder::with_real_fonts`]), `measure_text` measures
     /// with the font and size the widget set, instead of the fixed seven
     /// pixels a character.
@@ -102,6 +108,8 @@ impl PaintRecorder {
             strokes: Vec::new(),
             path_ops: Vec::new(),
             texts: Vec::new(),
+            text_clips: Vec::new(),
+            image_clips: Vec::new(),
             real_fonts: false,
             font: None,
             font_size: 0.0,
@@ -259,8 +267,30 @@ impl DrawCtx for PaintRecorder {
         self.stroke();
     }
     fn draw_triangles_aa(&mut self, _vertices: &[[f32; 3]], _indices: &[u32], _color: Color) {}
+    fn draw_image_rgba(
+        &mut self,
+        _data: &[u8],
+        _img_w: u32,
+        _img_h: u32,
+        dst_x: f64,
+        dst_y: f64,
+        dst_w: f64,
+        dst_h: f64,
+    ) {
+        let saved = self.path_bounds.take();
+        self.extend_rect(dst_x, dst_y, dst_w, dst_h);
+        let dst = self.path_bounds.take();
+        self.path_bounds = saved;
+        if let Some(dst) = dst {
+            self.image_clips.push((dst, self.clip));
+        }
+    }
     fn fill_text(&mut self, text: &str, x: f64, y: f64) {
         self.texts.push((text.to_string(), x, y));
+        let (mut dx, mut dy) = (x, y);
+        self.transform.transform(&mut dx, &mut dy);
+        self.text_clips
+            .push((text.to_string(), (dx, dy), self.clip));
     }
     fn fill_text_gsv(&mut self, _text: &str, _x: f64, _y: f64, _size: f64) {}
     fn measure_text(&self, text: &str) -> Option<TextMetrics> {

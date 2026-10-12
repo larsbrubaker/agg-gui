@@ -75,13 +75,36 @@ impl Widget for InspectorPanel {
             && !self.tree_view.nodes.is_empty();
 
         if !nodes_unchanged {
-            // Preserve expansion/selection state by index before rebuilding.
+            // Carry expansion and selection across the rebuild.  A live
+            // refresh keys them by each widget's child-index path, so a
+            // selection follows its widget when siblings come and go and
+            // leaves with it when it is removed (agg-sharp's InspectorModel
+            // keeps them by widget); restored saved state, or a snapshot
+            // without distinct paths, goes by position.
             let mut old_expanded: Vec<bool> =
                 self.tree_view.nodes.iter().map(|n| n.is_expanded).collect();
             let mut old_selected: Vec<bool> =
                 self.tree_view.nodes.iter().map(|n| n.is_selected).collect();
+            let mut by_path: Option<std::collections::HashMap<Vec<usize>, (bool, bool)>> = None;
+            if self.last_paths.len() == old_expanded.len() {
+                let map: std::collections::HashMap<Vec<usize>, (bool, bool)> = self
+                    .last_paths
+                    .iter()
+                    .cloned()
+                    .zip(
+                        old_expanded
+                            .iter()
+                            .copied()
+                            .zip(old_selected.iter().copied()),
+                    )
+                    .collect();
+                if map.len() == self.last_paths.len() {
+                    by_path = Some(map);
+                }
+            }
             if let Some(pe) = self.pending_expanded.take() {
                 old_expanded = pe;
+                by_path = None;
             }
             if let Some(ps) = self.pending_selected.take() {
                 old_selected = vec![false; old_expanded.len().max(ps.map(|i| i + 1).unwrap_or(0))];
@@ -90,6 +113,7 @@ impl Widget for InspectorPanel {
                         old_selected[i] = true;
                     }
                 }
+                by_path = None;
             }
 
             self.tree_view.nodes.clear();
@@ -118,16 +142,26 @@ impl Widget for InspectorPanel {
                 self.tree_view
                     .nodes
                     .push(TreeNode::new(label, NodeIcon::Package, parent, order));
-                self.tree_view.nodes[tv_idx].is_expanded =
-                    old_expanded.get(orig_idx).copied().unwrap_or(true);
-                self.tree_view.nodes[tv_idx].is_selected =
-                    old_selected.get(orig_idx).copied().unwrap_or(false);
+                let (expanded, selected) = match &by_path {
+                    Some(map) => map.get(&node.path).copied().unwrap_or((true, false)),
+                    None => (
+                        old_expanded.get(orig_idx).copied().unwrap_or(true),
+                        old_selected.get(orig_idx).copied().unwrap_or(false),
+                    ),
+                };
+                self.tree_view.nodes[tv_idx].is_expanded = expanded;
+                self.tree_view.nodes[tv_idx].is_selected = selected;
                 if depth_stack.len() <= node.depth {
                     depth_stack.resize(node.depth + 1, 0);
                 }
                 depth_stack[node.depth] = tv_idx;
             }
             self.last_inspector_nodes_fingerprint = Some(nodes_fingerprint);
+            self.last_paths = nodes.iter().map(|n| n.path.clone()).collect();
+            // Arrow keys continue from the (possibly moved) selection.
+            if let Some(sel) = self.tree_view.nodes.iter().position(|n| n.is_selected) {
+                self.tree_view.set_cursor_node(Some(sel));
+            }
         }
 
         self.selected = self.tree_view.nodes.iter().position(|n| n.is_selected);
@@ -270,13 +304,30 @@ impl Widget for InspectorPanel {
         paint_inspector_overlay(ctx, overlay, ox, oy);
     }
 
+    /// The panel takes keyboard focus so the tree's arrow-key navigation
+    /// works once a row has been clicked (agg-sharp's InspectorTreeView is
+    /// focusable).
+    fn is_focusable(&self) -> bool {
+        true
+    }
+
     fn on_event(&mut self, event: &Event) -> EventResult {
         match event {
+            Event::KeyDown { .. } if self.tree_focused => {
+                let result = self.tree_view.on_event(event);
+                self.selected = self.tree_view.nodes.iter().position(|n| n.is_selected);
+                result
+            }
+            Event::FocusLost => {
+                self.tree_focused = false;
+                EventResult::Ignored
+            }
             Event::MouseDown {
                 pos,
                 button: MouseButton::Left,
                 ..
             } => {
+                self.tree_focused = self.pos_in_tree_area(*pos) && !self.on_split_handle(*pos);
                 if pos.y < self.split_y() - 2.0 && self.try_emit_base_edit_from_click(*pos) {
                     return EventResult::Consumed;
                 }
@@ -326,7 +377,9 @@ impl Widget for InspectorPanel {
                     return EventResult::Consumed;
                 }
                 if self.pos_in_tree_area(*pos) {
-                    return self.forward_to_tree(event);
+                    let result = self.forward_to_tree(event);
+                    self.selected = self.tree_view.nodes.iter().position(|n| n.is_selected);
+                    return result;
                 }
                 EventResult::Ignored
             }

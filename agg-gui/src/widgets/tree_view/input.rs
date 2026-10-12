@@ -196,7 +196,11 @@ impl TreeView {
             }
             Key::ArrowLeft => {
                 if let Some(ni) = self.cursor_node {
-                    if self.nodes[ni].is_expanded {
+                    // A leaf can carry `is_expanded` (the inspector opens
+                    // every node it builds); with no children to hide, Left
+                    // moves to the parent as on any other leaf.
+                    let has_children = cursor_row.is_none_or(|row| row.has_children);
+                    if self.nodes[ni].is_expanded && has_children {
                         self.toggle_expanded_by_user(ni);
                     } else if let Some(parent_idx) = self.nodes[ni].parent {
                         if parent_idx < self.nodes.len() {

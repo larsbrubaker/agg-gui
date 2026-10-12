@@ -10,6 +10,7 @@
 //! └─────────────────────┘ ← bottom (y=0)
 //! ```
 
+mod api;
 mod widget_impl;
 
 use std::cell::RefCell;
@@ -113,7 +114,7 @@ const MIN_TREE_H: f64 = 60.0;
 fn c_panel_bg(v: &crate::theme::Visuals) -> Color {
     v.panel_fill
 }
-fn c_header_bg(v: &crate::theme::Visuals) -> Color {
+pub(crate) fn c_header_bg(v: &crate::theme::Visuals) -> Color {
     // Slightly darker than the panel fill.
     let f = if is_dark(v) { 0.80 } else { 0.94 };
     Color::rgba(
@@ -237,6 +238,16 @@ pub struct InspectorPanel {
     /// per-frame `tree_view.nodes` rebuild too, so the tree's row
     /// widgets reuse their backbuffers and the resize stays cheap.
     last_inspector_nodes_fingerprint: Option<(usize, usize)>,
+    /// Child-index paths of the snapshot the `TreeView` was last built
+    /// from, in node order: the keys that carry expansion and selection
+    /// across a rebuild.
+    last_paths: Vec<Vec<usize>>,
+    /// Whether the tree holds the keyboard: set by a press in the tree
+    /// area, cleared by a press elsewhere in the panel or by focus loss.
+    tree_focused: bool,
+    /// Panel-local rectangle of the box-model preview the last paint drew,
+    /// `None` when the properties pane had no room for it.
+    box_preview: Option<Rect>,
 }
 
 #[derive(Clone, Debug)]
@@ -263,9 +274,9 @@ pub(super) enum PropHitKind {
         step: f64,
     },
     /// Click anywhere on the row to advance to the next HAnchor preset.
-    HAnchorCycle { current_bits: u8 },
+    HAnchorCycle { current: HAnchor },
     /// Click anywhere on the row to advance to the next VAnchor preset.
-    VAnchorCycle { current_bits: u8 },
+    VAnchorCycle { current: VAnchor },
 }
 
 /// Which Insets struct the edit targets.
@@ -334,6 +345,9 @@ impl InspectorPanel {
             pending_selected: None,
             snapshot_out: None,
             last_inspector_nodes_fingerprint: None,
+            last_paths: Vec::new(),
+            tree_focused: false,
+            box_preview: None,
         }
     }
 
@@ -458,31 +472,39 @@ impl InspectorPanel {
 
 // ── Anchor cycle helpers ──────────────────────────────────────────────────────
 
-fn next_h_anchor(bits: u8) -> HAnchor {
-    // Cycle: FIT → STRETCH → LEFT → CENTER → RIGHT → FIT
-    if bits == HAnchor::FIT.bits() {
+/// The h_anchor a click on the inspector's anchor row picks next:
+/// FIT → STRETCH → LEFT → CENTER → RIGHT → ABSOLUTE → FIT (agg-sharp's
+/// `InspectorEdit.NextHAnchor`).  Any other combination goes to FIT.
+pub fn next_h_anchor(anchor: HAnchor) -> HAnchor {
+    if anchor == HAnchor::FIT {
         HAnchor::STRETCH
-    } else if bits == HAnchor::STRETCH.bits() {
+    } else if anchor == HAnchor::STRETCH {
         HAnchor::LEFT
-    } else if bits == HAnchor::LEFT.bits() {
+    } else if anchor == HAnchor::LEFT {
         HAnchor::CENTER
-    } else if bits == HAnchor::CENTER.bits() {
+    } else if anchor == HAnchor::CENTER {
         HAnchor::RIGHT
+    } else if anchor == HAnchor::RIGHT {
+        HAnchor::ABSOLUTE
     } else {
         HAnchor::FIT
     }
 }
 
-fn next_v_anchor(bits: u8) -> VAnchor {
-    // Cycle: FIT → STRETCH → BOTTOM → CENTER → TOP → FIT
-    if bits == VAnchor::FIT.bits() {
+/// The v_anchor a click on the inspector's anchor row picks next:
+/// FIT → STRETCH → BOTTOM → CENTER → TOP → ABSOLUTE → FIT (agg-sharp's
+/// `InspectorEdit.NextVAnchor`).  Any other combination goes to FIT.
+pub fn next_v_anchor(anchor: VAnchor) -> VAnchor {
+    if anchor == VAnchor::FIT {
         VAnchor::STRETCH
-    } else if bits == VAnchor::STRETCH.bits() {
+    } else if anchor == VAnchor::STRETCH {
         VAnchor::BOTTOM
-    } else if bits == VAnchor::BOTTOM.bits() {
+    } else if anchor == VAnchor::BOTTOM {
         VAnchor::CENTER
-    } else if bits == VAnchor::CENTER.bits() {
+    } else if anchor == VAnchor::CENTER {
         VAnchor::TOP
+    } else if anchor == VAnchor::TOP {
+        VAnchor::ABSOLUTE
     } else {
         VAnchor::FIT
     }
@@ -521,7 +543,7 @@ impl InspectorPanel {
     fn paint_properties(&mut self, ctx: &mut dyn DrawCtx, available_h: f64) {
         let panel_y_offset = 0.0; // properties pane sits at panel-local y=0
         self.prop_hits.clear();
-        super::inspector_props::paint_properties(
+        self.box_preview = super::inspector_props::paint_properties(
             ctx,
             available_h,
             panel_y_offset,
@@ -576,11 +598,11 @@ impl InspectorPanel {
                     InsetsSide::Bottom => crate::widget::WidgetBaseField::MarginBottom(new_v),
                 }
             }
-            PropHitKind::HAnchorCycle { current_bits } => {
-                crate::widget::WidgetBaseField::HAnchor(next_h_anchor(*current_bits))
+            PropHitKind::HAnchorCycle { current } => {
+                crate::widget::WidgetBaseField::HAnchor(next_h_anchor(*current))
             }
-            PropHitKind::VAnchorCycle { current_bits } => {
-                crate::widget::WidgetBaseField::VAnchor(next_v_anchor(*current_bits))
+            PropHitKind::VAnchorCycle { current } => {
+                crate::widget::WidgetBaseField::VAnchor(next_v_anchor(*current))
             }
             _ => return false,
         };

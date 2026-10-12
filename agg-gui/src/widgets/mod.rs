@@ -38,7 +38,7 @@ pub mod flow_wrap_row;
 pub mod hyperlink;
 pub mod image_view;
 pub mod inspector;
-mod inspector_props;
+pub(crate) mod inspector_props;
 pub mod label;
 pub mod markdown;
 /// The rich Markdown editor's document model (agg-sharp's `Markdig.Agg.Editing`).

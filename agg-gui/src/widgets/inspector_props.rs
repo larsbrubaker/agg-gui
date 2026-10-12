@@ -4,7 +4,8 @@
 //! 800-line limit.  The single entry point is [`paint_properties`], which
 //! renders the lower half of the inspector panel: section header, the static
 //! geometry rows (x/y/width/height/depth), editable margin and anchor rows,
-//! the widget-specific properties list, and the box-model preview.
+//! the widget-specific properties list, and the box-model preview, whose
+//! rectangle it returns.
 
 use std::sync::Arc;
 
@@ -29,9 +30,9 @@ pub(super) fn paint_properties(
     selected: Option<usize>,
     nodes: &[InspectorNode],
     hits: &mut Vec<PropHit>,
-) {
+) -> Option<Rect> {
     if available_h < 4.0 {
-        return;
+        return None;
     }
     let w = panel_w;
     let v = ctx.visuals().clone();
@@ -52,12 +53,10 @@ pub(super) fn paint_properties(
         ctx.set_font_size(FONT_SIZE);
         ctx.set_fill_color(c_dim_text(&v));
         ctx.fill_text("(select a widget)", 10.0, available_h - 36.0);
-        return;
+        return None;
     };
 
-    let Some(node) = nodes.get(sel_idx) else {
-        return;
-    };
+    let node = nodes.get(sel_idx)?;
 
     ctx.set_font_size(14.0);
     ctx.set_fill_color(c_text(&v));
@@ -161,9 +160,7 @@ pub(super) fn paint_properties(
             hits.push(PropHit {
                 rect: hit,
                 field: "h_anchor".to_string(),
-                kind: PropHitKind::HAnchorCycle {
-                    current_bits: ha.bits(),
-                },
+                kind: PropHitKind::HAnchorCycle { current: ha },
             });
             ry -= row_h;
         }
@@ -181,9 +178,7 @@ pub(super) fn paint_properties(
             hits.push(PropHit {
                 rect: hit,
                 field: "v_anchor".to_string(),
-                kind: PropHitKind::VAnchorCycle {
-                    current_bits: va.bits(),
-                },
+                kind: PropHitKind::VAnchorCycle { current: va },
             });
             ry -= row_h;
         }
@@ -231,6 +226,7 @@ pub(super) fn paint_properties(
 
     // ── box-model mini diagram ────────────────────────────────────────────────
     let diag_h = (ry - 8.0).min(80.0);
+    let mut preview = None;
     if diag_h > 30.0 {
         let diag_y_top = diag_h - 4.0;
         let diag_w = w - 20.0;
@@ -244,7 +240,8 @@ pub(super) fn paint_properties(
         let box_x = 10.0 + (diag_w - box_w) * 0.5;
         let box_y = diag_y_top - (diag_h + box_h) * 0.5;
 
-        ctx.set_fill_color(Color::rgba(0.10, 0.50, 1.0, 0.10));
+        preview = Some(Rect::new(box_x, box_y, box_w, box_h));
+        ctx.set_fill_color(BOX_PREVIEW_FILL);
         ctx.begin_path();
         ctx.rect(box_x, box_y, box_w, box_h);
         ctx.fill();
@@ -267,7 +264,11 @@ pub(super) fn paint_properties(
             }
         }
     }
+    preview
 }
+
+/// Fill of the box-model preview: the widget's shape, tinted blue.
+pub(crate) const BOX_PREVIEW_FILL: Color = Color::rgba(0.10, 0.50, 1.0, 0.10);
 
 // ── row drawing helpers ───────────────────────────────────────────────────────
 
