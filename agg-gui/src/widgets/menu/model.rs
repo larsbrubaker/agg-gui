@@ -81,6 +81,13 @@ pub struct MenuItem {
     /// column and `label_x`.  `None` (the default) keeps the style's.  Set
     /// with [`MenuItem::icon_slot()`].
     pub icon_slot: Option<MenuIconSlot>,
+    /// The row's GUI-automation name in place of the `"{label} Menu Item"`
+    /// convention (agg-sharp `MenuItemModel.AutomationName`, which
+    /// `MenuModelPopupBuilder` sets as the row's `Name`).  `None` (the
+    /// default) keeps the convention.  Set with
+    /// [`MenuItem::with_automation_name()`]; read through
+    /// [`menu_row_name`](super::menu_row_name).
+    pub automation_name: Option<String>,
 }
 
 /// A row's own icon slot: a gutter of `gutter_width` starting `gutter_x`
@@ -141,6 +148,7 @@ impl MenuItem {
             tooltip: None,
             row_height: None,
             icon_slot: None,
+            automation_name: None,
         }
     }
 
@@ -161,6 +169,7 @@ impl MenuItem {
             tooltip: None,
             row_height: None,
             icon_slot: None,
+            automation_name: None,
         }
     }
 
@@ -186,6 +195,7 @@ impl MenuItem {
             tooltip: None,
             row_height: None,
             icon_slot: None,
+            automation_name: None,
         }
     }
 
@@ -268,6 +278,13 @@ impl MenuItem {
     /// Show `text` as hover help for this row (see the `tooltip` field).
     pub fn tooltip(mut self, text: impl Into<String>) -> Self {
         self.tooltip = Some(text.into());
+        self
+    }
+
+    /// Name this row `name` for GUI automation (see the `automation_name`
+    /// field), as C# `MenuItemModel.AutomationName` does.
+    pub fn with_automation_name(mut self, name: impl Into<String>) -> Self {
+        self.automation_name = Some(name.into());
         self
     }
 

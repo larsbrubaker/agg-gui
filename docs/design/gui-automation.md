@@ -230,17 +230,18 @@ In live mode each of these pumps `pump_app_events` until the condition holds or 
 ## 6. Name lookup and search regions
 
 **Names**
-- `id()` **is** C#'s `Name` (`WidgetBase.name` by default; `Window` reports its title). MatterCAD's three ad-hoc `Named` structs move to `agg_gui::widgets::Named` in slice M3.
+- `id()` **is** C#'s `Name` (`WidgetBase.name` by default; `Window` reports its title). A widget without a `WidgetBase` takes a name by wrapping it in `agg_gui::widgets::Named` (one child at its natural size, the child's min/max size, optional `with_properties`); it does not pass the child's anchors or margin on.
 
 **Non-widget named targets** (C#'s `FindDescendants` overrides plus `NamedObject`/`OffsetHint`), which exist:
 - `Widget::find_named_targets(&self, name: &str, out: &mut Vec<NamedTarget>)`, a default-empty trait method: a widget pushes its own targets named `name` that are on show (children are walked by the caller).
 - `agg_gui::NamedTarget { rect_local: Rect, enabled: bool, object: Option<Rc<dyn Any>> }` (widget-local, Y-up; may lie outside the widget's bounds), with `new`, `with_enabled`, `with_object`, `object_as::<T>()`.
 - Implemented by:
   - `ComboBox`: the open list's rows in view, named `"{text} Menu Item"` (C#'s `DropDownList.AddItem`) or by `set_item_name`/`with_item_name`, with the row's enabled state and its index (`usize`) as object.
-  - `MenuBar`: its open menu's rows through `PopupMenu::named_row_targets(name, viewport, out)` (any host of a `PopupMenu` can call it), named `"{label} Menu Item"` (`menu_row_name`, C#'s `PopupMenu`), with the item's enabled flag and its path (`Vec<usize>`) as object; the titles are child widgets named `"{label} Menu"`.
-  - later, MatterCAD's 3D view (Object3D controls and scene children), replacing `CONTROL_KEYS`/`scene_objects` string parsing (M3).
+  - `MenuBar`: its open menu's rows through `PopupMenu::named_row_targets(name, viewport, out)` (any host of a `PopupMenu` can call it), with the item's enabled flag and its path (`Vec<usize>`) as object; the titles are child widgets named `"{label} Menu"`. A row's name is `menu_row_name(item)`: the item's `automation_name` when set (`MenuItem::with_automation_name`, C#'s `MenuItemModel.AutomationName`), else `"{label} Menu Item"` (C#'s `PopupMenu`).
+  - The right-click menus agg-gui owns: `TextField`, `TextArea` and `RichTextEdit` (through `TextContextMenu::named_row_targets(name, out)`) and `MarkdownView` report their open menu's rows the same way (`"Cut Menu Item"`, `"Select All Menu Item"`, ...).
+  - MatterCAD's own hosts: its View3D reports the Object3D controls and scene children, and its popup and context-menu hosts report their rows.
 
-**The tree walk** (`tree_query::find_named_hits`, used by `runner/named.rs`) puts a widget's targets before the widget itself, as C#'s overrides add them before calling the base. A target hit's `offset_hint` is its rect's center. A target is on show when its widget is actually visible on screen and its rect reaches into the window (it is not cut by ancestor clips: drop-down rows paint in the overlay pass); search regions and `get_region_by_name` use the target's own rect.
+**The tree walk** (`tree_query::find_named_hits`, used by `runner/named.rs`) puts a widget's targets before the widget itself, as C#'s overrides add them before calling the base. A target hit's `offset_hint` is its rect's center. A target is on show when its widget and every ancestor are visible and the target's own rect reaches into the window. The widget's own area is not asked, nor are ancestor clips: drop-down and menu rows paint in the overlay pass, and a context menu's host may have no size at all. Search regions and `get_region_by_name` use the target's own rect, and `wait_for_widget_enabled` on a target's name waits for the target's own `enabled` flag (read afresh each look) as well as its widget's enabled chain.
 
 **Image searches** use `region.image`, or a fresh whole-window capture.
 
@@ -345,7 +346,7 @@ In live mode each of these pumps `pump_app_events` until the condition holds or 
 
 ## 10. Risks
 
-- **Workers that serve a non-main UI thread** must wake it through that thread's queue (`ui_thread::current_queue()` captured on the UI thread, then `UiQueue::run_on_idle` / `UiQueue::signal_async_state_change`); an unbound worker's `animation::signal_async_state_change` wakes only the main queue's owner. MatterCAD's workers (`running_tasks`, `design_scene`, `library_executor`) call the free function, so a headless test on a non-main thread sees their wakeups only through its own pumping (M2 should capture the queue).
+- **Workers that serve a non-main UI thread** must wake it through that thread's queue (`ui_thread::current_queue()` captured on the UI thread, then `UiQueue::run_on_idle` / `UiQueue::signal_async_state_change`); an unbound worker's `animation::signal_async_state_change` wakes only the main queue's owner. MatterCAD's workers capture the queue this way, so a headless test on its own thread sees their wakeups; a new worker anywhere must do the same.
 - **Virtual time vs. real worker threads.** Covered by `ClockPolicy::Real` and the driver's background-busy hook (`set_background_busy`), which `wait_for_idle` and `wait_for_pending_ui_work` honour, so `settle` keeps working. Idle detection reads the thread's queue through `ui_thread::count_expired`, which does not see work no drain has stamped yet; such work is posted with a draw request, which keeps `is_idle` false until the next frame drains it.
 - **A timed-out body thread keeps running.** It only touches its own thread-locals, and it unwinds at its next runner call.
 - **Process-global agg-gui state** (input profile, tilt, fullscreen). It needs thread-local overrides, as the platform has, or `serial_test` for the few tests that touch it.

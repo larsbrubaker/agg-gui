@@ -147,6 +147,16 @@ impl TextContextMenu {
         self.handle_event(&event).1
     }
 
+    /// Push the open menu's rows named `name` (`"Cut Menu Item"`, ...) as
+    /// [`NamedTarget`](crate::NamedTarget)s in the host widget's local space,
+    /// for the host's [`Widget::find_named_targets`](crate::Widget::find_named_targets).
+    /// Nothing while the menu is closed.
+    pub fn named_row_targets(&self, name: &str, out: &mut Vec<crate::NamedTarget>) {
+        if let Some(menu) = self.menu.as_ref() {
+            menu.named_row_targets(name, current_viewport(), out);
+        }
+    }
+
     pub fn paint(&mut self, ctx: &mut dyn DrawCtx, font: Arc<Font>, font_size: f64) {
         if let Some(menu) = self.menu.as_mut() {
             menu.paint(ctx, font, font_size, current_viewport());

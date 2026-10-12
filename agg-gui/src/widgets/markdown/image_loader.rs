@@ -166,6 +166,23 @@ impl RemoteImageLoader for HttpRemoteImageLoader {
 }
 
 impl super::MarkdownView {
+    /// Whether an image is still loading or has arrived unseen, so the view
+    /// must draw again (part of [`Widget::needs_draw`](crate::Widget::needs_draw)).
+    pub(super) fn images_need_draw(&self) -> bool {
+        self.image_cache.iter().any(|entry| {
+            entry
+                .state
+                .lock()
+                .map(|state| {
+                    matches!(
+                        *state,
+                        ImageState::Loading | ImageState::Ready { seen: false, .. }
+                    )
+                })
+                .unwrap_or(false)
+        })
+    }
+
     /// Fetch this view's remote images through `loader` (instead of the
     /// process default, [`set_default_remote_image_loader`]). A host routes
     /// them through its own cache and network policy this way, as MatterCAD's

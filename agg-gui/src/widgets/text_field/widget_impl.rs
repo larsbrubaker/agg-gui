@@ -96,6 +96,12 @@ impl Widget for TextField {
         self.context_menu.is_open()
     }
 
+    /// The open right-click menu's rows ("Cut Menu Item", ...) for GUI
+    /// automation.
+    fn find_named_targets(&self, name: &str, out: &mut Vec<crate::NamedTarget>) {
+        self.context_menu.named_row_targets(name, out);
+    }
+
     /// The context menu paints at app level so it can overflow the field bounds
     /// and clamp to the viewport.
     fn paint_global_overlay(&mut self, ctx: &mut dyn DrawCtx) {

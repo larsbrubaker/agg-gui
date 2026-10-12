@@ -12,9 +12,11 @@
 //! choice is [`crate::pointer_reach`]'s. Search regions are Y-down window
 //! pixels ([`SearchRegion`]); a widget is in one when its screen rectangle
 //! overlaps it, a target when its own rectangle does. A target counts as on
-//! show when its widget is actually visible on screen (as C# asks of the
-//! widget behind a `NamedObject`) and its rectangle reaches into the window:
-//! drop-down rows paint in the overlay pass, outside their ancestors' clips. The polling waits look once per pumped frame (C#'s
+//! show when its widget and every ancestor are visible and the target's own
+//! rectangle reaches into the window. The widget's own area is not asked:
+//! drop-down and menu rows paint in the overlay pass, outside their
+//! ancestors' clips, and a context menu's host may have no size at all. The
+//! polling waits look once per pumped frame (C#'s
 //! `WaitForPendingUiWork(50)`), and their answer is the last look, not the
 //! clock, so a zero-second wait reports what is there now. The frame-level
 //! waits they build on are in the sibling `waits.rs`.
@@ -121,12 +123,12 @@ impl AutomationRunner {
         if hit.target.is_none() {
             return self.screen_and_visibility(&hit.handle);
         }
-        let (_, widget_visible) = self.screen_and_visibility(&hit.handle)?;
-        let rect = self.hit_window_rect(hit)?;
         let viewport = self.driver.logical_size();
+        let placement = tree_query::placement(self.driver.root(), &hit.handle, viewport)?;
+        let rect = self.hit_window_rect(hit)?;
         let on_window =
             tree_query::intersect(Rect::new(0.0, 0.0, viewport.width, viewport.height), rect);
-        let visible = widget_visible && on_window.width > 0.0 && on_window.height > 0.0;
+        let visible = placement.visible_chain && on_window.width > 0.0 && on_window.height > 0.0;
         Some((self.window_rect_to_screen(rect), visible))
     }
 
@@ -355,9 +357,45 @@ impl AutomationRunner {
         }
     }
 
+    /// Whether `found` is still on show and enabled: its widget and every
+    /// ancestor enabled ([`tree_query::actually_enabled`]), and for a named
+    /// target the target's own flag too, read from a fresh look (a row's
+    /// state changes while its widget stays put). The target looked up again
+    /// is the one `widget_name` names in the same widget at the same
+    /// rectangle, else the first one that widget reports under that name.
+    fn hit_visible_and_enabled(&self, widget_name: &str, found: &NamedHit) -> bool {
+        let root = self.driver.root();
+        if !tree_query::actually_enabled(root, &found.handle) {
+            return false;
+        }
+        let Some(target) = &found.target else {
+            let viewport = self.driver.logical_size();
+            return tree_query::actually_visible_on_screen(root, &found.handle, viewport);
+        };
+        let Some(path) = found.handle.resolve(root) else {
+            return false;
+        };
+        let same_widget: Vec<NamedHit> = tree_query::find_named_hits(root, widget_name)
+            .into_iter()
+            .filter(|hit| hit.target.is_some() && hit.handle.path() == path.as_slice())
+            .collect();
+        let current = same_widget
+            .iter()
+            .find(|hit| hit.target.as_ref().map(|t| t.rect_local) == Some(target.rect_local))
+            .or_else(|| same_widget.first());
+        current.is_some_and(|hit| {
+            hit.target_enabled()
+                && self
+                    .hit_screen_and_visibility(hit)
+                    .is_some_and(|(_, visible)| visible)
+        })
+    }
+
     /// C# `WaitForWidgetEnabled`: wait up to `secs_to_wait` for the named
     /// widget to be visible and enabled (it and every ancestor,
-    /// [`tree_query::actually_enabled`]). Panics with
+    /// [`tree_query::actually_enabled`]). A name that belongs to a target a
+    /// widget reports (a menu row) waits for the target's own `enabled` flag
+    /// as well, as C# waits on the row's `MenuItem` widget. Panics with
     /// [`widget_not_found_message`](Self::widget_not_found_message) when no
     /// such widget turns up, and with C#'s "not visible and enabled" message
     /// when it never becomes both.
@@ -376,7 +414,7 @@ impl AutomationRunner {
             self.wait_for_pending_ui_work(WIDGET_POLL_WAIT_MILLISECONDS);
         }
 
-        let Some(widget) = self.get_widget_by_name(widget_name, &WaitOpts::default()) else {
+        let Some(found) = self.get_widget_hit_by_name(widget_name, &WaitOpts::default()) else {
             panic!(
                 "{}",
                 Self::widget_not_found_message("WaitForWidgetEnabled", widget_name)
@@ -386,12 +424,7 @@ impl AutomationRunner {
         // Decided by the widget's state, not the clock.
         let remaining = (secs_to_wait - clock::since(time_waited).as_secs_f64()).max(0.0);
         let visible_and_enabled = self.wait_until(
-            |runner| {
-                let root = runner.driver.root();
-                let viewport = runner.driver.logical_size();
-                tree_query::actually_visible_on_screen(root, &widget, viewport)
-                    && tree_query::actually_enabled(root, &widget)
-            },
+            |runner| runner.hit_visible_and_enabled(widget_name, &found),
             remaining,
             super::waits::DEFAULT_CHECK_INTERVAL_MILLISECONDS,
         );

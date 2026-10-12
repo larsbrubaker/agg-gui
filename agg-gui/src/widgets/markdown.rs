@@ -751,22 +751,16 @@ impl Widget for MarkdownView {
         self.paint_context_menu(ctx);
     }
 
+    fn find_named_targets(&self, name: &str, out: &mut Vec<crate::NamedTarget>) {
+        self.context_menu_named_targets(name, out);
+    }
+
     fn needs_draw(&self) -> bool {
         if !self.is_visible() {
             return false;
         }
-        self.image_cache.iter().any(|entry| {
-            entry
-                .state
-                .lock()
-                .map(|state| {
-                    matches!(
-                        *state,
-                        ImageState::Loading | ImageState::Ready { seen: false, .. }
-                    )
-                })
-                .unwrap_or(false)
-        }) || self.animation_frame_due()
+        self.images_need_draw()
+            || self.animation_frame_due()
             || self.children().iter().any(|c| c.needs_draw())
     }
 

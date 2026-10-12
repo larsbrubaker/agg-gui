@@ -4,8 +4,10 @@
 //! [`Widget::find_named_targets`](crate::Widget::find_named_targets) and GUI
 //! automation can click a row by name.
 //!
-//! A row's name is agg-sharp's: `PopupMenu.CreateMenuItem` and
-//! `CreateSubMenu` name an item `"{Text} Menu Item"` (`Gui/Menu/PopupMenu.cs`).
+//! A row's name is agg-sharp's: the item's own automation name when it has one
+//! (`MenuItemModel.AutomationName`, set as the row's `Name` by
+//! `MenuModelPopupBuilder`), else `PopupMenu.CreateMenuItem` and
+//! `CreateSubMenu`'s `"{Text} Menu Item"` (`Gui/Menu/PopupMenu.cs`).
 //! Separators and widget rows (whose hosted widget is the clickable thing)
 //! are not reported. A scrolled panel's rows are cut to the panel, and rows
 //! scrolled wholly out of it are left out.
@@ -21,9 +23,14 @@ use super::super::geometry::item_at_path;
 use super::super::model::MenuItem;
 use super::PopupMenu;
 
-/// The automation name of a menu row (C# `"{Text} Menu Item"`).
+/// The automation name of a menu row: its
+/// [`automation_name`](MenuItem::automation_name) when set (C#
+/// `MenuItemModel.AutomationName`), else C#'s `"{Text} Menu Item"`.
 pub fn menu_row_name(item: &MenuItem) -> String {
-    format!("{} Menu Item", item.label)
+    match &item.automation_name {
+        Some(name) => name.clone(),
+        None => format!("{} Menu Item", item.label),
+    }
 }
 
 impl PopupMenu {

@@ -80,6 +80,15 @@ impl ImageContextAction {
 }
 
 impl MarkdownView {
+    /// The open right-click menu's rows named `name`, as named targets in
+    /// the view's local space (the menu opens at a view-local point), for
+    /// GUI automation.
+    pub(super) fn context_menu_named_targets(&self, name: &str, out: &mut Vec<crate::NamedTarget>) {
+        if let Some(state) = self.context_menu.as_ref() {
+            state.menu.named_row_targets(name, current_viewport(), out);
+        }
+    }
+
     /// Open the image menu on an image, else the text menu.
     pub(super) fn open_context_menu(&mut self, pos: Point) -> bool {
         if self.open_image_context_menu(pos) {
