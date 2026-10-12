@@ -4,15 +4,29 @@
 //! 800-line limit. These are inherent methods on `Slider`; the module core
 //! (mapping, events, layout) lives in `mod.rs` and calls into here from its
 //! `Widget::paint` implementation. Marked `pub(super)` so the parent module can
-//! invoke them.
+//! invoke them.  A disabled slider's colours come from `state.rs`.
 
 use super::*;
+use crate::color::Color;
 
 impl Slider {
+    /// The (trailing fill, rail) colours: the style's or the theme's, or
+    /// their disabled greys (`state.rs`) while the slider is disabled.
+    pub(super) fn paint_colors(&self, v: &crate::theme::Visuals) -> (Color, Color) {
+        let track = self.style.track.unwrap_or(v.track_bg);
+        if self.enabled() {
+            (self.style.fill.unwrap_or(v.accent), track)
+        } else {
+            Self::disabled_colors(track)
+        }
+    }
+
     /// Paint the draggable handle (circle or rect) centered at `(cx, cy)`.
     pub(super) fn paint_thumb(&self, ctx: &mut dyn DrawCtx, cx: f64, cy: f64) {
         let v = ctx.visuals();
-        let thumb_color = if let Some(c) = self.style.thumb {
+        let thumb_color = if !self.enabled() {
+            self.paint_colors(&v).0
+        } else if let Some(c) = self.style.thumb {
             c
         } else if self.dragging || self.focused {
             v.accent_pressed
@@ -92,14 +106,14 @@ impl Slider {
         let rail_y = self.track_start(cy);
 
         // Rail background.
-        ctx.set_fill_color(self.style.track.unwrap_or(v.track_bg));
+        ctx.set_fill_color(self.paint_colors(&v).1);
         ctx.begin_path();
         ctx.rounded_rect(thumb_r, rail_y, track_w, track_h, radius);
         ctx.fill();
 
         // Trailing fill up to the thumb.
         if self.trailing_fill && tx > thumb_r {
-            ctx.set_fill_color(self.style.fill.unwrap_or(v.accent));
+            ctx.set_fill_color(self.paint_colors(&v).0);
             ctx.begin_path();
             ctx.rounded_rect(thumb_r, rail_y, tx - thumb_r, track_h, radius);
             ctx.fill();
@@ -130,14 +144,14 @@ impl Slider {
         // Rail background (full height between the shrunk ends).
         let top = p1.min(p0);
         let rail_h = (p0 - p1).abs();
-        ctx.set_fill_color(self.style.track.unwrap_or(v.track_bg));
+        ctx.set_fill_color(self.paint_colors(&v).1);
         ctx.begin_path();
         ctx.rounded_rect(rail_x, top, track_h, rail_h, radius);
         ctx.fill();
 
         // Trailing fill from the bottom up to the thumb.
         if self.trailing_fill && ty < p0 {
-            ctx.set_fill_color(self.style.fill.unwrap_or(v.accent));
+            ctx.set_fill_color(self.paint_colors(&v).0);
             ctx.begin_path();
             ctx.rounded_rect(rail_x, ty, track_h, p0 - ty, radius);
             ctx.fill();

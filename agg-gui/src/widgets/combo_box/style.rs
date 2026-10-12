@@ -14,7 +14,8 @@
 //! item).  It is separate from `ComboBoxStyle` so existing struct-literal
 //! constructions of `ComboBoxStyle` keep compiling.
 //!
-//! The closed-box painter lives here (split out of `combo_box.rs` to keep
+//! The closed-box painter (fill, outline, and agg-sharp `DropDownList`'s
+//! chevron in the text colour) lives here (split out of `combo_box.rs` to keep
 //! that file under the 800-line limit); the popup painter is in
 //! `popup_paint.rs` and only consumes the resolved closed height.
 
@@ -69,6 +70,12 @@ pub struct ComboBoxStateStyle {
     pub item_hover_text: Option<Color>,
 }
 
+/// Half width of the closed box's chevron (logical px); its half height is
+/// half of this, as agg-sharp's `DropArrow.ArrowHeight / 2`.
+pub(super) const CHEVRON_HALF_W: f64 = 4.0;
+/// Stroke width of the chevron (C# `new Stroke(chevron, 1.5 * DeviceScale)`).
+const CHEVRON_STROKE: f64 = 1.5;
+
 impl ComboBox {
     /// Apply per-instance state / list styling.  See [`ComboBoxStateStyle`].
     pub fn with_state_style(mut self, style: ComboBoxStateStyle) -> Self {
@@ -97,7 +104,7 @@ impl ComboBox {
         self.style.height.unwrap_or(CLOSED_H).max(0.0)
     }
 
-    /// Paint the closed box: background, outline and the ▼ arrow.
+    /// Paint the closed box: background, outline and the chevron.
     pub(super) fn paint_closed_box(&self, ctx: &mut dyn DrawCtx) {
         let v = ctx.visuals();
         let w = self.bounds.width;
@@ -130,23 +137,36 @@ impl ComboBox {
         ctx.rounded_rect(0.0, 0.0, w, h, r);
         ctx.fill();
 
+        // The 1 px outline runs in the band just inside the box, as agg-sharp's
+        // DropDownList strokes its rounded outline in its Border band
+        // (`RoundedFieldChrome.DrawRing`): one crisp ring, not a line
+        // straddling the edge half outside the box.
         ctx.set_stroke_color(border);
         ctx.set_line_width(1.0);
         ctx.begin_path();
-        ctx.rounded_rect(0.0, 0.0, w, h, r);
+        ctx.rounded_rect(
+            0.5,
+            0.5,
+            (w - 1.0).max(0.0),
+            (h - 1.0).max(0.0),
+            (r - 0.5).max(0.0),
+        );
         ctx.stroke();
 
-        // ── Dropdown arrow (▼) ────────────────────────────────────────────
+        // ── Dropdown chevron ──────────────────────────────────────────────
+        // agg-sharp's DropDownList draws the open affordance as a chevron (two
+        // 1.5 px strokes meeting at a downward tip) in its text colour, where
+        // the filled triangle used to sit: same centre, same half width.
         let arrow_x = w - ARROW_W * 0.5;
         let arrow_cy = h * 0.5;
-        let arrow_sz = 4.0;
-        ctx.set_fill_color(self.text_for_state(v.text_dim));
+        let half_w = CHEVRON_HALF_W;
+        let half_h = CHEVRON_HALF_W * 0.5;
+        ctx.set_stroke_color(self.text_for_state(v.text_color));
+        ctx.set_line_width(CHEVRON_STROKE);
         ctx.begin_path();
-        // Small downward triangle.
-        ctx.move_to(arrow_x - arrow_sz, arrow_cy + arrow_sz * 0.5);
-        ctx.line_to(arrow_x + arrow_sz, arrow_cy + arrow_sz * 0.5);
-        ctx.line_to(arrow_x, arrow_cy - arrow_sz * 0.5);
-        ctx.close_path();
-        ctx.fill();
+        ctx.move_to(arrow_x - half_w, arrow_cy + half_h);
+        ctx.line_to(arrow_x, arrow_cy - half_h);
+        ctx.line_to(arrow_x + half_w, arrow_cy + half_h);
+        ctx.stroke();
     }
 }

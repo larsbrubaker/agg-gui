@@ -26,6 +26,7 @@ use crate::widgets::slider_math::{
 };
 
 mod paint;
+mod state;
 mod style;
 pub use style::SliderStyle;
 
@@ -171,6 +172,8 @@ pub struct Slider {
     trailing_fill: bool,
     /// Per-instance colour / radius overrides — see [`SliderStyle`].
     style: SliderStyle,
+    /// Live enabled predicate (`state.rs`); `None` is always enabled.
+    enabled_fn: Option<Rc<dyn Fn() -> bool>>,
 }
 
 impl Slider {
@@ -224,6 +227,7 @@ impl Slider {
             suffix: String::new(),
             trailing_fill: true,
             style: SliderStyle::default(),
+            enabled_fn: None,
         }
     }
 
@@ -580,7 +584,11 @@ impl Widget for Slider {
     }
 
     fn is_focusable(&self) -> bool {
-        true
+        self.enabled()
+    }
+
+    fn is_enabled(&self) -> bool {
+        self.enabled()
     }
 
     fn margin(&self) -> Insets {
@@ -659,6 +667,16 @@ impl Widget for Slider {
     }
 
     fn on_event(&mut self, event: &Event) -> EventResult {
+        if !self.enabled() {
+            // A disabled slider takes no input; a drag it was in ends with
+            // its release, as when focus loss tears one down.
+            self.hovered = false;
+            self.focused = false;
+            if std::mem::take(&mut self.dragging) {
+                self.fire_release();
+            }
+            return EventResult::Ignored;
+        }
         match event {
             Event::MouseMove { pos } => {
                 let was = self.hovered;

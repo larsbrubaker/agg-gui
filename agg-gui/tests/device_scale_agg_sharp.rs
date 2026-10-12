@@ -14,5 +14,7 @@ mod gui_device_scale_tests;
 mod margin_units_device_scale_tests;
 #[path = "device_scale_agg_sharp/popup_menu_icon_device_scale_tests.rs"]
 mod popup_menu_icon_device_scale_tests;
+#[path = "device_scale_agg_sharp/slider_device_scale_tests.rs"]
+mod slider_device_scale_tests;
 #[path = "device_scale_agg_sharp/sub_menu_arrow_device_scale_tests.rs"]
 mod sub_menu_arrow_device_scale_tests;

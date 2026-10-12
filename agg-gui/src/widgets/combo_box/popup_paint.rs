@@ -5,6 +5,10 @@
 //! after the regular tree walk and after `paint_global_overlays`, so popups
 //! always paint on top of the rest of the UI (including modals).
 //!
+//! The panel rounds by the installed popup-menu style's radius
+//! (`menu::current_menu_style`), as agg-sharp's DropDownList popup shares
+//! `ThemeConfig.MenuPopupRadius` with PopupMenu.
+//!
 //! Coordinates in the request are root LOGICAL space (unlifted layout
 //! space) — the drain pass runs while App's effective-scale CTM and the
 //! on-screen keyboard's lift translate are still active, so logical x/y map
@@ -13,16 +17,22 @@
 //! [`visible_root_rect`](crate::widget::visible_root_rect).
 
 use super::{
-    submit_combo_popup_internal, ComboPopupRequest, COMBO_POPUP_QUEUE, CORNER_R,
-    CURRENT_COMBO_VIEWPORT, ITEM_H, PAD_X, SCROLLBAR_W,
+    submit_combo_popup_internal, ComboPopupRequest, COMBO_POPUP_QUEUE, CURRENT_COMBO_VIEWPORT,
+    ITEM_H, PAD_X, SCROLLBAR_W,
 };
 use crate::color::Color;
 use crate::draw_ctx::DrawCtx;
 use crate::geometry::Size;
 use crate::widget::{paint_subtree, Widget};
+use crate::widgets::menu::current_menu_style;
 use crate::widgets::scrollbar::paint_prepared_scrollbar;
 
 use super::lazy_fonts::swap_row_font;
+
+/// Corner radius of a highlighted row, inset 2 px inside the panel so the
+/// panel's rounded corners never cut it: the radius a popup-menu row's
+/// highlight uses (`menu::paint::paint_item_row_bg`).
+const ROW_RADIUS: f64 = 3.0;
 
 pub(crate) fn submit_combo_popup(request: ComboPopupRequest) {
     submit_combo_popup_internal(request);
@@ -53,6 +63,10 @@ pub(crate) fn paint_global_combo_popups(ctx: &mut dyn DrawCtx) {
 
 fn paint_combo_popup(ctx: &mut dyn DrawCtx, request: ComboPopupRequest) {
     let v = ctx.visuals();
+    // agg-sharp rounds a DropDownList popup by the same theme radius a
+    // PopupMenu panel uses (`ThemeConfig.MenuPopupRadius`); here that is the
+    // popup-menu style the host installed.
+    let radius = current_menu_style().radius;
     let popup_y = if request.opens_up {
         request.y + request.closed_h
     } else {
@@ -63,13 +77,13 @@ fn paint_combo_popup(ctx: &mut dyn DrawCtx, request: ComboPopupRequest) {
     // popup itself must always obscure the content underneath.
     ctx.set_fill_color(v.window_fill);
     ctx.begin_path();
-    ctx.rounded_rect(request.x, popup_y, request.width, request.popup_h, CORNER_R);
+    ctx.rounded_rect(request.x, popup_y, request.width, request.popup_h, radius);
     ctx.fill();
 
     let st = request.state_style;
     ctx.set_fill_color(st.popup_fill.unwrap_or(v.widget_bg));
     ctx.begin_path();
-    ctx.rounded_rect(request.x, popup_y, request.width, request.popup_h, CORNER_R);
+    ctx.rounded_rect(request.x, popup_y, request.width, request.popup_h, radius);
     ctx.fill();
 
     let has_scroll = request.item_count > request.visible_count;
@@ -106,7 +120,7 @@ fn paint_combo_popup(ctx: &mut dyn DrawCtx, request: ComboPopupRequest) {
                 item_y + 1.0,
                 text_w - 4.0,
                 ITEM_H - 2.0,
-                3.0,
+                ROW_RADIUS,
             );
             ctx.fill();
         }
@@ -150,7 +164,7 @@ fn paint_combo_popup(ctx: &mut dyn DrawCtx, request: ComboPopupRequest) {
     ctx.set_stroke_color(v.widget_stroke);
     ctx.set_line_width(1.0);
     ctx.begin_path();
-    ctx.rounded_rect(request.x, popup_y, request.width, request.popup_h, CORNER_R);
+    ctx.rounded_rect(request.x, popup_y, request.width, request.popup_h, radius);
     ctx.stroke();
 
     paint_item_hover_tooltip(ctx, &request, popup_y);
