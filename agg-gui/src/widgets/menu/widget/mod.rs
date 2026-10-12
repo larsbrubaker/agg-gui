@@ -249,6 +249,8 @@ mod tests_anchor_edges;
 #[cfg(test)]
 mod tests_bar_children;
 #[cfg(test)]
+mod tests_cancelled_release;
+#[cfg(test)]
 mod tests_bar_flip;
 #[cfg(test)]
 mod tests_bar_title_icon;
@@ -268,6 +270,8 @@ mod tests_focus;
 mod tests_hover;
 #[cfg(test)]
 mod tests_image_icon;
+#[cfg(test)]
+mod tests_menu_model_builder;
 #[cfg(test)]
 mod tests_item_slot;
 #[cfg(test)]

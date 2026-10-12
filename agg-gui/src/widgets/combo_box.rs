@@ -74,6 +74,10 @@ pub(super) struct ComboPopupRequest {
     /// Item text size and label width, for a row that swaps to its font.
     pub(super) font_size: f64,
     pub(super) label_w: f64,
+    /// Rows that cannot be picked — see `combo_box/item_enabled.rs`.
+    pub(super) disabled_items: Vec<bool>,
+    /// Alpha of a disabled row's text ([`ComboBoxDisabledStyle::label_alpha`]).
+    pub(super) disabled_label_alpha: u8,
 }
 
 thread_local! {
@@ -165,6 +169,9 @@ pub struct ComboBox {
     enabled_fn: Option<Rc<dyn Fn() -> bool>>,
     /// Disabled paint — see [`ComboBoxDisabledStyle`].
     disabled_style: ComboBoxDisabledStyle,
+    /// Per-row disabled flags (`true` = disabled; missing = enabled) — see
+    /// [`ComboBox::set_item_enabled`] (`combo_box/item_enabled.rs`).
+    disabled_items: Vec<bool>,
 }
 
 impl ComboBox {
@@ -225,6 +232,7 @@ impl ComboBox {
             fit_width: false,
             enabled_fn: None,
             disabled_style: ComboBoxDisabledStyle::default(),
+            disabled_items: Vec::new(),
         }
     }
 
@@ -397,6 +405,7 @@ impl ComboBox {
 mod enabled;
 mod fit;
 mod geometry;
+mod item_enabled;
 mod keyboard;
 mod lazy_fonts;
 mod press;
@@ -587,6 +596,8 @@ impl Widget for ComboBox {
                 lazy_fonts: self.lazy_fonts_for_paint(),
                 font_size: self.font_size,
                 label_w: (self.bounds.width - PAD_X * 2.0 - ARROW_W).max(0.0),
+                disabled_items: self.disabled_items.clone(),
+                disabled_label_alpha: self.disabled_style.label_alpha,
             });
         }
     }
@@ -632,7 +643,8 @@ impl Widget for ComboBox {
                         crate::animation::request_draw();
                     }
                 }
-                let hovered_item = self.item_for_pos(*pos);
+                // A disabled row takes no hover (`combo_box/item_enabled.rs`).
+                let hovered_item = self.item_for_pos(*pos).filter(|&i| self.item_enabled(i));
                 if let Some(idx) = hovered_item {
                     // The row under the mouse is the one Enter picks.
                     self.key_highlight = idx;

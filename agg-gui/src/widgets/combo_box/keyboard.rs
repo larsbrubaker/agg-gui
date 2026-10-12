@@ -13,7 +13,9 @@
 //!
 //! Open list (the keys go to the combo: it is modal while open):
 //! - **Up** / **Down** move the highlight one row, stopping at the ends, and
-//!   scroll it into view.  The selection does not change.
+//!   scroll it into view.  The selection does not change.  Disabled rows
+//!   are skipped, by type-ahead too, and Enter never picks one
+//!   (`combo_box/item_enabled.rs`).
 //! - **Enter** picks the highlighted row and closes; `on_change` fires only
 //!   when the selection changed (C#'s `SelectedIndex` setter).
 //! - **Escape** closes without changing the selection.
@@ -62,17 +64,16 @@ impl ComboBox {
     }
 
     fn on_open_key_down(&mut self, key: &Key) -> EventResult {
-        let n = self.options.len();
         match key {
             Key::ArrowUp => {
-                if self.key_highlight > 0 {
-                    self.highlight(self.key_highlight - 1);
+                if let Some(idx) = self.next_enabled_item(self.key_highlight, false) {
+                    self.highlight(idx);
                 }
                 EventResult::Consumed
             }
             Key::ArrowDown => {
-                if self.key_highlight + 1 < n {
-                    self.highlight(self.key_highlight + 1);
+                if let Some(idx) = self.next_enabled_item(self.key_highlight, true) {
+                    self.highlight(idx);
                 }
                 EventResult::Consumed
             }
@@ -127,6 +128,10 @@ impl ComboBox {
     /// Enter: select the highlighted row and close.
     fn pick_highlighted(&mut self) {
         let idx = self.key_highlight;
+        if idx < self.options.len() && !self.item_enabled(idx) {
+            // Never picks a disabled row (`combo_box/item_enabled.rs`).
+            return;
+        }
         if idx < self.options.len() {
             let changed = !self.has_selection || self.selected != idx;
             if changed {
@@ -150,7 +155,8 @@ impl ComboBox {
         let hit = self
             .options
             .iter()
-            .position(|o| o.to_lowercase().starts_with(&needle));
+            .enumerate()
+            .position(|(i, o)| self.item_enabled(i) && o.to_lowercase().starts_with(&needle));
         self.type_ahead = Some(text);
         if let Some(idx) = hit {
             self.highlight(idx);

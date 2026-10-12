@@ -1,6 +1,6 @@
 //! Left-press handling for [`super::ComboBox`]: the closed box toggles the
 //! drop-down, a press in the open list's scrollbar drags or pages it, a press
-//! on a row picks it, and a press anywhere else closes the drop-down and is
+//! on a row picks it (a disabled row is ignored and the list stays open), and a press anywhere else closes the drop-down and is
 //! consumed — the widget under it sees neither the press nor its release
 //! (the combo is modal while open, `has_active_modal`), as a native drop-down
 //! list behaves.
@@ -36,6 +36,11 @@ impl ComboBox {
                 return EventResult::Consumed;
             }
             if let Some(i) = self.item_for_pos(pos) {
+                if !self.item_enabled(i) {
+                    // A disabled row: the list stays up for another pick
+                    // (`combo_box/item_enabled.rs`).
+                    return EventResult::Consumed;
+                }
                 // Route through `set_selected` so the closed
                 // combo's preview label is rebuilt with the
                 // newly-selected per-item font (when item_fonts

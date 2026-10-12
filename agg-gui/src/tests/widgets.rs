@@ -2,11 +2,14 @@ use super::*;
 
 mod button_touch;
 mod combo_enabled;
+mod combo_item_enabled;
 mod combo_keyboard;
 mod combo_lazy_fonts;
 mod combo_state_style;
 mod combo_style;
+mod menu_tests;
 mod password_reveal;
+mod popup_theme_change_tests;
 mod window;
 
 /// ColorPicker: clicking the swatch opens the panel; dragging the hue

@@ -27,6 +27,7 @@ use crate::widget::{paint_subtree, Widget};
 use crate::widgets::menu::current_menu_style;
 use crate::widgets::scrollbar::paint_prepared_scrollbar;
 
+use super::item_enabled::request_row_disabled;
 use super::lazy_fonts::swap_row_font;
 
 /// Corner radius of a highlighted row, inset 2 px inside the panel so the
@@ -105,8 +106,9 @@ fn paint_combo_popup(ctx: &mut dyn DrawCtx, request: ComboPopupRequest) {
             break;
         }
         let item_y = popup_y + request.popup_h - (row as f64 + 1.0) * ITEM_H;
-        let is_selected = request.selected == Some(idx);
-        let is_hovered = request.hovered_item == Some(idx);
+        let disabled = request_row_disabled(&request.disabled_items, idx);
+        let is_selected = !disabled && request.selected == Some(idx);
+        let is_hovered = !disabled && request.hovered_item == Some(idx);
         if is_selected || is_hovered {
             let bg = if is_selected {
                 v.accent
@@ -136,7 +138,9 @@ fn paint_combo_popup(ctx: &mut dyn DrawCtx, request: ComboPopupRequest) {
             swap_row_font(label, font, request.font_size, request.label_w);
         }
         let item_text = st.item_text.unwrap_or(v.text_color);
-        label.set_color(if is_selected {
+        label.set_color(if disabled {
+            item_text.with_alpha(request.disabled_label_alpha as f32 / 255.0)
+        } else if is_selected {
             Color::white()
         } else if is_hovered {
             st.item_hover_text.unwrap_or(item_text)

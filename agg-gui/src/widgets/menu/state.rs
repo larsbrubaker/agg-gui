@@ -299,6 +299,20 @@ impl PopupMenuState {
                 crate::animation::request_draw();
                 (EventResult::Consumed, MenuResponse::Closed)
             }
+            // The press of a finger drag that began on the menu (the touch
+            // layer offers it as a middle press): the gesture is a drag, not
+            // a tap, so it neither picks the row under it nor dismisses the
+            // menu.  Taken so `App` does not press the row instead (agg-sharp
+            // `CancelledReleaseTests.AMenuItemIsNotSelected`).
+            Event::MouseDown {
+                pos,
+                button: MouseButton::Middle,
+                ..
+            } if crate::touch_emulation::touch_pan_travel().is_some()
+                && hit_test(&self.layouts(items, viewport), *pos).is_some() =>
+            {
+                (EventResult::Consumed, MenuResponse::None)
+            }
             // Any non-left press dismisses — the desktop convention.
             // Right-clicking with a menu open closes it instead of
             // leaving it hanging over whatever context menu that press
