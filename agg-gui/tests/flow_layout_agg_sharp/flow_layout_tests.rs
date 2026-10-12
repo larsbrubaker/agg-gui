@@ -46,9 +46,11 @@
 //! show its window, and C#'s `Load` handler is the code that runs before the
 //! first layout here.
 //!
-//! Not ported: `RightToLeftTests` and `NestedFlowWidgetsRightToLeftTests`
-//! (MatterCAD never builds a `RightToLeft` flow; agg-gui has no reversed
-//! row).
+//! Not ported: `RightToLeftTests`, `NestedFlowWidgetsRightToLeftTests`,
+//! `RightLeftWithAnchorLeftRightChildTests` and
+//! `BottomTopWithAnchorBottomTopChildTests` (MatterCAD never builds a
+//! `RightToLeft` or `BottomToTop` flow; agg-gui has no reversed row or
+//! column).
 
 use agg_gui::{FlexColumn, FlexRow, HAnchor, Insets, Rect, SizedBox, VAnchor, Widget};
 

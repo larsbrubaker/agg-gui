@@ -35,6 +35,7 @@ pub mod flex_row;
 mod flex_share;
 pub mod flow_left_right_with_wrapping;
 pub mod flow_wrap_row;
+pub mod group_box;
 pub mod hyperlink;
 pub mod image_view;
 pub mod inspector;
@@ -68,6 +69,7 @@ pub mod scroll_view;
 /// every `ScrollView` shows, reusable by widgets that own their offset.
 pub mod scrollbar;
 pub mod segmented;
+pub(crate) mod simple_align;
 pub mod slider;
 pub mod slider_math;
 pub mod spacers;
@@ -109,6 +111,7 @@ pub use flex_row::FlexRow;
 pub use flow_left_right_with_wrapping::{
     FlowLeftRightWithWrapping, HardBreak, RowSpacer, SkipIfFirstSpace, WrapRow,
 };
+pub use group_box::GroupBox;
 pub use hyperlink::Hyperlink;
 pub use image_view::ImageView;
 pub use inspector::{InspectorPanel, InspectorSavedState};

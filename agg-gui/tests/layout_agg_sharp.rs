@@ -7,6 +7,8 @@
 #[path = "layout_agg_sharp/support.rs"]
 mod support;
 
+#[path = "layout_agg_sharp/anchor_fit_tests.rs"]
+mod anchor_fit_tests;
 #[path = "layout_agg_sharp/anchor_tests.rs"]
 mod anchor_tests;
 #[path = "layout_agg_sharp/border_tests.rs"]

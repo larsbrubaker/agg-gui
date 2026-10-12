@@ -229,7 +229,7 @@ pub use widgets::{
     single_font_resolver, tooltip_timings, Align, Align2, Button, CellInfo, Checkbox,
     ClickAwayAction, Clickable, CloseReason, CollapsingHeader, ColorPicker, ColorWheelPicker,
     ComboBox, ComboBoxDisabledStyle, ComboBoxStateStyle, ComboBoxStyle, Conditional, Container,
-    DragValue, FlexColumn, FlexRow, FlowLeftRightWithWrapping, FrameHistory, HandleShape,
+    DragValue, FlexColumn, FlexRow, FlowLeftRightWithWrapping, FrameHistory, GroupBox, HandleShape,
     HardBreak, HeaderInfo, HttpRemoteImageLoader, Hyperlink, ImageView, InspectorPanel,
     InspectorSavedState, Label, LabelAlign, MarkdownBlockKind, MarkdownTableCell, MarkdownView,
     MenuBar, MenuBarStrip, MenuEntry, MenuItem, MenuResponse, MenuSelection, MenuShortcut,

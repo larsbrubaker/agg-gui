@@ -16,7 +16,9 @@
 //! widget in C#, which is what those legs check).
 
 use agg_gui::widgets::AbsoluteLayout;
-use agg_gui::{Button, Framebuffer, HAnchor, Insets, Label, Rect, Size, VAnchor, Widget};
+use agg_gui::{
+    Button, FlexColumn, Framebuffer, HAnchor, Insets, Label, Rect, Size, VAnchor, Widget,
+};
 
 use super::support::{bounds_at, font, layout_at, render, sized};
 
@@ -471,6 +473,39 @@ fn parent_stretch_and_fit_to_children() {
         let mut parent = AbsoluteLayout::new().add(Box::new(child_outer));
         layout_at(&mut parent, Size::new(100.0, 200.0));
         assert_rect_eq(bounds_at(&parent, &[0]), Rect::new(0.0, 0.0, 31.0, 200.0));
+    }
+
+    // Make sure vertical flow layout nested works with both top bottom and children
+    {
+        // C# `new FlowLayoutWidget(TopToBottom)`: Fit on both axes, size 0.
+        // A FlexColumn fits its width to its children only with
+        // `with_fit_width` (it fills the slot by default).
+        let mut child_outer = FlexColumn::new()
+            .with_fit_width(true)
+            .with_v_anchor(VAnchor::FIT | VAnchor::STRETCH);
+        assert_eq!(alone(&mut child_outer, Size::ZERO), Size::new(0.0, 0.0));
+
+        child_outer = child_outer.add(Box::new(sized(41.0, 42.0)));
+        assert_eq!(alone(&mut child_outer, Size::ZERO), Size::new(41.0, 42.0));
+
+        let mut parent = AbsoluteLayout::new().add(Box::new(child_outer));
+        layout_at(&mut parent, Size::new(100.0, 200.0));
+        assert_rect_eq(bounds_at(&parent, &[0]), Rect::new(0.0, 0.0, 41.0, 200.0));
+    }
+
+    // Make sure horizontal flow layout nested works with both top bottom and children
+    {
+        let mut child_outer = FlexColumn::new()
+            .with_fit_width(true)
+            .with_h_anchor(HAnchor::FIT | HAnchor::STRETCH);
+        assert_eq!(alone(&mut child_outer, Size::ZERO), Size::new(0.0, 0.0));
+
+        child_outer = child_outer.add(Box::new(sized(41.0, 42.0)));
+        assert_eq!(alone(&mut child_outer, Size::ZERO), Size::new(41.0, 42.0));
+
+        let mut parent = AbsoluteLayout::new().add(Box::new(child_outer));
+        layout_at(&mut parent, Size::new(100.0, 200.0));
+        assert_rect_eq(bounds_at(&parent, &[0]), Rect::new(0.0, 0.0, 100.0, 42.0));
     }
 
     // Make sure normal nested layouts works as expected. First outer than inner added

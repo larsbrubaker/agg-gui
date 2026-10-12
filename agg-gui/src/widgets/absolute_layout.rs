@@ -12,8 +12,9 @@
 //! centres it, LEFT|RIGHT stretches it, and LEFT|CENTER or CENTER|RIGHT give
 //! it the matching half.  An axis with none of those bits (FIT, ABSOLUTE)
 //! uses the origin.  Margins are kept on anchored edges, as in C#.  A
-//! horizontally fit-or-stretch child (`FIT | STRETCH`) stretches but never
-//! below the width it reports.
+//! fit-or-stretch child (`FIT | STRETCH`) stretches but never below the
+//! size it reports.  The engine itself is [`simple_align`](super::simple_align),
+//! shared with [`GroupBox`](super::GroupBox).
 //!
 //! Siblings: [`Stack`](super::Stack) overlays children at the same place,
 //! [`FlexColumn`](super::FlexColumn)/[`FlexRow`](super::FlexRow) flow them.
@@ -29,32 +30,17 @@ use crate::widget::Widget;
 ///
 /// The container itself stretches to the slot it is given by default; with
 /// a FIT anchor on an axis it shrinks to enclose its visible children on
-/// that axis (C# `DoFitToChildrenHorizontal`/`Vertical`), and anchored
-/// children are then placed again against the fitted size.
+/// that axis, their margins and its padding on both sides included (C#
+/// `DoFitToChildrenHorizontal`/`Vertical`), and the children are then placed
+/// again against the fitted size: an un-anchored child at origin 0 sits its
+/// margin and the padding above the fitted bottom edge, as in C#.
 pub struct AbsoluteLayout {
     bounds: Rect,
     children: Vec<Box<dyn Widget>>,
     base: WidgetBase,
     padding: Insets,
-}
-
-/// One axis of a child's anchor, reduced to the three C# position bits.
-#[derive(Clone, Copy)]
-struct AxisAnchor {
-    low: bool,
-    center: bool,
-    high: bool,
-}
-
-/// One axis of the parent's space and the child's request on it.
-struct AxisSlot {
-    parent: f64,
-    pad_low: f64,
-    pad_high: f64,
-    margin_low: f64,
-    margin_high: f64,
-    origin: f64,
-    natural: f64,
+    /// C#'s `LocalBounds` low corner (see `simple_align`).
+    local_low: Point,
 }
 
 impl AbsoluteLayout {
@@ -66,6 +52,7 @@ impl AbsoluteLayout {
                 .with_h_anchor(HAnchor::STRETCH)
                 .with_v_anchor(VAnchor::STRETCH),
             padding: Insets::ZERO,
+            local_low: Point::ORIGIN,
         }
     }
 
@@ -104,157 +91,17 @@ impl AbsoluteLayout {
         self
     }
 
-    /// Lay out and place every visible child against a `size` parent.
-    fn place_children(&mut self, size: Size) {
-        let pad = self.padding;
-        for child in self.children.iter_mut().filter(|c| c.is_visible()) {
-            let m = child.margin();
-            let origin = child
-                .widget_base()
-                .map(|b| b.origin)
-                .unwrap_or_else(|| Point::new(child.bounds().x, child.bounds().y));
-            let room = Size::new(
-                (size.width - pad.horizontal() - m.horizontal()).max(0.0),
-                (size.height - pad.vertical() - m.vertical()).max(0.0),
-            );
-            let natural = child.layout(room);
-            let (min, max) = (child.min_size(), child.max_size());
-            let ha = child.h_anchor();
-            let va = child.v_anchor();
-            let (x, w) = place_axis(
-                AxisAnchor {
-                    low: ha.contains(HAnchor::LEFT),
-                    center: ha.contains(HAnchor::CENTER),
-                    high: ha.contains(HAnchor::RIGHT),
-                },
-                AxisSlot {
-                    parent: size.width,
-                    pad_low: pad.left,
-                    pad_high: pad.right,
-                    margin_low: m.left,
-                    margin_high: m.right,
-                    origin: origin.x,
-                    natural: natural.width.clamp(min.width, max.width),
-                },
-            );
-            let (y, h) = place_axis(
-                AxisAnchor {
-                    low: va.contains(VAnchor::BOTTOM),
-                    center: va.contains(VAnchor::CENTER),
-                    high: va.contains(VAnchor::TOP),
-                },
-                AxisSlot {
-                    parent: size.height,
-                    pad_low: pad.bottom,
-                    pad_high: pad.top,
-                    margin_low: m.bottom,
-                    margin_high: m.top,
-                    origin: origin.y,
-                    natural: natural.height.clamp(min.height, max.height),
-                },
-            );
-            // A fit-or-stretch child (C# `HAnchor.Fit | Stretch`) never
-            // shrinks below its content: C#'s `DoFitToChildrenHorizontal`
-            // takes the larger of the parent's width and the children's.
-            let w = if ha.contains(HAnchor::FIT) && ha.is_stretch() {
-                w.max(natural.width)
-            } else {
-                w
-            };
-            let w = w.clamp(min.width, max.width).max(0.0);
-            let h = h.clamp(min.height, max.height).max(0.0);
-            if w != room.width || h != room.height {
-                // The child arranged its own children against `room`; re-lay
-                // it at the box it actually occupies.  Comparing with the
-                // measured `room` (not the reported `natural`) matters for a
-                // fitted child: a content-fitted `FlexColumn` reports less
-                // than `room` but placed its rows from the top (and centred
-                // them) within `room`, so without this pass they would sit
-                // above/right of its box and be clipped away.
-                child.layout(Size::new(w, h));
-            }
-            // C# `OriginRelativeParent`'s setter rounds with Math.Round
-            // (banker's) when EnforceIntegerBounds is on.
-            let integer = child
-                .widget_base()
-                .map(|b| b.enforce_integer_bounds)
-                .unwrap_or_else(|| child.enforce_integer_bounds());
-            let (x, y) = if integer {
-                (round_half_even(x), round_half_even(y))
-            } else {
-                (x, y)
-            };
-            child.set_bounds(Rect::new(x, y, w, h));
-        }
-    }
-
-    /// The far edges of the visible children, margins and padding included
-    /// (C# `GetMinimumBoundsToEncloseChildren(true)` measured from 0). As in
-    /// C#, a child that stretches on an axis (anchor exactly `STRETCH`) does
-    /// not count on it: it takes the parent's size rather than giving one,
-    /// so counting it would hold a fitted parent at its last stretched size.
-    fn enclosing_size(&self) -> Size {
-        let mut right: f64 = 0.0;
-        let mut top: f64 = 0.0;
-        for child in self.children.iter().filter(|c| c.is_visible()) {
-            let b = child.bounds();
-            let m = child.margin();
-            if child.h_anchor() != HAnchor::STRETCH {
-                right = right.max(b.x + b.width + m.right);
-            }
-            if child.v_anchor() != VAnchor::STRETCH {
-                top = top.max(b.y + b.height + m.top);
-            }
-        }
-        Size::new(right + self.padding.right, top + self.padding.top)
-    }
-}
-
-/// C#'s `GetOriginAndWidthForChild` / `GetOriginAndHeightForChild` for one
-/// axis: returns the child's position and size on it.
-fn place_axis(anchor: AxisAnchor, slot: AxisSlot) -> (f64, f64) {
-    let usable = slot.parent - (slot.pad_low + slot.pad_high);
-    let margins = slot.margin_low + slot.margin_high;
-    if anchor.low {
-        let pos = slot.pad_low + slot.margin_low;
-        if anchor.center {
-            (pos, usable / 2.0 - margins)
-        } else if anchor.high {
-            (pos, usable - margins)
-        } else {
-            (pos, slot.natural)
-        }
-    } else if anchor.center {
-        if anchor.high {
-            (
-                slot.pad_low + slot.margin_low + usable / 2.0,
-                usable / 2.0 - margins,
-            )
-        } else {
-            let center = slot.pad_low + usable / 2.0;
-            (
-                center - (slot.natural + margins) / 2.0 + slot.margin_low,
-                slot.natural,
-            )
-        }
-    } else if anchor.high {
-        (
-            slot.parent - slot.margin_high - slot.pad_high - slot.natural,
-            slot.natural,
+    /// C#'s `LocalBounds`: the container's size, starting at the low
+    /// corner fitting moved it to (see [`simple_align`](super::simple_align)).
+    /// The corner is `(0, 0)` unless a FIT axis has children (or padding)
+    /// below or left of the origin.
+    pub fn local_bounds(&self) -> Rect {
+        Rect::new(
+            self.local_low.x,
+            self.local_low.y,
+            self.bounds.width,
+            self.bounds.height,
         )
-    } else {
-        (slot.origin, slot.natural)
-    }
-}
-
-/// C# `Math.Round`: round half to even (`f64::round_ties_even` needs Rust
-/// 1.77; agg-gui's MSRV is 1.70).
-fn round_half_even(v: f64) -> f64 {
-    let r = v.round();
-    if (v - v.trunc()).abs() == 0.5 {
-        2.0 * (v / 2.0).round()
-    } else {
-        r
     }
 }
 
@@ -323,37 +170,13 @@ impl Widget for AbsoluteLayout {
         if let Some(size) = crate::shared_size_group::layout_as_scope(self, available) {
             return size;
         }
-        self.place_children(available);
-        let fit_w = self.base.h_anchor.contains(HAnchor::FIT) && !self.base.h_anchor.is_stretch();
-        let fit_h = self.base.v_anchor.contains(VAnchor::FIT) && !self.base.v_anchor.is_stretch();
-        // FIT | STRETCH (`MAX_FIT_OR_STRETCH`): the larger of the two, so the
-        // parent's size when it has room and the children's when it does not
-        // (C# `ParentStretchAndFitToChildren`).
-        let max_w = self.base.h_anchor == HAnchor::MAX_FIT_OR_STRETCH;
-        let max_h = self.base.v_anchor == VAnchor::MAX_FIT_OR_STRETCH;
-        if !fit_w && !fit_h && !max_w && !max_h {
-            return available;
-        }
-        let enclosing = self.enclosing_size();
-        let axis = |fit: bool, max: bool, enclosing: f64, available: f64| {
-            if fit {
-                enclosing
-            } else if max {
-                enclosing.max(available)
-            } else {
-                available
-            }
-        };
-        let size = self.base.clamp_size(Size::new(
-            axis(fit_w, max_w, enclosing.width, available.width),
-            axis(fit_h, max_h, enclosing.height, available.height),
-        ));
-        if size != available {
-            // C# re-anchors the children when fitting changed the parent's
-            // size (LayoutEngineSimpleAlign.Layout's second pass).
-            self.place_children(size);
-        }
-        size
+        super::simple_align::layout_simple_align(
+            &mut self.children,
+            &self.base,
+            self.padding,
+            &mut self.local_low,
+            available,
+        )
     }
 
     fn paint(&mut self, _ctx: &mut dyn DrawCtx) {}

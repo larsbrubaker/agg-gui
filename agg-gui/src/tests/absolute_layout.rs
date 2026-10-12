@@ -131,8 +131,37 @@ fn a_fit_layout_encloses_its_children() {
         .with_v_anchor(VAnchor::FIT)
         .add(Box::new(sized(50.0, 20.0).with_origin(10.0, 40.0)))
         .add(Box::new(sized(30.0, 10.0).with_origin(110.0, 5.0)));
-    let (size, _) = laid_out(layout, Size::new(500.0, 500.0));
-    assert_eq!(size, Size::new(140.0, 60.0));
+    let mut layout = layout;
+    let size = layout.layout(Size::new(500.0, 500.0));
+    layout.set_bounds(Rect::new(0.0, 0.0, size.width, size.height));
+    // C#'s GetMinimumBoundsToEncloseChildren spans the children's low edges
+    // too: x 10..140, y 5..60, and the fitted LocalBounds start there.
+    assert_eq!(size, Size::new(130.0, 55.0));
+    assert_eq!(layout.local_bounds(), Rect::new(10.0, 5.0, 130.0, 55.0));
+    let rects: Vec<Rect> = layout.children().iter().map(|c| c.bounds()).collect();
+    assert_eq!(rects[0], Rect::new(0.0, 35.0, 50.0, 20.0));
+    assert_eq!(rects[1], Rect::new(100.0, 0.0, 30.0, 10.0));
+}
+
+/// A fitted parent keeps its padding and an un-anchored child's margin on
+/// the low side as well (C# `Inflate(DevicePadding)` around the margin-
+/// inflated child bounds): the child moves up and right by both.
+#[test]
+fn a_fit_layout_includes_low_side_margin_and_padding() {
+    let child = sized(20.0, 10.0).with_margin(Insets::all(3.0));
+    let mut layout = AbsoluteLayout::new()
+        .with_h_anchor(HAnchor::FIT)
+        .with_v_anchor(VAnchor::FIT)
+        .with_padding(Insets::all(2.0))
+        .add(Box::new(child));
+    let size = layout.layout(Size::new(500.0, 500.0));
+    assert_eq!(size, Size::new(30.0, 20.0));
+    assert_eq!(
+        layout.children()[0].bounds(),
+        Rect::new(5.0, 5.0, 20.0, 10.0)
+    );
+    assert_eq!(layout.local_bounds().x, -5.0);
+    assert_eq!(layout.local_bounds().y, -5.0);
 }
 
 #[test]
