@@ -67,6 +67,10 @@ mod inset_tests;
 mod replace_range_tests;
 #[cfg(test)]
 mod selection_tests;
+#[cfg(test)]
+mod text_edit_caret_tests;
+#[cfg(test)]
+mod themed_text_edit_widget_color_tests;
 
 use crate::widgets::text_context_menu::TextContextMenu;
 use clipboard::{clipboard_get, clipboard_set};
