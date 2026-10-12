@@ -238,3 +238,32 @@ fn test_idle_retained_window_does_not_request_reactive_redraw() {
         "an idle retained window must let the reactive host go idle"
     );
 }
+
+/// A wakeup aimed at the main queue — an unbound worker's signal, or another
+/// test's — must not repaint a retained layer painted on a thread that is not
+/// the main queue's UI thread: that thread's epochs are its own. Forces the
+/// interleaving that made paint-count tests flake under a parallel run.
+#[test]
+fn rust_only_foreign_main_queue_wakeup_keeps_retained_layer() {
+    let paints = Rc::new(Cell::new(0));
+    let mut widget = RetainedProbe {
+        bounds: Rect::new(0.0, 0.0, 20.0, 20.0),
+        children: Vec::new(),
+        backbuffer: BackbufferState::new(),
+        paints: Rc::clone(&paints),
+    };
+    let mut ctx = RetainedLayerCtx::new();
+    paint_subtree(&mut widget, &mut ctx);
+    assert_eq!(paints.get(), 1);
+
+    std::thread::spawn(crate::animation::signal_async_state_change)
+        .join()
+        .expect("signalling worker");
+    paint_subtree(&mut widget, &mut ctx);
+
+    assert_eq!(
+        paints.get(),
+        1,
+        "another thread's main-queue wakeup must not re-raster this thread's layer"
+    );
+}

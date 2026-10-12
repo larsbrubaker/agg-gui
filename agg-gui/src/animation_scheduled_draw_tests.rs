@@ -121,12 +121,16 @@ fn clear_immediate_keeps_the_scheduled_deadline() {
 /// pending after it — the next paint must still see it (dirty walk, layout).
 /// Signalled from a spawned thread: a same-thread signal also sets this
 /// thread's flags directly, which would hide a clear that swallows the
-/// cross-thread counter.
+/// cross-thread counter. This thread is a UI thread on a queue of its own and
+/// the worker signals through its handle, as a worker serving a UI thread
+/// other than the main one does: an unbound thread merges no queue's wakeups.
 #[test]
 fn clear_immediate_keeps_a_pending_cross_thread_signal() {
+    let queue = crate::ui_thread::UiQueue::new();
+    queue.attach_current_thread();
     clear_draw_request();
     let before = ASYNC_STATE_EPOCH.with(|c| c.get());
-    std::thread::spawn(signal_async_state_change)
+    std::thread::spawn(move || queue.signal_async_state_change())
         .join()
         .expect("signal thread");
     clear_immediate_draw_request();
@@ -138,5 +142,32 @@ fn clear_immediate_keeps_a_pending_cross_thread_signal() {
         async_state_epoch(),
         before,
         "the cross-thread signal must still advance the async-state epoch"
+    );
+    crate::ui_thread::unbind_current_thread();
+}
+
+/// (h) The interleaving behind the parallel-run flake of
+/// `future_deadline_peeks_but_does_not_want_draw`: another thread's signal to
+/// the main queue (an unbound worker, or an unrelated test) lands between this
+/// thread's clear and its read. This thread is not the main queue's UI thread,
+/// so the foreign wakeup must not reach its draw request or epochs.
+#[test]
+fn rust_only_foreign_main_queue_signal_does_not_wake_an_unbound_thread() {
+    clear_draw_request();
+    request_draw_after(Duration::from_millis(500));
+    let async_before = async_state_epoch();
+    let invalidation_before = invalidation_epoch();
+    std::thread::spawn(signal_async_state_change)
+        .join()
+        .expect("signal thread");
+    assert!(
+        !wants_draw(),
+        "a foreign main-queue wakeup must not force this thread to draw"
+    );
+    assert_eq!(async_state_epoch(), async_before);
+    assert_eq!(invalidation_epoch(), invalidation_before);
+    assert!(
+        peek_next_draw_deadline().is_some(),
+        "the pending deadline is untouched"
     );
 }

@@ -9,14 +9,15 @@
 //! follow-up draw so the next frame re-lays-out.  These tests pin both halves:
 //! the follow-up happens, and it cannot turn into a perpetual redraw loop.
 //!
-//! Integration-test binary (own process) so the main queue's wakeup count,
-//! which these unbound test threads and their workers share, is not shared
-//! with the unit-test binary's signalling tests; the tests here serialize on
-//! a local mutex so they cannot signal into each other.
+//! Each test thread is a UI thread on a queue of its own, and its worker
+//! signals through that queue's handle (as a worker serving a UI thread other
+//! than the main one does), so no other test's wakeup reaches it; the tests
+//! also serialize on a local mutex.
 
 use std::sync::Mutex;
 
-use agg_gui::animation::{clear_draw_request, signal_async_state_change, wants_draw};
+use agg_gui::animation::{clear_draw_request, wants_draw};
+use agg_gui::ui_thread::{self, UiQueue};
 use agg_gui::{App, DrawCtx, Event, EventResult, Framebuffer, GfxCtx, Rect, Size, Widget};
 
 static SERIAL: Mutex<()> = Mutex::new(());
@@ -65,8 +66,10 @@ fn paint(app: &mut App) {
     app.paint(&mut ctx);
 }
 
-/// An idle app: laid out and painted once, nothing pending.
+/// An idle app on this thread, now a UI thread with a queue of its own: laid
+/// out and painted once, nothing pending.
 fn settled_app() -> App {
+    UiQueue::new().attach_current_thread();
     let mut app = App::new(Box::new(Leaf {
         bounds: Rect::default(),
         children: Vec::new(),
@@ -78,8 +81,10 @@ fn settled_app() -> App {
     app
 }
 
+/// A worker serving this UI thread signals an async change through its queue.
 fn signal_from_worker() {
-    std::thread::spawn(signal_async_state_change)
+    let queue = ui_thread::current_queue();
+    std::thread::spawn(move || queue.signal_async_state_change())
         .join()
         .expect("signal thread");
 }

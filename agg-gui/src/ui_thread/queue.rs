@@ -175,7 +175,7 @@ impl UiQueue {
     /// [`super::current_queue`] handle. Also runs the host waker.
     pub fn signal_async_state_change(&self) {
         self.shared.wakeups.fetch_add(1, Ordering::AcqRel);
-        if super::reads_wakeups_of(self) {
+        if super::raises_poster_flags(self) {
             // Same-thread caller: raise its flags now as well, so a read in
             // the same dispatch sees them without waiting for the merge.
             crate::animation::bump_local_async_state();

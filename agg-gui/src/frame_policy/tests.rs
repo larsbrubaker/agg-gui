@@ -54,6 +54,13 @@ fn quiet() {
     animation::clear_draw_request();
 }
 
+/// Make this test thread a UI thread on a queue of its own before it drains
+/// (a drain binds the thread, adopting the process's main queue when no live
+/// UI thread owns it — and with it every unbound thread's posts and signals).
+fn own_ui_queue() {
+    crate::ui_thread::UiQueue::new().attach_current_thread();
+}
+
 /// A pending `request_layout` forces layout even when the skip key is
 /// unchanged; without one an unchanged key still skips.
 #[test]
@@ -74,9 +81,10 @@ fn layout_key_tracks_size_scale_and_epoch() {
         LayoutKey::for_surface(100, 100),
         LayoutKey::for_surface(101, 100)
     );
-    // Equal unless another test's wakeup moved the epoch between the reads.
-    assert!((0..IDLE_ATTEMPTS)
-        .any(|_| LayoutKey::for_surface(100, 100) == LayoutKey::new(100.0, 100.0)));
+    assert_eq!(
+        LayoutKey::for_surface(100, 100),
+        LayoutKey::new(100.0, 100.0)
+    );
     let before = LayoutKey::for_surface(100, 100);
     animation::request_draw();
     assert_ne!(before, LayoutKey::for_surface(100, 100), "epoch moved");
@@ -127,13 +135,6 @@ fn deadline_paints_only_once_due() {
     assert!(wants_frame(&at(now, later)));
 }
 
-/// Other tests' cross-thread wakeups (`animation::signal_async_state_change`,
-/// which `ui_thread::run_on_idle` also sends) bump a process-wide counter that
-/// every thread folds into its invalidation epoch and draw request — as a
-/// real worker wakes a real shell. Assertions that need a quiet epoch take
-/// their keys explicitly, or retry an idle check that such a wakeup hit.
-const IDLE_ATTEMPTS: usize = 5;
-
 #[test]
 fn tracker_skips_an_unchanged_key() {
     quiet();
@@ -168,6 +169,7 @@ fn tracker_lays_out_when_the_key_changes() {
 
 #[test]
 fn reactive_tick_paints_only_when_the_app_wants_to_draw() {
+    own_ui_queue();
     quiet();
     let (mut app, layouts) = counting_app();
     let mut tracker = LayoutTracker::new();
@@ -178,13 +180,11 @@ fn reactive_tick_paints_only_when_the_app_wants_to_draw() {
         paints.set(paints.get() + 1)
     }));
     assert_eq!((layouts.get(), paints.get()), (1, 1));
-    let idle_tick_skipped = (0..IDLE_ATTEMPTS).any(|_| {
-        // Fold in any wakeup already pending, then clear it.
-        app.wants_draw();
-        quiet();
-        !tracker.tick(&mut app, viewport, TickMode::Reactive, |_| {})
-    });
-    assert!(idle_tick_skipped, "an idle app is not painted");
+    quiet();
+    assert!(
+        !tracker.tick(&mut app, viewport, TickMode::Reactive, |_| {}),
+        "an idle app is not painted"
+    );
     animation::request_draw();
     let before = (layouts.get(), paints.get());
     assert!(tracker.tick(&mut app, viewport, TickMode::Reactive, |_| {
@@ -201,6 +201,7 @@ fn reactive_tick_paints_only_when_the_app_wants_to_draw() {
 
 #[test]
 fn tick_drains_the_ui_thread_queue_first() {
+    own_ui_queue();
     quiet();
     let (mut app, _) = counting_app();
     let mut tracker = LayoutTracker::new();

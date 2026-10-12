@@ -252,7 +252,10 @@ fn host_waker() -> Option<HostWaker> {
 /// the layout pass and paints the freshly-decoded SVG into the
 /// previous layout's placeholder rect.
 fn pump_async_wakeup() {
-    let current = crate::ui_thread::current_wakeups();
+    // An unbound thread has no queue aimed at it, so nothing to merge.
+    let Some(current) = crate::ui_thread::current_wakeups() else {
+        return;
+    };
     let changed = LAST_SEEN_ASYNC_WAKEUP.with(|c| {
         let prev = c.get();
         if prev == current {
@@ -636,7 +639,7 @@ mod host_waker_tests {
     //! `ControlFlow::Wait`.
     //!
     //! `HOST_WAKER` and the main queue's wakeup count (which these unbound test
-    //! threads read) are process-global, and other tests in this crate call
+    //! threads signal and check) are process-global, and other tests in this crate call
     //! `signal_async_state_change` concurrently — so
     //! these tests serialize against each other with a local mutex, count
     //! *their own* invocations rather than reading the global counter after
@@ -673,14 +676,14 @@ mod host_waker_tests {
     #[test]
     fn waker_sees_counter_already_bumped() {
         let _guard = serial();
-        let before = crate::ui_thread::current_wakeups();
+        let before = crate::ui_thread::main_queue_wakeups();
         let observed = Arc::new(AtomicU64::new(0));
         let sink = Arc::clone(&observed);
         set_host_waker(move || {
             // Snapshot from inside the waker: the host is woken only after the
             // bump is published, otherwise it would park again having seen
             // nothing.
-            sink.store(crate::ui_thread::current_wakeups(), Ordering::Release);
+            sink.store(crate::ui_thread::main_queue_wakeups(), Ordering::Release);
         });
 
         signal_async_state_change();
@@ -769,10 +772,10 @@ mod host_waker_tests {
         let _guard = serial();
         clear_host_waker();
         // Must not panic and must still publish the cross-thread bump.
-        let before = crate::ui_thread::current_wakeups();
+        let before = crate::ui_thread::main_queue_wakeups();
         signal_async_state_change();
         assert!(
-            crate::ui_thread::current_wakeups() > before,
+            crate::ui_thread::main_queue_wakeups() > before,
             "counter-only behaviour is unchanged when no waker is installed"
         );
     }

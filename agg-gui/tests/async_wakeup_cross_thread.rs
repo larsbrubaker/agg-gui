@@ -14,11 +14,11 @@
 //! event (mouse-move over a scrollbar) bumped `invalidation_epoch` and the
 //! next frame's layout pass finally gave the badge its real width.
 //!
-//! These tests live in an integration-test binary (separate process) so the
-//! main queue's wakeup count, which an unbound worker's signal bumps and these
-//! unbound test threads read, is isolated from the
-//! unit-test binary's other tests, which rely on `wants_draw() == false`
-//! after `clear_draw_request()`.
+//! The test thread is the UI thread, marked as the shells mark theirs, so it
+//! owns the main queue that an unbound worker's signal goes to (an unbound
+//! thread merges no queue's wakeups). It lives in an integration-test binary
+//! of its own (separate process) so no other test owns or signals the main
+//! queue.
 
 use agg_gui::animation::{
     async_state_epoch, clear_draw_request, invalidation_epoch, signal_async_state_change,
@@ -27,6 +27,7 @@ use agg_gui::animation::{
 
 #[test]
 fn signal_async_state_change_propagates_across_threads() {
+    agg_gui::ui_thread::mark_current_thread_as_ui_thread();
     // Establish a clean baseline on this (the test runner's) thread.
     clear_draw_request();
     let before_epoch = invalidation_epoch();

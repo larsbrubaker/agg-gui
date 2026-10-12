@@ -17,10 +17,11 @@
 //!
 //! **Wakeups are per queue, so per UI thread.** Each queue counts the wakeups
 //! aimed at it, and [`crate::animation`] merges only the calling thread's
-//! queue's count into its draw request and epochs ([`current_wakeups`]). A
-//! post or `animation::signal_async_state_change` from an unbound worker goes
-//! to the main queue and wakes its owner; parallel UI threads (headless tests)
-//! never see each other's wakeups.
+//! bound queue's count into its draw request and epochs ([`current_wakeups`]);
+//! an unbound thread merges none. A post or
+//! `animation::signal_async_state_change` from an unbound worker goes to the
+//! main queue and wakes its owner; parallel UI threads (headless tests), and
+//! unbound threads painting widgets, never see each other's wakeups.
 //!
 //! **One queue per UI thread.** C# has one process-wide queue; agg-gui's UI
 //! state is per thread, and tests run windows on threads of their own in
@@ -150,20 +151,41 @@ pub fn current_queue() -> UiQueue {
     bound().unwrap_or_else(main_queue)
 }
 
-/// The wakeup count of the queue the calling thread reads its wakeups from
-/// (its bound queue, otherwise the main queue). [`crate::animation`] merges a
-/// change into the thread's draw request and epochs. Zero while thread-locals
-/// are being torn down.
-pub(crate) fn current_wakeups() -> u64 {
-    match BOUND.try_with(|b| b.borrow().as_ref().map(UiQueue::wakeups)) {
-        Ok(Some(count)) => count,
-        Ok(None) => main_queue().wakeups(),
-        Err(_) => 0,
-    }
+/// The wakeup count of the queue the calling thread is bound to, which
+/// [`crate::animation`] merges into the thread's draw request and epochs on a
+/// change. `None` for an unbound thread, and while thread-locals are being
+/// torn down.
+///
+/// An unbound thread is not a UI thread, so no queue's wakeups are aimed at
+/// it: a worker's post to the main queue wakes the main queue's owner only.
+/// Reading the main queue's count here instead once let every unbound thread
+/// see every other thread's main-queue wakeups — in a parallel test run,
+/// another test's signal landed between one test's `clear_draw_request` and
+/// its `wants_draw`, and repainted its retained layers. Every UI thread binds
+/// before it pumps frames (the shells and the headless drivers mark
+/// themselves, and a drain binds), so production loses nothing. An unbound
+/// thread still sees its own signals: posting raises the poster's flags
+/// directly ([`raises_poster_flags`]).
+pub(crate) fn current_wakeups() -> Option<u64> {
+    BOUND
+        .try_with(|b| b.borrow().as_ref().map(UiQueue::wakeups))
+        .ok()
+        .flatten()
 }
 
-/// Whether the calling thread reads its wakeups from `queue`.
-fn reads_wakeups_of(queue: &UiQueue) -> bool {
+/// The main queue's wakeup count, for tests that check a worker's signal
+/// reached it without being bound to it.
+#[cfg(test)]
+pub(crate) fn main_queue_wakeups() -> u64 {
+    main_queue().wakeups()
+}
+
+/// Whether a signal to `queue` from the calling thread also raises the
+/// caller's own draw request and epochs at once: the caller is bound to
+/// `queue`, or is unbound and posting to the main queue (a thread that has not
+/// bound — demo-wasm's loop, a test painting without draining — still sees
+/// what it signals itself).
+fn raises_poster_flags(queue: &UiQueue) -> bool {
     match BOUND.try_with(|b| b.borrow().as_ref().map(|q| q.same_queue(queue))) {
         Ok(Some(same)) => same,
         Ok(None) => main_queue().same_queue(queue),
