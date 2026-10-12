@@ -204,6 +204,20 @@ impl WindowTitleBar {
         // children[1] is the label (children[0] is the chevron).
         self.children[1].set_label_text(title);
     }
+
+    /// The text the title label shows now.
+    pub(crate) fn title_text(&self) -> String {
+        self.children[1]
+            .as_any()
+            .and_then(|any| any.downcast_ref::<Label>())
+            .map(|label| label.text_str().to_string())
+            .unwrap_or_default()
+    }
+
+    /// The collapse chevron (children[0]), in title-bar-local bounds.
+    pub(crate) fn chevron(&self) -> &dyn Widget {
+        self.children[0].as_ref()
+    }
 }
 
 impl Widget for WindowTitleBar {

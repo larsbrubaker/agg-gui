@@ -162,4 +162,7 @@ mod window_layout;
 mod window_maximize;
 mod window_snap_coords;
 mod window_title_buttons;
+mod window_widget_options_tests;
+mod window_widget_resize_tests;
+mod window_widget_title_bar_drag_tests;
 mod windowing;

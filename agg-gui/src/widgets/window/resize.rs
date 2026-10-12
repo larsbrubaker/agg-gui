@@ -2,6 +2,7 @@
 // may reach and the drag-delta → bounds mapping per resize direction. Lifted
 // out of `window.rs` (which keeps `resize_dir`, the hit-test side) to keep
 // that file under the 800-line limit; snapping lives in `snap_glue.rs`.
+// Resized bounds round by edge (`snap_edges`) so the undragged edge stays put.
 
 use super::*;
 
@@ -86,7 +87,19 @@ impl Window {
             }
         }
 
-        self.bounds = snap(Rect::new(x, y, w, h));
+        self.bounds = snap_edges(x, y, w, h);
         self.clamp_to_canvas();
     }
+}
+
+/// Round a resized rectangle to whole units by its EDGES, not its size: the
+/// edge that is not being dragged sits on a whole unit already (the drag
+/// starts from snapped bounds), so it stays exactly where it was. Rounding
+/// the left and the width separately moved the right edge a unit whenever the
+/// mouse travel landed on a half unit, as a drag inside a zoomed container
+/// does (a 5 px step at zoom 2 is 2.5 units).
+fn snap_edges(x: f64, y: f64, w: f64, h: f64) -> Rect {
+    let (left, bottom) = (x.round(), y.round());
+    let (right, top) = ((x + w).round(), (y + h).round());
+    Rect::new(left, bottom, right - left, top - bottom)
 }

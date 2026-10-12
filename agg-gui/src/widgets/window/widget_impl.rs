@@ -253,6 +253,12 @@ impl Widget for Window {
             self.collapsible = cell.get();
         }
         self.title_bar.set_collapsible(self.collapsible);
+        // Turning collapsing off unfolds a folded window: with the chevron
+        // gone nothing would be left to unfold it with (agg-sharp
+        // `WindowWidget.Collapsible`).
+        if !self.collapsible && self.collapsed {
+            self.toggle_collapse();
+        }
         if let Some(ref cell) = self.title_cell {
             let wanted = cell.borrow();
             if *wanted != *self.last_applied_title.borrow() {
@@ -370,7 +376,11 @@ impl Widget for Window {
                 // Matches egui where auto_sized tracks content size
                 // symmetrically.
                 let new_w = pref.width.max(MIN_W).min(available.width.max(MIN_W));
-                let new_h = (pref.height + TITLE_H).min(cap_h + TITLE_H).max(MIN_H);
+                // Floor at the title bar alone, not `MIN_H` (the floor of
+                // a user resize): the height fits the content exactly, so
+                // a short content leaves no empty band (agg-sharp
+                // `WindowWidget.AutoSize`).
+                let new_h = (pref.height + TITLE_H).min(cap_h + TITLE_H).max(TITLE_H);
                 let top = self.bounds.y + self.bounds.height;
                 self.bounds.width = new_w;
                 self.bounds.height = new_h;

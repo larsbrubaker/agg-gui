@@ -514,10 +514,16 @@ impl App {
     }
 
     /// Call when the cursor leaves the window to clear hover state.
+    ///
+    /// A widget holding the pointer capture (a window being dragged by its
+    /// title bar or a resize edge, a slider thumb) does not get the leave as
+    /// a move to (-1, -1): that is not where the pointer is, and taking it
+    /// for one threw a dragged window at the corner of the screen. It keeps
+    /// its last position until the next real move or the release.
     pub fn on_mouse_leave(&mut self) {
         self.resolve_tracked_paths();
         crate::cursor::reset_cursor_icon();
-        self.dispatch_mouse_move(Point::new(-1.0, -1.0));
+        self.dispatch_pointer_move(Point::new(-1.0, -1.0), false);
     }
 
     // --- Touch ingestion ---
@@ -651,6 +657,12 @@ impl App {
     }
 
     fn dispatch_mouse_move(&mut self, pos: Point) {
+        self.dispatch_pointer_move(pos, true);
+    }
+
+    /// Hover update plus the move itself; `to_capture` is false for the
+    /// pointer-leave sentinel, which a captured widget never receives.
+    fn dispatch_pointer_move(&mut self, pos: Point, to_capture: bool) {
         let new_hit = self.compute_hit(pos);
         self.update_hover_chain(new_hit.as_deref(), Some(pos));
 
@@ -675,7 +687,9 @@ impl App {
             // Captured widget always receives the real position, regardless of
             // whether the cursor is over it — this is what keeps a slider
             // tracking the cursor when dragged outside its bounds.
-            dispatch_event(&mut self.root, cap_path, &event, pos);
+            if to_capture {
+                dispatch_event(&mut self.root, cap_path, &event, pos);
+            }
         } else if let Some(path) = new_hit {
             dispatch_event(&mut self.root, &path, &event, pos);
         }

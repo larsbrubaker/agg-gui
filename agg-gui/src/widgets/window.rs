@@ -650,7 +650,7 @@ impl Window {
 
     /// Return the resize direction for `local`, or `None` if the point is in
     /// the interior (or the window is collapsed).
-    fn resize_dir(&self, local: Point) -> Option<ResizeDir> {
+    pub(crate) fn resize_dir(&self, local: Point) -> Option<ResizeDir> {
         if self.collapsed || self.auto_size {
             return None;
         }
@@ -706,6 +706,7 @@ pub mod chrome;
 mod close;
 mod events;
 mod opacity;
+mod options;
 mod paint;
 mod resize;
 mod snap_glue;
