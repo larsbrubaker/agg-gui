@@ -175,7 +175,8 @@ impl MarkdownView {
         let Some(entry) = self.image_cache.get(cache_idx) else {
             return;
         };
-        if is_rect_visible_in_root(ctx, x, y, width, height) {
+        let visible = is_rect_visible_in_root(ctx, x, y, width, height);
+        if visible {
             let should_load = entry.state.lock().is_ok_and(|mut state| {
                 if matches!(*state, ImageState::RemotePending) {
                     *state = ImageState::Loading;
@@ -204,15 +205,21 @@ impl MarkdownView {
             });
         let v = ctx.visuals();
         if let Some(image) = ready {
-            ctx.draw_image_rgba(
-                image.data.as_slice(),
-                image.width,
-                image.height,
-                x,
-                y,
-                width,
-                height,
-            );
+            // An animated image draws the frame its playback clock is on
+            // (`animated_image.rs`), starting the clock on this first paint.
+            let (data, iw, ih) = match &image.sequence {
+                Some(sequence) => {
+                    let index = entry.animation.frame_for_paint(sequence, visible);
+                    let frame = &sequence.frames()[index];
+                    (
+                        std::sync::Arc::clone(&frame.data),
+                        frame.width,
+                        frame.height,
+                    )
+                }
+                None => (image.data, image.width, image.height),
+            };
+            ctx.draw_image_rgba(data.as_slice(), iw, ih, x, y, width, height);
         } else {
             ctx.set_fill_color(Color::rgba(0.5, 0.5, 0.5, 0.15));
             ctx.begin_path();

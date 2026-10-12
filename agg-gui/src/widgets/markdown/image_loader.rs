@@ -47,6 +47,14 @@ fn decode_image(bytes: &[u8]) -> Option<ImagePixels> {
     if looks_like_svg(bytes) {
         return decode_svg(bytes);
     }
+    // An animated GIF keeps its frames (`ImageSequence::load_gif`, C#'s
+    // `ImageIO.LoadImageData(Stream, ImageSequence)`); a one-frame GIF
+    // comes back as a plain still.
+    if crate::image_sequence::ImageSequence::is_gif(bytes) {
+        if let Some(sequence) = crate::image_sequence::ImageSequence::load_gif(bytes) {
+            return super::animated_image::pixels_of_sequence(sequence);
+        }
+    }
 
     let image = image::load_from_memory(bytes).ok()?.to_rgba8();
     let (width, height) = image.dimensions();
@@ -54,6 +62,7 @@ fn decode_image(bytes: &[u8]) -> Option<ImagePixels> {
         data: Arc::new(image.into_raw()),
         width,
         height,
+        sequence: None,
     })
 }
 
@@ -74,5 +83,29 @@ fn decode_svg(bytes: &[u8]) -> Option<ImagePixels> {
         data: Arc::new(pixels),
         width,
         height,
+        sequence: None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::decode_image;
+    use crate::image_sequence::tests::gif_bytes;
+
+    #[test]
+    fn rust_only_fetched_animated_gif_keeps_its_frames() {
+        let bytes = gif_bytes(3, 2, &[([255, 0, 0, 255], 5), ([0, 255, 0, 255], 5)]);
+        let image = decode_image(&bytes).expect("decodes");
+        assert_eq!((image.width, image.height), (3, 2));
+        assert_eq!(&image.data[..4], &[255, 0, 0, 255]);
+        assert_eq!(image.sequence.expect("animated").num_frames(), 2);
+    }
+
+    #[test]
+    fn rust_only_fetched_single_frame_gif_is_a_still() {
+        let bytes = gif_bytes(3, 2, &[([0, 0, 255, 255], 5)]);
+        let image = decode_image(&bytes).expect("decodes");
+        assert!(image.sequence.is_none());
+        assert_eq!(&image.data[..4], &[0, 0, 255, 255]);
+    }
 }

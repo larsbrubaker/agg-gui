@@ -660,6 +660,7 @@ mod tests {
                 data: Arc::new(vec![0u8; 200 * 40 * 4]),
                 width: 200,
                 height: 40,
+                sequence: None,
             },
             seen: false,
         };
@@ -706,6 +707,7 @@ mod tests {
                 data: Arc::new(vec![255, 0, 0, 255]),
                 width: 1,
                 height: 1,
+                sequence: None,
             },
             seen: false,
         };

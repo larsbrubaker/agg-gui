@@ -28,6 +28,8 @@
 //!   ([`MarkdownView::with_code_font`]; the body face when none is given)
 //! - Horizontal rules (thin separator line)
 //! - Images via `image_provider` callback; compact inline placeholder when unavailable
+//! - Animated GIFs (remote, or from [`MarkdownView::with_image_sequence_provider`])
+//!   play at their frame delays once loaded and painted (`animated_image.rs`)
 //! - Links (coloured text, URL is not opened — add `on_link_click` if needed),
 //!   in paragraphs and in table cells (`cell_links.rs`)
 //! - Matching-text highlight boxes ([`MarkdownView::set_matching_text`])
@@ -58,6 +60,9 @@ use crate::widget::Widget;
 mod alignment;
 #[cfg(test)]
 mod alignment_tests;
+mod animated_image;
+#[cfg(test)]
+mod animated_image_tests;
 mod block_scroll;
 mod cell_images;
 mod cell_links;
@@ -281,6 +286,8 @@ enum ParagraphItem {
 struct ImageEntry {
     url: String,
     state: Arc<Mutex<ImageState>>,
+    /// Playback of an animated image (`animated_image.rs`).
+    animation: animated_image::AnimationClock,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -295,6 +302,8 @@ pub(crate) struct ImagePixels {
     pub(crate) data: Arc<Vec<u8>>,
     pub(crate) width: u32,
     pub(crate) height: u32,
+    /// The frames of an animated image; `data` is its first frame.
+    pub(crate) sequence: Option<Arc<crate::image_sequence::ImageSequence>>,
 }
 
 /// An image's load state, shared with the rich editor's image cache
@@ -310,6 +319,9 @@ pub(crate) enum ImageState {
 
 /// Resolves an image URL to decoded RGBA `(pixels, width, height)`.
 type ImageProvider = Box<dyn Fn(&str) -> Option<(Vec<u8>, u32, u32)>>;
+
+/// Resolves an image URL to an animated [`crate::image_sequence::ImageSequence`].
+type SequenceProvider = Box<dyn Fn(&str) -> Option<crate::image_sequence::ImageSequence>>;
 
 /// A callback handed a link or image URL.
 type UrlCallback = Box<dyn FnMut(&str)>;
@@ -335,6 +347,8 @@ pub struct MarkdownView {
     /// Optional image decoder.  Receives a URL/path, returns RGBA8 pixel data
     /// (top-row first) + (width, height), or `None` if unavailable.
     image_provider: Option<ImageProvider>,
+    /// Optional animated-image source, asked before `image_provider`.
+    sequence_provider: Option<SequenceProvider>,
 
     /// Cached image data, indexed by `LineRun::Image::cache_idx`.
     image_cache: Vec<ImageEntry>,
@@ -380,6 +394,7 @@ impl MarkdownView {
             font_size: 14.0,
             padding: 8.0,
             image_provider: None,
+            sequence_provider: None,
             image_cache: Vec::new(),
             items: Vec::new(),
             content_h: 0.0,
@@ -534,12 +549,17 @@ impl MarkdownView {
         }
 
         let state = Arc::new(Mutex::new(
-            if let Some((data, width, height)) = self.image_provider.as_ref().and_then(|p| p(url)) {
+            if let Some(image) = self.provided_sequence(url) {
+                ImageState::Ready { image, seen: false }
+            } else if let Some((data, width, height)) =
+                self.image_provider.as_ref().and_then(|p| p(url))
+            {
                 ImageState::Ready {
                     image: ImagePixels {
                         data: Arc::new(data),
                         width,
                         height,
+                        sequence: None,
                     },
                     seen: false,
                 }
@@ -554,6 +574,7 @@ impl MarkdownView {
         self.image_cache.push(ImageEntry {
             url: url.to_string(),
             state,
+            animation: Default::default(),
         });
         idx
     }
@@ -727,7 +748,18 @@ impl Widget for MarkdownView {
                     )
                 })
                 .unwrap_or(false)
-        }) || self.children().iter().any(|c| c.needs_draw())
+        }) || self.animation_frame_due()
+            || self.children().iter().any(|c| c.needs_draw())
+    }
+
+    fn next_draw_deadline(&self) -> Option<web_time::Instant> {
+        if !self.is_visible() {
+            return None;
+        }
+        self.next_animation_deadline()
+            .into_iter()
+            .chain(self.children.iter().filter_map(|c| c.next_draw_deadline()))
+            .min()
     }
 
     fn on_event(&mut self, event: &Event) -> EventResult {

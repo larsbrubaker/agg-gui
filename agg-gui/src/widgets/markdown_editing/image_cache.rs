@@ -120,6 +120,7 @@ impl RichImageCache {
                         data: Arc::new(data),
                         width,
                         height,
+                        sequence: None,
                     },
                     seen: true,
                 },
