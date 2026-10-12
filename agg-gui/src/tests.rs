@@ -67,6 +67,7 @@ mod focus_replaced_subtree;
 mod horizontal_wheel_routing;
 mod hover_enter_leave;
 mod huge_offset_blit;
+mod icon_font_tests;
 mod image_icons;
 mod inspector_hover;
 mod inspector_tree;

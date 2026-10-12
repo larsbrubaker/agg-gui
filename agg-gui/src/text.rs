@@ -246,6 +246,24 @@ impl Font {
         })
     }
 
+    /// A glyph's outline bounding box in pixels at `size`, relative to its
+    /// pen origin, Y-up: `(x_min, y_min, x_max, y_max)`.  `None` when the
+    /// glyph has no outline or isn't in this face (the fallback chain is not
+    /// consulted).
+    pub fn glyph_visual_rect(&self, glyph: char, size: f64) -> Option<(f64, f64, f64, f64)> {
+        self.with_ttf_face(|face| {
+            let gid = face.glyph_index(glyph)?;
+            let bbox = face.glyph_bounding_box(gid)?;
+            let scale = size / self.units_per_em as f64;
+            Some((
+                bbox.x_min as f64 * scale,
+                bbox.y_min as f64 * scale,
+                bbox.x_max as f64 * scale,
+                bbox.y_max as f64 * scale,
+            ))
+        })
+    }
+
     /// Run `f` with a `rustybuzz::Face` borrowed from the internal data.
     ///
     /// The face has the same lifetime as the closure invocation, so it cannot

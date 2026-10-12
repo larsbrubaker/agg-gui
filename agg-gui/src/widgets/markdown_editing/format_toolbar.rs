@@ -32,6 +32,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use crate::geometry::Rect;
+use crate::icon_font;
 use crate::layout_props::WidgetBase;
 use crate::text::Font;
 use crate::widget::Widget;
@@ -110,22 +111,22 @@ impl MarkdownFormatButtonKind {
         Self::ALL.iter().position(|k| *k == self).unwrap_or(0)
     }
 
-    /// The Font Awesome 4.7 glyph the button shows.
+    /// The Font Awesome glyph the button shows (`crate::icon_font`).
     pub fn icon(self) -> char {
         match self {
-            Self::Bold => '\u{F032}',
-            Self::Italic => '\u{F033}',
-            Self::Strike => '\u{F0CC}',
-            Self::Code => '\u{F121}',
-            Self::AlignLeft => '\u{F036}',
-            Self::AlignCenter => '\u{F037}',
-            Self::AlignRight => '\u{F038}',
-            Self::BulletList => '\u{F0CA}',
-            Self::NumberedList => '\u{F0CB}',
-            Self::Quote => '\u{F10D}',
-            Self::Link => '\u{F0C1}',
-            Self::CodeBlock => '\u{F1C9}',
-            Self::Table => '\u{F0CE}',
+            Self::Bold => icon_font::BOLD,
+            Self::Italic => icon_font::ITALIC,
+            Self::Strike => icon_font::STRIKETHROUGH,
+            Self::Code => icon_font::CODE,
+            Self::AlignLeft => icon_font::ALIGN_LEFT,
+            Self::AlignCenter => icon_font::ALIGN_CENTER,
+            Self::AlignRight => icon_font::ALIGN_RIGHT,
+            Self::BulletList => icon_font::LIST_UL,
+            Self::NumberedList => icon_font::LIST_OL,
+            Self::Quote => icon_font::QUOTE_LEFT,
+            Self::Link => icon_font::LINK,
+            Self::CodeBlock => icon_font::FILE_CODE,
+            Self::Table => icon_font::TABLE,
         }
     }
 
