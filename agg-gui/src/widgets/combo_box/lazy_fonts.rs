@@ -42,6 +42,12 @@ impl LazyItemFonts {
         font
     }
 
+    /// Forget every answer: the rows now name other things
+    /// ([`ComboBox::set_options`]), so each is asked again when it paints.
+    pub(super) fn forget(&self) {
+        self.resolved.borrow_mut().clear();
+    }
+
     fn resolved_font(&self, idx: usize) -> Option<Arc<Font>> {
         self.resolved.borrow().get(idx).cloned().flatten().flatten()
     }

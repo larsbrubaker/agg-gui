@@ -119,6 +119,9 @@ pub struct ComboBox {
     /// `layout()` re-reads the cell every frame so a sibling ComboBox bound
     /// to the same cell stays in lock-step; selection changes here write back.
     selected_cell: Option<Rc<Cell<usize>>>,
+    /// Optional external list of options — see
+    /// [`ComboBox::with_options_cell`] (`combo_box/options.rs`).
+    options_cell: Option<Rc<RefCell<Vec<String>>>>,
 
     // ── Backbuffered labels ──────────────────────────────────────────────────
     /// Label for the currently selected option (shown in the closed button area).
@@ -209,6 +212,7 @@ impl ComboBox {
             font_size,
             on_change: None,
             selected_cell: None,
+            options_cell: None,
             selected_label,
             item_labels,
             item_fonts: None,
@@ -408,6 +412,7 @@ mod geometry;
 mod item_enabled;
 mod keyboard;
 mod lazy_fonts;
+mod options;
 mod press;
 mod selection;
 mod style;
@@ -497,6 +502,9 @@ impl Widget for ComboBox {
         // get yanked back.
         self.close_if_disabled();
         if !self.open {
+            // The options first, so the cell's index below means a row of
+            // the list the host just wrote.
+            self.sync_options_cell();
             if let Some(cell) = &self.selected_cell {
                 let n = self.options.len();
                 if n > 0 {
