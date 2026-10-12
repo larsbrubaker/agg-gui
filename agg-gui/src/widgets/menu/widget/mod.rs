@@ -247,6 +247,8 @@ mod tests_2;
 #[cfg(test)]
 mod tests_anchor_edges;
 #[cfg(test)]
+mod tests_bar_anchor;
+#[cfg(test)]
 mod tests_bar_children;
 #[cfg(test)]
 mod tests_bar_drag_overlap;

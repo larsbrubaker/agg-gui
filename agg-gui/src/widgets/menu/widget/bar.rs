@@ -14,6 +14,7 @@ use crate::draw_ctx::DrawCtx;
 use crate::event::{Event, EventResult, Key, Modifiers, MouseButton};
 use crate::font_settings;
 use crate::geometry::{Point, Rect, Size};
+use crate::layout_props::HAnchor;
 use crate::text::Font;
 use crate::widget::{current_viewport, BackbufferCache, Widget};
 
@@ -67,6 +68,9 @@ pub struct MenuBar {
     title_keys: Vec<(String, String)>,
     /// Instance id from [`MenuBar::with_id`], reported by [`Widget::id`].
     id: Option<String>,
+    /// Horizontal anchor from [`MenuBar::with_h_anchor`], reported by
+    /// [`Widget::h_anchor`]; `FIT` (the trait default) unless set.
+    h_anchor: HAnchor,
 }
 
 impl MenuBar {
@@ -94,6 +98,7 @@ impl MenuBar {
             bar_height: None,
             title_keys: Vec::new(),
             id: None,
+            h_anchor: HAnchor::FIT,
         }
     }
 
@@ -103,6 +108,14 @@ impl MenuBar {
     /// no id by default.
     pub fn with_id(mut self, id: impl Into<String>) -> Self {
         self.id = Some(id.into());
+        self
+    }
+
+    /// How a parent places the bar across its width ([`Widget::h_anchor`]),
+    /// e.g. `HAnchor::STRETCH` so a `FlexColumn` gives it the whole row as
+    /// C#'s `MenuBar { HAnchor = HAnchor.Stretch }`.  `FIT` by default.
+    pub fn with_h_anchor(mut self, h_anchor: HAnchor) -> Self {
+        self.h_anchor = h_anchor;
         self
     }
 
@@ -407,6 +420,10 @@ impl Widget for MenuBar {
 
     fn id(&self) -> Option<&str> {
         self.id.as_deref()
+    }
+
+    fn h_anchor(&self) -> HAnchor {
+        self.h_anchor
     }
 
     fn bounds(&self) -> Rect {

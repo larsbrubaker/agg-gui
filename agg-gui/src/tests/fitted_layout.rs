@@ -137,3 +137,22 @@ fn a_fit_height_container_keeps_a_fitted_column_inside() {
     assert_eq!(column.bounds(), Rect::new(5.0, 5.0, 100.0, 40.0));
     assert_children_inside(column.as_ref());
 }
+
+#[test]
+fn a_padded_container_stacks_a_column_of_rows_from_its_top() {
+    // A dialog page's content row: a padded, stretched `Container` around a
+    // plain `FlexColumn` of rows, with no filler under them.  The column
+    // reports its rows' height, so the container re-lays it at that height
+    // and its rows sit at the top of the row, inside the column.
+    let column = FlexColumn::new()
+        .with_gap(0.0)
+        .add(Box::new(sized(100.0, 20.0)))
+        .add(Box::new(sized(100.0, 30.0)));
+    let mut container = Container::new().with_padding(5.0).add(Box::new(column));
+    container.layout(Size::new(300.0, 400.0));
+    let column = &container.children()[0];
+    assert_eq!(column.bounds(), Rect::new(5.0, 345.0, 290.0, 50.0));
+    assert_children_inside(column.as_ref());
+    assert_eq!(column.children()[0].bounds().y, 30.0);
+    assert_eq!(column.children()[1].bounds().y, 0.0);
+}

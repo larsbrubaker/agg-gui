@@ -22,6 +22,8 @@
 //! - The mouse cursor is answered by [`RichEditorState::cursor_at`] rather
 //!   than set; links in a Raw block's rendered host are found through the
 //!   widget's lookup (`set_raw_link_lookup`), since the hosts are widgets.
+//! - A drag held past the edge of a view under 2 px tall keeps the floor
+//!   of C#'s `Math.Clamp(y, 1, Height - 1)`, which threw there.
 //! - The link modifier is the editor's command key: Cmd with mac bindings,
 //!   Ctrl otherwise (C#'s hosts folded Command onto Control).  The Windows
 //!   key is never read, as in C#.
@@ -29,6 +31,7 @@
 use crate::cursor::CursorIcon;
 use crate::event::{Modifiers, MouseButton};
 use crate::geometry::Point;
+use crate::layout_props::clamp_to_limits;
 
 use super::block::{RichBlock, RichBlockKind};
 use super::block_layout::RichBlockGeometry;
@@ -198,11 +201,9 @@ impl RichEditorState {
         let before = self.scroll_offset_from_top();
         let step = (past / 2.0).clamp(-MAX_AUTO_SCROLL_STEP, MAX_AUTO_SCROLL_STEP);
         self.set_scroll_offset_from_top(before - step);
-        let y = self
-            .mouse
-            .last_drag
-            .y
-            .clamp(1.0, self.viewport_height - 1.0);
+        // C# `Math.Clamp(lastDrag.Y, 1, editor.Height - 1)` throws once the
+        // view is under 2 px tall (as `f64::clamp` panics); the floor wins.
+        let y = clamp_to_limits(self.mouse.last_drag.y, 1.0, self.viewport_height - 1.0);
         self.extend_to_point(Point::new(self.mouse.last_drag.x, y));
         if self.scroll_offset_from_top() == before {
             // At the top or bottom of the document: nothing more to scroll to.
