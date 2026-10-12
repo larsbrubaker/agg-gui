@@ -645,6 +645,8 @@ mod image_tests;
 #[cfg(test)]
 mod opacity_tests;
 #[cfg(test)]
+mod static_data_svg_icon_tests;
+#[cfg(test)]
 mod text_tests;
 
 mod clip;
