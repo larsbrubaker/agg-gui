@@ -24,6 +24,7 @@ use crate::geometry::{Rect, Size};
 use crate::layout_props::{
     clamp_to_limits, resolve_fit_or_stretch, HAnchor, Insets, VAnchor, WidgetBase,
 };
+use crate::pixel_bounds::snap_extent;
 use crate::widget::Widget;
 use crate::widgets::flex::DEFAULT_ROW_GAP;
 use crate::widgets::flex_share::{share_flex_space, FlexItem};
@@ -350,10 +351,15 @@ impl Widget for FlexRow {
                 // Held to the child's limits (agg-sharp's FlowLayoutWidget
                 // respects MaximumSize). The floor wins where they cross, as
                 // in `WidgetBase::clamp_size` (`f64::clamp` would panic).
-                content_widths[i] = desired
-                    .width
-                    .min(self.children[i].max_size().width)
-                    .max(self.children[i].min_size().width);
+                // Snapped here, so the totals below (and a fit-width row's
+                // reported width) sum the widths step 3 places.
+                content_widths[i] = snap_extent(
+                    self.children[i].enforce_integer_bounds(),
+                    desired
+                        .width
+                        .min(self.children[i].max_size().width)
+                        .max(self.children[i].min_size().width),
+                );
             }
         }
 
@@ -448,9 +454,11 @@ impl Widget for FlexRow {
                 v_anchor, pad_b, inner_h, m.bottom, m.top, natural_h, min_h, max_h,
             );
 
-            // Round to integers — same reason as FlexColumn (pixel-perfect blits).
-            let final_w = content_w.round();
-            let final_h = child_h.round();
+            // Round to integers — same reason as FlexColumn (pixel-perfect
+            // blits) — unless the child opts out of integer bounds.
+            let snap = self.children[i].enforce_integer_bounds();
+            let final_w = snap_extent(snap, content_w);
+            let final_h = snap_extent(snap, child_h);
             // Re-layout at the final assigned box. The measure pass above used
             // the full slot height, so a fit-content child (e.g. a shorter
             // FlexColumn) top-anchored its own children for that taller slot.
@@ -461,12 +469,14 @@ impl Widget for FlexRow {
                 self.children[i].layout(Size::new(final_w, final_h));
             }
             self.children[i].set_bounds(Rect::new(
-                cursor_x.round(),
-                child_y.round(),
+                snap_extent(snap, cursor_x),
+                snap_extent(snap, child_y),
                 final_w,
                 final_h,
             ));
-            max_slot_h = max_slot_h.max(child_h + m.vertical());
+            // The row fits the height it placed, not the unrounded one, or a
+            // 22.67 px child placed at 23 would lose a third of a pixel.
+            max_slot_h = max_slot_h.max(final_h + m.vertical());
 
             // Advance past content width, right margin, and inter-child gap.
             cursor_x += content_w + m.right + gap;

@@ -42,6 +42,7 @@ use crate::geometry::{Rect, Size};
 use crate::layout_props::{
     clamp_to_limits, resolve_fit_or_stretch, HAnchor, Insets, VAnchor, WidgetBase,
 };
+use crate::pixel_bounds::snap_extent;
 use crate::widget::Widget;
 use crate::widgets::flex_share::{share_flex_space, FlexItem};
 
@@ -342,7 +343,11 @@ impl Widget for FlexColumn {
             visible_n += 1;
             let m = child.margin();
             let slot_w = (inner_w - m.left - m.right).max(0.0);
-            total += child.measure_min_height(slot_w) + m.vertical();
+            // Snapped as `layout` places it, so the two agree on the height.
+            total += snap_extent(
+                child.enforce_integer_bounds(),
+                child.measure_min_height(slot_w),
+            ) + m.vertical();
         }
         total += pad_t + pad_b;
         if visible_n > 1 {
@@ -414,12 +419,18 @@ impl Widget for FlexColumn {
                 // Measure at natural height; pass inner_h as the available
                 // height so the child can self-report its natural size.
                 let desired = self.children[i].layout(Size::new(slot_w, inner_h));
-                content_heights[i] = clamp_to_limits(
-                    desired.height,
-                    self.children[i].min_size().height,
-                    self.children[i].max_size().height,
+                // Snapped here, so the column stacks and reports the
+                // heights (and a fit-width column the widths) it places.
+                let snap = self.children[i].enforce_integer_bounds();
+                content_heights[i] = snap_extent(
+                    snap,
+                    clamp_to_limits(
+                        desired.height,
+                        self.children[i].min_size().height,
+                        self.children[i].max_size().height,
+                    ),
                 );
-                natural_widths[i] = desired.width;
+                natural_widths[i] = snap_extent(snap, desired.width);
             }
         }
 
@@ -528,8 +539,10 @@ impl Widget for FlexColumn {
             );
 
             // Round to integers so bitmap content (cached text, images) lands on
-            // exact pixel boundaries and isn't sub-pixel sampled into blur.
-            let final_w = child_w.round();
+            // exact pixel boundaries and isn't sub-pixel sampled into blur —
+            // unless the child opts out of integer bounds.
+            let snap = self.children[i].enforce_integer_bounds();
+            let final_w = snap_extent(snap, child_w);
             // Re-lay at the final width when it differs from the slot the
             // child was just laid out in (a fit-width child that is
             // centred, right-aligned or narrower than the slot): the child
@@ -540,10 +553,10 @@ impl Widget for FlexColumn {
                 self.children[i].layout(Size::new(final_w, content_h));
             }
             self.children[i].set_bounds(Rect::new(
-                child_x.round(),
-                child_bottom.round(),
+                snap_extent(snap, child_x),
+                snap_extent(snap, child_bottom),
                 final_w,
-                content_h.round(),
+                snap_extent(snap, content_h),
             ));
 
             // Advance cursor past bottom margin and inter-child gap.

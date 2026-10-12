@@ -63,6 +63,7 @@ mod fitted_layout;
 mod flex_column_stretch;
 mod flex_empty_and_capped;
 mod flex_gap;
+mod flex_integer_bounds;
 mod focus;
 mod focus_blur;
 mod focus_replaced_subtree;

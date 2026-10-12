@@ -51,6 +51,22 @@ pub fn set_default_enforce_integer_bounds(enforce: bool) {
     DEFAULT_ENFORCE_INTEGER_BOUNDS.store(enforce, Ordering::Relaxed);
 }
 
+/// A child's size or position as a layout places it: rounded to whole
+/// pixels when the child enforces integer bounds, exact otherwise.
+///
+/// Layouts that fit their children (`FlexRow`, `FlexColumn`) snap each value
+/// once, through this, and then both place the child and report their own
+/// size from the snapped value, so the container is exactly as big as what
+/// it placed: agg-sharp's `GuiWidget` rounds a child's bounds as they are
+/// set (`EnforceIntegerBounds`), before its `FlowLayoutWidget` fits them.
+pub fn snap_extent(enforce: bool, v: f64) -> f64 {
+    if enforce {
+        v.round()
+    } else {
+        v
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
