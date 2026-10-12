@@ -2,7 +2,9 @@
 //! `pointer_reach_tests.rs`): a named rectangle whose visibility and enabled
 //! state are switched from another thread or an idle action, and a container
 //! that lets every press through to what is under it (the GUI demo's fading
-//! window, which C#'s `PointerReach` exists for).
+//! window, which C#'s `PointerReach` exists for). A `Switchable` can also
+//! clip its children (all, or one slot), paint in the overlay pass and
+//! enforce integer bounds, for the paint-geometry lookups.
 
 #![allow(dead_code)]
 
@@ -35,6 +37,10 @@ pub struct Switchable {
     visible: Switch,
     enabled: Switch,
     takes_presses: bool,
+    children_clip: Option<Rect>,
+    slot_clips: Vec<(usize, Rect)>,
+    defers_paint: bool,
+    integer_bounds: bool,
 }
 
 impl Switchable {
@@ -48,6 +54,10 @@ impl Switchable {
             visible: switch(true),
             enabled: switch(true),
             takes_presses: true,
+            children_clip: None,
+            slot_clips: Vec::new(),
+            defers_paint: false,
+            integer_bounds: false,
         }
     }
 
@@ -69,6 +79,30 @@ impl Switchable {
 
     pub fn with_child(mut self, child: Box<dyn Widget>) -> Self {
         self.children.push(child);
+        self
+    }
+
+    /// Clips its children to `rect` (local) rather than its bounds.
+    pub fn clipping_children_to(mut self, rect: Rect) -> Self {
+        self.children_clip = Some(rect);
+        self
+    }
+
+    /// Clips child `index` to `rect` (its `child_paint_clip`, a slot).
+    pub fn clipping_child(mut self, index: usize, rect: Rect) -> Self {
+        self.slot_clips.push((index, rect));
+        self
+    }
+
+    /// Paints in the global overlay pass (a modal host).
+    pub fn deferring_paint_to_overlay(mut self) -> Self {
+        self.defers_paint = true;
+        self
+    }
+
+    /// Enforces integer bounds (painted at rounded, pixel-snapped offsets).
+    pub fn with_integer_bounds(mut self) -> Self {
+        self.integer_bounds = true;
         self
     }
 }
@@ -118,6 +152,27 @@ impl Widget for Switchable {
             child.set_bounds(b);
         }
         Size::new(self.bounds.width, self.bounds.height)
+    }
+    fn clip_children_rect(&self) -> Option<(f64, f64, f64, f64)> {
+        let r = self.children_clip.unwrap_or(Rect::new(
+            0.0,
+            0.0,
+            self.bounds.width,
+            self.bounds.height,
+        ));
+        Some((r.x, r.y, r.width, r.height))
+    }
+    fn child_paint_clip(&self, index: usize) -> Option<Rect> {
+        self.slot_clips
+            .iter()
+            .find(|(i, _)| *i == index)
+            .map(|(_, r)| *r)
+    }
+    fn defer_paint_to_overlay(&self) -> bool {
+        self.defers_paint
+    }
+    fn enforce_integer_bounds(&self) -> bool {
+        self.integer_bounds
     }
     fn paint(&mut self, _ctx: &mut dyn DrawCtx) {}
     fn on_event(&mut self, _event: &Event) -> EventResult {

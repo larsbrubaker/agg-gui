@@ -39,6 +39,11 @@
 //! - [`input`] — `InputMethod` (C# `IInputMethod`) and `SimulatedInput`
 //!   (`AggInputMethods`): pointer and keyboard input through the shells'
 //!   input forwarder.
+//! - [`paint_geometry`] — painting's transform and clip chain, replayed
+//!   without a draw context (pixel snapping, children and slot clips, the
+//!   overlay pass).
+//! - [`name_pick`] — which same-named thing a click by name goes to and
+//!   where on it the click lands, as pure functions of a tree.
 //! - [`pointer_reach`] — `PointerReach`: whether a press can get to a widget.
 //! - [`pointer_state`] — C#'s `UnderMouseState`, `MouseCaptured`,
 //!   `ChildHasMouseCaptured` and `Focused` for a found widget.
@@ -53,6 +58,8 @@ pub mod image_source;
 pub mod input;
 mod key_mapping;
 pub mod keys;
+pub mod name_pick;
+pub mod paint_geometry;
 pub mod pointer_reach;
 pub mod pointer_state;
 pub mod probe;
@@ -72,6 +79,7 @@ pub use image_match::{find_least_squares_match, LeastSquaresMatch};
 pub use image_source::{decode_needle, DirectoryImageSource, ImageNeedle, ImageSource};
 pub use input::{InputMethod, MouseAction, Point2D, SimulatedInput};
 pub use keys::Keys;
+pub use name_pick::HitPlacement;
 pub use probe::{ProbeLog, ProbeWidget};
 pub use runner::{
     AutomationConfig, AutomationRunner, ClickOpts, ClickOrigin, DragDropOpts, DragOpts,

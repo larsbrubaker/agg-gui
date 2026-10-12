@@ -80,6 +80,8 @@ src/runner/drag.rs         (exists) DragOpts/DragDropOpts, Drag*/Drop*
 src/runner/keyboard.rs     (exists) Type, ModifierKeys, Press/ReleaseModifierKeys, SelectAll/None
 src/runner/waits.rs        (exists) Delay, WaitFor/WaitUntil, Assert, WaitForPendingUiWork, WaitforDraw
 src/input.rs               (exists) InputMethod trait (IInputMethod) + SimulatedInput (AggInputMethods), MouseConsts→MouseAction, keyboard members; current_screen to come
+src/paint_geometry.rs      (exists) painting's transform and clip chain, replayed for the lookups
+src/name_pick.rs           (exists) GetWidgetByName's pick among same-named hits and where the click lands; find_on_screen
 src/pointer_reach.rs       (exists) PointerReach
 src/tree_query.rs          (exists) WidgetHandle, NamedHit (GetByNameResults, with its `target`), find_named_hits, screen/clip rects, ActuallyVisibleOnScreen, inherited Enabled, Parents/Children
 src/image_match.rs         (exists) FindLeastSquaresMatch over agg_gui::Framebuffer
@@ -243,6 +245,16 @@ In live mode each of these pumps `pump_app_events` until the condition holds or 
 
 **The tree walk** (`tree_query::find_named_hits`, used by `runner/named.rs`) puts a widget's targets before the widget itself, as C#'s overrides add them before calling the base. A target hit's `offset_hint` is its rect's center. A target is on show when its widget and every ancestor are visible and the target's own rect reaches into the window. The widget's own area is not asked, nor are ancestor clips: drop-down and menu rows paint in the overlay pass, and a context menu's host may have no size at all. Search regions and `get_region_by_name` use the target's own rect, and `wait_for_widget_enabled` on a target's name waits for the target's own `enabled` flag (read afresh each look) as well as its widget's enabled chain.
 
+**Where a widget is, and what of it shows** (`paint_geometry`, under `tree_query::placement`): the lookups replay painting's transform and clip chain, so a widget is found where the frame draws it. A child is offset by its bounds origin, rounded when it enforces integer bounds, and such a widget's transform is floored onto the pixel grid (`snap_to_pixel`; exact at device scale 1). Children are clipped to `clip_children_rect`, then offset by the child transform, and each child by its parent's `child_paint_clip` (a `FlexRow` slot). A subtree that paints in the overlay pass (`defer_paint_to_overlay`, a modal inside a clipped container) escapes its ancestors' clips and is clipped by the window alone.
+
+**Choosing among same-named things, and where to click** (`name_pick`, pure functions of a tree and the window size, shared by the runner's lookups and an application's own harness):
+1. Only what shows counts (`HitPlacement::shows`).
+2. Those a press can reach come first (C# `PreferReachable`): the click point shows and no ancestor's `hit_test` refuses it (`pointer_reach::can_reach`); all count when none can be reached.
+3. The largest visible area wins, the first in tree order on a tie, with areas within a relative `AREA_TOLERANCE` (1e-9) counting as equal: equal widgets at different offsets come out a few ulps apart in window space, and C#'s strict comparison let that noise pick the second of equals.
+4. The click lands at the centre (C# `MoveMouseToWidget`), or at the centre of the visible part when a clip hides the centre (a row half scrolled out of its list): C# pressed whatever lay over the hidden centre of a widget its lookup had just required to show.
+
+Rules 3 and 4 are the runner's behaviour for every consumer, not a hook: both make a lookup keep its own contract (the first of equals; a found widget is a clickable one). `find_on_screen(root, name, viewport)` applies all four in one look; `AutomationRunner::find_now(name)` / `find_now_in(name, region)` is the same from a runner, taking `&self` and pumping nothing, so a `wait_until` predicate can ask it. `hit_placement` and `aim_point` report a hit's rectangles and its click point (logical, Y-up).
+
 **Image searches** use `region.image`, or a fresh whole-window capture.
 
 **Reading widget state from tests** (C# reads `field.Text`, `IsOpen`, `ContainsFocus` straight off objects):
@@ -340,7 +352,7 @@ In live mode each of these pumps `pump_app_events` until the condition holds or 
 |---|---|---|
 | M2 | Back `TestHarness` with the runner | Built on `AutomationRunner::attach`, `HeadlessDriver::with_painter` (the wgpu `HeadlessFrame`, or no pixels), `set_background_busy` and `wait_for_idle` (section 3). `TestHarness` owns a `HeadlessDriver` (settings isolation, sample part, compute workers move to a `MatterCadAppWindow` builder) and exposes `runner()`. `frame`/`settle`/`pump_until_idle` use the driver's frame and `ClockPolicy::Real` when workers are on. Existing helpers delegate. |
 | M3 | Delete the name hacks | mattercad-app's View3D and design page implement `find_named_targets` (Object3D controls by C# name, scene children); `CONTROL_KEYS` and `scene_objects`/`controls` string parsing go. `menu_automation` uses menu-row named targets. |
-| M4 | `run_test` and `new_part_tab_test` | Equivalents of C# `MatterCADUtilities.RunTest`/`NewPartTabTest` over `show_window_and_execute_tests`, with automatic `mark_test_complete`, C#'s 1280×720 default, and `AutomationFileService` (dialog provider) installed. `complete_dialog`, `add_item_to_bed`, `navigate_to_folder` and friends become extension traits on `AutomationRunner`. |
+| M4 | Single name path and `complete_dialog` | MatterCAD has `run_test`/`new_part_tab_test` and the extension traits. Left: its harness drops its own `on_screen` lookup for `name_pick::find_on_screen` / `AutomationRunner::find_now` (section 6), and `complete_dialog` waits on slice 29's `AutomationFileDialog`. |
 | M5–M9 | Move the 14 ported test files to the runner API, about 3 files per slice | `click_by_name`/`drag_drop_by_name`/`type_text`/`wait_for_name`/`assert` replace harness calls; `MAX_WAIT_FRAMES` becomes C#'s seconds; teleporting clicks become stepped moves (fix whatever this exposes, test-first). |
 | M10 | Remove the old helpers | Delete the deprecated `TestHarness` helpers (`click`, `type_keys`, `drag`, `MAX_WAIT_FRAMES`); update crate docs. That leaves 47 of the 61 C# AutomationTests files, which can then be ported one per slice with the same API. |
 

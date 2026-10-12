@@ -17,13 +17,15 @@
 //! answers `None` / `false` / empty.
 //!
 //! Rectangles are agg-gui's native space: logical units, Y-up, with the
-//! root's lower-left corner at the window's. They are accumulated with the
-//! same transform chain [`agg_gui::find_widget_screen_rect`] and the
-//! inspector use (each ancestor's bounds origin, then its
-//! `inspector_child_transform`). Conversion to the runner's Y-down pixel
-//! search regions belongs to the name-lookup layer.
+//! root's lower-left corner at the window's. They follow painting's
+//! transform and clip chain ([`crate::paint_geometry`]), so a widget is where
+//! the frame draws it, and on show where the frame lets it show. Conversion
+//! to the runner's Y-down pixel search regions belongs to the name-lookup
+//! layer; choosing among same-named widgets is [`crate::name_pick`]'s.
 
-use agg_gui::{NamedTarget, Point, Rect, Size, TransAffine, Widget, WidgetAnchor};
+use agg_gui::{NamedTarget, Point, Rect, Size, Widget, WidgetAnchor};
+
+use crate::paint_geometry;
 
 /// A found widget (the Rust side of C# holding a `GuiWidget` reference).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -256,15 +258,17 @@ fn parents_where(
 pub struct ScreenPlacement {
     /// The widget's bounds in window space (logical, Y-up).
     pub screen_rect: Rect,
-    /// `screen_rect` cut by every ancestor's `clip_children_rect` and by the
-    /// viewport; empty (zero width or height) when nothing of it shows.
+    /// `screen_rect` cut by every clip painting puts it under (see
+    /// [`placement`]) and by the viewport; empty (zero width or height) when nothing of it shows.
     pub clipped_rect: Rect,
     /// Every widget from the root down to this one reports `is_visible()`.
     pub visible_chain: bool,
 }
 
-/// Walk from `root` to `handle`'s widget, accumulating its screen rectangle
-/// and the clip every ancestor imposes. `viewport` is the window's logical
+/// Walk from `root` to `handle`'s widget, replaying painting's transforms
+/// and clips ([`paint_geometry`]): pixel snapping, every ancestor's
+/// `clip_children_rect` and `child_paint_clip`, and the window alone for a
+/// subtree painted in the overlay pass. `viewport` is the window's logical
 /// size. `None` when the handle is detached.
 pub fn placement(
     root: &dyn Widget,
@@ -272,30 +276,14 @@ pub fn placement(
     viewport: Size,
 ) -> Option<ScreenPlacement> {
     let path = handle.resolve(root)?;
-    let mut node = root;
-    let mut parent_to_screen = TransAffine::new();
-    let mut clip = Rect::new(0.0, 0.0, viewport.width, viewport.height);
-    let mut visible_chain = node.is_visible();
-    for &idx in &path {
-        let b = node.bounds();
-        let mut local_to_screen = parent_to_screen;
-        local_to_screen.translate(b.x, b.y);
-        if let Some((x, y, w, h)) = node.clip_children_rect() {
-            clip = intersect(
-                clip,
-                transform_rect_aabb(&local_to_screen, Rect::new(x, y, w, h)),
-            );
-        }
-        local_to_screen.premultiply(&node.inspector_child_transform());
-        parent_to_screen = local_to_screen;
-        node = node.children().get(idx)?.as_ref();
-        visible_chain &= node.is_visible();
-    }
-    let screen_rect = transform_rect_aabb(&parent_to_screen, node.bounds());
+    let widget = agg_gui::widget::walk_path(root, &path)?;
+    let painted = paint_geometry::paint_placement(root, &path, viewport)?;
+    let b = widget.bounds();
+    let screen_rect = painted.screen_rect(Size::new(b.width, b.height));
     Some(ScreenPlacement {
         screen_rect,
-        clipped_rect: intersect(clip, screen_rect),
-        visible_chain,
+        clipped_rect: intersect(painted.clip, screen_rect),
+        visible_chain: painted.visible_chain,
     })
 }
 
@@ -313,27 +301,13 @@ pub fn local_rect_to_screen(
     rect_local: Rect,
 ) -> Option<Rect> {
     let path = handle.resolve(root)?;
-    let mut node = root;
-    let mut parent_to_screen = TransAffine::new();
-    for &idx in &path {
-        let b = node.bounds();
-        let mut local_to_screen = parent_to_screen;
-        local_to_screen.translate(b.x, b.y);
-        local_to_screen.premultiply(&node.inspector_child_transform());
-        parent_to_screen = local_to_screen;
-        node = node.children().get(idx)?.as_ref();
-    }
-    // The same mapping `placement` gives the widget's own bounds (which
-    // are in its parent's space): offset by the widget's origin, then
-    // through its parent's chain.
-    let b = node.bounds();
-    let in_parent = Rect::new(
-        rect_local.x + b.x,
-        rect_local.y + b.y,
-        rect_local.width,
-        rect_local.height,
-    );
-    Some(transform_rect_aabb(&parent_to_screen, in_parent))
+    // The viewport only affects the clip.
+    let unbounded = Size::new(f64::INFINITY, f64::INFINITY);
+    let painted = paint_geometry::paint_placement(root, &path, unbounded)?;
+    Some(paint_geometry::screen_aabb(
+        &painted.local_to_screen,
+        rect_local,
+    ))
 }
 
 /// The part of the widget left after every ancestor's clip and the viewport.
@@ -373,43 +347,4 @@ pub fn actually_enabled(root: &dyn Widget, handle: &WidgetHandle) -> bool {
     enabled
 }
 
-/// The overlap of two rectangles; zero-sized at the nearer edge when they do
-/// not overlap.
-pub fn intersect(a: Rect, b: Rect) -> Rect {
-    let left = a.left().max(b.left());
-    let bottom = a.bottom().max(b.bottom());
-    let right = a.right().min(b.right());
-    let top = a.top().min(b.top());
-    Rect::new(
-        left,
-        bottom,
-        (right - left).max(0.0),
-        (top - bottom).max(0.0),
-    )
-}
-
-/// The axis-aligned box around `rect`'s corners after `t` (exact for
-/// translation plus scale, as in agg-gui's inspector).
-fn transform_rect_aabb(t: &TransAffine, rect: Rect) -> Rect {
-    let corners = [
-        (rect.left(), rect.bottom()),
-        (rect.right(), rect.bottom()),
-        (rect.left(), rect.top()),
-        (rect.right(), rect.top()),
-    ];
-    let (mut min_x, mut min_y) = (f64::INFINITY, f64::INFINITY);
-    let (mut max_x, mut max_y) = (f64::NEG_INFINITY, f64::NEG_INFINITY);
-    for (mut x, mut y) in corners {
-        t.transform(&mut x, &mut y);
-        min_x = min_x.min(x);
-        min_y = min_y.min(y);
-        max_x = max_x.max(x);
-        max_y = max_y.max(y);
-    }
-    Rect::new(
-        min_x,
-        min_y,
-        (max_x - min_x).max(0.0),
-        (max_y - min_y).max(0.0),
-    )
-}
+pub use crate::paint_geometry::intersect;
