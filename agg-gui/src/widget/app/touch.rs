@@ -5,11 +5,13 @@
 //! conversion — Y-flip + keyboard lift — the mouse path uses), and the
 //! primary-finger mouse emulation in [`crate::touch_emulation`], whose
 //! commands are replayed through `App::on_mouse_*` in raw screen
-//! coordinates. Platform shells therefore forward raw touches ONLY —
+//! coordinates; a drag's middle press is offered with the finger's travel
+//! and falls back to a left press when no `ScrollView` takes it
+//! (`touch_drag_press`). Platform shells therefore forward raw touches ONLY —
 //! synthesizing mouse events shell-side would double-fire them.
 
 use super::super::keyboard_scroll;
-use crate::event::Modifiers;
+use crate::event::{Modifiers, MouseButton};
 use crate::touch_emulation::EmuCmd;
 use crate::widget::App;
 
@@ -77,10 +79,30 @@ impl App {
         for cmd in cmds {
             match cmd {
                 EmuCmd::MouseMove(x, y) => self.on_mouse_move(x, y),
+                EmuCmd::MouseDown(x, y, MouseButton::Middle) => self.touch_drag_press(x, y),
                 EmuCmd::MouseDown(x, y, btn) => self.on_mouse_down(x, y, btn, Modifiers::default()),
                 EmuCmd::MouseUp(x, y, btn) => self.on_mouse_up(x, y, btn, Modifiers::default()),
                 EmuCmd::MouseLeave => self.on_mouse_leave(),
+                EmuCmd::CancelPress => self.cancel_pointer_capture(),
             }
+        }
+    }
+
+    /// The press of a finger drag past the tap tolerance, at the
+    /// touch-down point. Offered as a middle press with the finger's travel
+    /// published ([`crate::touch_emulation::touch_pan_travel`]), so the
+    /// nearest `ScrollView` that can scroll along the drag pans; when
+    /// nothing takes it, the drag is the widget's own and the left button
+    /// goes down there instead (a slider, a 3D view).
+    fn touch_drag_press(&mut self, x: f64, y: f64) {
+        let (dx, dy) = self.touch_mouse_emu.travel();
+        let scale = crate::ux_scale::effective_scale().max(1e-6);
+        crate::touch_emulation::set_touch_pan_travel(Some((dx / scale, -dy / scale)));
+        self.on_mouse_down(x, y, MouseButton::Middle, Modifiers::default());
+        crate::touch_emulation::set_touch_pan_travel(None);
+        if !self.has_captured_pointer() {
+            self.touch_mouse_emu.press_instead();
+            self.on_mouse_down(x, y, MouseButton::Left, Modifiers::default());
         }
     }
 

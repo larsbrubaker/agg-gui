@@ -10,6 +10,19 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- Finger drags decide what they are, as agg-sharp's `TouchPressDeferral`
+  does: a drag past the tap tolerance pans the nearest `ScrollView` that can
+  scroll along the drag (`touch_pan_travel()` reports the finger's travel
+  while its middle press is dispatched); a drag no `ScrollView` takes is the
+  widget's own left drag, pressed where the finger went down and ended with
+  `Event::MouseCaptureLost` (new `EmuCmd::CancelPress`), so it never clicks.
+  A press on a visible scroll bar is the bar's drag; a faded-out floating bar
+  is panned over, and a floating bar shows while a finger pans
+  (`ScrollbarAxis::touch_panning`, read through `scroll_bar_properties()`'s
+  `fade_target`).
+  A second finger landing during a widget's own drag (or after a dropped
+  release) cancels that press.
+
 - Popups close when the window deactivates, as agg-sharp's `PopupMenu` and
   `PopupWidget` close on `SystemWindow.Deactivated`: `PopupMenuState` closes
   on `Event::WindowDeactivated` and answers `MenuResponse::Closed` (so
@@ -236,6 +249,8 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Changed
 
+- `TOUCH_SCROLL_THRESHOLD` is 8 logical points (times `device_scale()`), not
+  8 physical pixels, so finger jitter on a dense phone stays a tap.
 - **Native clipboard requires an opt-in.** With the `clipboard` feature, the
   `clipboard` functions (and `screenshot::copy_rgba_to_clipboard`) now use a
   process-wide in-process clipboard (text or a picture, holding one clears

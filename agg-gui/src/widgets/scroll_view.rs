@@ -605,6 +605,7 @@ impl ScrollView {
 mod bar_properties;
 mod widget_impl;
 
+mod touch_pan;
 pub use bar_properties::{ScrollBarAxisProperties, ScrollBarProperties, ScrollFadedEdges};
 
 pub mod scroll_offsets;

@@ -54,6 +54,9 @@ pub struct ScrollbarAxis {
     pub hovered_thumb: bool,
     pub dragging: bool,
     pub drag_thumb_offset: f64,
+    /// A finger is panning the view: a floating bar shows for it, since a
+    /// finger has no hover to find the bar with.
+    pub touch_panning: bool,
     pub hover_anim: crate::animation::Tween,
     pub visibility_anim: crate::animation::Tween,
 }
@@ -68,6 +71,7 @@ impl Default for ScrollbarAxis {
             hovered_thumb: false,
             dragging: false,
             drag_thumb_offset: 0.0,
+            touch_panning: false,
             hover_anim: crate::animation::Tween::new(0.0, SCROLL_BAR_GROW_SECS),
             visibility_anim: crate::animation::Tween::new(0.0, SCROLL_BAR_FADE_SECS),
         }
@@ -283,7 +287,7 @@ impl ScrollbarAxis {
             ScrollBarVisibility::AlwaysHidden => false,
             ScrollBarVisibility::AlwaysVisible => true,
             ScrollBarVisibility::VisibleWhenNeeded => {
-                !floating || self.hovered_bar || self.dragging
+                !floating || self.hovered_bar || self.dragging || self.touch_panning
             }
         }
     }

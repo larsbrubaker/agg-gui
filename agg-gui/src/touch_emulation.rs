@@ -13,31 +13,65 @@
 //! The gesture contract (ported from the original JS shell in
 //! `demo/src/app.ts`):
 //!
-//!   - A tap (release before moving [`TOUCH_SCROLL_THRESHOLD`] px) is a
-//!     left click at the release point.
+//!   - A tap (release before moving [`TOUCH_SCROLL_THRESHOLD`] points,
+//!     that many logical units times [`crate::device_scale`] in the
+//!     physical pixels touches arrive in) is a left click at the release
+//!     point.
 //!   - A drag past the threshold becomes a MIDDLE-button drag starting
 //!     at the touch-down point — `ScrollView` pans on middle-drag, so a
 //!     finger drag scrolls by the exact finger delta.  Canvas-style
 //!     widgets that want to own finger drags (e.g. the lion demo)
-//!     consume middle-drag instead of left-drag.
+//!     consume middle-drag instead of left-drag.  While that press is
+//!     dispatched, [`touch_pan_travel`] reports the finger's travel so a
+//!     `ScrollView` takes it only when it can scroll along the drag.
+//!   - A drag nothing takes as a middle-drag is the widget's own drag (a
+//!     slider, a 3D view): `App` calls [`TouchMouseEmu::press_instead`]
+//!     and presses the LEFT button where the finger went down.  Such a
+//!     press ends in [`EmuCmd::CancelPress`] (the capture is cancelled,
+//!     not released), so a gesture past the tap tolerance never clicks.
 //!   - The moment a second finger lands, single-finger emulation is
 //!     suppressed until every finger lifts: an in-flight middle drag is
-//!     released immediately, and the eventual release emits no click.
-//!     (The multi-finger gesture is reported via `MultiTouchInfo`
-//!     instead.)  This also kills the phantom click a pinch used to
-//!     fire when the first finger barely moved.
+//!     released immediately (a widget's own left drag is cancelled), and
+//!     the eventual release emits no click.  (The multi-finger gesture is
+//!     reported via `MultiTouchInfo` instead.)  This also kills the
+//!     phantom click a pinch used to fire when the first finger barely
+//!     moved, and lets go of a press whose release a host dropped.
 //!
 //! All coordinates are the same screen-space (Y-down, physical-pixel)
 //! units the `App::on_mouse_*` entry points accept.
 
+use std::cell::Cell;
 use std::collections::BTreeSet;
 
 use crate::event::MouseButton;
 use crate::touch_state::{TouchDeviceId, TouchId};
 
-/// Distance (physical px) the primary finger must travel before the
-/// gesture stops being a potential tap and becomes a middle-drag.
+/// Distance (logical points) the primary finger must travel before the
+/// gesture stops being a potential tap and becomes a drag. Touches arrive
+/// in physical pixels, so the emulator compares against this times
+/// [`crate::device_scale`] (the monitor's pixels per point, not the UX
+/// zoom): on a devicePixelRatio 3.5 phone a fixed 8 physical pixels is
+/// about 2 CSS pixels, and ordinary finger jitter turned every tap into a
+/// drag (agg-sharp `TouchTapToleranceTests`).
 pub const TOUCH_SCROLL_THRESHOLD: f64 = 8.0;
+
+thread_local! {
+    static TOUCH_PAN_TRAVEL: Cell<Option<(f64, f64)>> = const { Cell::new(None) };
+}
+
+/// The finger's travel (logical units, Y-up: `x` right, `y` up) while
+/// `App` dispatches the middle press of a touch drag, else `None`. A
+/// `ScrollView` takes that press only when it can scroll along the
+/// drag's main axis, leaving a drag it cannot scroll to its ancestors
+/// and, when none can, to the widget under the finger as a left drag.
+pub fn touch_pan_travel() -> Option<(f64, f64)> {
+    TOUCH_PAN_TRAVEL.with(|t| t.get())
+}
+
+/// Set (or clear) [`touch_pan_travel`] around a dispatch.
+pub(crate) fn set_touch_pan_travel(travel: Option<(f64, f64)>) {
+    TOUCH_PAN_TRAVEL.with(|t| t.set(travel));
+}
 
 /// A mouse event the emulator wants replayed through `App::on_mouse_*`.
 /// Coordinates are screen-space, matching those entry points.
@@ -47,6 +81,9 @@ pub enum EmuCmd {
     MouseDown(f64, f64, MouseButton),
     MouseUp(f64, f64, MouseButton),
     MouseLeave,
+    /// End a widget's own left drag without a release: the capture holder
+    /// gets `Event::MouseCaptureLost`, so a drag never clicks.
+    CancelPress,
 }
 
 /// State machine tracking the primary finger.  Self-contained (keeps
@@ -67,6 +104,9 @@ pub struct TouchMouseEmu {
     /// True once the threshold was crossed and a middle-drag is in
     /// flight.
     scrolling: bool,
+    /// True once the drag fell to the widget under the finger as a left
+    /// press ([`Self::press_instead`]).
+    pressed: bool,
     /// True once a second finger landed while this primary was active;
     /// no further mouse events are emitted until all fingers lift.
     suppressed: bool,
@@ -87,6 +127,7 @@ impl TouchMouseEmu {
             self.start_pos = (x, y);
             self.last_pos = (x, y);
             self.scrolling = false;
+            self.pressed = false;
             self.suppressed = false;
             return vec![EmuCmd::MouseMove(x, y)];
         }
@@ -95,6 +136,12 @@ impl TouchMouseEmu {
         // ScrollView doesn't keep panning while the user pinches.
         if self.primary.is_some() && !self.suppressed {
             self.suppressed = true;
+            if self.pressed {
+                // A widget's own drag (or a press whose release a host
+                // dropped) lets go without clicking.
+                self.pressed = false;
+                return vec![EmuCmd::CancelPress];
+            }
             if self.scrolling {
                 self.scrolling = false;
                 return vec![EmuCmd::MouseUp(
@@ -112,10 +159,11 @@ impl TouchMouseEmu {
             return Vec::new();
         }
         let mut cmds = Vec::new();
-        if !self.scrolling {
+        if !self.scrolling && !self.pressed {
             let dx = x - self.start_pos.0;
             let dy = y - self.start_pos.1;
-            if (dx * dx + dy * dy).sqrt() >= TOUCH_SCROLL_THRESHOLD {
+            let threshold = TOUCH_SCROLL_THRESHOLD * crate::device_scale();
+            if (dx * dx + dy * dy).sqrt() >= threshold {
                 // Threshold crossed: this is a drag, not a tap.  The
                 // middle button goes down at the START point so the
                 // scroll pan covers the full finger travel.
@@ -129,9 +177,34 @@ impl TouchMouseEmu {
         }
         // The primary finger always drives the hover position, even
         // before the threshold — widgets show hover/pressed states.
-        cmds.push(EmuCmd::MouseMove(x, y));
         self.last_pos = (x, y);
+        cmds.push(EmuCmd::MouseMove(x, y));
         cmds
+    }
+
+    /// The primary finger's travel from where it went down, in the
+    /// screen-space (Y-down, physical-pixel) units of the commands.
+    pub fn travel(&self) -> (f64, f64) {
+        (
+            self.last_pos.0 - self.start_pos.0,
+            self.last_pos.1 - self.start_pos.1,
+        )
+    }
+
+    /// Nothing took the drag's middle press: the gesture becomes the
+    /// widget's own left drag, which `App` presses at the touch-down point.
+    /// Later moves stay plain moves and the lift cancels the press
+    /// ([`EmuCmd::CancelPress`]) instead of releasing it.
+    pub fn press_instead(&mut self) {
+        if self.scrolling {
+            self.scrolling = false;
+            self.pressed = true;
+        }
+    }
+
+    /// The touch-down point of the primary finger (screen space).
+    pub fn start_pos(&self) -> (f64, f64) {
+        self.start_pos
     }
 
     pub fn on_end(&mut self, device: TouchDeviceId, id: TouchId) -> Vec<EmuCmd> {
@@ -156,6 +229,10 @@ impl TouchMouseEmu {
                 // only the hover state needs clearing — and crucially,
                 // NO click fires.
                 cmds.push(EmuCmd::MouseLeave);
+            } else if self.pressed {
+                self.pressed = false;
+                cmds.push(EmuCmd::CancelPress);
+                cmds.push(EmuCmd::MouseLeave);
             } else if self.scrolling {
                 self.scrolling = false;
                 cmds.push(EmuCmd::MouseUp(x, y, MouseButton::Middle));
@@ -173,6 +250,7 @@ impl TouchMouseEmu {
             // become primary even after a suppressed gesture.
             self.primary = None;
             self.scrolling = false;
+            self.pressed = false;
             self.suppressed = false;
         }
         cmds

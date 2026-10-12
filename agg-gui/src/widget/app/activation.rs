@@ -58,7 +58,7 @@ impl App {
 
     /// End the pointer capture without a release: tell the holder with
     /// [`Event::MouseCaptureLost`], then forget the capture.
-    fn cancel_pointer_capture(&mut self) {
+    pub(super) fn cancel_pointer_capture(&mut self) {
         let Some(path) = self.captured.clone() else {
             return;
         };

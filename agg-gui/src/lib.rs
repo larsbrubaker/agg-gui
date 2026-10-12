@@ -196,7 +196,7 @@ pub use theme::{
     current_visuals, current_visuals_epoch, set_visuals, AccentColor, ThemePreference, Visuals,
 };
 pub use timestep::{FixedTimestep, StepBatch, FIXED_DT, MAX_STEPS_PER_DRAW, SIMULATION_HZ};
-pub use touch_emulation::{EmuCmd, TouchMouseEmu, TOUCH_SCROLL_THRESHOLD};
+pub use touch_emulation::{touch_pan_travel, EmuCmd, TouchMouseEmu, TOUCH_SCROLL_THRESHOLD};
 pub use touch_state::{current_multi_touch, MultiTouchInfo, TouchDeviceId, TouchId, TouchPhase};
 pub use trackpad_pinch_fingers::{
     TrackpadGesturePhase, TrackpadPinchFingers, VIRTUAL_TRACKPAD_DEVICE,

@@ -428,9 +428,17 @@ impl Widget for ScrollView {
                 ..
             } => {
                 let (vw, vh) = self.viewport();
-                if (self.v.enabled && self.v.content > vh)
-                    || (self.h.enabled && self.h.content > vw)
-                {
+                let v_scroll = self.v.enabled && self.v.content > vh;
+                let h_scroll = self.h.enabled && self.h.content > vw;
+                let touch = crate::touch_emulation::touch_pan_travel();
+                if let Some(travel) = touch {
+                    if !self.touch_can_pan(*pos, travel, v_scroll, h_scroll) {
+                        return EventResult::Ignored;
+                    }
+                }
+                if v_scroll || h_scroll {
+                    self.v.touch_panning = touch.is_some();
+                    self.h.touch_panning = touch.is_some();
                     self.middle_dragging = true;
                     self.middle_start_world = crate::widget::current_mouse_world().unwrap_or(*pos);
                     self.middle_start_v_offset = self.v.offset;
@@ -498,6 +506,8 @@ impl Widget for ScrollView {
                 self.v.dragging = false;
                 self.h.dragging = false;
                 self.middle_dragging = false;
+                self.v.touch_panning = false;
+                self.h.touch_panning = false;
                 if was {
                     crate::animation::request_draw();
                     EventResult::Consumed
@@ -515,6 +525,8 @@ impl Widget for ScrollView {
                 self.h.dragging = false;
                 if *button == MouseButton::Middle {
                     self.middle_dragging = false;
+                    self.v.touch_panning = false;
+                    self.h.touch_panning = false;
                 }
                 if was {
                     crate::animation::request_draw();
