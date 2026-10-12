@@ -25,6 +25,9 @@ use super::*;
 /// visuals, so a theme that sets none of them looks as before. The border's
 /// unset hovered and focused colours keep their own visuals fallbacks
 /// (`widget_stroke_active`, `accent`).
+///
+/// [`TextArea::with_theme`](crate::widgets::TextArea::with_theme) takes the
+/// same theme, so single- and multi-line editors share one palette.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct TextFieldTheme {
     pub background: Option<Color>,
@@ -39,6 +42,17 @@ pub struct TextFieldTheme {
     /// `EditFieldColors.Focused.TextColor`).
     pub text_color_focused: Option<Color>,
     pub placeholder_color: Option<Color>,
+    /// Hint colour while the field has keyboard focus (agg-sharp's
+    /// `EditFieldColors.Focused.LightTextColor`). Unset falls back to
+    /// `placeholder_color`, then the visuals. Seen only where the hint shows
+    /// while focused: a [`TextField`] with
+    /// [`show_placeholder_when_focused`](Self::show_placeholder_when_focused),
+    /// or a [`TextArea`](crate::widgets::TextArea), whose hint always shows.
+    pub placeholder_color_focused: Option<Color>,
+    /// Keep a [`TextField`]'s hint visible while it has focus and is empty,
+    /// as agg-sharp's `ThemedTextEditWidget` does. `false` (the default)
+    /// hides it on focus. A `TextArea` always shows its hint.
+    pub show_placeholder_when_focused: bool,
     pub border_color: Option<Color>,
     pub border_color_hovered: Option<Color>,
     pub border_color_focused: Option<Color>,
@@ -46,6 +60,10 @@ pub struct TextFieldTheme {
     pub selection_bg_unfocused: Option<Color>,
     pub cursor_color: Option<Color>,
     pub border_radius: Option<f64>,
+    /// Border width while focused. Unset keeps the 2 px focus ring; agg-sharp's
+    /// edit fields keep a 1 px border in every state (`Some(1.0)`). The border
+    /// is 1 px in the other states.
+    pub border_width_focused: Option<f64>,
 }
 
 impl TextFieldTheme {
@@ -73,6 +91,47 @@ impl TextFieldTheme {
             None
         };
         state.or(self.text_color).unwrap_or(normal)
+    }
+
+    /// The hint colour: `placeholder_color_focused` while focused, else (or
+    /// when unset) `placeholder_color`, then `normal`.
+    pub fn placeholder_color_for(&self, focused: bool, normal: Color) -> Color {
+        let state = if focused {
+            self.placeholder_color_focused
+        } else {
+            None
+        };
+        state.or(self.placeholder_color).unwrap_or(normal)
+    }
+
+    /// The border colour for the given state: focus over hover over normal,
+    /// each unset colour falling back to its own visuals colour (`focused`,
+    /// `hovered`, `normal`).
+    pub fn border_color_for(
+        &self,
+        focused: bool,
+        hovered: bool,
+        normal: Color,
+        hovered_fallback: Color,
+        focused_fallback: Color,
+    ) -> Color {
+        if focused {
+            self.border_color_focused.unwrap_or(focused_fallback)
+        } else if hovered {
+            self.border_color_hovered.unwrap_or(hovered_fallback)
+        } else {
+            self.border_color.unwrap_or(normal)
+        }
+    }
+
+    /// The border width: [`border_width_focused`](Self::border_width_focused)
+    /// (default 2) while focused, 1 otherwise.
+    pub fn border_width_for(&self, focused: bool) -> f64 {
+        if focused {
+            self.border_width_focused.unwrap_or(2.0)
+        } else {
+            1.0
+        }
     }
 }
 

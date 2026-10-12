@@ -271,8 +271,8 @@ impl Widget for TextField {
         }
 
         // ── Text or placeholder ───────────────────────────────────────────
-        if text.is_empty() && !self.focused {
-            ctx.set_fill_color(t.placeholder_color.unwrap_or(v.text_dim));
+        if text.is_empty() && (!self.focused || t.show_placeholder_when_focused) {
+            ctx.set_fill_color(t.placeholder_color_for(self.focused, v.text_dim));
             ctx.fill_text(&self.placeholder, text_x, baseline_y);
         } else {
             ctx.set_fill_color(t.text_color_for(self.focused, self.hovered, v.text_color));
@@ -288,15 +288,15 @@ impl Widget for TextField {
         if !self.frame {
             return;
         }
-        let border_color = if self.focused {
-            t.border_color_focused.unwrap_or(v.accent)
-        } else if self.hovered {
-            t.border_color_hovered.unwrap_or(v.widget_stroke_active)
-        } else {
-            t.border_color.unwrap_or(v.widget_stroke)
-        };
+        let border_color = t.border_color_for(
+            self.focused,
+            self.hovered,
+            v.widget_stroke,
+            v.widget_stroke_active,
+            v.accent,
+        );
         ctx.set_stroke_color(border_color);
-        let border_w = if self.focused { 2.0 } else { 1.0 };
+        let border_w = t.border_width_for(self.focused);
         ctx.set_line_width(border_w);
         ctx.begin_path();
         let inset = border_w * 0.5;

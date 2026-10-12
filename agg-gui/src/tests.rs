@@ -125,6 +125,7 @@ mod rotated_image_blit;
 mod row_overflow;
 mod scene_focus;
 mod scroll_bar_appearance_tests;
+mod scroll_bar_classic_style_tests;
 mod scroll_bar_device_scale_tests;
 mod scroll_fit_height;
 mod scroll_fixtures;

@@ -266,14 +266,14 @@ impl TextArea {
         }
         let w = self.bounds.width;
         let h = self.bounds.height;
-        let border = if self.focused {
-            v.accent
-        } else if self.hovered {
-            v.widget_stroke_active
-        } else {
-            v.widget_stroke
-        };
-        let line_width = if self.focused { 2.0 } else { 1.0 };
+        let border = self.theme.border_color_for(
+            self.focused,
+            self.hovered,
+            v.widget_stroke,
+            v.widget_stroke_active,
+            v.accent,
+        );
+        let line_width = self.theme.border_width_for(self.focused);
         ctx.set_stroke_color(border);
         ctx.set_line_width(line_width);
         ctx.begin_path();
@@ -283,7 +283,7 @@ impl TextArea {
             inset,
             (w - line_width).max(0.0),
             (h - line_width).max(0.0),
-            4.0,
+            self.corner_radius(),
         );
         ctx.stroke();
     }
@@ -302,10 +302,10 @@ impl TextArea {
         let h = self.bounds.height;
         let inner_w = (w - self.padding * 2.0).max(0.0);
         let inner_h = (h - self.padding * 2.0).max(0.0);
-        ctx.set_fill_color(v.widget_bg);
+        ctx.set_fill_color(self.background_color(v));
         ctx.set_fill_rule(crate::draw_ctx::FillRule::EvenOdd);
         ctx.begin_path();
-        ctx.rounded_rect(0.0, 0.0, w, h, 4.0);
+        ctx.rounded_rect(0.0, 0.0, w, h, self.corner_radius());
         ctx.rect(self.padding, self.padding, inner_w, inner_h);
         ctx.fill();
         ctx.set_fill_rule(crate::draw_ctx::FillRule::NonZero);

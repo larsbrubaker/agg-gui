@@ -326,6 +326,9 @@ pub struct TextArea {
     /// Paint the background fill and the border (the default). `false` leaves
     /// both to the host; see [`with_frame`](Self::with_frame) in `frame.rs`.
     frame: bool,
+    /// Per-widget colour overrides, as `TextField`'s; see `with_theme` in
+    /// `frame.rs`.
+    theme: crate::widgets::TextFieldTheme,
 
     /// Wrap lines at the inner width (the default). `false` keeps each line
     /// whole and scrolls sideways to the caret; see `no_wrap.rs`.
@@ -387,6 +390,7 @@ impl TextArea {
             context_menu: crate::widgets::text_context_menu::TextContextMenu::new(),
             context_menu_enabled: true,
             frame: true,
+            theme: crate::widgets::TextFieldTheme::default(),
             word_wrap: true,
             h_offset: 0.0,
         }
@@ -742,6 +746,8 @@ mod segment_highlight_tests;
 mod selection_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod theme_tests;
 #[cfg(test)]
 mod undo_tests;
 #[cfg(test)]

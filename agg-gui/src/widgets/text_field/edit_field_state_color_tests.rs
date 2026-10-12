@@ -6,7 +6,8 @@
 //!
 //! Each test paints through the production `paint_subtree` path into a
 //! software `GfxCtx`, as `themed_text_edit_widget_color_tests` does, and
-//! reads back the colours the field actually drew.
+//! reads back the colours the field actually drew. The focused border width
+//! and the hint kept while focused are checked the same way.
 
 use std::sync::Arc;
 
@@ -216,4 +217,95 @@ fn rust_only_set_theme_repaints_a_laid_out_field() {
         close(bg, rgb_of(t.background.unwrap())),
         "background {bg:?}"
     );
+}
+
+/// The middle pixel of the second border row up: inside a 2 px stroke, past a
+/// 1 px one.
+fn second_border_row(fb: &Framebuffer) -> [u8; 3] {
+    rgb(fb, W / 2, 1)
+}
+
+#[test]
+fn rust_only_focused_border_is_two_pixels_by_default() {
+    let t = edit_field_colors();
+    let mut f = field("", t);
+    let fb = render(&mut f, State::Focused);
+    let p = second_border_row(&fb);
+    assert!(
+        close(p, rgb_of(t.border_color_focused.unwrap())),
+        "second row {p:?}"
+    );
+}
+
+#[test]
+fn rust_only_focused_border_width_one_matches_the_edit_field_border() {
+    // agg-sharp's ThemedTextEditWidget keeps a 1 px border while focused.
+    let t = TextFieldTheme {
+        border_width_focused: Some(1.0),
+        ..edit_field_colors()
+    };
+    let mut f = field("", t);
+    let fb = render(&mut f, State::Focused);
+    let (b, _) = border_and_background(&fb);
+    assert!(
+        close(b, rgb_of(t.border_color_focused.unwrap())),
+        "border {b:?}"
+    );
+    let p = second_border_row(&fb);
+    assert!(
+        close(p, rgb_of(t.background_focused.unwrap())),
+        "second row {p:?} should be the focused background"
+    );
+}
+
+/// An empty focused field with hint `MMMM` whose caret paints in `caret`.
+fn focused_hint(theme: TextFieldTheme, caret: Color) -> Framebuffer {
+    let mut theme = theme;
+    theme.cursor_color = Some(caret);
+    let mut f = field("", theme).with_placeholder("MMMM");
+    render(&mut f, State::Focused)
+}
+
+fn hint_theme() -> TextFieldTheme {
+    TextFieldTheme {
+        placeholder_color: Some(c(0.0, 0.0, 1.0)),
+        placeholder_color_focused: Some(c(0.0, 1.0, 0.0)),
+        ..edit_field_colors()
+    }
+}
+
+#[test]
+fn rust_only_focused_field_hides_its_hint_by_default() {
+    let t = hint_theme();
+    let bg = t.background_focused.unwrap();
+    // The caret paints in the background so only a hint could show.
+    let fb = focused_hint(t, bg);
+    let p = strongest_text_pixel(&fb, rgb_of(bg));
+    assert!(close(p, rgb_of(bg)), "a hint painted {p:?}");
+}
+
+#[test]
+fn rust_only_focused_field_keeps_its_hint_in_the_focused_hint_color() {
+    // agg-sharp's ThemedTextEditWidget keeps the hint while focused, in
+    // EditFieldColors.Focused.LightTextColor.
+    let t = TextFieldTheme {
+        show_placeholder_when_focused: true,
+        ..hint_theme()
+    };
+    let bg = t.background_focused.unwrap();
+    let fb = focused_hint(t, bg);
+    let p = strongest_text_pixel(&fb, rgb_of(bg));
+    let hint = rgb_of(t.placeholder_color_focused.unwrap());
+    assert!(close(p, hint), "hint painted {p:?}, expected {hint:?}");
+}
+
+#[test]
+fn rust_only_unfocused_hint_keeps_the_normal_hint_color() {
+    let t = hint_theme();
+    let bg = t.background.unwrap();
+    let mut f = field("", t).with_placeholder("MMMM");
+    let fb = render(&mut f, State::Normal);
+    let p = strongest_text_pixel(&fb, rgb_of(bg));
+    let hint = rgb_of(t.placeholder_color.unwrap());
+    assert!(close(p, hint), "hint painted {p:?}, expected {hint:?}");
 }

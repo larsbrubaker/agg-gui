@@ -262,9 +262,11 @@ impl Widget for TextArea {
             let lo = st.cursor.min(st.anchor);
             let hi = st.cursor.max(st.anchor);
             let hl_color = if self.focused {
-                v.selection_bg
+                self.theme.selection_bg.unwrap_or(v.selection_bg)
             } else {
-                v.selection_bg_unfocused
+                self.theme
+                    .selection_bg_unfocused
+                    .unwrap_or(v.selection_bg_unfocused)
             };
             ctx.set_fill_color(hl_color);
             for (i, line) in self.cached_lines.iter().enumerate() {
@@ -298,7 +300,8 @@ impl Widget for TextArea {
         // ── Text ───────────────────────────────────────────────────
         tt.sel_loop_ms = pt::ms(&t);
         t = pt::start();
-        ctx.set_fill_color(v.text_color);
+        let text_color = self.text_color(&v);
+        ctx.set_fill_color(text_color);
         for (i, line) in self.cached_lines.iter().enumerate() {
             if line.text.is_empty() {
                 continue;
@@ -319,12 +322,7 @@ impl Widget for TextArea {
                     let spans = hl(&line.text);
                     let th = pt::start();
                     self.paint_highlighted_line(
-                        ctx,
-                        &line.text,
-                        &spans,
-                        x0,
-                        baseline_y,
-                        v.text_color,
+                        ctx, &line.text, &spans, x0, baseline_y, text_color,
                     );
                     tt.hl_ms += pt::ms(&th);
                 }
@@ -341,7 +339,7 @@ impl Widget for TextArea {
         // same content alignment as real text.
         t = pt::start();
         if st.text.is_empty() && !self.hint.is_empty() {
-            ctx.set_fill_color(v.text_dim);
+            ctx.set_fill_color(self.theme.placeholder_color_for(self.focused, v.text_dim));
             let hint_w = measure_advance(&self.font, &self.hint, self.font_size);
             let slack = (self.inner_width() - hint_w).max(0.0);
             let hint_x = self.padding
@@ -416,7 +414,7 @@ impl Widget for TextArea {
             return;
         };
         let v = ctx.visuals();
-        ctx.set_stroke_color(v.text_color);
+        ctx.set_stroke_color(self.theme.cursor_color.unwrap_or(v.text_color));
         ctx.set_line_width(1.5);
         ctx.begin_path();
         ctx.move_to(p.x, y0);

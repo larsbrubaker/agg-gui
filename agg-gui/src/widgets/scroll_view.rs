@@ -127,6 +127,16 @@ pub struct ScrollBarStyle {
     /// `outer_margin + bar_width + inner_margin`, as agg-sharp's classic
     /// `ScrollableWidget` does.
     pub edge_guard: f64,
+    /// Corner radius of the track and thumb. `None` (every preset) rounds
+    /// them fully, at half the thumb's width; `Some(0.0)` draws agg-sharp's
+    /// classic square track and thumb.
+    pub corner_radius: Option<f64>,
+    /// `true` jumps the hover growth (the thumb's [`ScrollThumbRest::Inset`]
+    /// or a floating bar's width) to full as soon as the bar is hovered or
+    /// dragged, and back at once when it is left, as agg-sharp's classic
+    /// `ScrollBar` does. `false` (every preset) eases it over
+    /// [`SCROLL_BAR_GROW_SECS`](super::scrollbar::SCROLL_BAR_GROW_SECS).
+    pub snap_on_hover: bool,
 }
 
 impl ScrollBarStyle {
@@ -171,6 +181,13 @@ impl ScrollBarStyle {
             ScrollThumbRest::Inset { .. } => self.bar_width,
         }
     }
+
+    /// The track and thumb corner radius at hover-animation parameter `t`:
+    /// [`Self::corner_radius`], else half of [`Self::thumb_width_at`].
+    pub fn corner_radius_at(&self, t: f64) -> f64 {
+        self.corner_radius
+            .unwrap_or_else(|| self.thumb_width_at(t) * 0.5)
+    }
 }
 
 impl Default for ScrollBarStyle {
@@ -189,6 +206,8 @@ impl Default for ScrollBarStyle {
             fade_size: 20.0,
             thumb_rest: ScrollThumbRest::OuterEdge,
             edge_guard: DEFAULT_SCROLL_EDGE_GUARD,
+            corner_radius: None,
+            snap_on_hover: false,
         }
     }
 }
@@ -212,6 +231,8 @@ impl ScrollBarStyle {
             fade_size: 20.0,
             thumb_rest: ScrollThumbRest::OuterEdge,
             edge_guard: DEFAULT_SCROLL_EDGE_GUARD,
+            corner_radius: None,
+            snap_on_hover: false,
         }
     }
     /// Preset matching egui's `ScrollStyle::thin` — a narrow floating bar
@@ -235,6 +256,8 @@ impl ScrollBarStyle {
             fade_size: 20.0,
             thumb_rest: ScrollThumbRest::OuterEdge,
             edge_guard: DEFAULT_SCROLL_EDGE_GUARD,
+            corner_radius: None,
+            snap_on_hover: false,
         }
     }
     /// Preset matching egui's `ScrollStyle::floating` — wide floating overlay

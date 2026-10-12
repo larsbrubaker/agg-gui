@@ -381,8 +381,13 @@ impl ScrollbarAxis {
         // The width eases on even while the bar is hidden, so a bar that
         // faded out mid-shrink is back at its dormant width when it next
         // shows rather than resuming a stale width.
-        self.hover_anim
-            .set_target(if self.interact() { 1.0 } else { 0.0 });
+        let hover_target = if self.interact() { 1.0 } else { 0.0 };
+        if style.snap_on_hover {
+            // agg-sharp's classic bar: the growth jumps, no ease.
+            self.hover_anim = crate::animation::Tween::new(hover_target, SCROLL_BAR_GROW_SECS);
+        } else {
+            self.hover_anim.set_target(hover_target);
+        }
         let t = self.hover_anim.tick();
         if !self.enabled || !self.overflows(viewport) || alpha <= 0.001 {
             return None;
@@ -391,7 +396,7 @@ impl ScrollbarAxis {
         Some(PreparedScrollbar {
             track,
             thumb,
-            radius: style.thumb_width_at(t) * 0.5,
+            radius: style.corner_radius_at(t),
             alpha,
             color: style.color,
             hovered_thumb: self.hovered_thumb,
