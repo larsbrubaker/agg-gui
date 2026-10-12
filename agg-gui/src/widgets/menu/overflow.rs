@@ -13,8 +13,9 @@
 //! - A context menu or a submenu keeps its clamp into the window; one taller
 //!   than the window fills it, shows its top, and scrolls.
 //!
-//! agg-gui keeps every popup [`MARGIN`] (4 px) clear of the window edge where
-//! C# sits flush and subtracts 5 px from the room of a scrolling drop down;
+//! agg-gui keeps every popup a window margin clear of the window edge
+//! ([`super::MenuMetrics::window_margin`], 4 px by default) where C# sits
+//! flush (margin `0`) and subtracts 5 px from the room of a scrolling drop down;
 //! here the room on each side already excludes the margin, so a scrolling
 //! panel is exactly as tall as its room.
 //!
@@ -25,7 +26,6 @@
 use crate::geometry::{Point, Rect};
 use crate::widgets::scroll_view::{current_scroll_style, ScrollBarStyle};
 
-use super::geometry::MARGIN;
 use super::state::MenuAnchorKind;
 
 /// A scrolling panel's scroll state, carried on its
@@ -94,6 +94,8 @@ pub(crate) fn current_scroll_gutter() -> f64 {
 /// only one a bar title opens; submenus clamp.  `bar_legacy` is the bar
 /// placement with no known origin: `vis` is then not in the menu's space,
 /// so the panel keeps hanging below the bar unclamped and never scrolls.
+/// `margin` is the gap kept from the window edge.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn place_vertical(
     h: f64,
     anchor_y: f64,
@@ -102,9 +104,10 @@ pub(crate) fn place_vertical(
     root: bool,
     anchor_span: f64,
     bar_legacy: bool,
+    margin: f64,
 ) -> (f64, f64) {
-    let floor = vis.y + MARGIN;
-    let ceiling = vis.y + vis.height - MARGIN;
+    let floor = vis.y + margin;
+    let ceiling = vis.y + vis.height - margin;
     if bar_legacy && kind == MenuAnchorKind::Bar {
         // Top bar with no root origin: hang below the anchor, allowing
         // negative bar-local y (the window's bottom is unknown here).
@@ -184,20 +187,38 @@ mod tests {
 
     #[test]
     fn rust_only_bar_menu_that_fits_below_keeps_opening_down() {
-        let (y, h) = place_vertical(100.0, 200.0, MenuAnchorKind::Bar, VIS, true, 26.0, false);
+        let (y, h) = place_vertical(
+            100.0,
+            200.0,
+            MenuAnchorKind::Bar,
+            VIS,
+            true,
+            26.0,
+            false,
+            4.0,
+        );
         assert_eq!((y, h), (100.0, 100.0));
     }
 
     #[test]
     fn rust_only_tie_keeps_the_preferred_side() {
         // 146 below, 146 above, 200 needed: stays down and scrolls.
-        let (y, h) = place_vertical(200.0, 150.0, MenuAnchorKind::Bar, VIS, true, 0.0, false);
+        let (y, h) = place_vertical(
+            200.0,
+            150.0,
+            MenuAnchorKind::Bar,
+            VIS,
+            true,
+            0.0,
+            false,
+            4.0,
+        );
         assert_eq!((y, h), (4.0, 146.0));
     }
 
     #[test]
     fn rust_only_legacy_bar_placement_is_unchanged() {
-        let (y, h) = place_vertical(500.0, 0.0, MenuAnchorKind::Bar, VIS, true, 26.0, true);
+        let (y, h) = place_vertical(500.0, 0.0, MenuAnchorKind::Bar, VIS, true, 26.0, true, 4.0);
         assert_eq!((y, h), (-300.0, 500.0));
     }
 }

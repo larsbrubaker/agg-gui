@@ -84,7 +84,8 @@ impl PopupMenu {
     }
 
     /// Restyle this popup.  Besides the paint values this applies the
-    /// style's row height, width policy and fitted-width floor to the
+    /// style's row and separator heights, window margin, width policy and
+    /// fitted-width floor to the
     /// layout, so prefer it over assigning [`Self::style`] directly.
     /// A later [`Self::set_width`] / [`Self::set_min_width`] still wins.
     pub fn with_style(mut self, style: MenuStyle) -> Self {
@@ -96,6 +97,9 @@ impl PopupMenu {
         self.state.set_width(style.width);
         self.state.set_min_width(style.min_width);
         self.state.set_row_height(style.row_h);
+        self.state
+            .set_separator_height(style.separator.row_height());
+        self.state.set_window_margin(style.window_margin);
         self.style = style;
     }
 
@@ -244,6 +248,8 @@ impl PopupMenu {
 mod tests_1;
 #[cfg(test)]
 mod tests_2;
+#[cfg(test)]
+mod tests_agg_sharp_chrome;
 #[cfg(test)]
 mod tests_anchor_edges;
 #[cfg(test)]

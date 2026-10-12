@@ -31,7 +31,8 @@ pub const DEFAULT_FONT_SIZE: f64 = 14.0;
 /// interactive menu target on a touch device.  44 px is the long-standing
 /// Apple HIG / Material touch-target floor.
 pub const TOUCH_MIN: f64 = 44.0;
-/// Gap every popup keeps from the window edge (agg-sharp sits flush).
+/// Default gap every popup keeps from the window edge (agg-sharp sits
+/// flush); a [`super::MenuStyle::window_margin`] replaces it.
 pub(crate) const MARGIN: f64 = 4.0;
 
 /// The concrete menu metrics for the current frame.  Desktop values are the
@@ -47,6 +48,9 @@ pub struct MenuMetrics {
     pub vertical_row_h: f64,
     pub menu_w: f64,
     pub default_font_size: f64,
+    /// Gap every popup keeps from the window edge ([`MARGIN`] unless a
+    /// [`super::MenuStyle::window_margin`] replaces it; `0.0` is flush).
+    pub window_margin: f64,
 }
 
 /// Effective menu metrics for the current frame.
@@ -74,6 +78,7 @@ pub fn effective_metrics() -> MenuMetrics {
         vertical_row_h: VERTICAL_ROW_H,
         menu_w: MENU_W,
         default_font_size: crate::font_settings::default_font_size_or(DEFAULT_FONT_SIZE),
+        window_margin: MARGIN,
     };
     if !crate::input_profile::touch_ui_active() {
         return base;
@@ -95,6 +100,7 @@ pub fn effective_metrics() -> MenuMetrics {
         vertical_row_h,
         menu_w: MENU_W * grow,
         default_font_size: base.default_font_size * grow,
+        window_margin: MARGIN,
     }
 }
 
@@ -193,6 +199,23 @@ pub fn metrics_with_row_h(row_h: f64) -> MenuMetrics {
     m
 }
 
+/// [`metrics_with_row_h`] with the separator row height replaced by `sep_h`
+/// and the window margin by `window_margin` (a [`super::MenuStyle`]'s
+/// [`super::MenuSeparatorStyle::row_height`] and
+/// [`super::MenuStyle::window_margin`]).  Separators are not tappable, so
+/// `sep_h` is not touch-floored.  Non-finite or negative values keep this
+/// frame's defaults.
+pub fn metrics_with_style(row_h: f64, sep_h: f64, window_margin: f64) -> MenuMetrics {
+    let mut m = metrics_with_row_h(row_h);
+    if sep_h.is_finite() && sep_h >= 0.0 {
+        m.sep_h = sep_h;
+    }
+    if window_margin.is_finite() && window_margin >= 0.0 {
+        m.window_margin = window_margin;
+    }
+    m
+}
+
 /// [`stack_layout_with_width`] with caller-supplied metrics `m` (see
 /// [`metrics_with_row_h`]) instead of this frame's [`effective_metrics`].
 pub fn stack_layout_with_metrics(
@@ -261,6 +284,7 @@ pub(crate) fn stack_layout_placed(
             prefix.is_empty(),
             placement.anchor_span,
             bar_legacy,
+            m.window_margin,
         );
         let scrolls = h < content_h - 1e-9;
         let gutter = if scrolls {
@@ -268,9 +292,10 @@ pub(crate) fn stack_layout_placed(
         } else {
             0.0
         };
-        let left = vis.x + MARGIN;
+        let margin = m.window_margin;
+        let left = vis.x + margin;
         let panel_w = w + gutter;
-        let px = x.clamp(left, (vis.x + vis.width - panel_w - MARGIN).max(left));
+        let px = x.clamp(left, (vis.x + vis.width - panel_w - margin).max(left));
         let rect = Rect::new(px, y, panel_w, h);
         let scroll = scrolls.then(|| {
             let mut s = PopupScroll {
@@ -312,8 +337,8 @@ pub(crate) fn stack_layout_placed(
         items = &item.submenu;
         let sub_w = width(items, &m);
         let cascade_x = rect.x + rect.width - 2.0;
-        let fits_right = cascade_x + sub_w <= vis.x + vis.width - MARGIN;
-        let fits_left = rect.x - sub_w >= vis.x + MARGIN;
+        let fits_right = cascade_x + sub_w <= vis.x + vis.width - margin;
+        let fits_left = rect.x - sub_w >= vis.x + margin;
         // agg-sharp `PopupMenu` (its `AltMate`): a submenu with no room
         // to the right of its parent opens to its left, overlapping the
         // parent's left edge by the same 2 px the right cascade does,
@@ -321,7 +346,7 @@ pub(crate) fn stack_layout_placed(
         x = if !fits_right && fits_left {
             rect.x - sub_w + 2.0
         } else {
-            cascade_x.min(vis.x + vis.width - sub_w - MARGIN)
+            cascade_x.min(vis.x + vis.width - sub_w - margin)
         };
         // A row scrolled partly out of its panel cascades from the part
         // that shows.

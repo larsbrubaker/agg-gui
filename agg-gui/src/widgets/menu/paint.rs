@@ -3,7 +3,7 @@
 //! Text rendering is composed: the bar and popup widgets own `Label` widgets
 //! for every text-bearing element (bar button text, item labels, shortcut
 //! strings).  This module paints the chrome (backgrounds, hover panels,
-//! separators, submenu chevrons, check marks and radio circles) inline, and the bar /
+//! separators, submenu chevrons / triangles, check marks and radio circles) inline, and the bar /
 //! popup widgets paint their owned `Label` children through `paint_subtree`
 //! so the framework's backbuffer + LCD subpixel path renders every glyph.
 
@@ -11,9 +11,8 @@ use crate::color::Color;
 use crate::draw_ctx::DrawCtx;
 use crate::geometry::Rect;
 
-use super::geometry::SEP_H;
-
 pub use super::style::MenuStyle;
+use super::style::{MenuSeparatorStyle, SubmenuArrow};
 
 /// Three points (apex on the right, top-left, bottom-left) of the
 /// submenu-indicator chevron painted at the right edge of a popup row.
@@ -28,6 +27,33 @@ pub fn submenu_chevron_points(row: Rect) -> [(f64, f64); 3] {
     let half_h = 4.0;
     let arm = 3.0;
     [(cx - arm, cy + half_h), (cx, cy), (cx - arm, cy - half_h)]
+}
+
+/// Three points (apex on the right, top-left, bottom-left) of agg-sharp's
+/// filled submenu triangle (`SubMenuItemButton.OnDraw`): centred half the
+/// row's height in from its right edge and 2 px above its middle, 6 px wide
+/// and 10 px tall.  Y-up, like the row.
+pub fn submenu_triangle_points(row: Rect) -> [(f64, f64); 3] {
+    let x = row.x + row.width - row.height / 2.0;
+    let y = row.y + row.height / 2.0 + 2.0;
+    [(x + 3.0, y), (x - 3.0, y + 5.0), (x - 3.0, y - 5.0)]
+}
+
+/// Paint a row's submenu indicator in `arrow`'s style.
+pub fn paint_submenu_arrow(ctx: &mut dyn DrawCtx, row: Rect, color: Color, arrow: SubmenuArrow) {
+    match arrow {
+        SubmenuArrow::Chevron => paint_submenu_chevron(ctx, row, color),
+        SubmenuArrow::FilledTriangle => {
+            let [a, b, c] = submenu_triangle_points(row);
+            ctx.set_fill_color(color);
+            ctx.begin_path();
+            ctx.move_to(a.0, a.1);
+            ctx.line_to(b.0, b.1);
+            ctx.line_to(c.0, c.1);
+            ctx.close_path();
+            ctx.fill();
+        }
+    }
 }
 
 /// Paint a check-mark indicator centred at `(cx, cy)` as a stroked
@@ -175,13 +201,31 @@ pub fn paint_panel(ctx: &mut dyn DrawCtx, rect: Rect, style: &MenuStyle) {
     }
 }
 
+/// Paint a separator row in the default [`MenuSeparatorStyle`].
 pub fn paint_separator(ctx: &mut dyn DrawCtx, rect: Rect) {
+    paint_separator_styled(ctx, rect, &MenuSeparatorStyle::default());
+}
+
+/// Paint a separator row `rect` as `style` describes: a line
+/// `style.line_height` thick whose top sits `style.margin_y` below the
+/// row's top, inset `style.inset_x` from both sides.
+pub fn paint_separator_styled(ctx: &mut dyn DrawCtx, rect: Rect, style: &MenuSeparatorStyle) {
+    if style.line_height <= 0.0 {
+        return;
+    }
     let v = ctx.visuals();
-    ctx.set_stroke_color(v.widget_stroke.with_alpha(0.55));
-    ctx.set_line_width(1.0);
+    let color = style
+        .color
+        .unwrap_or_else(|| v.widget_stroke.with_alpha(0.55));
+    // Y-up: the line's centre is `margin_y + line_height / 2` below the top
+    // of the row.  A rect sized to the style's own row height draws the
+    // line midway, so this matches the default 7 px row exactly.
+    let cy = rect.y + rect.height - style.margin_y - style.line_height * 0.5;
+    ctx.set_stroke_color(color);
+    ctx.set_line_width(style.line_height);
     ctx.begin_path();
-    ctx.move_to(rect.x + 8.0, rect.y + SEP_H * 0.5);
-    ctx.line_to(rect.x + rect.width - 8.0, rect.y + SEP_H * 0.5);
+    ctx.move_to(rect.x + style.inset_x, cy);
+    ctx.line_to(rect.x + rect.width - style.inset_x, cy);
     ctx.stroke();
 }
 

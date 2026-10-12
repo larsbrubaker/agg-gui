@@ -28,7 +28,8 @@ pub use paint::MenuStyle;
 pub use state::{MenuAnchorKind, MenuResponse, PopupMenuState};
 pub use strip::MenuBarStrip;
 pub use style::{
-    current_menu_style, reset_menu_style, set_menu_style, SelectionColumn, ShortcutFormat,
+    current_menu_style, reset_menu_style, set_menu_style, MenuSeparatorStyle, SelectionColumn,
+    ShortcutFormat, SubmenuArrow,
 };
 pub use widget::{MenuBar, MenuOrientation, MenuTitle, PopupMenu, TopMenu};
 

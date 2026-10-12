@@ -32,8 +32,8 @@ use super::super::geometry::{hit_test, item_at_path, MenuHit, PopupLayout};
 use super::super::model::{MenuEntry, MenuSelection};
 use super::super::overflow::PopupScroll;
 use super::super::paint::{
-    paint_check_mark, paint_item_row_bg, paint_radio_mark, paint_separator, paint_submenu_chevron,
-    popup_row_text_color, MenuStyle,
+    paint_check_mark, paint_item_row_bg, paint_radio_mark, paint_separator_styled,
+    paint_submenu_arrow, popup_row_text_color, MenuStyle,
 };
 use super::super::state::PopupMenuState;
 use super::super::style::{row_icon_x, row_label_right, row_label_x, row_selection_column};
@@ -66,7 +66,7 @@ pub(super) fn paint_popup_level(
     for (row_idx, row_layout) in layout.rows.iter().enumerate() {
         let Some(item_idx) = row_layout.item_index else {
             // Separator row.
-            paint_separator(ctx, row_layout.rect);
+            paint_separator_styled(ctx, row_layout.rect, &style.separator);
             continue;
         };
         let Some(MenuEntry::Item(item)) = level_items.get(item_idx) else {
@@ -192,7 +192,7 @@ pub(super) fn paint_popup_level(
             paint_check_mark(ctx, cx, cy, inline_color);
         }
         if item.has_submenu() {
-            paint_submenu_chevron(ctx, row_layout.rect, inline_color);
+            paint_submenu_arrow(ctx, row_layout.rect, inline_color, style.submenu_arrow);
         }
 
         // Row text (label + shortcut) via the Label cache so glyph

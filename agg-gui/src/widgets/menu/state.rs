@@ -8,8 +8,8 @@ use crate::geometry::{Point, Size};
 
 use super::fit_width::{FitMeasure, MenuWidth, FIT_MIN_W};
 use super::geometry::{
-    hit_test, item_at_path, metrics_with_row_h, stack_layout_placed, MenuHit, MenuMetrics,
-    PopupLayout, ROW_H,
+    hit_test, item_at_path, metrics_with_style, stack_layout_placed, MenuHit, MenuMetrics,
+    PopupLayout, MARGIN, ROW_H, SEP_H,
 };
 use super::model::{MenuEntry, MenuSelection};
 use super::overflow::StackPlacement;
@@ -59,6 +59,10 @@ pub struct PopupMenuState {
     min_width: f64,
     /// Desktop item-row height (logical px); see [`super::MenuStyle::row_h`].
     row_h: f64,
+    /// Separator row height (logical px); see [`super::MenuSeparatorStyle`].
+    sep_h: f64,
+    /// Gap kept from the window edge; see [`super::MenuStyle::window_margin`].
+    window_margin: f64,
     /// Height of the bar title the menu opened from (`0.0` for a point), so
     /// a menu that flips upward clears it; see [`Self::set_anchor_span`].
     anchor_span: f64,
@@ -95,6 +99,8 @@ impl Default for PopupMenuState {
             fit_measure: None,
             min_width: FIT_MIN_W,
             row_h: ROW_H,
+            sep_h: SEP_H,
+            window_margin: MARGIN,
             anchor_span: 0.0,
             space_origin: None,
             scroll_offsets: Vec::new(),
@@ -202,6 +208,26 @@ impl PopupMenuState {
         self.row_h
     }
 
+    /// Set the separator row height (logical px, never touch-grown).  The
+    /// default is [`SEP_H`].
+    pub fn set_separator_height(&mut self, sep_h: f64) {
+        self.sep_h = sep_h;
+    }
+
+    pub fn separator_height(&self) -> f64 {
+        self.sep_h
+    }
+
+    /// Set the gap every panel keeps from the window edge (logical px;
+    /// `0.0` is flush).  The default is 4 px.
+    pub fn set_window_margin(&mut self, window_margin: f64) {
+        self.window_margin = window_margin;
+    }
+
+    pub fn window_margin(&self) -> f64 {
+        self.window_margin
+    }
+
     /// Set the font, size and row style a [`MenuWidth::FitContent`] popup
     /// measures with.  `PopupMenu` / `MenuBar` keep this in step with the
     /// font they paint with, so hit-testing sees the painted widths.
@@ -213,7 +239,7 @@ impl PopupMenuState {
         if !self.open {
             return Vec::new();
         }
-        let m = metrics_with_row_h(self.row_h);
+        let m = metrics_with_style(self.row_h, self.sep_h, self.window_margin);
         let scroll = |prefix: &[usize]| self.scroll_offset(prefix);
         let placement = StackPlacement {
             anchor_span: self.anchor_span,

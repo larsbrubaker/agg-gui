@@ -18,13 +18,19 @@
 //! painter (`widget/popup_paint.rs`) and the fitted width (`fit_width.rs`);
 //! a row's own [`super::MenuIconSlot`] overrides both, and
 //! [`row_label_right`] the room on its right.
+//!
+//! [`MenuSeparatorStyle`], [`SubmenuArrow`] and [`MenuStyle::window_margin`]
+//! cover the rest of agg-sharp's `PopupMenu` look: its `CreateSeparator` line
+//! (1 unit tall with `Margin(8, 1)`, in the theme's `RowBorder`), the filled
+//! submenu triangle `SubMenuItemButton.OnDraw` draws, and popups that sit
+//! flush with the window edge.
 
 use std::cell::RefCell;
 
 use crate::color::Color;
 
 use super::fit_width::{MenuWidth, FIT_MIN_W};
-use super::geometry::ROW_H;
+use super::geometry::{MARGIN, ROW_H, SEP_H};
 use super::model::{MenuItem, MenuSelection};
 
 /// How a row's keyboard shortcut is spelled.
@@ -86,6 +92,64 @@ pub struct MenuStyle {
     /// keeps the single icon column, where a mark shares the icon slot or
     /// moves to the row's right end when the row has an icon.
     pub selection_column: Option<SelectionColumn>,
+    /// Separator row geometry and colour.
+    pub separator: MenuSeparatorStyle,
+    /// How a row with a submenu marks it at its right end.
+    pub submenu_arrow: SubmenuArrow,
+    /// Gap every popup keeps from the window edge (logical px); `0.0` lets a
+    /// panel sit flush with it, as agg-sharp's `PopupMenu` does.
+    pub window_margin: f64,
+}
+
+/// A separator row: a horizontal line `line_height` tall with `margin_y`
+/// above and below it (the row is `line_height + 2 * margin_y` tall) and
+/// inset `inset_x` from both sides of the panel.
+///
+/// The default is agg-gui's 7 px row (a 1 px line, 3 px either side, 8 px
+/// insets) in the theme's `widget_stroke` at 55 % opacity.  agg-sharp's
+/// `PopupMenu.CreateSeparator` is `line_height: 1.0, margin_y: 1.0,
+/// inset_x: 8.0` in its theme's `RowBorder`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct MenuSeparatorStyle {
+    /// Thickness of the line (logical px).
+    pub line_height: f64,
+    /// Space above and below the line (logical px).
+    pub margin_y: f64,
+    /// Distance from each side of the panel to the line's ends (logical px).
+    pub inset_x: f64,
+    /// Line colour; `None` uses the theme's `widget_stroke` at 55 % opacity.
+    pub color: Option<Color>,
+}
+
+impl MenuSeparatorStyle {
+    /// Height of the whole separator row (logical px).
+    pub fn row_height(&self) -> f64 {
+        self.line_height + 2.0 * self.margin_y
+    }
+}
+
+impl Default for MenuSeparatorStyle {
+    fn default() -> Self {
+        Self {
+            line_height: 1.0,
+            margin_y: (SEP_H - 1.0) * 0.5,
+            inset_x: 8.0,
+            color: None,
+        }
+    }
+}
+
+/// The submenu indicator at a row's right end.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SubmenuArrow {
+    /// A stroked `>` chevron, 11 px in from the row's right edge (agg-gui's
+    /// look; see [`super::paint::submenu_chevron_points`]).
+    #[default]
+    Chevron,
+    /// agg-sharp's filled right-pointing triangle, 6 px wide and 10 px tall,
+    /// centred half a row height in from the right edge and 2 px above the
+    /// row's middle (see [`super::paint::submenu_triangle_points`]).
+    FilledTriangle,
 }
 
 /// A leading column for check and radio marks beside the icon column, as
@@ -168,6 +232,9 @@ impl Default for MenuStyle {
             min_width: FIT_MIN_W,
             shortcut_format: ShortcutFormat::Platform,
             selection_column: None,
+            separator: MenuSeparatorStyle::default(),
+            submenu_arrow: SubmenuArrow::Chevron,
+            window_margin: MARGIN,
         }
     }
 }

@@ -10,6 +10,17 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- `MenuStyle` covers the rest of agg-sharp's `PopupMenu` chrome, all
+  defaulting to the existing look: `separator: MenuSeparatorStyle`
+  (`line_height`, `margin_y`, `inset_x`, `color`; agg-sharp's
+  `CreateSeparator` is 1 / 1 / 8 in its theme's `RowBorder`),
+  `submenu_arrow: SubmenuArrow` (`Chevron` or agg-sharp's `FilledTriangle`,
+  with `paint::submenu_triangle_points` / `paint_submenu_arrow` /
+  `paint_separator_styled`) and `window_margin` (gap kept from the window
+  edge, `0.0` flush).  `MenuMetrics` gains `window_margin`;
+  `geometry::metrics_with_style` and `PopupMenuState::set_separator_height` /
+  `set_window_margin` carry the layout values.
+
 - Finger drags decide what they are, as agg-sharp's `TouchPressDeferral`
   does: a drag past the tap tolerance pans the nearest `ScrollView` that can
   scroll along the drag (`touch_pan_travel()` reports the finger's travel
