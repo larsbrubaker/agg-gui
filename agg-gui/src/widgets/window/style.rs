@@ -1,5 +1,5 @@
 // The panel look of a `Window` as agg-sharp's styled `WindowWidget` exposes it
-// (`CornerRadius`, `ShadowColor`, `TitleBarColor`, `BackgroundColor`,
+// (`CornerRadius`, `ShadowColor`/`ShadowOffset`/`ShadowBlur`, `TitleBarColor`, `BackgroundColor`,
 // `WindowBorder`/`WindowBorderColor`, and the panel's `DoubleBuffer`), read
 // and set at runtime. Every option defaults to the look `Window` has always
 // had: radius 8, the drop shadow on, theme colours, a 1 px border, and the
@@ -21,6 +21,8 @@ pub(super) struct PanelStyle {
     pub(super) corner_radius: f64,
     /// Whether the soft drop shadow is drawn around the panel.
     pub(super) shadow: bool,
+    /// The shadow's colour, offset and blur in place of the default halo.
+    pub(super) shadow_style: Option<WindowShadow>,
     /// Title-bar fill in place of the theme's `window_title_fill`.
     pub(super) title_bar_color: Option<Color>,
     /// Body fill in place of the theme's `window_fill`.
@@ -41,6 +43,7 @@ impl Default for PanelStyle {
         Self {
             corner_radius: CORNER_R,
             shadow: true,
+            shadow_style: None,
             title_bar_color: None,
             body_color: None,
             border_width: 1.0,
@@ -49,6 +52,27 @@ impl Default for PanelStyle {
             panel_layered: Cell::new(false),
         }
     }
+}
+
+/// A window's drop shadow as agg-sharp's `WindowWidget` describes it
+/// (`ShadowColor`, `ShadowOffset`, `ShadowBlur`), in logical units. Set
+/// with [`Window::set_shadow_style`].
+///
+/// The blur is stacked translucent rounded rectangles, widest first, one per
+/// device pixel of blur (at most 12), each with the alpha that makes all of
+/// them together reach `color`'s. A shadow reaching past the window's halo
+/// (blur 14, offset (2, -6)) is cut at the halo's edge on a backend that
+/// retains the window as a layer, as agg-sharp cuts it at the grab border.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct WindowShadow {
+    /// The shadow's colour; its alpha is how dark it is at its darkest.
+    pub color: Color,
+    /// How far the shadow is shifted right of the panel.
+    pub offset_x: f64,
+    /// How far the shadow is shifted up from the panel (negative is down).
+    pub offset_y: f64,
+    /// How far the shadow fades out past the panel's edge.
+    pub blur: f64,
 }
 
 impl Window {
@@ -97,6 +121,28 @@ impl Window {
             self.panel_style.shadow = shown;
             self.restyled();
         }
+    }
+
+    /// The shadow's colour, offset and blur, `None` for the default halo.
+    pub fn shadow_style(&self) -> Option<WindowShadow> {
+        self.panel_style.shadow_style
+    }
+
+    /// Draw the drop shadow as `style` describes it (agg-sharp's
+    /// `ShadowColor`, `ShadowOffset`, `ShadowBlur`) instead of the default
+    /// halo; `None` goes back to the default. [`Window::set_shadow`] still
+    /// turns the shadow off and on.
+    pub fn set_shadow_style(&mut self, style: Option<WindowShadow>) {
+        if style != self.panel_style.shadow_style {
+            self.panel_style.shadow_style = style;
+            self.restyled();
+        }
+    }
+
+    /// Builder form of [`Window::set_shadow_style`].
+    pub fn with_shadow_style(mut self, style: WindowShadow) -> Self {
+        self.set_shadow_style(Some(style));
+        self
     }
 
     /// The title-bar colour override, `None` for the theme's.

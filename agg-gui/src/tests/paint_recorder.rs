@@ -7,7 +7,9 @@
 //! `stroke()` with the colour in effect at that moment plus the kind of
 //! path primitive that preceded it, which is enough to assert things
 //! like "exactly one shape is filled with the accent colour" or "the
-//! spinner strokes twelve spokes" without rasterizing anything.
+//! spinner strokes twelve spokes" without rasterizing anything. It also
+//! tracks the device bounds of each filled path inside the clip
+//! (`filled_area`), the cost measure of an LCD fill.
 
 use std::sync::Arc;
 
@@ -52,9 +54,21 @@ pub(crate) struct PaintOp {
     pub kind: PathKind,
 }
 
+/// A device-space rectangle: left, bottom, right, top.
+pub(crate) type DeviceRect = (f64, f64, f64, f64);
+
 pub(crate) struct PaintRecorder {
     transform: TransAffine,
-    stack: Vec<TransAffine>,
+    stack: Vec<(TransAffine, Option<DeviceRect>)>,
+    /// The clip in device space, `None` for none.
+    clip: Option<DeviceRect>,
+    /// Device bounds of the path built since the last `begin_path`.
+    path_bounds: Option<DeviceRect>,
+    /// Sum over every `fill()` of its path's device bounds inside the clip
+    /// (agg-sharp's `FillAreaCountingGraphics2D`): what an LCD fill costs.
+    pub filled_area: f64,
+    /// Every `clear_rect` call, in device space.
+    pub clears: Vec<DeviceRect>,
     fill_color: Color,
     stroke_color: Color,
     last_kind: PathKind,
@@ -77,6 +91,10 @@ impl PaintRecorder {
         Self {
             transform: TransAffine::new(),
             stack: Vec::new(),
+            clip: None,
+            path_bounds: None,
+            filled_area: 0.0,
+            clears: Vec::new(),
             fill_color: Color::rgba(0.0, 0.0, 0.0, 0.0),
             stroke_color: Color::rgba(0.0, 0.0, 0.0, 0.0),
             last_kind: PathKind::Empty,
@@ -97,6 +115,28 @@ impl PaintRecorder {
         Self {
             real_fonts: true,
             ..Self::new()
+        }
+    }
+
+    /// A recorder whose target is `width`×`height` device pixels: fills
+    /// outside it are clipped off [`filled_area`](Self::filled_area).
+    pub(crate) fn with_target(width: f64, height: f64) -> Self {
+        Self {
+            clip: Some((0.0, 0.0, width, height)),
+            ..Self::new()
+        }
+    }
+
+    /// Grow the path's device bounds by the local point `(x, y)`.
+    fn extend(&mut self, mut x: f64, mut y: f64) {
+        self.transform.transform(&mut x, &mut y);
+        let b = self.path_bounds.unwrap_or((x, y, x, y));
+        self.path_bounds = Some((b.0.min(x), b.1.min(y), b.2.max(x), b.3.max(y)));
+    }
+
+    fn extend_rect(&mut self, x: f64, y: f64, w: f64, h: f64) {
+        for (px, py) in [(x, y), (x + w, y), (x, y + h), (x + w, y + h)] {
+            self.extend(px, py);
         }
     }
 
@@ -134,23 +174,43 @@ impl DrawCtx for PaintRecorder {
     fn set_font_size(&mut self, size: f64) {
         self.font_size = size;
     }
-    fn clip_rect(&mut self, _x: f64, _y: f64, _w: f64, _h: f64) {}
-    fn reset_clip(&mut self) {}
+    fn clip_rect(&mut self, x: f64, y: f64, w: f64, h: f64) {
+        let saved = self.path_bounds.take();
+        self.extend_rect(x, y, w, h);
+        let r = self.path_bounds.take().unwrap_or((x, y, x, y));
+        self.path_bounds = saved;
+        self.clip = Some(match self.clip {
+            Some(c) => (c.0.max(r.0), c.1.max(r.1), c.2.min(r.2), c.3.min(r.3)),
+            None => r,
+        });
+    }
+    fn reset_clip(&mut self) {
+        self.clip = None;
+    }
     fn clear(&mut self, _color: Color) {}
+    fn clear_rect(&mut self, x: f64, y: f64, w: f64, h: f64, _color: Color) {
+        self.clears.push((x, y, x + w, y + h));
+    }
     fn begin_path(&mut self) {
         self.last_kind = PathKind::Empty;
         self.path_ops.clear();
+        self.path_bounds = None;
     }
     fn move_to(&mut self, x: f64, y: f64) {
         self.last_kind = PathKind::Freeform;
         self.path_ops.push(PathOp::MoveTo(x, y));
+        self.extend(x, y);
     }
     fn line_to(&mut self, x: f64, y: f64) {
         self.last_kind = PathKind::Freeform;
         self.path_ops.push(PathOp::LineTo(x, y));
+        self.extend(x, y);
     }
     fn cubic_to(&mut self, cx1: f64, cy1: f64, cx2: f64, cy2: f64, x: f64, y: f64) {
         self.last_kind = PathKind::Freeform;
+        self.extend(cx1, cy1);
+        self.extend(cx2, cy2);
+        self.extend(x, y);
         self.path_ops
             .push(PathOp::CubicTo(cx1, cy1, cx2, cy2, x, y));
     }
@@ -163,16 +223,26 @@ impl DrawCtx for PaintRecorder {
     fn circle(&mut self, _cx: f64, _cy: f64, _r: f64) {
         self.last_kind = PathKind::Circle;
     }
-    fn rect(&mut self, _x: f64, _y: f64, _w: f64, _h: f64) {
+    fn rect(&mut self, x: f64, y: f64, w: f64, h: f64) {
         self.last_kind = PathKind::Rect;
+        self.extend_rect(x, y, w, h);
     }
-    fn rounded_rect(&mut self, _x: f64, _y: f64, _w: f64, _h: f64, _r: f64) {
+    fn rounded_rect(&mut self, x: f64, y: f64, w: f64, h: f64, _r: f64) {
         self.last_kind = PathKind::RoundedRect;
+        self.extend_rect(x, y, w, h);
     }
     fn close_path(&mut self) {
         self.path_ops.push(PathOp::ClosePath);
     }
     fn fill(&mut self) {
+        if let Some(b) = self.path_bounds {
+            let c = self.clip.unwrap_or(b);
+            let w = b.2.min(c.2) - b.0.max(c.0);
+            let h = b.3.min(c.3) - b.1.max(c.1);
+            if w > 0.0 && h > 0.0 {
+                self.filled_area += w * h;
+            }
+        }
         self.fills.push(PaintOp {
             color: self.fill_color,
             kind: self.last_kind,
@@ -212,11 +282,12 @@ impl DrawCtx for PaintRecorder {
         self.transform
     }
     fn save(&mut self) {
-        self.stack.push(self.transform);
+        self.stack.push((self.transform, self.clip));
     }
     fn restore(&mut self) {
-        if let Some(t) = self.stack.pop() {
+        if let Some((t, clip)) = self.stack.pop() {
             self.transform = t;
+            self.clip = clip;
         }
     }
     fn translate(&mut self, tx: f64, ty: f64) {

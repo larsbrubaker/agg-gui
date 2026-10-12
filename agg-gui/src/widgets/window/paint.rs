@@ -5,6 +5,7 @@
 // remain a thin dispatcher in `widget_impl.rs`.
 
 use super::*;
+use crate::color::Color;
 use crate::widget::paint_subtree;
 
 /// Body of `<Window as Widget>::paint`.
@@ -63,8 +64,26 @@ pub(super) fn paint_window(window: &mut Window, ctx: &mut dyn DrawCtx) {
     if let Some(c) = ps.border_color {
         style.border_color = c;
     }
+    let title_color = if window.drag_mode == DragMode::Move {
+        v.window_title_fill_drag
+    } else {
+        ps.title_bar_color.unwrap_or(v.window_title_fill)
+    };
+    let body_opaque = style.body_color.a >= 1.0 && !window.collapsed;
     if ps.shadow {
-        super::chrome::paint_chrome_shadow(ctx, w, h, &style);
+        // Under an opaque body (and an opaque title bar over the strip the
+        // body leaves it) none of the shadow shows in the middle.
+        let covered_h = if title_color.a >= 1.0 {
+            h
+        } else {
+            (h - style.title_height).max(0.0)
+        };
+        let skip = body_opaque
+            .then(|| {
+                super::opaque_fill::solid_interior(ctx, 0.0, 0.0, w, covered_h, style.corner_radius)
+            })
+            .flatten();
+        paint_shadow(ctx, w, h, &style, ps.shadow_style, skip);
     }
 
     // A rounded panel paints into its own layer so the rounded clip below
@@ -80,7 +99,7 @@ pub(super) fn paint_window(window: &mut Window, ctx: &mut dyn DrawCtx) {
 
     // Window body. Expanded windows leave the top strip to `WindowTitleBar`
     // so the top corner alpha comes from one shape, not overlapping fills.
-    super::chrome::paint_chrome_body(ctx, w, h, &style, window.collapsed);
+    paint_body(ctx, w, h, &style, window.collapsed, body_opaque);
 
     // The body fill just made this layer opaque, so text painted into it
     // from here on lands on destination alpha 1 and can use LCD subpixel
@@ -103,14 +122,7 @@ pub(super) fn paint_window(window: &mut Window, ctx: &mut dyn DrawCtx) {
     // WindowTitleBar entry (background_color = window_title_fill).
     {
         let mut st = window.title_state.borrow_mut();
-        st.bar_color = if window.drag_mode == DragMode::Move {
-            v.window_title_fill_drag
-        } else {
-            window
-                .panel_style
-                .title_bar_color
-                .unwrap_or(v.window_title_fill)
-        };
+        st.bar_color = title_color;
         st.corner_radius = window.panel_style.corner_radius;
         st.title_color = v.window_title_text;
         st.collapsed = window.collapsed;
@@ -127,6 +139,100 @@ pub(super) fn paint_window(window: &mut Window, ctx: &mut dyn DrawCtx) {
     // Outer border frames both body and title region.
     ctx.set_fill_color(v.window_fill); // restore default fill — stroke follows
     super::chrome::paint_chrome_border_width(ctx, w, h, &style, window.panel_style.border_width);
+}
+
+/// The drop shadow around a `w`×`h` panel: `custom` (agg-sharp's
+/// `ShadowColor`/`ShadowOffset`/`ShadowBlur` layering) or the default halo
+/// [`paint_chrome_shadow`](super::chrome::paint_chrome_shadow) draws, each
+/// layer filled only around the device rect `skip` an opaque body covers.
+pub(super) fn paint_shadow(
+    ctx: &mut dyn DrawCtx,
+    w: f64,
+    h: f64,
+    style: &super::chrome::ChromeStyle,
+    custom: Option<super::WindowShadow>,
+    skip: Option<super::opaque_fill::DeviceRect>,
+) {
+    // (inflation, offset x, offset y, colour) per layer, widest first.
+    let mut layers: Vec<(f64, f64, f64, Color)> = Vec::new();
+    match custom {
+        Some(s) => {
+            // One layer per device pixel of blur (capped) keeps the steps
+            // under a pixel apart at any display scale.
+            let t = ctx.transform();
+            let scale = (t.sx * t.sx + t.shy * t.shy).sqrt();
+            let blur = s.blur.max(0.0);
+            let count = ((blur * scale).ceil() as i32).clamp(1, 12);
+            // Per layer alpha such that all of them together reach the
+            // requested alpha, in whole 8-bit steps as agg-sharp's `Color`.
+            let a = s.color.a.clamp(0.0, 1.0) as f64;
+            let layer_alpha = 1.0 - (1.0 - a).powf(1.0 / count as f64);
+            let alpha = ((layer_alpha * 255.0).round_ties_even() / 255.0) as f32;
+            let color = Color::rgba(s.color.r, s.color.g, s.color.b, alpha);
+            for i in (1..=count).rev() {
+                let grow = blur * i as f64 / count as f64;
+                layers.push((grow, s.offset_x, s.offset_y, color));
+            }
+        }
+        None => {
+            let base = style.shadow_color;
+            let steps = style.shadow_steps.max(1);
+            for i in (0..steps).rev() {
+                let t = i as f64 / steps as f64;
+                let falloff = (1.0 - t).powi(2) as f32;
+                let alpha = base.a * falloff / steps as f32 * 6.0;
+                let color = Color::rgba(base.r, base.g, base.b, alpha);
+                layers.push((
+                    t * style.shadow_blur,
+                    style.shadow_dx,
+                    -style.shadow_dy,
+                    color,
+                ));
+            }
+        }
+    }
+    let r = style.corner_radius;
+    for (grow, dx, dy, color) in layers {
+        let (x, y) = (dx - grow, dy - grow);
+        let (lw, lh) = (w + 2.0 * grow, h + 2.0 * grow);
+        let bounds = super::opaque_fill::device_bounds(ctx, x, y, lw, lh);
+        ctx.set_fill_color(color);
+        super::opaque_fill::fill_around(ctx, bounds, skip, &|ctx| {
+            ctx.rounded_rect(x, y, lw, lh, r + grow)
+        });
+    }
+}
+
+/// The panel's body below the title strip, as
+/// [`paint_chrome_body`](super::chrome::paint_chrome_body) draws it; an
+/// opaque one clears its flat middle and fills only the bands around it.
+pub(super) fn paint_body(
+    ctx: &mut dyn DrawCtx,
+    w: f64,
+    h: f64,
+    style: &super::chrome::ChromeStyle,
+    collapsed: bool,
+    opaque: bool,
+) {
+    let content_h = (h - style.title_height).max(0.0);
+    if collapsed || content_h <= 0.0 {
+        return;
+    }
+    let r = style.corner_radius;
+    let skip = if opaque {
+        super::opaque_fill::solid_interior(ctx, 0.0, 0.0, w, content_h, r)
+    } else {
+        None
+    };
+    if let Some((x1, y1, x2, y2)) = skip {
+        ctx.clear_rect(x1, y1, x2 - x1, y2 - y1, style.body_color);
+    }
+    let bounds = super::opaque_fill::device_bounds(ctx, 0.0, 0.0, w, content_h);
+    ctx.set_fill_color(style.body_color);
+    super::opaque_fill::fill_around(ctx, bounds, skip, &|ctx| {
+        ctx.rounded_rect(0.0, 0.0, w, content_h, r);
+        ctx.rect(0.0, (content_h - r).max(0.0), w, r.min(content_h));
+    });
 }
 
 /// Body of `<Window as Widget>::paint_overlay`: draws the resize

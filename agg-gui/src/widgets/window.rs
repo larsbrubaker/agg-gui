@@ -26,9 +26,11 @@
 //! - **Opacity** — [`Window::set_backbuffer_opacity`] composites the whole
 //!   window (chrome and content) over what is behind it at that alpha.
 //! - **Style** — [`Window::set_corner_radius`], [`Window::set_shadow`],
-//!   [`Window::set_title_bar_color`], [`Window::set_body_color`] and
-//!   [`Window::set_border`] restyle the panel; a rounded panel paints through
-//!   its own layer, cut by the rounded clip (`window/style.rs`).
+//!   [`Window::set_shadow_style`], [`Window::set_title_bar_color`],
+//!   [`Window::set_body_color`] and [`Window::set_border`] restyle the panel;
+//!   a rounded panel paints through its own layer, cut by the rounded clip
+//!   (`window/style.rs`). Under an opaque body the shadow and body are
+//!   filled only around the flat middle (`window/opaque_fill.rs`).
 //!
 //! # ⚠ Backbuffer caching gotcha — read before adding a custom Window
 //!
@@ -717,11 +719,15 @@ mod options;
 mod paint;
 mod resize;
 mod snap_glue;
+mod opaque_fill;
 mod style;
+#[cfg(test)]
+mod window_widget_style_tests;
 mod title_buttons;
 mod widget_impl;
 
 pub use close::{ClickAwayAction, CloseReason};
+pub use style::WindowShadow;
 
 pub use chrome::{
     paint_chevron, paint_chrome_body, paint_chrome_border, paint_chrome_border_width,

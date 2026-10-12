@@ -181,4 +181,4 @@ pub use tooltip::{
 };
 pub use tree_view::{NodeGlyph, NodeIcon, ScrollAlign, TreeView, TreeViewEvent};
 pub use tumble_cube::{TumbleCube, TumbleCubeCamera, TumbleCubeGpuRenderer};
-pub use window::{ClickAwayAction, CloseReason, Window};
+pub use window::{ClickAwayAction, CloseReason, Window, WindowShadow};
