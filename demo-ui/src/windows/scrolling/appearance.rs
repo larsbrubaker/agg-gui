@@ -168,6 +168,7 @@ impl StyleCells {
             thumb_rest: agg_gui::current_scroll_style().thumb_rest,
             edge_guard: agg_gui::current_scroll_style().edge_guard,
             corner_radius: agg_gui::current_scroll_style().corner_radius,
+            track_corner_radius: agg_gui::current_scroll_style().track_corner_radius,
             snap_on_hover: agg_gui::current_scroll_style().snap_on_hover,
         }
     }

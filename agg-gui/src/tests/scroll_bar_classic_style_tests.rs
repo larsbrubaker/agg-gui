@@ -1,5 +1,7 @@
 //! [`ScrollBarStyle`]'s options for agg-sharp's classic `ScrollBar` look:
-//! `corner_radius` (`Some(0.0)` for its square track and thumb) and
+//! `corner_radius` (`Some(0.0)` for a square track and thumb),
+//! `track_corner_radius` (`Some(0.0)` for its square track under a round
+//! thumb) and
 //! `snap_on_hover` (the thumb grows to full width the moment it is hovered,
 //! with no ease). Rust-only: agg-sharp's classic bar is the reference these
 //! options reproduce, so the tests drive a [`ScrollView`] through the
@@ -118,6 +120,68 @@ fn rust_only_square_corner_radius_paints_a_square_track() {
     assert!(
         close(corner, edge),
         "a square corner paints like the edge: {corner:?} vs {edge:?}"
+    );
+}
+
+/// The thumb's top-left corner pixel and the middle of its top row (the
+/// thumb sits at the top while the offset is 0).
+fn thumb_corner_and_edge(scroll: &mut ScrollView) -> ([u8; 4], [u8; 4]) {
+    let thumb = props(scroll).vertical.thumb;
+    let fb = paint(scroll);
+    let (x, y) = (thumb.x as u32, (thumb.y + thumb.height) as u32 - 1);
+    let mid = (thumb.x + thumb.width / 2.0) as u32;
+    (rgba(&fb, x, y), rgba(&fb, mid, y))
+}
+
+#[test]
+fn rust_only_track_corner_radius_defaults_to_the_thumb_radius() {
+    let style = classic();
+    assert_eq!(style.track_corner_radius, None);
+    assert_eq!(style.track_corner_radius_at(0.0), 4.5);
+    assert_eq!(style.track_corner_radius_at(1.0), 7.5);
+    let square_track = ScrollBarStyle {
+        track_corner_radius: Some(0.0),
+        ..style
+    };
+    assert_eq!(square_track.track_corner_radius_at(0.0), 0.0);
+    assert_eq!(square_track.track_corner_radius_at(1.0), 0.0);
+    assert_eq!(
+        square_track.corner_radius_at(0.0),
+        4.5,
+        "the thumb keeps its radius"
+    );
+    assert_eq!(square_track.corner_radius_at(1.0), 7.5);
+}
+
+#[test]
+fn rust_only_square_track_corner_radius_keeps_a_round_thumb() {
+    let _clock = clock::scoped_virtual(None);
+    let square_track = ScrollBarStyle {
+        track_corner_radius: Some(0.0),
+        ..classic()
+    };
+    let mut scroll = make(square_track);
+    let (corner, edge) = corner_and_edge(&mut scroll);
+    assert!(edge[3] > 0, "the track paints: {edge:?}");
+    assert!(
+        close(corner, edge),
+        "the track's corner is square: {corner:?} vs {edge:?}"
+    );
+    let (thumb_corner, thumb_edge) = thumb_corner_and_edge(&mut scroll);
+    assert!(
+        !close(thumb_corner, thumb_edge),
+        "the thumb's corner stays round: {thumb_corner:?} vs {thumb_edge:?}"
+    );
+
+    // control: a square thumb fills its corner pixel, so the probe tells them apart
+    let mut square = make(ScrollBarStyle {
+        corner_radius: Some(0.0),
+        ..square_track
+    });
+    let (thumb_corner, thumb_edge) = thumb_corner_and_edge(&mut square);
+    assert!(
+        close(thumb_corner, thumb_edge),
+        "a square thumb paints its corner like its edge: {thumb_corner:?} vs {thumb_edge:?}"
     );
 }
 

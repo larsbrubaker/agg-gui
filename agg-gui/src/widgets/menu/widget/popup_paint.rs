@@ -243,6 +243,7 @@ pub(super) fn paint_scroll_bar(ctx: &mut dyn DrawCtx, rect: Rect, scroll: PopupS
             ),
             thumb: Rect::new(bar_x, thumb_start, bar_w, thumb_len),
             radius: bar_w * 0.5,
+            track_radius: bar_w * 0.5,
             alpha: 1.0,
             color: style.color,
             hovered_thumb: false,

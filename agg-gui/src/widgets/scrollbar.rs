@@ -38,7 +38,10 @@ pub struct ScrollbarGeometry {
 pub struct PreparedScrollbar {
     pub track: Rect,
     pub thumb: Rect,
+    /// The thumb's corner radius.
     pub radius: f64,
+    /// The track's corner radius.
+    pub track_radius: f64,
     pub alpha: f64,
     pub color: ScrollBarColor,
     pub hovered_thumb: bool,
@@ -397,6 +400,7 @@ impl ScrollbarAxis {
             track,
             thumb,
             radius: style.corner_radius_at(t),
+            track_radius: style.track_corner_radius_at(t),
             alpha,
             color: style.color,
             hovered_thumb: self.hovered_thumb,
@@ -425,7 +429,7 @@ pub fn paint_prepared_scrollbar(ctx: &mut dyn DrawCtx, bar: PreparedScrollbar) {
         bar.track.y,
         bar.track.width,
         bar.track.height,
-        bar.radius,
+        bar.track_radius,
     );
     ctx.fill();
 
