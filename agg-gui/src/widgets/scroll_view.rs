@@ -119,6 +119,14 @@ pub struct ScrollBarStyle {
     pub fade_size: f64,
     /// Where the resting thumb sits across the bar.
     pub thumb_rest: ScrollThumbRest,
+    /// Room kept clear between the bars and the view's right and bottom
+    /// edges, so the parent window's resize grip there stays reachable
+    /// ([`DEFAULT_SCROLL_EDGE_GUARD`] in every preset). A
+    /// [`ScrollBarKind::Solid`] bar reserves it on top of its strip. `0`
+    /// puts the strip flush against the edge and reserves exactly
+    /// `outer_margin + bar_width + inner_margin`, as agg-sharp's classic
+    /// `ScrollableWidget` does.
+    pub edge_guard: f64,
 }
 
 impl ScrollBarStyle {
@@ -180,6 +188,7 @@ impl Default for ScrollBarStyle {
             fade_strength: 0.5,
             fade_size: 20.0,
             thumb_rest: ScrollThumbRest::OuterEdge,
+            edge_guard: DEFAULT_SCROLL_EDGE_GUARD,
         }
     }
 }
@@ -202,6 +211,7 @@ impl ScrollBarStyle {
             fade_strength: 0.5,
             fade_size: 20.0,
             thumb_rest: ScrollThumbRest::OuterEdge,
+            edge_guard: DEFAULT_SCROLL_EDGE_GUARD,
         }
     }
     /// Preset matching egui's `ScrollStyle::thin` — a narrow floating bar
@@ -224,6 +234,7 @@ impl ScrollBarStyle {
             fade_strength: 0.5,
             fade_size: 20.0,
             thumb_rest: ScrollThumbRest::OuterEdge,
+            edge_guard: DEFAULT_SCROLL_EDGE_GUARD,
         }
     }
     /// Preset matching egui's `ScrollStyle::floating` — wide floating overlay
@@ -281,10 +292,9 @@ fn current_scroll_style_epoch() -> u64 {
 
 // ── Runtime constants ────────────────────────────────────────────────────────
 
-/// Pixels at the right edge reserved for the parent window's resize grip.
-const RIGHT_EDGE_GUARD: f64 = 4.0;
-/// Pixels at the bottom edge reserved for the parent window's resize grip.
-const BOTTOM_EDGE_GUARD: f64 = 4.0;
+/// The default [`ScrollBarStyle::edge_guard`]: pixels kept clear at the
+/// view's right and bottom edges for the parent window's resize grip.
+pub const DEFAULT_SCROLL_EDGE_GUARD: f64 = 4.0;
 
 // ── Per-axis state (vertical or horizontal) ──────────────────────────────────
 //
@@ -529,12 +539,9 @@ impl ScrollView {
         // takes from the content includes the guard: without it the content
         // ran under the strip's inner margin (agg-sharp's
         // `ScrollBarAppearanceTests.WidthAndMarginsWidenTheStripAndReserveIt`).
-        let rx = if need_v { span + RIGHT_EDGE_GUARD } else { 0.0 };
-        let ry = if need_h {
-            span + BOTTOM_EDGE_GUARD
-        } else {
-            0.0
-        };
+        let guard = self.edge_guard();
+        let rx = if need_v { span + guard } else { 0.0 };
+        let ry = if need_h { span + guard } else { 0.0 };
         (rx, ry)
     }
 
@@ -547,14 +554,19 @@ impl ScrollView {
         self.style.bar_width + self.style.outer_margin + self.style.inner_margin
     }
 
+    /// The style's resize-grip guard, never negative.
+    fn edge_guard(&self) -> f64 {
+        self.style.edge_guard.max(0.0)
+    }
+
     /// Right-edge X (exclusive) of the vertical scroll bar in local space.
     fn v_bar_right(&self) -> f64 {
-        self.bounds.width - RIGHT_EDGE_GUARD - self.style.outer_margin
+        self.bounds.width - self.edge_guard() - self.style.outer_margin
     }
     /// Bottom-edge Y (exclusive, Y-up) of the horizontal bar — i.e. the lower
-    /// edge of the bar stripe, which in Y-up = `outer_margin + BOTTOM_EDGE_GUARD`.
+    /// edge of the bar stripe, which in Y-up = `outer_margin + edge_guard`.
     fn h_bar_bottom(&self) -> f64 {
-        BOTTOM_EDGE_GUARD + self.style.outer_margin
+        self.edge_guard() + self.style.outer_margin
     }
 
     /// Vertical track range [lo, hi] in Y-up.  Accounts for the horizontal bar

@@ -32,7 +32,7 @@ pub struct ScrollBarAxisProperties {
     /// The room the bar owns, margins included (agg-sharp's `ScrollBar`
     /// bounds): `outer_margin + bar_width + inner_margin` across, and the
     /// track plus its inner margin at each end along. Its outer edge sits
-    /// inside the parent window's resize-grip guard.
+    /// [`ScrollBarStyle::edge_guard`] in from the view's edge.
     pub strip: Rect,
     /// The painted track (agg-sharp's `ScrollBar.Track`); zero-sized when
     /// the content fits.
@@ -44,7 +44,7 @@ pub struct ScrollBarAxisProperties {
     /// height a horizontal bar reserves at the bottom, the width a vertical
     /// one reserves at the right; agg-sharp's `ScrollArea.DeviceMargin`):
     /// from the view's edge to the strip's inner edge, so the strip plus the
-    /// resize-grip guard outside it. Non-zero only for a
+    /// [`ScrollBarStyle::edge_guard`] outside it. Non-zero only for a
     /// [`ScrollBarKind::Solid`] bar over overflowing content that is not
     /// [`ScrollBarVisibility::AlwaysHidden`].
     pub reserved: f64,

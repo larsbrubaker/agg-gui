@@ -6,9 +6,9 @@
 //! agg-sharp's bar is a widget whose `Track` and `Thumb` children the tests
 //! measure; agg-gui paints its bars, so the same rects come from
 //! [`ScrollView::scroll_bar_properties`]. agg-sharp's bar bounds are the
-//! query's `strip`, and positions agg-sharp gives from the view's right or
-//! bottom edge are taken from the strip's outer edge, which agg-gui keeps
-//! inside the parent window's resize-grip guard. agg-sharp's option names
+//! query's `strip`, its `ScrollArea.DeviceMargin` the bar's `reserved`, and
+//! its bar sits flush against the view's edge, which is agg-gui's
+//! `edge_guard: 0` (no room kept for a resize grip). agg-sharp's option names
 //! map onto [`ScrollBarStyle`]: `BarWidth` is `bar_width`, `FloatingWidth`
 //! `floating_width`, `InnerMargin`/`OuterMargin` the margins,
 //! `HandleMinLength` `handle_min_length`, `Floating` the `Floating` kind and
@@ -52,8 +52,8 @@ use crate::{
 /// agg-sharp's `ScrollBar.GrowThumbBy` at device scale 1.
 const GROW_THUMB_BY: f64 = 3.0;
 
-/// agg-sharp's `ScrollBar` defaults: a 15 wide Solid bar, no margins, no
-/// handle minimum and no edge fade.
+/// agg-sharp's `ScrollBar` defaults: a 15 wide Solid bar flush against the
+/// view's edge, no margins, no handle minimum and no edge fade.
 fn legacy() -> ScrollBarStyle {
     ScrollBarStyle {
         bar_width: 15.0,
@@ -63,6 +63,7 @@ fn legacy() -> ScrollBarStyle {
         inner_margin: 0.0,
         kind: ScrollBarKind::Solid,
         fade_strength: 0.0,
+        edge_guard: 0.0,
         ..ScrollBarStyle::default()
     }
 }
@@ -174,6 +175,7 @@ fn defaults_keep_the_legacy_geometry() {
     assert_eq!(bar.strip.height, 100.0);
     assert_eq!(bar.thumb.x - bar.strip.x, GROW_THUMB_BY);
     close(bar.thumb.height, 100.0 * 100.0 / 500.0, 1e-9);
+    close(bar.reserved, classic().bar_width, 1e-9);
     // the strip is reserved: the content stops where it begins
     close(p.viewport.x + p.viewport.width, bar.strip.x, 1e-9);
     assert_eq!(bar.fade_target, 1.0);
@@ -195,6 +197,7 @@ fn width_and_margins_widen_the_strip_and_reserve_it() {
     let p = props(&scroll);
     let bar = p.vertical;
     assert_eq!(bar.strip.width, 27.0);
+    close(bar.reserved, 27.0, 1e-9);
     close(p.viewport.x + p.viewport.width, bar.strip.x, 1e-9);
 
     // the track sits past the inner margin; the outer margin is left clear at the view's edge
@@ -481,19 +484,19 @@ fn the_vertical_bar_stops_above_the_horizontal_bar() {
     relayout(&mut scroll);
     let p = props(&scroll);
     let vertical = p.vertical;
-    let hbar_top = p.horizontal.strip.y + p.horizontal.strip.height;
+    let hbar = p.horizontal.strip.height;
     assert!(p.horizontal.showing);
-    assert_eq!(vertical.strip.y, hbar_top);
-    assert_eq!(vertical.track.height, 100.0 - hbar_top);
+    assert_eq!(vertical.strip.y, hbar);
+    assert_eq!(vertical.track.height, 100.0 - hbar);
     close(
         vertical.thumb.height,
-        (100.0 - hbar_top) * (p.viewport.height / 500.0),
+        (100.0 - hbar) * (p.viewport.height / 500.0),
         1e-9,
     );
 
     // at either end the thumb meets the end of the track, not the view's bottom
     move_thumb(&mut scroll, -1000.0);
-    close(props(&scroll).vertical.thumb.y, hbar_top, 1e-6);
+    close(props(&scroll).vertical.thumb.y, hbar, 1e-6);
     move_thumb(&mut scroll, 1000.0);
     let thumb = props(&scroll).vertical.thumb;
     close(thumb.y + thumb.height, 100.0, 1e-6);
@@ -564,4 +567,58 @@ fn rust_only_a_classic_thumb_rests_inset_and_fills_the_bar_on_hover() {
     assert_eq!(bar.thumb.x - bar.strip.x, 0.0);
     assert_eq!(bar.thumb.width, 15.0);
     assert_eq!(bar.track.width, 15.0);
+}
+
+/// `edge_guard: 0` lays a Solid bar out as agg-sharp's classic
+/// `ScrollableWidget` does: each strip flush against the view's edge,
+/// reserving exactly its strip, the two bars stopping at each other so the
+/// corner square between them is neither's. The default style keeps its
+/// resize-grip guard.
+#[test]
+fn rust_only_a_zero_edge_guard_solid_bar_sits_flush_and_leaves_the_corner_square() {
+    let style = ScrollBarStyle {
+        edge_guard: 0.0,
+        ..ScrollBarStyle::solid()
+    };
+    let span = style.outer_margin + style.bar_width + style.inner_margin;
+    let content = SizedBox::new().with_width(600.0).with_height(500.0);
+    let mut scroll = ScrollView::new(Box::new(content))
+        .horizontal(true)
+        .with_style(style)
+        .with_bar_visibility(ScrollBarVisibility::VisibleWhenNeeded);
+    relayout(&mut scroll);
+    let p = props(&scroll);
+    let (v, h) = (p.vertical, p.horizontal);
+    assert!(v.showing && h.showing);
+
+    // reserved: exactly the strip, on both axes
+    close(v.reserved, span, 1e-9);
+    close(h.reserved, span, 1e-9);
+    assert_eq!(
+        p.viewport,
+        crate::Rect::new(0.0, span, 200.0 - span, 100.0 - span)
+    );
+
+    // flush: the strips and tracks reach the view's right and bottom edges
+    assert_eq!(v.strip.x + v.strip.width, 200.0);
+    assert_eq!(v.track.x + v.track.width, 200.0);
+    assert_eq!(h.strip.y, 0.0);
+    assert_eq!(h.track.y, 0.0);
+
+    // the corner: the vertical strip starts above the horizontal one and the
+    // horizontal strip ends left of the vertical one, leaving the span square
+    assert_eq!(v.strip.y, h.strip.y + h.strip.height);
+    assert_eq!(v.strip.y, span);
+    assert_eq!(h.strip.x + h.strip.width, v.strip.x);
+    assert_eq!(v.strip.x, 200.0 - span);
+
+    // the default keeps the resize-grip guard outside each strip
+    let guard = crate::DEFAULT_SCROLL_EDGE_GUARD;
+    assert_eq!(ScrollBarStyle::solid().edge_guard, guard);
+    assert_eq!(ScrollBarStyle::default().edge_guard, guard);
+    let scroll = restyle(scroll, ScrollBarStyle::solid());
+    let p = props(&scroll);
+    close(p.vertical.reserved, span + guard, 1e-9);
+    assert_eq!(p.vertical.strip.x + p.vertical.strip.width, 200.0 - guard);
+    assert_eq!(p.horizontal.strip.y, guard);
 }
