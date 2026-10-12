@@ -464,9 +464,12 @@ impl ScrollView {
         (w, h)
     }
 
-    /// Horizontal/vertical space reserved for Solid scrollbars (0 for Floating).
+    /// Horizontal/vertical space reserved for Solid scrollbars (0 for Floating,
+    /// and for a bar that is never shown: it has nothing to draw in the room).
     fn bar_reserve(&self) -> (f64, f64) {
-        if self.style.kind != ScrollBarKind::Solid {
+        if self.style.kind != ScrollBarKind::Solid
+            || self.bar_visibility == ScrollBarVisibility::AlwaysHidden
+        {
             return (0.0, 0.0);
         }
         let span = self.style.bar_width + self.style.outer_margin + self.style.inner_margin;
@@ -592,5 +595,8 @@ impl ScrollView {
 }
 
 mod widget_impl;
+
+mod bar_report;
+pub use bar_report::ScrollBarReport;
 
 pub mod scroll_offsets;

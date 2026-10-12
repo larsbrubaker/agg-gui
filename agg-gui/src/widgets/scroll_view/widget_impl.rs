@@ -32,7 +32,7 @@ impl Widget for ScrollView {
     ///
     /// In Y-up screen space, increasing `v.offset` by `D` shifts this
     /// scroll view's child upward by `D` pixels (see the formula
-    /// `child_y = vh - content + offset` in [`layout`]).  We clamp by
+    /// `child_y = height - content + offset` in [`layout`]).  We clamp by
     /// the remaining slack so we never scroll past the bottom of the
     /// content, and a negative `amount` reverses (used to release
     /// the auto-scroll when focus leaves the text field).
@@ -227,7 +227,10 @@ impl Widget for ScrollView {
 
         // Position child inside the widget.
         if let Some(child) = self.children.first_mut() {
-            let child_y = vh - self.v.content + self.v.offset;
+            // The vertical viewport is the TOP `vh` of the view (a Solid
+            // horizontal bar takes the bottom), so the content's top is
+            // measured from the view's top, not from `vh`.
+            let child_y = self.bounds.height - self.v.content + self.v.offset;
             let child_x = -self.h.offset;
             child.set_bounds(Rect::new(
                 child_x.round(),

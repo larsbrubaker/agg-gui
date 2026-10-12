@@ -16,16 +16,22 @@
 //! runs. `HorizontalScrollIsOffAndAddsNoChildrenByDefault` checks the
 //! default leaves wide content unscrollable sideways and the view's one
 //! child alone (agg-gui's bars are painted, never children).
-//! `HorizontalScrollShowsABarThatScrollsAndReservesItsHeight` is not ported
-//! yet: it needs the horizontal bar's thumb drag and track click driven on
-//! a Solid-style bar.
+//! `HorizontalScrollShowsABarThatScrollsAndReservesItsHeight` drives a
+//! [`ScrollBarStyle::solid`] bar (agg-sharp's bar always reserves its room)
+//! through the view's own mouse events, and reads the bar from
+//! [`ScrollView::horizontal_bar_report`]: agg-sharp's `ScrollBarWidth` is the
+//! style's `bar_width`, and the room reserved at the bottom (C#'s
+//! `ScrollArea.DeviceMargin.Bottom`) is the bar with its inner and outer
+//! margins.
 
 use std::cell::Cell;
 use std::rc::Rc;
 
 use super::scroll_fixtures::Resizable;
 use crate::geometry::Point;
-use crate::{Event, EventResult, Modifiers, Rect, ScrollView, Size, Widget};
+use crate::{
+    Event, EventResult, Modifiers, MouseButton, Rect, ScrollBarStyle, ScrollView, Size, Widget,
+};
 
 struct Made {
     scroll: ScrollView,
@@ -123,6 +129,61 @@ fn horizontal_scroll_is_off_and_adds_no_children_by_default() {
     });
     assert_eq!(m.h_offset.get(), 0.0);
     assert_eq!(m.scroll.children().len(), 1);
+}
+
+#[test]
+fn horizontal_scroll_shows_a_bar_that_scrolls_and_reserves_its_height() {
+    let (content, size) = Resizable::new(600.0, 50.0);
+    let h_offset = Rc::new(Cell::new(0.0));
+    let h_max = Rc::new(Cell::new(0.0));
+    let style = ScrollBarStyle::solid();
+    let mut scroll = ScrollView::new(Box::new(content))
+        .horizontal(true)
+        .with_style(style)
+        .with_h_offset_cell(Rc::clone(&h_offset))
+        .with_h_max_scroll_cell(Rc::clone(&h_max));
+    lay_out(&mut scroll, 200.0, 100.0);
+
+    let bar = scroll.horizontal_bar_report();
+    assert!(bar.shown);
+    assert_eq!(bar.track.height, style.bar_width);
+    let room = style.bar_width + style.inner_margin + style.outer_margin;
+    assert!((bar.reserved - room).abs() < 1e-9, "{}", bar.reserved);
+    assert_eq!(h_max.get(), 400.0);
+
+    // Dragging the thumb the whole free track scrolls to the right end.
+    let thumb = bar.thumb.expect("an overflowing bar has a thumb");
+    let grab = Point::new(thumb.x + thumb.width / 2.0, thumb.y + thumb.height / 2.0);
+    let left = |pos| Event::MouseDown {
+        pos,
+        button: MouseButton::Left,
+        modifiers: Modifiers::default(),
+    };
+    let up = |pos| Event::MouseUp {
+        pos,
+        button: MouseButton::Left,
+        modifiers: Modifiers::default(),
+    };
+    assert!(scroll.on_event(&left(grab)).is_consumed());
+    let to = Point::new(grab.x + bar.track.width, grab.y);
+    let _ = scroll.on_event(&Event::MouseMove { pos: to });
+    let _ = scroll.on_event(&up(to));
+    assert_eq!(h_offset.get(), 400.0);
+
+    // Clicking the track to the left of the thumb pages back towards the start.
+    let track = scroll.horizontal_bar_report().track;
+    let click = Point::new(1.0, track.y + track.height / 2.0);
+    let _ = scroll.on_event(&left(click));
+    let _ = scroll.on_event(&up(click));
+    assert!(h_offset.get() < 400.0, "{}", h_offset.get());
+
+    // Content that fits hides the bar and gives its room back.
+    size.set(Size::new(100.0, 50.0));
+    lay_out(&mut scroll, 200.0, 100.0);
+    assert_eq!(scroll.children()[0].bounds().x, 0.0);
+    let bar = scroll.horizontal_bar_report();
+    assert!(!bar.shown);
+    assert_eq!(bar.reserved, 0.0);
 }
 
 #[test]
