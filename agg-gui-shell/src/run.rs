@@ -77,7 +77,9 @@ where
 
     let restored_bounds = config.bounds_store.as_ref().and_then(|s| s.load());
     let (window, restored_size) = create_window(&event_loop, &config, restored_bounds)?;
-    agg_gui::set_device_scale(window.scale_factor());
+    agg_gui::set_device_scale(crate::display_metrics::usable_display_scale(
+        window.scale_factor(),
+    ));
     if config.os_tooltip_timings {
         if let Some(timings) = crate::tooltip::os_tooltip_timings() {
             agg_gui::set_tooltip_timings(timings);
@@ -155,6 +157,7 @@ where
         bounds_auto,
         windowed_size,
         maximized,
+        display_size: crate::display_metrics::DisplayUsableSize::new(),
         exit: Rc::clone(&exit),
         error: Rc::clone(&error),
         finished: false,
@@ -283,6 +286,30 @@ fn create_window(
             if WindowSize::Physical(refined.0, refined.1) != size {
                 let _ =
                     window.request_inner_size(winit::dpi::PhysicalSize::new(refined.0, refined.1));
+            }
+        }
+    }
+    // A first-launch logical size is scaled by the display and clamped to it
+    // (C# `UiScale.ScaledWindowSize`), so a 150% laptop does not open a
+    // window taller than its screen. winit applies the scale itself; only the
+    // clamp needs a request, made while the window is still hidden.
+    if saved.is_none() && !config.fullscreen && !config.maximized {
+        if let (WindowSize::Logical(w, h), Some(monitor)) = (
+            size,
+            window.current_monitor().or_else(|| window.primary_monitor()),
+        ) {
+            let m = monitor.size();
+            let desktop = (
+                i32::try_from(m.width).unwrap_or(i32::MAX),
+                i32::try_from(m.height).unwrap_or(i32::MAX),
+            );
+            let scale = crate::display_metrics::usable_display_scale(window.scale_factor());
+            let fitted = crate::display_metrics::scaled_window_size(w, h, scale, desktop);
+            if fitted != crate::display_metrics::scaled_window_size(w, h, scale, (0, 0)) {
+                let _ = window.request_inner_size(winit::dpi::PhysicalSize::new(
+                    fitted.0.max(1) as u32,
+                    fitted.1.max(1) as u32,
+                ));
             }
         }
     }

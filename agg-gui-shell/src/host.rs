@@ -54,6 +54,9 @@ pub struct WindowGeometry {
     pub maximized: bool,
     pub fullscreen: bool,
     pub scale_factor: f64,
+    /// Physical size of the monitor the window is on, the last good
+    /// measurement (`DisplayUsableSize`): `None` until the OS reports one.
+    pub display_size: Option<(f64, f64)>,
 }
 
 /// How the event loop should end.

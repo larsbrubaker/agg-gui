@@ -102,6 +102,7 @@ mod multi_touch_routing;
 mod on_screen_keyboard;
 pub(crate) mod paint_recorder;
 mod platform_multi_click;
+mod platform_surface_bounds_tests;
 mod pointer_modifiers;
 mod preview_event;
 mod radio_button;

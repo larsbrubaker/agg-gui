@@ -79,12 +79,14 @@
 
 mod bounds;
 mod click_policy;
+mod close_request;
 mod config;
+mod display_metrics;
 mod host;
 mod input;
 mod lcd_display;
-mod out_of_view_capture;
 pub mod menu_bar;
+mod out_of_view_capture;
 mod paint;
 mod redraw_schedule;
 mod run;
@@ -95,6 +97,7 @@ mod waker;
 
 pub use bounds::{sanitize_restored_window_size, SavedBounds, WindowBoundsStore};
 pub use config::{RedrawPolicy, ScreenshotConfig, ShellConfig, WindowIcon, WindowSize};
+pub use display_metrics::{scaled_window_size, usable_display_scale, DisplayUsableSize};
 pub use host::{default_paint, Frame, NoHost, ShellControl, ShellHost, WindowGeometry};
 pub use lcd_display::WindowsLcdDisplayEnvironmentProvider;
 pub use run::run;

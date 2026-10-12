@@ -86,6 +86,9 @@ pub(crate) struct ShellLoop<H: ShellHost> {
     /// the maximized rect.
     pub(crate) windowed_size: WindowedSizeTracker,
     pub(crate) maximized: bool,
+    /// The monitor the window is on, kept through a measurement of nothing
+    /// (off screen, mid hot-plug); refreshed with every geometry report.
+    pub(crate) display_size: crate::display_metrics::DisplayUsableSize,
     pub(crate) exit: Rc<Cell<Option<ExitAction>>>,
     pub(crate) error: Rc<RefCell<Option<ShellError>>>,
     pub(crate) finished: bool,
@@ -137,7 +140,7 @@ impl<H: ShellHost> ShellLoop<H> {
             WindowEvent::CloseRequested => {
                 // The host may veto (unsaved-changes gate) or defer the close
                 // — see `ShellHost::on_close_requested`.
-                if self.host.on_close_requested(&mut self.app) {
+                if crate::close_request::close_requested(&mut self.host, &mut self.app) {
                     elwt.exit();
                 }
             }
@@ -163,7 +166,9 @@ impl<H: ShellHost> ShellLoop<H> {
             }
 
             WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
-                agg_gui::set_device_scale(scale_factor);
+                agg_gui::set_device_scale(crate::display_metrics::usable_display_scale(
+                    scale_factor,
+                ));
                 // The OS double-click distance is in physical pixels.
                 self.refresh_click_policy();
                 self.notify_geometry();
@@ -648,11 +653,17 @@ impl<H: ShellHost> ShellLoop<H> {
             height: size.height,
             maximized: self.maximized,
             fullscreen: self.window.fullscreen().is_some(),
-            scale_factor: self.window.scale_factor(),
+            scale_factor: crate::display_metrics::usable_display_scale(self.window.scale_factor()),
+            display_size: self.display_size.get(),
         }
     }
 
     fn notify_geometry(&mut self) {
+        if let Some(monitor) = self.window.current_monitor() {
+            let size = monitor.size();
+            self.display_size
+                .set(f64::from(size.width), f64::from(size.height));
+        }
         let geometry = self.geometry();
         self.host.on_geometry_changed(geometry);
     }
