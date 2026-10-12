@@ -116,6 +116,10 @@ impl PopupMenuState {
         self.hover_path = None;
         self.suppress_next_mouse_up = false;
         self.activate_on_mouse_up = false;
+        // agg-sharp `PopupMenu.ShowMenu` → `ToolTipManager.Clear`: a tip that
+        // is showing, or armed by the hover delay, would otherwise sit over
+        // (or pop up over) the menu a moment later. Every menu opens here.
+        crate::widgets::tooltip::controller::clear();
     }
 
     pub fn close(&mut self) {

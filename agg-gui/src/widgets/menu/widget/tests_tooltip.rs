@@ -34,12 +34,12 @@ use super::super::geometry::{hit_test, MenuHit, BAR_H};
 use super::super::model::{MenuEntry, MenuItem};
 use super::{MenuBar, PopupMenu, TopMenu};
 
-const VIEWPORT: Size = Size {
+pub(super) const VIEWPORT: Size = Size {
     width: 400.0,
     height: 400.0,
 };
 
-fn test_font() -> Arc<Font> {
+pub(super) fn test_font() -> Arc<Font> {
     const FONT_BYTES: &[u8] = include_bytes!("../../../../../demo/assets/CascadiaCode.ttf");
     Arc::new(Font::from_slice(FONT_BYTES).expect("font"))
 }
@@ -47,7 +47,7 @@ fn test_font() -> Arc<Font> {
 /// Desktop input baseline at scale 1, a pinned tooltip clock, a system font
 /// for the tip painter, no keyboard lift, and a clean controller; restores
 /// the shared state (scales included) on drop.
-struct Guard;
+pub(super) struct Guard;
 impl Drop for Guard {
     fn drop(&mut self) {
         reset_tooltip_test_state();
@@ -58,7 +58,7 @@ impl Drop for Guard {
         crate::device_scale::set_device_scale(1.0);
     }
 }
-fn pin() -> Guard {
+pub(super) fn pin() -> Guard {
     crate::input_profile::set_input_profile(crate::input_profile::InputProfile::Desktop);
     crate::touch_state::clear_last_touch_event_for_testing();
     crate::ux_scale::set_ux_scale(1.0);
@@ -431,7 +431,7 @@ fn screen_of(world: Point, lift: f64) -> (f64, f64) {
 
 /// One full App frame (tree, popup overlay, tooltip resolution) into a
 /// framebuffer of the physical viewport.
-fn paint_frame(app: &mut App) {
+pub(super) fn paint_frame(app: &mut App) {
     let phys = physical_viewport();
     let mut fb = Framebuffer::new(phys.width as u32, phys.height as u32);
     let mut ctx = GfxCtx::new(&mut fb);

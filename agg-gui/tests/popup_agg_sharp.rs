@@ -7,6 +7,8 @@
 mod anchored_popup_tests;
 #[path = "popup_agg_sharp/narrow_sub_menu_placement_tests.rs"]
 mod narrow_sub_menu_placement_tests;
+#[path = "popup_agg_sharp/popup_anchor_tests.rs"]
+mod popup_anchor_tests;
 #[path = "popup_agg_sharp/popup_direction_flip_tests.rs"]
 mod popup_direction_flip_tests;
 #[path = "popup_agg_sharp/popup_horizontal_clamp_tests.rs"]
