@@ -3,9 +3,12 @@
 //!
 //! The numbers copy the markdown viewer's renderers (TextWordX, HeadingRowX,
 //! ListX, QuoteBlockX, CodeBlockX) so a document looks the same in the Edit
-//! tab as in Help.  Font sizes and spacing are scaled when the style is built,
-//! the way a TextWidget scales its point size: rebuild the style when the
-//! device scale or the text size setting changes.
+//! tab as in Help.  Sizes are logical units, like every other agg-gui widget:
+//! the App paints its tree under a `ctx.scale(device_scale)` transform, so
+//! C#'s `* DeviceScale` falls away (scaling here too drew text twice the size
+//! on a HiDPI display).  The device scale still sets the table grid's line
+//! width in whole device pixels, and the text size setting scales the fonts:
+//! rebuild the style when either changes.
 //!
 //! agg-sharp reads its faces from `AggContext.DefaultFont`,
 //! `AggContext.DefaultFontBold` and `CodeBlockX.GetMonoTypeFace()`; agg-gui
@@ -206,7 +209,7 @@ impl RichLayoutStyle {
             fonts,
             faces: RefCell::new(HashMap::new()),
             scale,
-            font_scale: scale * crate::font_settings::current_font_size_scale(),
+            font_scale: crate::font_settings::current_font_size_scale(),
             text_color,
             link_color: accent.with_contrast(background, 4.5),
             body_point_size: 10.0,
@@ -246,7 +249,10 @@ impl RichLayoutStyle {
         self.text_at_alpha(Self::SHADE_ALPHA)
     }
 
-    /// The device scale every spacing value below is already multiplied by.
+    /// The device scale the style was built for.  Sizes are logical units
+    /// (the App paints its tree under a `ctx.scale(device_scale)`
+    /// transform); only the table grid reads the scale, to keep its lines
+    /// whole device pixels.
     pub fn scale(&self) -> f64 {
         self.scale
     }
@@ -269,42 +275,42 @@ impl RichLayoutStyle {
 
     /// How far each list depth moves the item right (the viewer's ListX margin).
     pub fn list_indent(&self) -> f64 {
-        14.0 * self.scale
+        14.0
     }
 
     /// The fixed column a list marker sits in, so text lines up across items.
     pub fn marker_gutter(&self) -> f64 {
-        18.0 * self.scale
+        18.0
     }
 
     /// The space between a list marker's right edge and the item text.
     pub fn marker_gap(&self) -> f64 {
-        4.0 * self.scale
+        4.0
     }
 
     /// The width of a quote's bar.
     pub fn quote_bar_width(&self) -> f64 {
-        2.0 * self.scale
+        2.0
     }
 
     /// Where quote text starts, measured from the bar's left edge.
     pub fn quote_indent(&self) -> f64 {
-        12.0 * self.scale
+        12.0
     }
 
     /// Space inside a code block's shaded background, on every side.
     pub fn code_padding(&self) -> f64 {
-        6.0 * self.scale
+        6.0
     }
 
     /// Space added to every line's ascent + descent, half above and half below.
     pub fn line_gap(&self) -> f64 {
-        6.0 * self.scale
+        6.0
     }
 
     /// The caret's width.
     pub fn caret_width(&self) -> f64 {
-        self.scale
+        1.0
     }
 
     /// The heading sizes HeadingRowX uses, in points.
@@ -329,7 +335,7 @@ impl RichLayoutStyle {
             RichBlockKind::Table => (12.0, 12.0),
             _ => (0.0, 12.0),
         };
-        (before * self.scale, after * self.scale)
+        (before, after)
     }
 
     /// The face a block's unstyled text is drawn in; every line is at least
@@ -401,28 +407,28 @@ impl RichLayoutStyle {
     /// Space between a table cell's text and its left and right grid lines
     /// (the viewer's 10 cell padding).
     pub fn table_cell_padding_x(&self) -> f64 {
-        10.0 * self.scale
+        10.0
     }
 
     /// Space between a table cell's text and its top and bottom grid lines
     /// (the viewer's 2 cell padding); each line's own [`Self::line_gap`] adds
     /// to it, as in the viewer, whose rows hold padded text widgets.
     pub fn table_cell_padding_y(&self) -> f64 {
-        2.0 * self.scale
+        2.0
     }
 
-    /// A table grid line's thickness: whole device pixels
-    /// ([`crate::grid_pixels::line_thickness`]), as the viewer's grid draws,
-    /// so a line never lands half on a pixel.
+    /// A table grid line's thickness in logical units: whole device pixels
+    /// ([`crate::grid_pixels::line_thickness`]) at the style's device scale,
+    /// as the viewer's grid draws, so a line never lands half on a pixel.
     pub fn table_grid_line_width(&self) -> f64 {
-        f64::from(crate::grid_pixels::line_thickness(self.scale))
+        f64::from(crate::grid_pixels::line_thickness(self.scale)) / self.scale
     }
 
     /// The narrowest a table column's text gets when the table is squeezed to
     /// fit (a column whose text is narrower keeps its own width), so a
     /// squeezed column still shows a few characters rather than one.
     pub fn table_min_column_text_width(&self) -> f64 {
-        40.0 * self.scale
+        40.0
     }
 
     fn face(&self, kind: FaceKind, points: f64, italic: bool, underline: bool) -> RichFace {

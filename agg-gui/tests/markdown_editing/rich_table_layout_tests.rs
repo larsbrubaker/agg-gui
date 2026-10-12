@@ -366,30 +366,38 @@ fn rust_only_the_grid_snaps_to_whole_device_pixels() {
                 &["Headings", "Ready"],
                 &["Tables", "Ready"],
             ]),
-            500.0 * scale,
+            500.0,
             &style,
         );
         let mut snap = RichTableGridSnap::default();
-        assert!(layout.snap_grid(10.3, 0.25, 0.5, &mut snap));
+        // Drawn as the App draws: logical units under a `scale` transform.
+        assert!(layout.snap_grid(10.3, 0.25, 0.5, scale, &mut snap));
 
         assert_eq!(snap.thickness, thickness, "scale {scale}");
-        assert_eq!(f64::from(snap.thickness), style.table_grid_line_width());
+        assert_eq!(
+            f64::from(snap.thickness),
+            style.table_grid_line_width() * scale
+        );
+        assert_eq!(snap.line_width, f64::from(thickness) / scale);
         // Three columns' worth of verticals (two columns + the right edge),
         // four rules (three rows + the bottom).
         assert_eq!(snap.lefts.len(), 3);
         assert_eq!(snap.bottoms.len(), 4);
+        // Whole device pixels once the transform is applied.
         for &left in &snap.lefts {
-            assert_eq!((left + 0.25).fract(), 0.0, "scale {scale}");
+            let device = left * scale + 0.25;
+            assert!((device - device.round()).abs() < 1e-9, "scale {scale}");
         }
         for &bottom in &snap.bottoms {
-            assert_eq!((bottom + 0.5).fract(), 0.0, "scale {scale}");
+            let device = bottom * scale + 0.5;
+            assert!((device - device.round()).abs() < 1e-9, "scale {scale}");
         }
         // Lefts left to right, rules top to bottom.
         assert!(snap.lefts.windows(2).all(|pair| pair[0] < pair[1]));
         assert!(snap.bottoms.windows(2).all(|pair| pair[0] > pair[1]));
 
         // Refilled in place, not appended to.
-        assert!(layout.snap_grid(0.0, 0.0, 0.0, &mut snap));
+        assert!(layout.snap_grid(0.0, 0.0, 0.0, scale, &mut snap));
         assert_eq!(snap.lefts.len(), 3);
     }
 
@@ -398,7 +406,8 @@ fn rust_only_the_grid_snaps_to_whole_device_pixels() {
         lefts: vec![1.0],
         bottoms: vec![2.0],
         thickness: 1,
+        line_width: 1.0,
     };
-    assert!(!empty.snap_grid(0.0, 0.0, 0.0, &mut snap));
+    assert!(!empty.snap_grid(0.0, 0.0, 0.0, 1.0, &mut snap));
     assert!(snap.lefts.is_empty() && snap.bottoms.is_empty());
 }

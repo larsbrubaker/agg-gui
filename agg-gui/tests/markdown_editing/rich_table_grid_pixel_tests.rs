@@ -1,11 +1,12 @@
 //! agg-sharp's `RichTableGridPixelTests.cs`, ported 1:1 against
 //! `RichMarkdownEditWidget`, read from the drawn pixels.
 //!
-//! The rich editor lays out in device pixels at the device scale (its
-//! `RichLayoutStyle` scales every size, as C#'s did), so [`paint_at_scale`]
-//! lays it out in a `500 * s` x `200 * s` container and paints it with no
-//! draw transform into a framebuffer of that size (Y-up, as C#'s back
-//! buffer).  `[NotInParallel]`'s device scale is agg-gui's thread-local one,
+//! C#'s editor laid out in device pixels with no draw transform; agg-gui's
+//! lays out in logical units and the App paints it under a
+//! `ctx.scale(device_scale)` transform, so [`Painted`] lays it out in a
+//! `500` x `200` logical container and paints it under that transform into
+//! a `500 * s` x `200 * s` device-pixel framebuffer (Y-up, as C#'s back
+//! buffer).  Bounds are scaled to device pixels before the pixel checks.  `[NotInParallel]`'s device scale is agg-gui's thread-local one,
 //! set and restored per test.  C#'s `[Arguments]` cases are one test each,
 //! suffixed with the scale.
 
@@ -24,18 +25,19 @@ const TABLE: &str =
     "| Feature | Status | Notes |\n| --- | --- | --- |\n| Headings | Ready | 6 levels |\n\
                      | Tables | Ready | Pipe and grid |\n| Lists | Done | Nested |\n";
 
-/// An editor laid out `editor_width` wide in a `500 * scale` x
-/// `200 * scale` device-pixel container at `scale`, with a framebuffer of
-/// the container's size.  Sets the device scale; the caller restores it.
+/// An editor laid out `editor_width` (logical) wide in a `500` x `200`
+/// logical container at `scale`, with a device-pixel framebuffer of the
+/// container's size.  Sets the device scale; the caller restores it.
 struct Painted {
     editor: RichMarkdownEditWidget,
     fb: Framebuffer,
+    scale: f64,
 }
 
 impl Painted {
     fn new(scale: f64, editor_width: Option<f64>) -> Self {
         agg_gui::set_device_scale(scale);
-        let (width, height) = (500.0 * scale, 200.0 * scale);
+        let (width, height) = (500.0, 200.0);
         let editor_width = editor_width.unwrap_or(width);
         set_current_viewport(Size::new(width, height));
         let mut editor = RichMarkdownEditWidget::new(fonts(), None);
@@ -44,7 +46,8 @@ impl Painted {
         editor.set_bounds(Rect::new(0.0, 0.0, editor_width, height));
         Self {
             editor,
-            fb: Framebuffer::new(width as u32, height as u32),
+            fb: Framebuffer::new((width * scale) as u32, (height * scale) as u32),
+            scale,
         }
     }
 
@@ -53,6 +56,7 @@ impl Painted {
     fn render(&mut self) -> Vec<u8> {
         let mut ctx = GfxCtx::new(&mut self.fb);
         ctx.clear(Color::white());
+        ctx.scale(self.scale, self.scale);
         paint_subtree(&mut self.editor, &mut ctx);
         drop(ctx);
         self.fb.pixels().to_vec()
@@ -67,7 +71,7 @@ impl Painted {
     }
 
     /// Block 0's box (`right` as given) in the editor's (the container's)
-    /// coordinates.
+    /// coordinates, scaled to device pixels.
     fn block_box(&self, right: f64) -> Rect {
         let origin = self.editor.block_origin(0).unwrap();
         let height = match self.editor.block_layout(0) {
@@ -78,11 +82,12 @@ impl Painted {
         let b = self
             .editor
             .view_to_editor(Point::new(right, origin + height));
+        let s = self.scale;
         Rect::new(
-            a.x.min(b.x),
-            a.y.min(b.y),
-            (b.x - a.x).abs(),
-            (b.y - a.y).abs(),
+            a.x.min(b.x) * s,
+            a.y.min(b.y) * s,
+            (b.x - a.x).abs() * s,
+            (b.y - a.y).abs() * s,
         )
     }
 
@@ -250,7 +255,7 @@ fn table_grid_lines_are_crisp_whole_pixels_of_one_tone_2_0() {
 
 fn whole_table_selection_stays_off_the_grid_lines(device_scale: f64) {
     // The editor is narrower than the container, so there are page pixels right of the block to check.
-    let mut p = Painted::new(device_scale, Some(420.0 * device_scale));
+    let mut p = Painted::new(device_scale, Some(420.0));
     p.editor.select(RichSelection::at(DocPosition::new(0, 0)));
     let plain = p.render();
     let selection = whole_block(p.editor.document(), 0);

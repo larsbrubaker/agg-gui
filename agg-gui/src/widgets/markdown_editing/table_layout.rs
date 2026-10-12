@@ -89,6 +89,8 @@ pub struct RichTableGridSnap {
     pub bottoms: Vec<f64>,
     /// The line thickness in whole device pixels.
     pub thickness: i32,
+    /// That thickness in drawing coordinates (`thickness / scale`).
+    pub line_width: f64,
 }
 
 /// A Table block laid out to a width (C# `RichTableLayout`).
@@ -392,15 +394,18 @@ impl RichTableLayout {
     }
 
     /// Snaps the grid, drawn with the block's bottom at `origin_y`, to whole
-    /// device pixels under a draw transform translated by `translate_x`,
-    /// `translate_y` (C# `SnapGrid`, which read the translation from the
-    /// Graphics2D), refilling `snap`.  Returns false for a table with no
-    /// rows, which has no grid.
+    /// device pixels under a draw transform that maps a drawing unit to
+    /// `scale` device pixels and translates by `translate_x`, `translate_y`
+    /// device pixels (C# `SnapGrid`, which read the translation from the
+    /// Graphics2D and drew in device pixels, so its scale was always 1),
+    /// refilling `snap`.  Returns false for a table with no rows, which has
+    /// no grid.
     pub fn snap_grid(
         &self,
         origin_y: f64,
         translate_x: f64,
         translate_y: f64,
+        scale: f64,
         snap: &mut RichTableGridSnap,
     ) -> bool {
         snap.lefts.clear();
@@ -411,19 +416,27 @@ impl RichTableLayout {
 
         // The width is already whole device pixels; rounding again keeps the
         // thickness an integer (C# `Math.Max(1, (int)Math.Round(width))`).
-        snap.thickness = (self.grid_line_width.round() as i32).max(1);
+        snap.thickness = ((self.grid_line_width * scale).round() as i32).max(1);
+        snap.line_width = f64::from(snap.thickness) / scale;
         snap.lefts.extend(
             self.line_lefts
                 .iter()
-                .map(|&left| crate::grid_pixels::snap(left, translate_x)),
+                .map(|&left| snap_scaled(left, translate_x, scale)),
         );
         snap.bottoms.extend(
             self.line_bottoms
                 .iter()
-                .map(|&bottom| crate::grid_pixels::snap(origin_y + bottom, translate_y)),
+                .map(|&bottom| snap_scaled(origin_y + bottom, translate_y, scale)),
         );
         true
     }
+}
+
+/// [`crate::grid_pixels::snap`] under a draw transform that scales a drawing
+/// unit to `scale` device pixels: the nearest whole device pixel to `value`,
+/// back in drawing coordinates.
+fn snap_scaled(value: f64, translation: f64, scale: f64) -> f64 {
+    crate::grid_pixels::snap(value * scale, translation) / scale
 }
 
 impl RichBlockGeometry for RichTableLayout {

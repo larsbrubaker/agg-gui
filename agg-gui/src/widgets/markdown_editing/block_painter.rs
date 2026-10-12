@@ -195,7 +195,14 @@ impl RichBlockPainter {
 
     fn snap_grid(&mut self, ctx: &dyn DrawCtx, table: &RichTableLayout, origin_y: f64) -> bool {
         let transform = ctx.transform();
-        table.snap_grid(origin_y, transform.tx, transform.ty, &mut self.snap)
+        // The App paints under a uniform device-scale transform.
+        table.snap_grid(
+            origin_y,
+            transform.tx,
+            transform.ty,
+            transform.sx,
+            &mut self.snap,
+        )
     }
 
     fn draw_table(
@@ -214,7 +221,7 @@ impl RichBlockPainter {
             let style = inputs.style;
             let lefts = &self.snap.lefts;
             let bottoms = &self.snap.bottoms;
-            let line = f64::from(self.snap.thickness);
+            let line = self.snap.line_width;
             for &r in &table.striped_row_indices {
                 if r + 1 >= bottoms.len() {
                     continue;
@@ -364,7 +371,7 @@ impl RichBlockPainter {
         else {
             return;
         };
-        let line = f64::from(self.snap.thickness);
+        let line = self.snap.line_width;
         let grid_right = last_left + line;
         let grid_top = first_bottom + line;
 
@@ -461,7 +468,7 @@ fn draw_bullet(
         }
         "\u{25E6}" => {
             ctx.set_stroke_color(style.text_color);
-            ctx.set_line_width(style.scale().max(1.0));
+            ctx.set_line_width(1.0);
             ctx.begin_path();
             ctx.circle(center_x, center_y, radius);
             ctx.stroke();
@@ -539,7 +546,7 @@ fn draw_lines(
                 fragment.x,
                 strike_y,
                 fragment.x + fragment.width,
-                strike_y + style.scale().max(1.0),
+                strike_y + 1.0,
                 color,
             );
         }

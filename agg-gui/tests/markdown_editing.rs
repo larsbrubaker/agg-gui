@@ -54,6 +54,8 @@ mod rich_table_layout_tests;
 mod rust_only_block_painter_tests;
 #[path = "markdown_editing/rust_only_code_block_and_commands_tests.rs"]
 mod rust_only_code_block_and_commands_tests;
+#[path = "markdown_editing/rust_only_device_scale_tests.rs"]
+mod rust_only_device_scale_tests;
 #[path = "markdown_editing/rust_only_document_view_tests.rs"]
 mod rust_only_document_view_tests;
 #[path = "markdown_editing/rust_only_edit_error_tests.rs"]
