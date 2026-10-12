@@ -296,7 +296,9 @@ fn create_window(
     if saved.is_none() && !config.fullscreen && !config.maximized {
         if let (WindowSize::Logical(w, h), Some(monitor)) = (
             size,
-            window.current_monitor().or_else(|| window.primary_monitor()),
+            window
+                .current_monitor()
+                .or_else(|| window.primary_monitor()),
         ) {
             let m = monitor.size();
             let desktop = (

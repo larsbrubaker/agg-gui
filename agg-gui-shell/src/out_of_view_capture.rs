@@ -63,7 +63,10 @@ impl OutOfViewMouseCapture {
         if !self.has_captured_buttons() {
             return (PointerEventKind::Other, None);
         }
-        (PointerEventKind::Drag, self.captured_buttons.first().copied())
+        (
+            PointerEventKind::Drag,
+            self.captured_buttons.first().copied(),
+        )
     }
 
     /// Whether `(x, y)` lies within a `width` x `height` content area. The

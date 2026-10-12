@@ -234,13 +234,14 @@ pub use widgets::{
     Rebuilder, RectAlign, Resize, ResponsiveImageWidget, RichCommand, RichDoc, RichEditHandle,
     RichTextEdit, RichTextToolbar, RichTextView, RunMode, RunModeDesc, RunModeRow, Scene,
     SceneTransform, ScrollAlign, ScrollBarColor, ScrollBarKind, ScrollBarStyle,
-    ScrollBarVisibility, ScrollThumbRest, ScrollView, SegmentedControl, Separator, SharedFrameHistory,
-    SharedResolver, ShortcutKey, SizedBox, SkipIfFirstSpace, Slider, SliderClamping,
-    SliderOrientation, SliderStyle, Spacer, Spinner, SpinnerSize, Splitter, SplitterRatio, Stack,
-    TabView, Table, TableBuilder, TableColumn, TableRows, TextArea, TextAreaScrollInfo,
-    TextEditState, TextField, TextHAlign, TextVAlign, Toast, ToastHost, ToastId, ToastKind, Toasts,
-    ToggleSwitch, ToggleSwitchStyle, Tooltip, TooltipTimings, TopMenu, TreeView, TreeViewEvent,
-    TumbleCube, TumbleCubeCamera, Window, WrapRow, DEFAULT_COLUMN_GAP, DEFAULT_ROW_GAP,
+    ScrollBarVisibility, ScrollThumbRest, ScrollView, SegmentedControl, Separator,
+    SharedFrameHistory, SharedResolver, ShortcutKey, SizedBox, SkipIfFirstSpace, Slider,
+    SliderClamping, SliderOrientation, SliderStyle, Spacer, Spinner, SpinnerSize, Splitter,
+    SplitterRatio, Stack, TabView, Table, TableBuilder, TableColumn, TableRows, TextArea,
+    TextAreaScrollInfo, TextEditState, TextField, TextHAlign, TextVAlign, Toast, ToastHost,
+    ToastId, ToastKind, Toasts, ToggleSwitch, ToggleSwitchStyle, Tooltip, TooltipTimings, TopMenu,
+    TreeView, TreeViewEvent, TumbleCube, TumbleCubeCamera, Window, WrapRow, DEFAULT_COLUMN_GAP,
+    DEFAULT_ROW_GAP,
 };
 
 // The read-only scroll bar query (`ScrollView::scroll_bar_properties`) and

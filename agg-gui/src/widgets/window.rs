@@ -715,16 +715,16 @@ pub mod chrome;
 mod close;
 mod events;
 mod opacity;
+mod opaque_fill;
 mod options;
 mod paint;
 mod resize;
 mod snap_glue;
-mod opaque_fill;
 mod style;
-#[cfg(test)]
-mod window_widget_style_tests;
 mod title_buttons;
 mod widget_impl;
+#[cfg(test)]
+mod window_widget_style_tests;
 
 pub use close::{ClickAwayAction, CloseReason};
 pub use style::WindowShadow;

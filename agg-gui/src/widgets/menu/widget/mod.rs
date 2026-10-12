@@ -251,13 +251,13 @@ mod tests_bar_children;
 #[cfg(test)]
 mod tests_bar_drag_overlap;
 #[cfg(test)]
-mod tests_cancelled_release;
-#[cfg(test)]
 mod tests_bar_flip;
 #[cfg(test)]
 mod tests_bar_title_icon;
 #[cfg(test)]
 mod tests_bar_widget;
+#[cfg(test)]
+mod tests_cancelled_release;
 #[cfg(test)]
 mod tests_chrome;
 #[cfg(test)]
@@ -273,11 +273,11 @@ mod tests_hover;
 #[cfg(test)]
 mod tests_image_icon;
 #[cfg(test)]
-mod tests_menu_model_builder;
-#[cfg(test)]
 mod tests_item_slot;
 #[cfg(test)]
 mod tests_keyboard;
+#[cfg(test)]
+mod tests_menu_model_builder;
 #[cfg(test)]
 mod tests_rows;
 #[cfg(test)]
