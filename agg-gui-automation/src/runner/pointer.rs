@@ -166,7 +166,7 @@ impl AutomationRunner {
 
     /// C# `HoldButton`: hold a pressed button until the UI has taken the
     /// press, for no longer than `up_delay`.
-    fn hold_button(&mut self) {
+    pub(super) fn hold_button(&mut self) {
         self.wait_for_pending_ui_work((self.config.up_delay * 1000.0) as i32);
     }
 

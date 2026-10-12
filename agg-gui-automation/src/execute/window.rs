@@ -4,8 +4,10 @@
 //! It is a description, built on the run's own UI thread by the `build`
 //! closure of [`super::show_window_and_execute_tests`]: a root widget, a
 //! logical size, an `on_load` hook, and the close hooks the run's close phase
-//! (`close.rs`) answers to: `on_close_requested` (C# `ShouldClose`, which can
-//! veto) and `on_closed` (C# `Closed`, after which `HasBeenClosed` is true).
+//! (`close.rs`) answers to: `close_window` (C#'s `closeWindow` argument, the
+//! application's own shutdown, which replaces the plain close request),
+//! `on_close_requested` (C# `ShouldClose`, which can veto) and `on_closed`
+//! (C# `Closed`, after which `HasBeenClosed` is true).
 //! Bringing it up (creating the [`HeadlessDriver`], painting the first frame,
 //! firing `on_load`) is the run's bring-up phase, timed by its own budget
 //! rather than the test's.
@@ -14,6 +16,7 @@ use agg_gui::{App, Widget};
 
 use crate::driver::{ClockPolicy, FrameKind, HeadlessDriver, UiDriver};
 use crate::probe::ProbeWidget;
+use crate::runner::AutomationRunner;
 
 /// The name of the root widget [`AutomationWindow::new`] creates.
 pub const AUTOMATION_WINDOW_ROOT_NAME: &str = "AutomationWindow";
@@ -21,10 +24,12 @@ pub const AUTOMATION_WINDOW_ROOT_NAME: &str = "AutomationWindow";
 type LoadHook = Box<dyn FnOnce(&mut App)>;
 type CloseRequestedHook = Box<dyn FnMut(&mut App) -> bool>;
 type ClosedHook = Box<dyn FnOnce(&mut App)>;
+type CloseWindowHook = Box<dyn FnOnce(&mut AutomationRunner)>;
 
 /// The window's close hooks, handed from bring-up to the close phase.
 #[derive(Default)]
 pub(crate) struct CloseHooks {
+    pub(crate) close_window: Option<CloseWindowHook>,
     pub(crate) on_close_requested: Option<CloseRequestedHook>,
     pub(crate) on_closed: Option<ClosedHook>,
 }
@@ -70,6 +75,22 @@ impl AutomationWindow {
     /// before the test body starts. Time spent here is bring-up, not test.
     pub fn on_load(mut self, hook: impl FnOnce(&mut App) + 'static) -> Self {
         self.on_load = Some(Box::new(hook));
+        self
+    }
+
+    /// C#'s `closeWindow` argument to `ShowWindowAndExecuteTests`: how the
+    /// application shuts down once the body has finished (MatterCAD's answers
+    /// its "save changes?" prompts and then closes). It runs on the UI
+    /// thread with the body's runner *instead of* the plain close request,
+    /// so it must ask for the close itself (typing
+    /// [`CLOSE_CHORD`](crate::runner::CLOSE_CHORD), or
+    /// `runner.driver_mut().request_close()`). The close budget starts when
+    /// it returns, so a slow shutdown is not charged to the close; one that
+    /// never returns is given up on after three budgets. A callback that
+    /// panics fails the run (ranked after the body's own failure, before a
+    /// close timeout) and the window is then asked to close plainly.
+    pub fn close_window(mut self, hook: impl FnOnce(&mut AutomationRunner) + 'static) -> Self {
+        self.close_hooks.close_window = Some(Box::new(hook));
         self
     }
 

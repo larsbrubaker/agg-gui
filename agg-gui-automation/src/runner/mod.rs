@@ -4,7 +4,8 @@
 //! `assert`, ...) and `named.rs` the name lookups and the waits that poll
 //! them, `pointer.rs` the pointer gestures (stepped moves, clicks),
 //! `drag.rs` the drags and drops built on them, `keyboard.rs` typing and
-//! held modifiers, and `images.rs` the screen capture and image searches.
+//! held modifiers, `images.rs` the screen capture and image searches, and
+//! `image_gestures.rs` the clicks, drags and drops onto found images.
 //!
 //! A runner is created by [`crate::execute::show_window_and_execute_tests`]
 //! on the run's own UI thread and handed to the test body. It owns the
@@ -13,16 +14,20 @@
 //! cancels the run; the body's next runner call then panics with
 //! [`TEST_TIMED_OUT`], which unwinds a body that was stuck between calls.
 
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use agg_gui::{App, UnderMouseState};
 
 use crate::driver::{HeadlessDriver, UiDriver};
+use crate::image_source::{DirectoryImageSource, ImageSource};
 use crate::input::{InputMethod, SimulatedInput};
 use crate::tree_query::WidgetHandle;
 
 mod drag;
+mod image_gestures;
 mod images;
 mod keyboard;
 mod named;
@@ -31,6 +36,7 @@ mod scroll;
 mod waits;
 
 pub use drag::{DragDropOpts, DragOpts};
+pub use image_gestures::{ImageDragDropOpts, ImageOpts};
 pub use keyboard::{ModifierKeys, CLOSE_CHORD};
 pub use named::{WaitOpts, WidgetPredicate, DEFAULT_WIDGET_WAIT_SECONDS};
 pub use pointer::{cubic_out, mouse_move_steps, ClickOpts, ClickOrigin};
@@ -41,6 +47,14 @@ pub use waits::{
 
 /// The panic message of a runner call made after its run timed out.
 pub const TEST_TIMED_OUT: &str = "test timed out";
+
+/// The panic message of a runner call made after a UI-thread panic (an idle
+/// action's) failed the run; the run reports that panic, not this.
+pub const UI_THREAD_FAULTED: &str = "the UI thread panicked";
+
+/// The first UI-thread panic of a run, shared by the run's unhandled-failure
+/// handler and its runner.
+pub(crate) type UiFault = Rc<RefCell<Option<String>>>;
 
 /// Per-runner settings. C# keeps some of these as process-wide statics; here
 /// each run has its own copy, with C#'s defaults, so tests running in
@@ -90,8 +104,12 @@ pub struct AutomationRunner {
     /// Where pointer input goes (C# `inputSystem`): the forwarder, unless a
     /// test replaced it.
     input: Box<dyn InputMethod>,
+    /// Loads needles given by name (C#'s `imagesDirectory`).
+    images: Box<dyn ImageSource>,
     test_was_completed: bool,
     cancel: Arc<AtomicBool>,
+    /// Set by the run's unhandled-failure handler.
+    ui_fault: UiFault,
 }
 
 impl AutomationRunner {
@@ -106,8 +124,10 @@ impl AutomationRunner {
             config,
             driver,
             input: Box::new(SimulatedInput::new()),
+            images: Box::new(DirectoryImageSource::default()),
             test_was_completed: false,
             cancel,
+            ui_fault: UiFault::default(),
         }
     }
 
@@ -118,6 +138,15 @@ impl AutomationRunner {
         if self.cancel.load(Ordering::SeqCst) {
             panic!("{TEST_TIMED_OUT}");
         }
+        if self.ui_fault.borrow().is_some() {
+            panic!("{UI_THREAD_FAULTED}");
+        }
+    }
+
+    /// Stop the body at its next call once `ui_fault` holds a UI-thread
+    /// panic (C# ends the run when a UI-thread exception wins its race).
+    pub(crate) fn set_ui_fault(&mut self, ui_fault: UiFault) {
+        self.ui_fault = ui_fault;
     }
 
     /// The window's driver, once the body is done with the runner (the

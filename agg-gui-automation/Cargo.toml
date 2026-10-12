@@ -15,3 +15,6 @@ publish = false
 
 [dependencies]
 agg-gui = { path = "../agg-gui" }
+# Decodes image needles loaded by file name (`image_source.rs`); the same
+# version and features agg-gui already builds, so nothing new is compiled.
+image = "0.24"

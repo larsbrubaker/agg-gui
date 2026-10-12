@@ -23,6 +23,11 @@ pub enum AutomationError {
     /// Building or bringing up the window panicked, with the panic's message
     /// (C#'s `ShowAsSystemWindow` failure, rethrown).
     BringUpFailed(String),
+    /// Work the UI thread ran for the window (an idle action) panicked while
+    /// the body ran, with the first such panic's message (C# rethrows the
+    /// exception `UiThread.UnhandledException` captured). The body is stopped
+    /// at its next runner call, and this outranks its own failure.
+    UiThreadPanicked(String),
     /// The body panicked, with the panic's message (C# rethrows the body's
     /// exception).
     BodyPanicked(String),
@@ -44,6 +49,9 @@ impl fmt::Display for AutomationError {
             Self::LoadTimeout => f.write_str("Reset event timed out"),
             Self::BringUpFailed(message) => {
                 write!(f, "The test window failed to come up: {message}")
+            }
+            Self::UiThreadPanicked(message) => {
+                write!(f, "The UI thread panicked: {message}")
             }
             Self::BodyPanicked(message) => f.write_str(message),
             Self::CloseTimeout(timeout) => write!(

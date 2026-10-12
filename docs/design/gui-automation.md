@@ -61,7 +61,7 @@
 
 ## 2. Where the code goes
 
-**Crate `agg-gui/agg-gui-automation`** (workspace member; consumers use it as a dev-dependency). It exists with `keys`, `key_mapping`, `typed_key_parser`, `search_region`, `waits` (`static_delay`), `driver` (`HeadlessDriver`, `HeadlessWindow`, `ClockPolicy`, `FrameKind`, `UiDriver`), `probe` (`ProbeWidget`) and `tree_query` (`WidgetHandle`, `find_by_name`, `placement`/`screen_rect`/`clipped_rect`, `actually_visible_on_screen`, `parents`/`children` and their `_of_type` forms), `execute` (`show_window_and_execute_tests`, `RunOptions`, `AutomationWindow`, `AutomationError`, the close phase in `execute/close.rs`), `image_match` (`find_least_squares_match`, `LeastSquaresMatch`), `pointer_reach` (`can_reach`, `prefer_reachable`), `pointer_state` (`under_mouse_state`, `mouse_captured`, `child_has_mouse_captured`, `focused` for a handle), `input` (`InputMethod`, `SimulatedInput`, `Point2D`, `MouseAction`) and `runner` (`AutomationRunner` with `AutomationConfig`, `mark_test_complete`, driver access, the waits in `runner/waits.rs`, the name lookups in `runner/named.rs`, `scroll_into_view` in `runner/scroll.rs`, the pointer gestures in `runner/pointer.rs`, the drags in `runner/drag.rs`, the keyboard (`type_text`, `ModifierKeys`, `press_modifier_keys`/`release_modifier_keys`, `select_all`/`select_none`) in `runner/keyboard.rs` and the image searches (`get_current_screen`, `get_screen_region`, `image_exists`, `wait_for_image`) in `runner/images.rs`); the other modules and members below are still to come.
+**Crate `agg-gui/agg-gui-automation`** (workspace member; consumers use it as a dev-dependency). It exists with `keys`, `key_mapping`, `typed_key_parser`, `search_region`, `waits` (`static_delay`), `driver` (`HeadlessDriver`, `HeadlessWindow`, `ClockPolicy`, `FrameKind`, `UiDriver`), `probe` (`ProbeWidget`) and `tree_query` (`WidgetHandle`, `find_by_name`, `placement`/`screen_rect`/`clipped_rect`, `actually_visible_on_screen`, `parents`/`children` and their `_of_type` forms), `execute` (`show_window_and_execute_tests`, `RunOptions`, `AutomationWindow`, `AutomationError`, the close phase in `execute/close.rs`), `image_match` (`find_least_squares_match`, `LeastSquaresMatch`), `pointer_reach` (`can_reach`, `prefer_reachable`), `pointer_state` (`under_mouse_state`, `mouse_captured`, `child_has_mouse_captured`, `focused` for a handle), `input` (`InputMethod`, `SimulatedInput`, `Point2D`, `MouseAction`) and `runner` (`AutomationRunner` with `AutomationConfig`, `mark_test_complete`, driver access, the waits in `runner/waits.rs`, the name lookups in `runner/named.rs`, `scroll_into_view` in `runner/scroll.rs`, the pointer gestures in `runner/pointer.rs`, the drags in `runner/drag.rs`, the keyboard (`type_text`, `ModifierKeys`, `press_modifier_keys`/`release_modifier_keys`, `select_all`/`select_none`) in `runner/keyboard.rs` the image searches (`get_current_screen`, `get_screen_region`, `capture_region`, `image_exists`, `wait_for_image`) in `runner/images.rs` and the image gestures (`click_image`, `drag_image`, `drop_image`, `drag_drop_image`, `set_image_source`) in `runner/image_gestures.rs`), `image_source` (`ImageNeedle`, `ImageSource`, `DirectoryImageSource`, `decode_needle`); the other modules and members below are still to come.
 - It keeps test-only code (watchdogs, stack dumps, image matching) out of product builds.
 - Its optional live mode depends on `agg-gui-shell` (winit and wgpu), which core `agg-gui` must not.
 - Features, each added with the slice whose code uses it (none exist yet; headless is the default):
@@ -79,7 +79,6 @@ src/runner/pointer.rs      (exists) stepped moves, ClickOrigin/ClickOpts, Click*
 src/runner/drag.rs         (exists) DragOpts/DragDropOpts, Drag*/Drop*
 src/runner/keyboard.rs     (exists) Type, ModifierKeys, Press/ReleaseModifierKeys, SelectAll/None
 src/runner/waits.rs        (exists) Delay, WaitFor/WaitUntil, Assert, WaitForPendingUiWork, WaitforDraw
-src/runner/images.rs       (exists) GetCurrentScreen, ImageExists/WaitForImage; ClickImage/DragImage/DropImage/DragDropImage and file-name needles to come
 src/input.rs               (exists) InputMethod trait (IInputMethod) + SimulatedInput (AggInputMethods), MouseConsts→MouseAction, keyboard members; current_screen to come
 src/pointer_reach.rs       (exists) PointerReach
 src/tree_query.rs          (exists) WidgetHandle, NamedHit (GetByNameResults; its `target` lands with G11), screen/clip rects, ActuallyVisibleOnScreen, inherited Enabled, Parents/Children
@@ -88,9 +87,8 @@ src/driver/mod.rs          (exists) UiDriver trait, FrameKind, ClockPolicy
 src/driver/headless.rs     (exists) HeadlessDriver
 src/driver/window.rs       (exists) HeadlessWindow (the "SystemWindow" for tests that use no runner)
 src/driver/live.rs         (feature live) LiveDriver over agg_gui_shell::ShellSession
-src/execute/              (exists) show_window_and_execute_tests, RunOptions, AutomationWindow, AutomationError, load watchdog, close phase (close.rs); the closeWindow callback to come
 src/probe.rs               (exists) ProbeWidget: generic C#-GuiWidget stand-in (name, bounds, colour, event log/callbacks, C# Click semantics)
-src/overlay.rs             RenderMouse (simulated pointer drawing)
+src/overlay.rs             RenderMouse (simulated pointer drawing), drawn by the LiveDriver (slice 31)
 src/dialog_provider.rs     AutomationFileDialog (AutomationDialogProvider)
 src/startup_failure_log.rs StartupFailureLog
 src/thread_stack_dump/     (feature stack-dump) ThreadStackDump
@@ -115,10 +113,9 @@ tests/live/*.rs            live tests, `harness = false` (winit on macOS needs t
 | `RequireTestCompletion` / `TestWasCompleted` / `MarkTestComplete()` | `config.require_test_completion`, `test_was_completed()`, `mark_test_complete()` |
 | static `TimeToMoveMouse` (0.1), `MouseMoveSteps` (5), `UpDelaySeconds` (0.1) | `config.time_to_move_mouse`, `config.mouse_move_steps`, `config.up_delay`. Same values, Cubic.Out easing and step formula. |
 | `DrawSimulatedMouse` | `RunOptions.draw_simulated_mouse` (`InputType`/`OverrideInputSystem`/static `InputMethod` are `AutomationRunner::set_input_method`, default `SimulatedInput`) |
-| `CloseWindowTimeoutSeconds` (15) | `RunOptions.close_window_timeout` (exists) |
 | `InterpolationType` (unused) | Dropped as dead code; noted in the port comment. |
 | `GetCurrentScreen()` | `get_current_screen() -> Framebuffer` (exists): headless, a copy of the last software frame; live, a read-back. |
-| `RenderMouse` | `overlay::render_mouse`. The driver draws it after `App::paint`: a circle, green while the left button is down, "S"/"C" for held modifiers, plus the click count. |
+| `RenderMouse` | `overlay::render_mouse` (slice 31). C# draws it on the window's `AfterDraw` while `DrawSimulatedMouse` (default true) is set, as a watcher's aid: a radius-10 circle stroked black (3) and white (2), filled green while the left button is down with "S"/"C" for held Shift/Control plus the click count above 1. The LiveDriver draws it after `App::paint` on the presented frame only, never into `get_current_screen` captures, so image searches never see it; headless runs have no watcher and draw nothing. |
 | `Dispose`, `KeyDown`/`KeyUp` (throw NotImplemented in C#) | `Drop`. The two key methods are left out. |
 
 **Name lookup** (the rest of it exists in `runner/named.rs`)
@@ -135,8 +132,6 @@ tests/live/*.rs            live tests, `harness = false` (winit on macOS needs t
 | C# | Rust |
 |---|---|
 | `ImageExists`, `WaitForImage` (needle as an image) | exist: `image_exists`/`wait_for_image(&Framebuffer, secs, Option<&SearchRegion>)`, least-squares match in `image_match.rs` under `match_limit` |
-| `ClickImage`, `DragImage`, `DropImage`, `DragDropImage`, and every image member's file-name needle | Same names, needle as `ImageNeedle::Path` or `ImageNeedle::Buffer` |
-| `DoubleClickImage`, `MoveToImage` (throw NotImplemented in C#) | Left out (no stubs); the port comment names them. |
 
 **Run entry point**
 
@@ -145,7 +140,6 @@ tests/live/*.rs            live tests, `harness = false` (winit on macOS needs t
 | `ShowWindowAndExecuteTests(window, test, secs = 30, images, closeWindow, timeoutIsTheExpectedOutcome)` | `show_window_and_execute_tests(RunOptions, build, body) -> Result<R, AutomationError>` (section 5) |
 
 **Supporting types**
-- `SearchRegion::image(capture)` takes the runner's `get_current_screen` as its capture function.
 - `InputMethod` (= `IInputMethod`) gains `current_screen` (slice 23).
 
 ## 4. How simulated input gets in
@@ -186,17 +180,18 @@ pub fn show_window_and_execute_tests<S, R>(
   - It then waits `secs_to_test_failure` (wall clock, starting at Loaded) for the body's outcome.
   - On timeout it sets the run's `cancel: Arc<AtomicBool>`; the next runner call on the stuck thread panics with "test timed out". It returns `AutomationError::Timeout` and lets the thread finish detached, because Rust cannot kill a thread. This reproduces `AutomationRunnerTimeoutTest`: a body that sleeps 10 s still returns Timeout at about 1 s.
 - **Close phase** (`execute/close.rs`):
-  - It asks the window to close (C# `CloseOnIdle`); each request the window takes goes to `on_close_requested`, whose `false` is a veto. It keeps pumping frames, paced to the frame interval, while the app's own shutdown runs.
+  - A window with a `close_window` callback (C#'s `closeWindow`, MatterCAD's shutdown) hands it the runner instead of asking; the close budget starts when it returns (three budgets if it never does), and a panicking callback fails the run (after the body's own failure, before a close timeout; C# swallowed it) and the window is then asked plainly.
+  - Otherwise it asks the window to close (C# `CloseOnIdle`), after one frame drains the UI work queued before the request; each request the window takes goes to `on_close_requested`, whose `false` is a veto. It keeps pumping frames, paced to the frame interval, while the app's own shutdown runs.
   - After `close_window_timeout` (wall clock) it force-closes (`on_closed`, then the tree is dropped) and the run fails with `AutomationError::CloseTimeout`. The watching thread gives up after twice the budget if the UI thread never comes back from a frame.
   - A panic while closing fails the run as `BodyPanicked("the window panicked while closing: …")`, ranked after the body's own failure.
-  - Errors are ranked as C# ranks them: Timeout, then UI panic, then body panic, then CloseTimeout, then missing MarkTestComplete.
-  - Still to come: `opts.close_window` (the `closeWindow` callback, MatterCAD's shutdown) replacing the plain request, with the budget starting when it returns (a 3× cap if it never does); the stack dump on a forced close (slice 30c).
+  - Errors are ranked as C# ranks them: Timeout, then a UI panic while the body ran (`UiThreadPanicked`), then body panic, then a panicking `close_window` callback, then a panic while closing (a UI panic during the close counts; C# lost it), then CloseTimeout, then missing MarkTestComplete.
+  - Still to come: the stack dump on a forced close (slice 30c).
 - **UI-thread exceptions** (`UiThread.UnhandledException`):
   - idle actions run under `catch_unwind` (`agg_gui::ui_thread`)
-  - paint panics are contained per subtree (slice 27)
+  - paint panics are contained per subtree (slice 27, still to come)
   - both are reported through `agg_gui::report_unhandled`.
 
-  The runner captures the first report, fails the run with it, and starts the close.
+  The run installs a handler on its UI thread (`set_unhandled_handler`) that keeps the first report; the body's next runner call unwinds (`UI_THREAD_FAULTED`), and the run fails with `AutomationError::UiThreadPanicked`.
 
 **Frames.** One pumped frame (`HeadlessDriver::pump`) matches the shells' reactive tick:
 1. advance the virtual clock by one frame interval
@@ -309,18 +304,17 @@ In live mode each of these pumps `pump_app_events` until the condition holds or 
 | # | Slice | Tests that land |
 |---|---|---|
 | 20 | G13 NumberField | NumEditHandlesNonNumberChars, NumEditWithTextParserAcceptsLettersAndCommitsTheParsedValue, NumEditRefusesKeysItCannotRead, NumEditTakesLeadingEqualsOnlyWhenExpressionEntryIsAllowed |
-| 23 | Image gestures (`click_image`, `drag_image`, `drop_image`, `drag_drop_image`), file-name needles, simulated-mouse overlay | ScrollingToEndShowsEnd |
+| 23 | ScrollingToEndShowsEnd (a TextField render compared with `image_match`; needs no gesture) | ScrollingToEndShowsEnd |
 | 24 | G11 named targets plus ComboBox items | OpenAndCloseMenus |
 | 25 | G12, then Flow, part 1 | TopToBottomContainerAppliesExpectedMargin, SpacingClearedAfterLoadPositionsCorrectly, NestedLayoutTopToBottomTests, ChangingChildVisiblityUpdatesFlow, ChangingChildFlowWidgetVisiblityUpdatesParentFlow, NestedLayoutTopToBottomWithResizeTests, LeftToRightTests, RightToLeftTests |
 | 26 | Flow, part 2 | NestedMaxFitOrStretchToChildrenParentWidth, NestedMinFitOrStretchToChildrenParentWidth, LeftToRightAnchorLeftBottomTests, AnchorLeftRightTests, NestedFlowWidgetsTopToBottomTests, NestedFlowWidgetsRightToLeftTests, NestedFlowWidgetsLeftToRightTests, FlowWithMaxSizeChildAllocatesToOthers |
 | 26b | Flow, part 3 | LeftRightWithAnchorLeftRightChildTests, RightLeftWithAnchorLeftRightChildTests, BottomTopWithAnchorBottomTopChildTests, TopBottomWithAnchorBottomTopChildTests, ChildVisibilityChangeCauseResize, EnsureCorrectSizeOnChildrenVisibleChange, ChildHAnchorPriority, TestVAnchorCenter |
-| 27 | G15 paint containment plus UI-panic capture in the runner | AThrowingDrawIsReportedAndTheEventLoopKeepsRunning, ADrawThatThrowsEveryFrameForLongerThanTheMatrixStackIsDeepStillCostsOnlyItsOwnFrames |
-| 28 | The `close_window` callback in the close phase | (crate unit tests) |
+| 27 | G15 paint containment (the runner already captures what `report_unhandled` reports) | AThrowingDrawIsReportedAndTheEventLoopKeepsRunning, ADrawThatThrowsEveryFrameForLongerThanTheMatrixStackIsDeepStillCostsOnlyItsOwnFrames |
 | 29 | `StartupFailureLog`, `widget_not_found_message`, `AutomationFileDialog`/`ModalPresenter` | (crate unit tests) |
 | 30 | ThreadStackDump, part 1 (retry and dump-writer subprocess) | ACaptureThatLosesTheDumpRaceIsRetakenNotReparsed, ACaptureThatNeverSucceedsGivesUpAndReportsEveryAttempt, WritingADumpCapturesTheDumpWritersLogInsteadOfPrintingIt, ADumpWriterWithMoreOutputThanAPipeHoldsStillFinishes, ADumpWriterThatNeverExitsIsKilledAtTheTimeout |
 | 30b | ThreadStackDump, part 2 (minidump capture and walk) | CaptureNamesTheCallingThreadsOwnFrames, ADumpThatCannotWalkItsCapturingThreadIsRejected, RegisteredThreadsAreLabelledInTheDump, ATruncatedThreadCommandIsNotRead, ADumpWithTwoThreadsOnOneStackPointerStillReports |
 | 30c | Load and close watchdogs write dumps to `TestResults/` | AnExpectedTimeoutLeavesNoThreadDump |
-| 31 | G17 `ShellSession` plus `LiveDriver` | RealMouseInputDoesNotReachAWindowUnderAutomation |
+| 31 | G17 `ShellSession` plus `LiveDriver`, with the simulated-mouse overlay (`RunOptions.draw_simulated_mouse`, `overlay::render_mouse`) | RealMouseInputDoesNotReachAWindowUnderAutomation |
 | 32 | Live pump robustness | IdlePumpSurvivesAnotherWindowsTeardown, ShowFromNonPumpThreadReturnsToItsCaller |
 | 33 | G18 present-failure reset (agg-gui-wgpu) | APresentThatFailsEveryFrameStillStartsEachNextFrameWhole |
 

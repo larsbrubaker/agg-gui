@@ -2,8 +2,10 @@
 //! and its close watchdog in agg-sharp `AutomationRunner.ShowWindowAndExecuteTests`
 //! (`GuiAutomation/AutomationRunner.cs`).
 //!
-//! Once the body has finished, the run asks its window to close (C#
-//! `CloseOnIdle`), unless the body already asked (typing `%{F4}`), and keeps
+//! Once the body has finished, the run hands the window to its
+//! `close_window` callback (C#'s `closeWindow`, the application's own
+//! shutdown) when it has one, and otherwise asks the window to close (C#
+//! `CloseOnIdle`) unless the body already asked (typing `%{F4}`). It keeps
 //! pumping frames so the application's own shutdown work can run. Each close
 //! request the window takes is put to its `on_close_requested` hook, which
 //! may veto it, the shape of a "save changes?" prompt. A window still open
@@ -32,17 +34,26 @@ pub(crate) enum CloseResult {
     Forced,
 }
 
-/// Close the window: request, honour vetoes, and force close after
-/// `timeout`; see the module docs. The tree is dropped before this returns.
+/// Close the window: request (unless `request` is false: a `close_window`
+/// callback has already done the application's shutdown, which asks for the
+/// close itself), honour vetoes, and force close after `timeout`, counted
+/// from here; see the module docs. The tree is dropped before this returns.
 pub(crate) fn close_window(
     mut driver: HeadlessDriver,
     mut hooks: CloseHooks,
     timeout: Duration,
+    request: bool,
 ) -> CloseResult {
     let started = Instant::now();
     // C# `CloseOnIdle`. A request the body already made is the same request.
-    driver.request_close();
+    if request {
+        driver.request_close();
+    }
     let result = loop {
+        // C#'s close request is an idle action, so the UI work queued before
+        // it (the body's or the shutdown callback's) runs first; one frame
+        // drains it before the request is answered.
+        driver.pump(FrameKind::Reactive);
         if driver.take_close_request() && may_close(&mut driver, &mut hooks) {
             break CloseResult::Closed;
         }
@@ -53,10 +64,10 @@ pub(crate) fn close_window(
             );
             break CloseResult::Forced;
         }
-        // Let the application's shutdown work run, paced as a shell's frame
-        // loop is: the budget is wall time, and a virtual-clock frame costs
-        // nothing, so an unpaced loop would spin a core for the whole budget.
-        driver.pump(FrameKind::Reactive);
+        // Let the application's shutdown work run (the next pass's frame),
+        // paced as a shell's frame loop is: the budget is wall time, and a
+        // virtual-clock frame costs nothing, so an unpaced loop would spin a
+        // core for the whole budget.
         thread::sleep(FRAME_INTERVAL);
     };
 

@@ -15,11 +15,19 @@
 //!    `max(secs_to_test_failure, 30 s)`; a load watchdog speaks up two
 //!    seconds before it runs out unless the timeout is the expected outcome.
 //! 3. The body runs inside `catch_unwind`, on the wall clock from Loaded.
+//!    A handler on the thread keeps the first UI-thread panic agg-gui
+//!    contains (an idle action's, C#'s `UiThread.UnhandledException`); the
+//!    body's next runner call then unwinds, and that panic is the run's
+//!    failure.
 //!    When the budget runs out the caller sets the run's cancel flag and
 //!    returns [`AutomationError::Timeout`]; the thread cannot be killed, so it
 //!    finishes detached and its next runner call panics
 //!    [`TEST_TIMED_OUT`](crate::runner::TEST_TIMED_OUT).
-//! 4. The close phase (`close.rs`) asks the window to close, honours its
+//! 4. The close phase hands the runner to the window's `close_window`
+//!    callback (C#'s `closeWindow`, the application's shutdown) when it has
+//!    one, inside `catch_unwind`, and the close budget starts when that
+//!    returns. Then `close.rs` asks the window to close (unless the callback
+//!    did the asking), honours its
 //!    `on_close_requested` veto while the close budget lasts, and then force
 //!    closes it; the tree is dropped on its own thread either way. The
 //!    caller waits for that, and gives up on a UI thread stuck in a frame
@@ -37,19 +45,22 @@ mod tests;
 mod window;
 
 use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::path::PathBuf;
+use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use agg_gui::unhandled::panic_message;
+use agg_gui::unhandled::{panic_message, set_unhandled_handler};
 
 pub use error::{AutomationError, TEST_NOT_COMPLETED_MESSAGE};
 pub use window::{AutomationWindow, AUTOMATION_WINDOW_ROOT_NAME};
 
 use crate::driver::ClockPolicy;
-use crate::runner::{AutomationConfig, AutomationRunner};
+use crate::image_source::DirectoryImageSource;
+use crate::runner::{AutomationConfig, AutomationRunner, UiFault, UI_THREAD_FAULTED};
 
 /// The name of every run's UI thread (C# registers its message-pump thread
 /// under the same label for its stack dumps).
@@ -85,6 +96,10 @@ pub struct RunOptions {
     /// A per-run setting rather than C#'s static, so parallel runs cannot
     /// change each other's.
     pub close_window_timeout: f64,
+    /// C# `imagesDirectory` (""): the folder image gestures read needles
+    /// given by name from; empty is the current directory, as in C#. A body
+    /// can install another loader with `AutomationRunner::set_image_source`.
+    pub images_directory: PathBuf,
 }
 
 impl Default for RunOptions {
@@ -95,6 +110,7 @@ impl Default for RunOptions {
             config: AutomationConfig::default(),
             clock: ClockPolicy::Virtual,
             close_window_timeout: 15.0,
+            images_directory: PathBuf::new(),
         }
     }
 }
@@ -117,6 +133,10 @@ enum Report<R> {
     BringUpFailed(String),
     /// The body finished (returned or panicked).
     Finished(BodyOutcome<R>),
+    /// The window's `close_window` callback returned (at once when it has
+    /// none), with its panic message if it panicked; the close budget
+    /// starts now.
+    CloseCallbackReturned(Option<String>),
     /// The close phase is over.
     Closed(CloseReport),
 }
@@ -136,6 +156,8 @@ pub(crate) enum CloseReport {
 /// How a body ended, as [`rank_outcome`] needs it.
 pub(crate) struct BodyOutcome<R> {
     result: Result<R, String>,
+    /// The first UI-thread panic (an idle action's) while the body ran.
+    ui_fault: Option<String>,
     require_test_completion: bool,
     test_was_completed: bool,
 }
@@ -175,11 +197,18 @@ where
     let thread_cancel = Arc::clone(&cancel);
     let config = opts.config.clone();
     let clock = opts.clock;
+    let images = DirectoryImageSource::new(opts.images_directory.clone());
     let close_timeout = secs_to_duration(opts.close_window_timeout);
     thread::Builder::new()
         .name(UI_THREAD_NAME.to_string())
         .spawn(move || {
-            run_on_ui_thread(build, body, config, clock, close_timeout, thread_cancel, tx)
+            let setup = UiThreadSetup {
+                config,
+                clock,
+                images,
+                close_timeout,
+            };
+            run_on_ui_thread(build, body, setup, thread_cancel, tx)
         })
         .map_err(|e| {
             AutomationError::BringUpFailed(format!("could not start the UI thread: {e}"))
@@ -209,15 +238,22 @@ where
         }
     };
 
-    // Close: the UI thread closes (or force closes) the window within the
-    // close budget. Should it never come back from a frame, give up after a
-    // second budget, as C# does after its posted force close. A thread that
-    // ends without saying so has finished closing too.
-    let close_deadline = Instant::now() + close_timeout.saturating_mul(2);
+    // Close: the application's shutdown (the `close_window` callback) gets
+    // three close budgets to return, C#'s hard cap for a shutdown that hangs.
+    // Once it has, the UI thread closes (or force closes) the window within
+    // the close budget; should it never come back from a frame, give up after
+    // a second budget, as C# does after its posted force close. A thread
+    // that ends without saying so has finished closing too.
+    let mut close_deadline = Instant::now() + close_timeout.saturating_mul(3);
+    let mut callback_panic = None;
     let close = loop {
         let wait = close_deadline.saturating_duration_since(Instant::now());
         match rx.recv_timeout(wait) {
             Ok(Report::Closed(report)) => break report,
+            Ok(Report::CloseCallbackReturned(panic)) => {
+                callback_panic = panic;
+                close_deadline = Instant::now() + close_timeout.saturating_mul(2);
+            }
             Ok(_) => continue,
             Err(RecvTimeoutError::Disconnected) => break CloseReport::Closed,
             Err(RecvTimeoutError::Timeout) => {
@@ -231,20 +267,46 @@ where
         }
     };
 
-    rank_outcome(outcome, close)
+    rank_outcome(outcome, callback_panic, close)
+}
+
+/// The message of a run whose `close_window` callback panicked.
+pub(crate) fn close_callback_panic_message(panic: &str) -> String {
+    format!("the close_window callback panicked: {panic}")
 }
 
 /// C#'s order of failures, first match wins: the test timing out (returned
-/// before this is reached), a UI-thread failure (slice 27), the body's own
-/// failure, a close that panicked or timed out, and last a body that never
-/// called `mark_test_complete` — a real failure is more useful than the
-/// generic "did not complete" message, and a blocked shutdown is the more
-/// useful diagnosis than a missing completion.
+/// before this is reached), a UI-thread panic while the body ran, the body's own
+/// failure, a `close_window` callback that panicked, a close that panicked
+/// or timed out, and last a body that never called `mark_test_complete` — a
+/// real failure is more useful than the generic "did not complete" message,
+/// and a blocked shutdown is the more useful diagnosis than a missing
+/// completion.
+///
+/// The callback's panic: C# captures a throwing `closeWindow` as a UI-thread
+/// exception, but by then the body has already won its `Task.WhenAny`, so
+/// the capture is never thrown and the run passes with its shutdown broken.
+/// Here it fails the run, after the body's own failure (C#'s rule that the
+/// real test failure wins) and before the close timeout it usually causes
+/// (C#'s stated intent: the callback's fault, not a close hang, is "the real
+/// failure").
+///
+/// A UI-thread panic during the close phase is lost in C# for the same
+/// reason; here it is a panic while closing (`CloseReport::Panicked`).
 pub(crate) fn rank_outcome<R>(
     outcome: BodyOutcome<R>,
+    callback_panic: Option<String>,
     close: CloseReport,
 ) -> Result<R, AutomationError> {
+    if let Some(fault) = outcome.ui_fault {
+        return Err(AutomationError::UiThreadPanicked(fault));
+    }
     let value = outcome.result.map_err(AutomationError::BodyPanicked)?;
+    if let Some(panic) = callback_panic {
+        return Err(AutomationError::BodyPanicked(close_callback_panic_message(
+            &panic,
+        )));
+    }
     match close {
         CloseReport::Closed => {}
         CloseReport::TimedOut(timeout) => return Err(AutomationError::CloseTimeout(timeout)),
@@ -260,18 +322,40 @@ pub(crate) fn rank_outcome<R>(
     Ok(value)
 }
 
+/// The run's settings the UI thread takes from [`RunOptions`].
+struct UiThreadSetup {
+    config: AutomationConfig,
+    clock: ClockPolicy,
+    images: DirectoryImageSource,
+    close_timeout: Duration,
+}
+
 /// Everything that happens on the run's UI thread. Sends fail only once the
 /// watching thread has given up (a timeout), which is ignored: the thread
 /// just finishes.
 fn run_on_ui_thread<S, R>(
     build: impl FnOnce() -> (AutomationWindow, S),
     body: impl FnOnce(&mut AutomationRunner, &S) -> R,
-    config: AutomationConfig,
-    clock: ClockPolicy,
-    close_timeout: Duration,
+    setup: UiThreadSetup,
     cancel: Arc<AtomicBool>,
     tx: Sender<Report<R>>,
 ) {
+    let UiThreadSetup {
+        config,
+        clock,
+        images,
+        close_timeout,
+    } = setup;
+    // C# `UiThread.UnhandledException += CaptureUiThreadException`: the
+    // first contained UI-thread panic is kept, and the rest are dropped.
+    let ui_fault = UiFault::default();
+    let handler_fault = Rc::clone(&ui_fault);
+    let _handler = set_unhandled_handler(move |report| {
+        let mut fault = handler_fault.borrow_mut();
+        if fault.is_none() {
+            *fault = Some(report.message.clone());
+        }
+    });
     let brought_up = catch_unwind(AssertUnwindSafe(|| {
         let (window, state) = build();
         (window.bring_up(clock), state)
@@ -284,30 +368,66 @@ fn run_on_ui_thread<S, R>(
         }
     };
 
+    if let Some(fault) = ui_fault.borrow_mut().take() {
+        let _ = tx.send(Report::BringUpFailed(fault));
+        return;
+    }
+
     // A window that loaded after the caller gave up never runs its body.
     if tx.send(Report::Loaded).is_err() || cancel.load(Ordering::SeqCst) {
         return;
     }
 
     let mut runner = AutomationRunner::new(driver, config, cancel);
+    runner.set_image_source(images);
+    runner.set_ui_fault(Rc::clone(&ui_fault));
     let result = catch_unwind(AssertUnwindSafe(|| body(&mut runner, &state)))
         .map_err(|payload| panic_message(&*payload));
+    // The fault ranks with the body; one during the close is the close's.
+    let body_fault = ui_fault.borrow_mut().take();
     let outcome = BodyOutcome {
         result,
+        ui_fault: body_fault,
         require_test_completion: runner.config.require_test_completion,
         test_was_completed: runner.test_was_completed(),
     };
     let _ = tx.send(Report::Finished(outcome));
 
+    // The application's shutdown, when the window has one. A panic in it
+    // still has to reach a close request, or the run would be misreported
+    // as a close hang (C# then calls `CloseOnIdle` itself).
+    let mut close_hooks = close_hooks;
+    let mut request = true;
+    let mut callback_panic = None;
+    if let Some(close_window) = close_hooks.close_window.take() {
+        match catch_unwind(AssertUnwindSafe(|| close_window(&mut runner))) {
+            Ok(()) => request = false,
+            Err(payload) => {
+                // A callback stopped by a UI-thread panic reports that panic.
+                let message = panic_message(&*payload);
+                let fault = ui_fault.borrow_mut().take();
+                callback_panic = Some(match fault {
+                    Some(fault) if message == UI_THREAD_FAULTED => fault,
+                    _ => message,
+                });
+            }
+        }
+    }
+    let _ = tx.send(Report::CloseCallbackReturned(callback_panic));
+
     // The close phase: the window's tree goes on the thread that owns it.
     let driver = runner.into_driver();
     let closed = catch_unwind(AssertUnwindSafe(|| {
-        close::close_window(driver, close_hooks, close_timeout)
+        close::close_window(driver, close_hooks, close_timeout, request)
     }));
     let report = match closed {
         Ok(close::CloseResult::Closed) => CloseReport::Closed,
         Ok(close::CloseResult::Forced) => CloseReport::TimedOut(close_timeout),
         Err(payload) => CloseReport::Panicked(panic_message(&*payload)),
+    };
+    let report = match ui_fault.borrow_mut().take() {
+        Some(fault) if !matches!(report, CloseReport::Panicked(_)) => CloseReport::Panicked(fault),
+        _ => report,
     };
     drop(state);
     let _ = tx.send(Report::Closed(report));
@@ -339,7 +459,8 @@ fn wait_for_load<R>(rx: &Receiver<Report<R>>, bring_up: Duration, quiet: bool) -
         match rx.recv_timeout(wait) {
             Ok(Report::Loaded) => return LoadWait::Loaded,
             Ok(Report::BringUpFailed(message)) => return LoadWait::Failed(message),
-            Ok(Report::Finished(_) | Report::Closed(_)) | Err(RecvTimeoutError::Disconnected) => {
+            Ok(Report::Finished(_) | Report::CloseCallbackReturned(_) | Report::Closed(_))
+            | Err(RecvTimeoutError::Disconnected) => {
                 return LoadWait::Failed("the UI thread ended before its window loaded".to_string())
             }
             Err(RecvTimeoutError::Timeout) if watchdog_fired => return LoadWait::TimedOut,
