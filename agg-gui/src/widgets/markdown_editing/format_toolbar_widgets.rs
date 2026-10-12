@@ -5,7 +5,8 @@
 //! implementation (the strip over the link row).  The toolbar's logic is in
 //! `format_toolbar`.
 //!
-//! A button is agg-gui's [`Button`] with a Font Awesome icon, its enabled and
+//! A button is agg-gui's [`Button`] with a Font Awesome icon in its em box
+//! (`with_icon_em_box`, so every icon shares one baseline), its enabled and
 //! pressed states read live from the toolbar's model; the wrapper paints the
 //! faint shade C# shows for a style that covers only part of the selection,
 //! which `Button` has no state for.  Sizes are in agg-gui's logical units, so
@@ -103,7 +104,9 @@ impl MarkdownFormatButton {
         let index = kind.index();
         let button = Button::new("", Arc::clone(font))
             .with_icon_sized(kind.icon(), Arc::clone(icon_font), ICON_DESIGN_SIZE)
-            .with_subtle()
+            .with_icon_em_box()
+            // C#'s button is transparent until hovered or pressed; the group draws the outline.
+            .with_ghost()
             .with_compact()
             .with_focus_on_click(false)
             .with_enabled_fn(move || enabled.model.borrow().buttons[index].enabled)

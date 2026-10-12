@@ -94,6 +94,10 @@ pub struct Button {
     /// Optional image icon; takes precedence over `icon`.
     /// See [`with_image_icon`](Self::with_image_icon).
     icon_image: Option<IconImage>,
+    /// When true, a glyph icon sits in its font's em box centred on the
+    /// button on a whole-pixel baseline shared by every glyph of the face.
+    /// See [`with_icon_em_box`](Self::with_icon_em_box).
+    icon_em_box: bool,
 
     /// When true, drop the 48 px touch-target width floor and shrink
     /// the horizontal padding. Right for icon-only toolbar buttons
@@ -131,6 +135,7 @@ impl Button {
             label_pad_h: LEFT_LABEL_PAD,
             icon: None,
             icon_image: None,
+            icon_em_box: false,
             compact: false,
             hovered: false,
             pressed: false,

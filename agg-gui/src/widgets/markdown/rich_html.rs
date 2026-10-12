@@ -187,7 +187,8 @@ fn emphasized(mut html: String, run: MarkdownRunStyle, strong_allowed: bool) -> 
 }
 
 /// C# `RenderTable`: every row of a table the selection touches, header
-/// rows in `<thead>` as `<th>`, the rest in `<tbody>` as `<td>`.
+/// rows in `<thead>` as `<th>`, the rest in `<tbody>` as `<td>`, a cell's
+/// links as `<a href>`.
 fn render_table(item: &LayoutItem) -> String {
     let LayoutItem::Table {
         rows,
@@ -218,7 +219,13 @@ fn render_table(item: &LayoutItem) -> String {
                     let end = piece.end.min(cut);
                     if start < end {
                         let text = escape_html(&text[start..end]);
-                        html.push_str(&emphasized(text, style, tag == "td"));
+                        let mut piece_html = emphasized(text, style, tag == "td");
+                        // C# renders a cell's TextLinkX as `<a href>`, as in a paragraph.
+                        if let Some(url) = emphasis::link_at(spans, start) {
+                            piece_html =
+                                format!("<a href=\"{}\">{piece_html}</a>", escape_attr(url));
+                        }
+                        html.push_str(&piece_html);
                     }
                 }
                 pos = pos.max(cut);

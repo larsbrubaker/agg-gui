@@ -175,7 +175,9 @@ pub use format_toolbar::{
     MarkdownFormatButtonKind, MarkdownFormatButtonState, MarkdownFormatToolbar,
     MarkdownLinkRequestHandler,
 };
-pub use format_toolbar_widgets::{MarkdownFormatButton, MarkdownFormatGroup};
+pub use format_toolbar_widgets::{
+    group_height, MarkdownFormatButton, MarkdownFormatGroup, BUTTON_DESIGN_WIDTH, ICON_DESIGN_SIZE,
+};
 pub use groups::shared as shared_group;
 pub use groups::{
     RichAlignGroup, RichAlignGroupRef, RichListGroup, RichListGroupRef, RichQuoteGroup,

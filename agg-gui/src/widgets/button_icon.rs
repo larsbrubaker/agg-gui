@@ -11,8 +11,9 @@ use std::sync::Arc;
 
 use crate::color::Color;
 use crate::draw_ctx::DrawCtx;
+use crate::geometry::Rect;
 use crate::icon_image::IconImage;
-use crate::text::{measure_advance, Font};
+use crate::text::{measure_advance, measure_text_metrics, Font};
 
 use super::Button;
 
@@ -74,6 +75,85 @@ impl Button {
         self
     }
 
+    /// Places a glyph icon in its font's em box instead of centring the
+    /// glyph's own outline: the box is the glyph's advance wide and the
+    /// face's ascent to descent tall, centred on the button, with its left
+    /// edge and baseline on whole device pixels (MarkdigAgg's
+    /// `MarkdownFormatButton.EmBox`).  The baseline is the same for every
+    /// glyph of the face, so a row of icon-only buttons reads as one line.
+    /// Meant for icon-only buttons; image icons are unaffected.
+    pub fn with_icon_em_box(mut self) -> Self {
+        self.icon_em_box = true;
+        self
+    }
+
+    /// The glyph icon's em box in the button's local Y-up coordinates: the
+    /// glyph's advance wide, the face's ascent to descent tall, standing on
+    /// the baseline the icon is drawn on (C#'s `IconEmBox`).  `None` without
+    /// a glyph icon, or when an image icon replaces it.
+    pub fn icon_em_box(&self) -> Option<Rect> {
+        if self.icon_image.is_some() {
+            return None;
+        }
+        let icon = self.icon.as_ref()?;
+        let (w, h) = (self.bounds.width, self.bounds.height);
+        let (left, baseline) = self.glyph_origin(icon, self.icon_left_x(), w, h);
+        let metrics = measure_text_metrics(&icon.font, "", icon.font_size);
+        let advance = measure_advance(&icon.font, &icon.glyph.to_string(), icon.font_size);
+        Some(Rect::new(
+            left,
+            baseline - metrics.descent,
+            advance,
+            metrics.ascent + metrics.descent,
+        ))
+    }
+
+    /// Where the leading icon's left edge sits: left of the label child by
+    /// the icon block (as `paint` places it).
+    fn icon_left_x(&self) -> f64 {
+        let label_x = self
+            .children
+            .first()
+            .map(|c| c.bounds().x)
+            .unwrap_or_default();
+        (label_x - self.icon_block_w()).max(0.0)
+    }
+
+    /// The glyph icon's pen origin (left, baseline) for a button `w` x `h`
+    /// whose icon block starts at `x`.  By default the glyph's own outline
+    /// is centred vertically; in em-box mode the
+    /// em box is centred both ways and snapped to whole device pixels with
+    /// C#'s `Math.Round` (halves to even).
+    fn glyph_origin(&self, icon: &ButtonIcon, x: f64, w: f64, h: f64) -> (f64, f64) {
+        if !self.icon_em_box {
+            // Centre the glyph using its *actual* outline bounding box, not
+            // the font's worst-case ascender/descender.  Icon fonts (Font
+            // Awesome especially) place each glyph in a sub-rectangle of the
+            // design space; centring by the font metric leaves the glyph
+            // visibly high on the button (the "icons floating to the top"
+            // regression we've hit repeatedly).  (y_min, y_max) is the
+            // glyph's extent relative to the baseline, Y-up; pick the
+            // baseline so that baseline + (y_min + y_max) / 2 == h / 2.
+            // Fall back to the font metric only if the glyph has no outline
+            // (e.g. a space or a missing glyph).
+            let baseline = match icon.font.glyph_visual_bounds(icon.glyph, icon.font_size) {
+                Some((y_min, y_max)) => (h * 0.5 - (y_min + y_max) * 0.5).max(0.0),
+                None => ((h - icon.font_size) * 0.5).max(0.0),
+            };
+            return (x, baseline);
+        }
+        let metrics = measure_text_metrics(&icon.font, "", icon.font_size);
+        let advance = measure_advance(&icon.font, &icon.glyph.to_string(), icon.font_size);
+        let descent = -metrics.descent;
+        let height = metrics.ascent + metrics.descent;
+        let scale = crate::device_scale::device_scale().max(f64::MIN_POSITIVE);
+        let snap = |v: f64| round_half_even(v * scale) / scale;
+        (
+            snap(w * 0.5 - advance / 2.0),
+            snap(h * 0.5 - (descent + height / 2.0)),
+        )
+    }
+
     /// Spacing reserved between the leading icon glyph and the label.
     /// Collapses to zero for icon-only buttons (empty label) so the glyph
     /// centres in the button instead of being shoved left by a gap that
@@ -121,51 +201,23 @@ impl Button {
             }
             return;
         }
-        Self::paint_glyph_icon(
-            ctx,
-            &self.icon,
-            &self.font,
-            self.font_size,
-            x,
-            button_h,
-            color,
-        );
-    }
-
-    /// Render the configured icon glyph centred vertically in the
-    /// button using the glyph's *actual* outline bounding box — not
-    /// the font's worst-case ascender/descender. Icon fonts (Font
-    /// Awesome especially) place each glyph in a sub-rectangle of
-    /// the design space; centring by the font metric leaves the glyph
-    /// visibly high on the button (the "icons floating to the top"
-    /// regression we've hit repeatedly). With the per-glyph bbox we
-    /// solve for the baseline that puts the glyph's vertical midpoint
-    /// at `button_h / 2`.
-    fn paint_glyph_icon(
-        ctx: &mut dyn DrawCtx,
-        icon: &Option<ButtonIcon>,
-        _label_font: &Arc<Font>,
-        _label_font_size: f64,
-        x: f64,
-        button_h: f64,
-        color: Color,
-    ) {
-        let Some(icon) = icon else { return };
-        // (y_min, y_max) is the glyph's actual extent in pixels
-        // relative to baseline, Y-up. y_min is usually negative
-        // (descender region) or ~0, y_max is the cap-height of the
-        // glyph. Pick the baseline so that
-        //   baseline + (y_min + y_max) / 2  ==  button_h / 2
-        // i.e. the glyph's midpoint sits at the button's midpoint.
-        // Fall back to the font metric only if the glyph has no
-        // outline (e.g. a space or a missing glyph).
-        let baseline_y = match icon.font.glyph_visual_bounds(icon.glyph, icon.font_size) {
-            Some((y_min, y_max)) => (button_h * 0.5 - (y_min + y_max) * 0.5).max(0.0),
-            None => ((button_h - icon.font_size) * 0.5).max(0.0),
-        };
+        let Some(icon) = &self.icon else { return };
+        let (left, baseline) = self.glyph_origin(icon, x, self.bounds.width, button_h);
         ctx.set_font(Arc::clone(&icon.font));
         ctx.set_font_size(icon.font_size);
         ctx.set_fill_color(color);
-        ctx.fill_text(&icon.glyph.to_string(), x, baseline_y);
+        ctx.fill_text(&icon.glyph.to_string(), left, baseline);
+    }
+}
+
+/// C# `Math.Round`: halves round to the even neighbour (hand-written, as in
+/// `grid_pixels`, because `f64::round_ties_even` is newer than agg-gui's
+/// MSRV).
+fn round_half_even(x: f64) -> f64 {
+    let rounded = x.round();
+    if (rounded - x).abs() == 0.5 {
+        2.0 * (x / 2.0).round()
+    } else {
+        rounded
     }
 }

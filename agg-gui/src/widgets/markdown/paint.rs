@@ -118,17 +118,16 @@ impl MarkdownView {
                                         } else {
                                             tx + x + lead
                                         };
-                                        ctx.set_font(self.run_font(*run_style));
+                                        let face = self.run_face(*code, *run_style);
+                                        ctx.set_font(Arc::clone(&face));
                                         ctx.fill_text(text, text_x, text_y);
                                         if run_style.strikethrough {
                                             // Past the run's lead space, as C# strikes
                                             // each word's own text.
                                             let space = text.len() - text.trim_start().len();
-                                            let skip = self.styled_text_width(
-                                                &text[..space],
-                                                *style,
-                                                *run_style,
-                                            );
+                                            let skip =
+                                                measure_text_metrics(&face, &text[..space], fs)
+                                                    .width;
                                             let pad = if *code { 0.0 } else { *lead + *trail };
                                             self.paint_strike(
                                                 ctx,
@@ -189,11 +188,16 @@ impl MarkdownView {
                     height: _,
                     row_heights,
                     col_widths,
+                    line,
                     viewport_width,
                     content_width,
                 } => {
-                    let table_w: f64 = col_widths.iter().sum();
-                    let table_h: f64 = row_heights.iter().sum();
+                    let grid = super::table_grid::TableGrid {
+                        col_widths,
+                        row_heights,
+                        line: *line,
+                    };
+                    let table_h = grid.height();
                     let text_row_h = self.table_text_row_height();
                     let scroll_x = self.block_scroll_offset(*block_idx);
                     let scrollbar_h = if content_width > viewport_width {
@@ -205,28 +209,24 @@ impl MarkdownView {
                     ctx.save();
                     ctx.clip_rect(pad, content_y, *viewport_width, table_h);
                     ctx.translate(-scroll_x, 0.0);
-                    let mut cy = content_y + table_h;
-                    let grid = table_style::grid_color(&v);
+                    let snapped = super::table_grid::SnappedGrid::new(
+                        &grid,
+                        pad,
+                        content_y,
+                        &ctx.transform(),
+                        crate::device_scale(),
+                    );
+                    if let Some(snapped) = &snapped {
+                        snapped.paint_stripes(ctx, |ri| table_style::stripe_color(&v, ri, *header));
+                    }
                     ctx.set_font_size(self.font_size);
                     for (ri, row) in rows.iter().enumerate() {
                         let row_h = row_heights.get(ri).copied().unwrap_or(text_row_h);
-                        cy -= row_h;
-                        let stripe = table_style::stripe_color(&v, ri, *header);
-                        if stripe.a > 0.0 {
-                            ctx.set_fill_color(stripe);
-                            ctx.begin_path();
-                            ctx.rect(pad, cy, table_w, row_h);
-                            ctx.fill();
-                        }
+                        let cy = content_y + grid.row_bottom(ri);
                         // The text row sits in the middle of a taller row.
                         let text_cy = cy + (row_h - text_row_h) * 0.5;
-                        let mut cx = pad;
                         for (ci, width) in col_widths.iter().enumerate() {
-                            ctx.set_fill_color(grid);
-                            ctx.begin_path();
-                            ctx.rect(cx, cy, 1.0, row_h);
-                            ctx.rect(cx, cy, *width, 1.0);
-                            ctx.fill();
+                            let cx = pad + grid.cell_left(ci);
                             if let Some(text) = row.get(ci) {
                                 let spans = emphasis::cell_spans(cell_styles, ri, ci);
                                 let images = cell_images::images_of(cell_images, ri, ci);
@@ -264,17 +264,11 @@ impl MarkdownView {
                                     );
                                 }
                             }
-                            cx += width;
                         }
-                        ctx.set_fill_color(grid);
-                        ctx.begin_path();
-                        ctx.rect(pad + table_w, cy, 1.0, row_h);
-                        ctx.fill();
                     }
-                    ctx.set_fill_color(grid);
-                    ctx.begin_path();
-                    ctx.rect(pad, content_y + table_h, table_w, 1.0);
-                    ctx.fill();
+                    if let Some(snapped) = &snapped {
+                        snapped.paint_lines(ctx, table_style::grid_color(&v));
+                    }
                     ctx.restore();
 
                     if *content_width > *viewport_width {

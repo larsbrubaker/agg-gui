@@ -155,7 +155,8 @@ impl MarkdownView {
     }
 
     /// Draw image `cache_idx` in the rect at `(x, y)` (bottom-left, Y up):
-    /// the decoded pixels when ready, else a shaded box with the alt text.
+    /// the decoded pixels when ready, else a shaded box with the alt text
+    /// (after the placeholder icon, when the view has one).
     /// Starts a remote load the first time the rect is on screen.  A
     /// placeholder leaves the font size at `restore_font_size` and the fill
     /// at the text colour.
@@ -217,10 +218,11 @@ impl MarkdownView {
             ctx.begin_path();
             ctx.rounded_rect(x, y, width, height, 3.0);
             ctx.fill();
+            let icon_room = self.paint_placeholder_icon(ctx, x, y, height, v.text_color);
             ctx.set_fill_color(v.text_dim);
             ctx.set_font_size(self.font_size * 0.85);
             let label = if alt.is_empty() { "image" } else { alt };
-            ctx.fill_text(label, x + 8.0, y + height * 0.5);
+            ctx.fill_text(label, x + 8.0 + icon_room, y + height * 0.5);
             ctx.set_font_size(restore_font_size);
             ctx.set_fill_color(v.text_color);
         }

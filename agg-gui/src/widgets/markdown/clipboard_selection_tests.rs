@@ -175,3 +175,29 @@ fn right_click_menu_shows_readonly_markdown_actions_and_can_copy_selection() {
     );
     assert!(html().contains(">Preview Heading</h1>"), "{}", html());
 }
+
+#[test]
+fn rust_only_a_link_in_a_table_cell_copies_as_a_link() {
+    let _clipboard = crate::clipboard::simulate();
+    let mut widget = view(
+        "Before.\n\n| Item | Notes |\n| --- | --- |\n| Docs | See [Guide](https://example.com/guide) **now** |\n",
+    );
+    select(&mut widget, "Item");
+
+    assert!(widget.try_copy_selection_to_clipboard());
+    let html = html();
+    let cell = html
+        .split("<td")
+        .find(|cell| cell.contains("Guide"))
+        .unwrap_or_else(|| panic!("a cell with the link: {html}"));
+    assert!(
+        cell.contains("<a href=\"https://example.com/guide\" style="),
+        "{html}"
+    );
+    assert!(cell.contains(">Guide</a>"), "{html}");
+    // Only the link's own text is inside the anchor.
+    assert!(
+        !cell.contains("See </a>") && !cell.contains("now</a>"),
+        "{html}"
+    );
+}

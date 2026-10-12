@@ -93,8 +93,14 @@ impl MarkdownView {
                     let cell_images = self.layout_cell_images(cell_images, max_w);
                     let (col_widths, row_heights) =
                         self.layout_table(rows, cell_styles, &cell_images);
-                    let mut height: f64 = row_heights.iter().sum();
-                    let content_width = col_widths.iter().sum::<f64>();
+                    let line = super::table_grid::line_for_scale(crate::device_scale());
+                    let grid = super::table_grid::TableGrid {
+                        col_widths: &col_widths,
+                        row_heights: &row_heights,
+                        line,
+                    };
+                    let mut height = grid.height();
+                    let content_width = grid.width();
                     let viewport_width = max_w;
                     if content_width > viewport_width {
                         height += BLOCK_SCROLLBAR_H + BLOCK_SCROLLBAR_GAP;
@@ -116,6 +122,7 @@ impl MarkdownView {
                         height,
                         row_heights,
                         col_widths,
+                        line,
                         viewport_width,
                         content_width,
                     });
@@ -337,7 +344,8 @@ impl MarkdownView {
         code: bool,
         run_style: MarkdownRunStyle,
     ) -> f64 {
-        let width = self.styled_text_width(text, style, run_style);
+        let font_size = style.font_size(self.font_size);
+        let width = measure_text_metrics(&self.run_face(code, run_style), text, font_size).width;
         if code {
             width + self.font_size * 0.75
         } else {
@@ -356,7 +364,7 @@ impl MarkdownView {
             (iw as f64 * scale, ih as f64 * scale)
         } else {
             let label = if alt.is_empty() { "image" } else { alt };
-            let w = self.text_width(label, LineStyle::Body) + 16.0;
+            let w = self.text_width(label, LineStyle::Body) + 16.0 + self.placeholder_icon_room();
             (w.min(max_w), self.font_size * 1.45)
         }
     }
@@ -447,6 +455,7 @@ impl MarkdownView {
         cell_images: &cell_images::LaidCellImages,
     ) -> (Vec<f64>, Vec<f64>) {
         let text_row_h = self.table_text_row_height();
+        let scale = crate::device_scale();
         let cols = rows.iter().map(|r| r.len()).max().unwrap_or(0);
         let mut widths = vec![0.0_f64; cols];
         let mut heights = Vec::with_capacity(rows.len());
@@ -461,7 +470,12 @@ impl MarkdownView {
                     row_h = row_h.max(image.height + cell_images::CELL_IMAGE_PAD_Y * 2.0);
                 }
             }
-            heights.push(row_h);
+            // Whole device pixels, as C# `Math.Ceiling` sized rows and
+            // columns, so the snapped grid keeps every cell its width.
+            heights.push(super::table_grid::ceil_to_device_pixels(row_h, scale));
+        }
+        for width in &mut widths {
+            *width = super::table_grid::ceil_to_device_pixels(*width, scale);
         }
         (widths, heights)
     }

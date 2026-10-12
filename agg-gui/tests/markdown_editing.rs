@@ -46,6 +46,8 @@ mod rich_paste_operations_tests;
 mod rich_style_operations_tests;
 #[path = "markdown_editing/rich_table_code_operations_tests.rs"]
 mod rich_table_code_operations_tests;
+#[path = "markdown_editing/rich_table_grid_pixel_tests.rs"]
+mod rich_table_grid_pixel_tests;
 #[path = "markdown_editing/rich_table_layout_tests.rs"]
 mod rich_table_layout_tests;
 #[path = "markdown_editing/rust_only_block_painter_tests.rs"]

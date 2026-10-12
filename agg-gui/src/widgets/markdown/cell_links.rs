@@ -50,6 +50,7 @@ impl MarkdownView {
                 y,
                 row_heights,
                 col_widths,
+                line,
                 viewport_width,
                 content_width,
                 ..
@@ -66,12 +67,16 @@ impl MarkdownView {
             } else {
                 0.0
             };
-            let mut cy = y + scrollbar_h + row_heights.iter().sum::<f64>();
+            let grid = super::table_grid::TableGrid {
+                col_widths,
+                row_heights,
+                line: *line,
+            };
             for (ri, row) in rows.iter().enumerate() {
                 let row_h = row_heights.get(ri).copied().unwrap_or(0.0);
-                cy -= row_h;
-                let mut cx = pad - scroll_x;
+                let cy = y + scrollbar_h + grid.row_bottom(ri);
                 for (ci, width) in col_widths.iter().enumerate() {
+                    let cx = pad - scroll_x + grid.cell_left(ci);
                     if let Some(text) = row.get(ci) {
                         let spans = emphasis::cell_spans(cell_styles, ri, ci);
                         let images = images_of(cell_images, ri, ci);
@@ -90,7 +95,6 @@ impl MarkdownView {
                             }
                         }
                     }
-                    cx += width;
                 }
             }
         }

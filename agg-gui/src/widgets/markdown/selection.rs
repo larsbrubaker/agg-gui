@@ -90,10 +90,12 @@ pub(super) enum SelectableKind {
 
 impl MarkdownView {
     /// The face a fragment measures in: the code font for a code-block
-    /// line, else its run's emphasis face.
+    /// line, its run's face for text (the code font for inline code), else
+    /// its run's emphasis face.
     fn fragment_font(&self, fragment: &SelectableFragment) -> Arc<Font> {
         match fragment.kind {
             SelectableKind::CodeBlock => self.code_font(),
+            SelectableKind::Text { code, .. } => self.run_face(code, fragment.run_style),
             _ => self.run_font(fragment.run_style),
         }
     }
@@ -296,6 +298,7 @@ impl MarkdownView {
                     y,
                     row_heights,
                     col_widths,
+                    line,
                     viewport_width,
                     content_width,
                     ..
@@ -313,17 +316,20 @@ impl MarkdownView {
                         0.0
                     };
                     let content_y = y + scrollbar_h;
-                    let table_h: f64 = row_heights.iter().sum();
-                    let clip = Rect::new(pad, content_y, *viewport_width, table_h);
-                    let mut cy = content_y + table_h;
+                    let grid = super::table_grid::TableGrid {
+                        col_widths,
+                        row_heights,
+                        line: *line,
+                    };
+                    let clip = Rect::new(pad, content_y, *viewport_width, grid.height());
                     for (ri, row) in rows.iter().enumerate() {
                         if ri > 0 {
                             self.push_selection_gap("\n");
                         }
                         let row_h = row_heights.get(ri).copied().unwrap_or_default();
-                        cy -= row_h;
-                        let mut cx = pad - scroll_x;
+                        let cy = content_y + grid.row_bottom(ri);
                         for (ci, width) in col_widths.iter().enumerate() {
+                            let cx = pad - scroll_x + grid.cell_left(ci);
                             if ci > 0 {
                                 self.push_selection_gap("\t");
                             }
@@ -343,7 +349,6 @@ impl MarkdownView {
                                 };
                                 self.push_table_cell(&cell, place);
                             }
-                            cx += width;
                         }
                     }
                 }

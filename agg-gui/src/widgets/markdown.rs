@@ -86,6 +86,9 @@ mod line_width_tests;
 mod matching;
 mod paint;
 mod parse;
+mod placeholder_icon;
+#[cfg(test)]
+mod placeholder_icon_tests;
 #[cfg(test)]
 mod plain_text_tests;
 mod rich_html;
@@ -95,6 +98,9 @@ mod selection_tests;
 mod styled_html;
 #[cfg(test)]
 mod styled_html_tests;
+mod table_grid;
+#[cfg(test)]
+mod table_grid_tests;
 #[cfg(test)]
 mod table_image_tests;
 mod table_style;
@@ -176,7 +182,11 @@ enum LayoutItem {
         /// Each row's height, top row first: a text row's height, or more
         /// for a row whose images are taller.
         row_heights: Vec<f64>,
+        /// Each column's cell width, between its grid lines.
         col_widths: Vec<f64>,
+        /// One grid line in logical units, whole device pixels at the
+        /// device scale the table was laid out at (`table_grid.rs`).
+        line: f64,
         viewport_width: f64,
         content_width: f64,
     },
@@ -352,6 +362,8 @@ pub struct MarkdownView {
     matching_text: Option<String>,
     /// The look copied HTML carries (C#'s `MarkdownWidget.Theme`).
     html_theme: HtmlStyleTheme,
+    /// The icon image placeholders show (`placeholder_icon.rs`).
+    link_placeholder_icon: Option<crate::icon_image::IconImage>,
 }
 
 impl MarkdownView {
@@ -387,6 +399,7 @@ impl MarkdownView {
             suppress_next_left_mouse_up: false,
             matching_text: None,
             html_theme: HtmlStyleTheme::default(),
+            link_placeholder_icon: None,
         }
     }
 

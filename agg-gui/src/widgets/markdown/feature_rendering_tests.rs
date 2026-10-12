@@ -147,7 +147,10 @@ fn code_blocks_preserve_leading_spaces_and_use_monospace_font() {
     let metrics = crate::text::measure_text_metrics(&mono, code_text, view.code_font_size());
     assert!(view.code_block_line_heights()[0] > metrics.ascent + metrics.descent.abs());
     // The rows are laid out in the monospace face's own line height.
-    assert_eq!(view.code_block_line_heights()[0], metrics.line_height * 1.35);
+    assert_eq!(
+        view.code_block_line_heights()[0],
+        metrics.line_height * 1.35
+    );
     // Leading spaces take up room: the monospace advance of two spaces.
     let spaced = measure_advance(&mono, code_text, view.code_font_size());
     let bare = measure_advance(&mono, code_text.trim_start(), view.code_font_size());
@@ -356,4 +359,48 @@ fn rust_only_matching_text_highlights_inside_emphasis() {
             assert!(s.italic);
         }
     }
+}
+
+#[test]
+fn rust_only_inline_code_draws_in_the_code_font() {
+    let mono_font = || Arc::new(Font::from_slice(MONO_FONT).expect("mono font"));
+    let markdown = "a `iiii` b\n";
+    let x_of_b = |view: &MarkdownView| {
+        view.text_blocks()[0]
+            .words
+            .iter()
+            .find(|w| w.text == "b")
+            .expect("the word b")
+            .x
+    };
+    let plain = render_markdown(markdown);
+    let mono = mono_font();
+    let mut coded = MarkdownView::new(markdown, font()).with_code_font(Arc::clone(&mono));
+    coded.layout(Size::new(2000.0, 2000.0));
+
+    // The code span is measured (and drawn) in the code font, so what follows it moves by the
+    // difference between the two faces' widths of its text.
+    let code_text = coded
+        .items
+        .iter()
+        .find_map(|item| match item {
+            LayoutItem::Line { runs, .. } => runs.iter().find_map(|run| match run {
+                LineRun::Text {
+                    text, code: true, ..
+                } => Some(text.clone()),
+                _ => None,
+            }),
+            _ => None,
+        })
+        .expect("the code run");
+    assert_eq!(code_text.trim(), "iiii");
+    let width = |face: &Font| crate::text::measure_text_metrics(face, &code_text, 14.0).width;
+    let expected = width(&mono) - width(&font());
+    assert!(expected.abs() > 1.0);
+    assert!(
+        (x_of_b(&coded) - x_of_b(&plain) - expected).abs() < 1e-6,
+        "{} vs {}",
+        x_of_b(&coded) - x_of_b(&plain),
+        expected
+    );
 }

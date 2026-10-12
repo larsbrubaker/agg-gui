@@ -16,12 +16,14 @@ use std::sync::Arc;
 
 use agg_gui::event::{Event, Key, Modifiers};
 use agg_gui::text::Font;
+use agg_gui::widgets::markdown_editing::{group_height, BUTTON_DESIGN_WIDTH, ICON_DESIGN_SIZE};
 use agg_gui::widgets::markdown_editing::{
     markdown_parser, markdown_writer, with_scheme, DocPosition, MarkdownFormatButtonKind as K,
     MarkdownFormatGroup, MarkdownFormatToolbar, RichAlignment, RichBlockKind, RichDocumentCommands,
     RichEditCommands, RichInlineStyle, RichSelection, RichStyleCoverage,
 };
-use agg_gui::{Rect, Size, Widget};
+use agg_gui::widgets::Button;
+use agg_gui::{Framebuffer, GfxCtx, Rect, Size, Widget};
 
 use super::rich_markdown_edit_widget_tests::fonts;
 
@@ -462,6 +464,140 @@ fn the_groups_have_room_above_and_below_them() {
             assert!(above >= 6.0 - 0.5, "{above} units above the groups");
             assert!((below - above).abs() <= 0.5, "{below} below, {above} above");
         }
+        agg_gui::device_scale::set_device_scale(1.0);
+    }
+}
+
+/// The pixels a button's `Button` draws over its background into a
+/// transparent framebuffer at `scale` (device pixels, Y-up), bounded as C#'s `InkBounds`: every pixel
+/// with any alpha, each as a 1 x 1 square.
+fn ink_bounds(button: &mut dyn Widget, scale: f64) -> Option<Rect> {
+    let b = button.bounds();
+    let (w, h) = ((b.width * scale) as u32, (b.height * scale) as u32);
+    let mut fb = Framebuffer::new(w, h);
+    {
+        let mut ctx = GfxCtx::new(&mut fb);
+        ctx.scale(scale, scale);
+        // C# drew `OnDraw`, which leaves out the background (`OnDrawBackground`, where a pressed button's
+        // accent tint is): here the background is `paint` and the icon `paint_overlay`.
+        button.paint_overlay(&mut ctx);
+    }
+    let (mut x0, mut y0, mut x1, mut y1) = (u32::MAX, u32::MAX, 0, 0);
+    for y in 0..h {
+        for x in 0..w {
+            if fb.pixels()[((y * w + x) * 4 + 3) as usize] > 0 {
+                (x0, y0, x1, y1) = (x0.min(x), y0.min(y), x1.max(x + 1), y1.max(y + 1));
+            }
+        }
+    }
+    (x0 < x1).then(|| {
+        Rect::new(
+            f64::from(x0),
+            f64::from(y0),
+            f64::from(x1 - x0),
+            f64::from(y1 - y0),
+        )
+    })
+}
+
+/// Each MarkdownFormatButton's ink, in the order `walk` visits them.
+fn paint_inks(widget: &mut dyn Widget, scale: f64, out: &mut Vec<Option<Rect>>) {
+    for child in widget.children_mut().iter_mut() {
+        if child.type_name() == "MarkdownFormatButton" {
+            out.push(ink_bounds(child.children_mut()[0].as_mut(), scale));
+        } else {
+            paint_inks(child.as_mut(), scale, out);
+        }
+    }
+}
+
+/// Every icon is drawn in an em box of one height on one baseline across
+/// the whole toolbar, the ink each button draws lands inside its box, and
+/// the groups and the size list share one centre line and one height.
+/// Checked at 1x and 2x.  Sizes are logical units (C#'s `* scale` falls
+/// away); the ink is read in device pixels and compared with the em box
+/// scaled to them.
+#[test]
+fn every_icon_is_drawn_at_one_size_on_one_baseline() {
+    for scale in [1.0, 2.0] {
+        agg_gui::device_scale::set_device_scale(scale);
+        let mut f = make("Hello world\n", caret(0, 1));
+        laid_out(&mut f);
+
+        let mut inks = Vec::new();
+        paint_inks(&mut f.toolbar, scale, &mut inks);
+        let mut all = Vec::new();
+        walk(&f.toolbar, (0.0, 0.0), &mut all);
+        // Each MarkdownFormatButton's Button child, with its toolbar-space origin.
+        let buttons: Vec<(&Button, Rect, String)> = all
+            .iter()
+            .filter(|(w, _)| w.type_name() == "MarkdownFormatButton")
+            .map(|(w, r)| {
+                let button = w.children()[0]
+                    .as_any()
+                    .and_then(|a| a.downcast_ref::<Button>())
+                    .expect("a Button");
+                let tip = button.tooltip_text().unwrap_or_default().to_string();
+                (button, *r, tip)
+            })
+            .collect();
+        assert_eq!(buttons.len(), 13);
+        let mut inks = inks.into_iter();
+        let in_toolbar = |button: &Button, at: Rect| {
+            let local = button.icon_em_box().expect("a glyph icon");
+            Rect::new(local.x + at.x, local.y + at.y, local.width, local.height)
+        };
+        let first = in_toolbar(buttons[0].0, buttons[0].1);
+        // The box is the face's ascent to descent, which Font Awesome sets a little taller than its em.
+        assert!(
+            (first.height - ICON_DESIGN_SIZE).abs() <= 0.1 * ICON_DESIGN_SIZE,
+            "{}",
+            first.height
+        );
+        for (button, at, tip) in &buttons {
+            let em = in_toolbar(button, *at);
+            assert_eq!(em.height, first.height, "{tip}");
+            assert_eq!(em.y, first.y, "{tip}");
+            assert_eq!(button.bounds().width, BUTTON_DESIGN_WIDTH, "{tip}");
+            assert_eq!(button.bounds().height, group_height() - 2.0, "{tip}");
+
+            let local = button.icon_em_box().unwrap();
+            let ink = inks.next().flatten();
+            let ink = ink.unwrap_or_else(|| panic!("{tip} draws its icon"));
+            assert!(ink.width > 0.0, "{tip} draws its icon");
+            let (l, b, r, t) = (
+                local.x * scale,
+                local.y * scale,
+                (local.x + local.width) * scale,
+                (local.y + local.height) * scale,
+            );
+            assert!(
+                ink.y >= b - 1.0
+                    && ink.y + ink.height <= t + 1.0
+                    && ink.x >= l - 1.0
+                    && ink.x + ink.width <= r + 1.0,
+                "{tip}'s ink {ink:?} lands in its em box {local:?} at {scale}"
+            );
+        }
+
+        let groups: Vec<Rect> = all
+            .iter()
+            .filter(|(w, _)| w.type_name() == "MarkdownFormatGroup")
+            .map(|(_, r)| *r)
+            .collect();
+        let centre = groups[0].y + groups[0].height * 0.5;
+        for bounds in &groups {
+            assert!((bounds.y + bounds.height * 0.5 - centre).abs() <= 0.5);
+            assert_eq!(bounds.height, group_height());
+        }
+
+        let list = all
+            .iter()
+            .find(|(w, _)| w.type_name() == "MarkdownSizeList")
+            .map(|(_, r)| *r)
+            .expect("the size list");
+        assert_eq!(list.height, group_height());
+        assert!((list.y + list.height * 0.5 - centre).abs() <= 0.5);
         agg_gui::device_scale::set_device_scale(1.0);
     }
 }

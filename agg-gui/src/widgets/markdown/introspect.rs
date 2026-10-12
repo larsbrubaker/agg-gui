@@ -58,6 +58,10 @@ pub struct MarkdownTableCell {
     /// The url of each link in the cell's text, in order (C#'s `TextLinkX`
     /// children of the cell).
     pub links: Vec<String>,
+    /// The cell's box between its grid lines in the view's Y-up
+    /// coordinates, at the table's current horizontal scroll (C#'s
+    /// `cell.TransformToParentSpace(..., cell.LocalBounds)`).
+    pub bounds: crate::geometry::Rect,
 }
 
 /// One laid-out paragraph, heading or list item (C#'s `ParagraphX` /
@@ -251,8 +255,12 @@ impl MarkdownView {
                 cell_images,
                 header,
                 aligns,
+                y,
+                row_heights,
                 col_widths,
+                line,
                 viewport_width,
+                content_width,
                 ..
             } = item
             else {
@@ -260,10 +268,20 @@ impl MarkdownView {
             };
             let visuals = crate::theme::current_visuals();
             let scroll_x = self.block_scroll_offset(*block_idx);
+            let grid = super::table_grid::TableGrid {
+                col_widths,
+                row_heights,
+                line: *line,
+            };
+            let scrollbar_h = if content_width > viewport_width {
+                super::BLOCK_SCROLLBAR_H + super::BLOCK_SCROLLBAR_GAP
+            } else {
+                0.0
+            };
             let mut cells = Vec::new();
             for (ri, row) in rows.iter().enumerate() {
-                let mut x = -scroll_x;
                 for (ci, width) in col_widths.iter().enumerate() {
+                    let x = grid.cell_left(ci) - scroll_x;
                     let visible = (x + width).min(*viewport_width) - x.max(0.0);
                     let text = row.get(ci).map_or("", String::as_str);
                     let images = images_of(cell_images, ri, ci);
@@ -283,8 +301,13 @@ impl MarkdownView {
                         content_width,
                         stripe: table_style::stripe_color(&visuals, ri, *header),
                         links: super::cell_links::cell_link_urls(spans),
+                        bounds: crate::geometry::Rect::new(
+                            self.padding + x,
+                            y + scrollbar_h + grid.row_bottom(ri),
+                            *width,
+                            row_heights.get(ri).copied().unwrap_or(0.0),
+                        ),
                     });
-                    x += width;
                 }
             }
             tables.push(cells);
@@ -309,9 +332,32 @@ impl MarkdownView {
             .collect()
     }
 
+    /// Each table's box in the view's Y-up coordinates, in document order:
+    /// across the view's content width, as tall as its grid and its
+    /// scrollbar (C#'s `table.TransformToParentSpace(..., LocalBounds)`).
+    pub fn table_bounds(&self) -> Vec<crate::geometry::Rect> {
+        self.items
+            .iter()
+            .filter_map(|item| match item {
+                LayoutItem::Table {
+                    y,
+                    viewport_width,
+                    height,
+                    ..
+                } => Some(crate::geometry::Rect::new(
+                    self.padding,
+                    *y,
+                    *viewport_width,
+                    *height,
+                )),
+                _ => None,
+            })
+            .collect()
+    }
+
     /// Each table's row tops, top row first, in the view's Y-up
     /// coordinates (C#'s `row.TransformToParentSpace(...).Top`): the top
-    /// of each row is the grid line above it.
+    /// of each row is the bottom of the grid line above it.
     pub fn table_row_tops(&self) -> Vec<Vec<f64>> {
         self.items
             .iter()
@@ -319,6 +365,8 @@ impl MarkdownView {
                 LayoutItem::Table {
                     y,
                     row_heights,
+                    col_widths,
+                    line,
                     viewport_width,
                     content_width,
                     ..
@@ -328,15 +376,14 @@ impl MarkdownView {
                     } else {
                         0.0
                     };
-                    let mut top = y + scrollbar_h + row_heights.iter().sum::<f64>();
+                    let grid = super::table_grid::TableGrid {
+                        col_widths,
+                        row_heights,
+                        line: *line,
+                    };
                     Some(
-                        row_heights
-                            .iter()
-                            .map(|h| {
-                                let row_top = top;
-                                top -= h;
-                                row_top
-                            })
+                        (0..row_heights.len())
+                            .map(|ri| y + scrollbar_h + grid.row_top(ri))
                             .collect(),
                     )
                 }

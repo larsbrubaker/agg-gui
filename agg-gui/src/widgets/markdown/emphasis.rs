@@ -203,6 +203,17 @@ impl MarkdownView {
     }
 
     /// The face a run of `style` measures and draws with.
+    /// The face a run of text draws in: an inline code span in the code
+    /// font when the view has one (C#'s copied HTML sets `<code>` in the
+    /// monospace family; `with_code_font`), everything else in its
+    /// emphasis face ([`Self::run_font`]).
+    pub(super) fn run_face(&self, code: bool, style: MarkdownRunStyle) -> Arc<Font> {
+        match (&self.code_font, code) {
+            (Some(font), true) => Arc::clone(font),
+            _ => self.run_font(style),
+        }
+    }
+
     pub(super) fn run_font(&self, style: MarkdownRunStyle) -> Arc<Font> {
         let regular = self.active_font();
         let mut cache = self.styled_fonts.borrow_mut();
