@@ -25,6 +25,10 @@
 //!   widgets in the title bar, left of the maximize / close buttons.
 //! - **Opacity** — [`Window::set_backbuffer_opacity`] composites the whole
 //!   window (chrome and content) over what is behind it at that alpha.
+//! - **Style** — [`Window::set_corner_radius`], [`Window::set_shadow`],
+//!   [`Window::set_title_bar_color`], [`Window::set_body_color`] and
+//!   [`Window::set_border`] restyle the panel; a rounded panel paints through
+//!   its own layer, cut by the rounded clip (`window/style.rs`).
 //!
 //! # ⚠ Backbuffer caching gotcha — read before adding a custom Window
 //!
@@ -309,6 +313,8 @@ pub struct Window {
     /// Whether the maximize button (and double-click-to-maximize) is
     /// offered (agg-sharp `WindowWidget.Maximizable`). Default `true`.
     maximizable: bool,
+    /// Corner radius, shadow, colours, border and panel layer (`window/style.rs`).
+    panel_style: style::PanelStyle,
 }
 
 impl Window {
@@ -395,6 +401,7 @@ impl Window {
             title_bar_capture: None,
             title_button_hover: None,
             maximizable: true,
+            panel_style: style::PanelStyle::default(),
         }
     }
 
@@ -710,12 +717,13 @@ mod options;
 mod paint;
 mod resize;
 mod snap_glue;
+mod style;
 mod title_buttons;
 mod widget_impl;
 
 pub use close::{ClickAwayAction, CloseReason};
 
 pub use chrome::{
-    paint_chevron, paint_chrome_body, paint_chrome_border, paint_chrome_shadow,
-    paint_chrome_title_bar, ChromeStyle,
+    paint_chevron, paint_chrome_body, paint_chrome_border, paint_chrome_border_width,
+    paint_chrome_shadow, paint_chrome_title_bar, ChromeStyle,
 };

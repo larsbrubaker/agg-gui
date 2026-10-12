@@ -65,6 +65,11 @@ struct LayerEntry {
     /// is put back when the layer is popped so the caller can stroke or re-fill
     /// the outline it clipped with.
     clip_saved_path: Option<PathStorage>,
+    /// Coverage of the rounded rectangle set by `set_layer_rounded_clip`, the
+    /// size of `fb`, multiplied into the layer when it composites (after any
+    /// `clip_mask`). A later call in the same layer replaces it, as on the
+    /// wgpu backend.
+    rounded_mask: Option<Vec<u8>>,
 }
 
 // Re-export so callers don't need to import agg_rust directly.

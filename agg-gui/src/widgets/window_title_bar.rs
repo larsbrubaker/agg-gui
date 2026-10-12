@@ -61,6 +61,8 @@ pub(crate) struct TitleBarView {
     pub maximized: bool,
     pub close_hovered: bool,
     pub maximize_hovered: bool,
+    /// The window's corner radius, which the bar's top corners follow.
+    pub corner_radius: f64,
 }
 
 impl TitleBarView {
@@ -72,6 +74,7 @@ impl TitleBarView {
             maximized: false,
             close_hovered: false,
             maximize_hovered: false,
+            corner_radius: CORNER_R,
         }
     }
 }
@@ -287,11 +290,10 @@ impl Widget for WindowTitleBar {
         // fill must carry the window's bottom corner radius too.
         ctx.set_fill_color(st.bar_color);
         ctx.begin_path();
-        if st.collapsed {
-            ctx.rounded_rect(0.0, 0.0, w, h, CORNER_R);
-        } else {
-            ctx.rounded_rect(0.0, 0.0, w, h, CORNER_R);
-            ctx.rect(0.0, 0.0, w, CORNER_R.min(h));
+        let r = st.corner_radius;
+        ctx.rounded_rect(0.0, 0.0, w, h, r);
+        if !st.collapsed {
+            ctx.rect(0.0, 0.0, w, r.min(h));
         }
         ctx.fill();
 

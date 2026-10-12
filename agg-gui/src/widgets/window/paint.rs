@@ -52,15 +52,31 @@ pub(super) fn paint_window(window: &mut Window, ctx: &mut dyn DrawCtx) {
 
     // Drop shadow + body fill go through the shared chrome helpers so
     // every "framed" widget (Window, NodeWidget, etc.) renders the same
-    // halo + rounded body.
-    let style = super::chrome::ChromeStyle::from_visuals(&v);
-    super::chrome::paint_chrome_shadow(ctx, w, h, &style);
+    // halo + rounded body. The window's own style overrides the radius and
+    // colours (`style.rs`).
+    let ps = &window.panel_style;
+    let mut style = super::chrome::ChromeStyle::from_visuals(&v);
+    style.corner_radius = ps.corner_radius;
+    if let Some(c) = ps.body_color {
+        style.body_color = c;
+    }
+    if let Some(c) = ps.border_color {
+        style.border_color = c;
+    }
+    if ps.shadow {
+        super::chrome::paint_chrome_shadow(ctx, w, h, &style);
+    }
 
+    // A rounded panel paints into its own layer so the rounded clip below
+    // can cut whatever the title bar and content draw; a square one (or one
+    // with the layer turned off) paints straight onto its parent.
     window.foreground_layer_active.set(false);
-    if ctx.supports_compositing_layers() {
+    let layered = window.wants_panel_layer() && ctx.supports_compositing_layers();
+    if layered {
         ctx.push_layer(w, h);
         window.foreground_layer_active.set(true);
     }
+    window.panel_style.panel_layered.set(layered);
 
     // Window body. Expanded windows leave the top strip to `WindowTitleBar`
     // so the top corner alpha comes from one shape, not overlapping fills.
@@ -71,10 +87,14 @@ pub(super) fn paint_window(window: &mut Window, ctx: &mut dyn DrawCtx) {
     // rendering. Without this the entire window — title bar and all
     // content — silently falls back to grayscale text purely because a
     // compositing layer is active, while unlayered panels and menus keep
-    // subpixel. See `DrawCtx::set_layer_opaque_backdrop`.
+    // subpixel. See `DrawCtx::set_layer_opaque_backdrop`. Unlayered, the
+    // current layer (a retained window backbuffer, if any) gets the flag:
+    // text only lands over the opaque body there too.
     ctx.set_layer_opaque_backdrop(true);
 
-    ctx.set_layer_rounded_clip(0.0, 0.0, w, h, CORNER_R);
+    if layered {
+        ctx.set_layer_rounded_clip(0.0, 0.0, w, h, style.corner_radius);
+    }
 
     // Sync the title-bar sub-widget's display state for this frame
     // and paint it.  Positioning was done in `layout`; we just need
@@ -86,8 +106,12 @@ pub(super) fn paint_window(window: &mut Window, ctx: &mut dyn DrawCtx) {
         st.bar_color = if window.drag_mode == DragMode::Move {
             v.window_title_fill_drag
         } else {
-            v.window_title_fill
+            window
+                .panel_style
+                .title_bar_color
+                .unwrap_or(v.window_title_fill)
         };
+        st.corner_radius = window.panel_style.corner_radius;
         st.title_color = v.window_title_text;
         st.collapsed = window.collapsed;
         st.maximized = window.maximized;
@@ -102,7 +126,7 @@ pub(super) fn paint_window(window: &mut Window, ctx: &mut dyn DrawCtx) {
 
     // Outer border frames both body and title region.
     ctx.set_fill_color(v.window_fill); // restore default fill — stroke follows
-    super::chrome::paint_chrome_border(ctx, w, h, &style);
+    super::chrome::paint_chrome_border_width(ctx, w, h, &style, window.panel_style.border_width);
 }
 
 /// Body of `<Window as Widget>::paint_overlay`: draws the resize
@@ -179,7 +203,7 @@ pub(super) fn paint_overlay(window: &mut Window, ctx: &mut dyn DrawCtx) {
     };
 
     // Segments run between the rounded-corner tangent points.
-    let cr = CORNER_R;
+    let cr = window.panel_style.corner_radius;
     if top {
         ctx.begin_path();
         ctx.move_to(cr, h);

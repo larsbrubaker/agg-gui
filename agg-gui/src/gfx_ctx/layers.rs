@@ -52,6 +52,7 @@ impl GfxCtx<'_> {
             alpha: alpha.clamp(0.0, 1.0),
             clip_mask: None,
             clip_saved_path: None,
+            rounded_mask: None,
         });
         // Reset to local-space origin, keeping the device/UX scale so content
         // rasterises 1:1 onto the physical-pixel layer buffer.
@@ -166,9 +167,42 @@ impl GfxCtx<'_> {
             // `save(); clip_path(); …; restore(); stroke();` strokes the
             // outline that was clipped with.
             clip_saved_path: Some(self.path.clone()),
+            rounded_mask: None,
         });
         self.state.transform = local;
         self.state.clip = None;
+    }
+
+    /// Constrain what the current layer composites to the rounded rectangle
+    /// `(x, y, w, h)` with corner radius `r`, in the current (layer-local)
+    /// coordinates: the rectangle is rasterised, anti-aliased, into a coverage
+    /// mask the size of the layer, which `pop_layer` multiplies into the layer
+    /// before compositing it. The software counterpart of the wgpu backend's
+    /// rounded layer clip (`DrawCtx::set_layer_rounded_clip`). Outside a layer
+    /// there is nothing to clip and it does nothing.
+    pub fn set_layer_rounded_clip(&mut self, x: f64, y: f64, w: f64, h: f64, r: f64) {
+        let ctm = self.state.transform;
+        let Some(layer) = self.layer_stack.last_mut() else {
+            return;
+        };
+        let mut outline = PathStorage::new();
+        let r = r.min(w * 0.5).min(h * 0.5).max(0.0);
+        let mut rr = RoundedRect::new(x, y, x + w, y + h, r);
+        rr.normalize_radius();
+        outline.concat_path(&mut rr, 0);
+        let mut mask_fb = Framebuffer::new(layer.fb.width(), layer.fb.height());
+        let white = agg_rust::color::Rgba8::new(255, 255, 255, 255);
+        rasterize_fill(
+            &mut mask_fb,
+            &mut outline,
+            &white,
+            CompOp::SrcOver,
+            None,
+            FillRule::NonZero,
+            &ctm,
+            true,
+        );
+        layer.rounded_mask = Some(mask_fb.pixels().chunks_exact(4).map(|p| p[3]).collect());
     }
 
     /// SrcOver-composite the current layer into the previous render target, then
@@ -183,21 +217,13 @@ impl GfxCtx<'_> {
             if let Some(path) = layer.clip_saved_path.take() {
                 self.path = path;
             }
-            let px = layer.fb.pixels_mut();
             // The mask is rasterised at exactly the layer framebuffer's size in
             // `clip_path`; a mismatch means the layer was resized behind our
             // back and the clip would silently mask the wrong pixels.
-            debug_assert_eq!(mask.len(), px.len() / 4);
-            for (i, cov) in mask.iter().take(px.len() / 4).enumerate() {
-                let di = i * 4;
-                if *cov == 255 {
-                    continue;
-                }
-                let m = *cov as u32;
-                for k in 0..4 {
-                    px[di + k] = ((px[di + k] as u32 * m + 127) / 255) as u8;
-                }
-            }
+            apply_coverage(layer.fb.pixels_mut(), &mask);
+        }
+        if let Some(mask) = layer.rounded_mask.take() {
+            apply_coverage(layer.fb.pixels_mut(), &mask);
         }
         let ox = layer.origin_x as i32;
         let oy = layer.origin_y as i32;
@@ -212,6 +238,22 @@ impl GfxCtx<'_> {
             composite_framebuffers(&mut top.fb, &layer.fb, ox, oy, layer.alpha, parent_clip);
         } else {
             composite_framebuffers(self.base_fb, &layer.fb, ox, oy, layer.alpha, parent_clip);
+        }
+    }
+}
+
+/// Multiply each premultiplied RGBA pixel of `px` by the matching 8-bit
+/// coverage in `mask` (one byte per pixel).
+fn apply_coverage(px: &mut [u8], mask: &[u8]) {
+    debug_assert_eq!(mask.len(), px.len() / 4);
+    for (i, cov) in mask.iter().take(px.len() / 4).enumerate() {
+        if *cov == 255 {
+            continue;
+        }
+        let di = i * 4;
+        let m = *cov as u32;
+        for k in 0..4 {
+            px[di + k] = ((px[di + k] as u32 * m + 127) / 255) as u8;
         }
     }
 }

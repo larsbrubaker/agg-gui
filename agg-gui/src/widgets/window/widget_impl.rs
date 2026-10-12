@@ -158,7 +158,8 @@ impl Widget for Window {
             (0.0, 0.0, 0.0, 0.0)
         };
         let rounded_clip = if self.chrome {
-            Some(CORNER_R)
+            let r = self.panel_style.corner_radius;
+            (r > 0.0).then_some(r)
         } else {
             Some(3.0)
         };

@@ -76,3 +76,8 @@ objc2-app-kit = { version = "0.3", default-features = false, features = [
     "NSResponder",
     "NSRunningApplication",
 ] }
+
+# Decodes the PNGs the screenshot tests write (`screenshot.rs`); the same
+# `png` agg-gui encodes them with.
+[dev-dependencies]
+png = "0.17"

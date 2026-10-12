@@ -15,3 +15,5 @@ mod image_render_transform_tests;
 mod ssaa_composite_tests;
 mod text_widget_inset_tests;
 mod transparent_text_tests;
+mod widget_gallery_placeholder_gpu_tests;
+mod window_rounded_clip_tests;

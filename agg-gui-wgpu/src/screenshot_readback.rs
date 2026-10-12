@@ -119,7 +119,8 @@ impl WgpuGfxCtx {
 ///
 /// `format` says how the texels are stored: a `Bgra8*` texture has R and B
 /// swapped on the way out, so callers always get RGBA order; any other format
-/// is copied as is, so it must be 4 bytes per texel. Blocks on the device
+/// is copied as is, so it must be 4 bytes per texel. A texture that was not
+/// created with `COPY_SRC` is refused with an error. Blocks on the device
 /// until the copy is mapped. Shared by [`WgpuGfxCtx::read_screenshot`] and
 /// [`crate::headless::HeadlessTarget::read_rgba`].
 pub(crate) fn read_texture_rgba(
@@ -128,6 +129,12 @@ pub(crate) fn read_texture_rgba(
     texture: &wgpu::Texture,
     format: wgpu::TextureFormat,
 ) -> Result<Vec<u8>, wgpu::BufferAsyncError> {
+    // A texture without COPY_SRC cannot be read back: the copy would be a
+    // validation error and the capture a blank or garbage image. Refuse it so
+    // the caller reports a failed capture instead.
+    if !texture.usage().contains(wgpu::TextureUsages::COPY_SRC) {
+        return Err(wgpu::BufferAsyncError);
+    }
     let size = texture.size();
     let (w, h) = (size.width, size.height);
 

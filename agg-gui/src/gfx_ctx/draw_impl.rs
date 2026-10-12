@@ -402,6 +402,9 @@ impl crate::draw_ctx::DrawCtx for GfxCtx<'_> {
     fn pop_layer(&mut self) {
         self.pop_layer()
     }
+    fn set_layer_rounded_clip(&mut self, x: f64, y: f64, w: f64, h: f64, r: f64) {
+        self.set_layer_rounded_clip(x, y, w, h, r)
+    }
 
     fn has_image_blit(&self) -> bool {
         true

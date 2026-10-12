@@ -160,6 +160,8 @@ mod golden;
 #[cfg(test)]
 mod gpu_comp_op_tests;
 #[cfg(all(test, not(target_arch = "wasm32")))]
+mod gpu_frame_capture_tests;
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod headless_tests;
 #[cfg(test)]
 mod image_blit_readback_tests;

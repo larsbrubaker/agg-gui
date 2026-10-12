@@ -132,4 +132,42 @@ mod tests {
         assert_eq!(&bytes[..8], b"\x89PNG\r\n\x1a\n");
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    /// Decoded width and height of the PNG at `path`.
+    fn decoded_size(path: &Path) -> (u32, u32) {
+        let file = std::fs::File::open(path).expect("open the written png");
+        let reader = png::Decoder::new(file).read_info().expect("decode the png");
+        let info = reader.info();
+        (info.width, info.height)
+    }
+
+    // Port of agg-sharp `GpuFrameCaptureTests` (`Agg.RenderGl.Compat`): the
+    // shared write every capture goes through. C#'s 4th test,
+    // `AContextWithNothingBoundWritesNothingAndSaysNothing`, is
+    // `empty_readback_is_an_error` above; the 3rd, a target that cannot be
+    // copied from, is `agg-gui-wgpu`'s `gpu_frame_capture_tests.rs`.
+
+    /// Decoded rather than measured on disk: a PNG that is merely non-empty
+    /// proves nothing.
+    #[test]
+    fn a_capture_is_a_decodable_png_the_size_of_the_colour_target() {
+        let path =
+            std::env::temp_dir().join(format!("gpu-frame-capture-{}-size.png", std::process::id()));
+        write_png(&path, &[128; 64 * 32 * 4], 64, 32).expect("write png");
+        assert_eq!(decoded_size(&path), (64, 32));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// A stale file at the path is replaced, not left looking fresh.
+    #[test]
+    fn a_capture_replaces_whatever_was_at_the_path() {
+        let path = std::env::temp_dir().join(format!(
+            "gpu-frame-capture-{}-replace.png",
+            std::process::id()
+        ));
+        std::fs::write(&path, "not a png").expect("write the stale file");
+        write_png(&path, &[0; 8 * 4 * 4], 8, 4).expect("write png");
+        assert_eq!(decoded_size(&path).0, 8);
+        let _ = std::fs::remove_file(&path);
+    }
 }

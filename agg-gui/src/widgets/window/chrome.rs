@@ -165,14 +165,31 @@ pub fn paint_chrome_title_bar(
 
 /// Stroked outer border that frames body + title together.
 pub fn paint_chrome_border(ctx: &mut dyn DrawCtx, w: f64, h: f64, style: &ChromeStyle) {
+    paint_chrome_border_width(ctx, w, h, style, 1.0);
+}
+
+/// [`paint_chrome_border`] with a stroke `width` logical units wide, kept
+/// inside the frame's edge (the path runs `width / 2` in). A width of 0
+/// draws nothing.
+pub fn paint_chrome_border_width(
+    ctx: &mut dyn DrawCtx,
+    w: f64,
+    h: f64,
+    style: &ChromeStyle,
+    width: f64,
+) {
+    if width <= 0.0 {
+        return;
+    }
+    let inset = width * 0.5;
     ctx.set_stroke_color(style.border_color);
-    ctx.set_line_width(1.0);
+    ctx.set_line_width(width);
     ctx.begin_path();
     ctx.rounded_rect(
-        0.5,
-        0.5,
-        (w - 1.0).max(0.0),
-        (h - 1.0).max(0.0),
+        inset,
+        inset,
+        (w - width).max(0.0),
+        (h - width).max(0.0),
         style.corner_radius,
     );
     ctx.stroke();
