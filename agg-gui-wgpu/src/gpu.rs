@@ -365,6 +365,9 @@ pub struct Gpu {
     device: Arc<wgpu::Device>,
     queue: Arc<wgpu::Queue>,
     adapter_info: wgpu::AdapterInfo,
+    /// The adapter the device was opened on, kept for what a device cannot
+    /// report (see [`Gpu::wgpu_adapter`]).
+    wgpu_adapter: wgpu::Adapter,
     surface: wgpu::Surface<'static>,
     surface_format: wgpu::TextureFormat,
     config: wgpu::SurfaceConfiguration,
@@ -483,6 +486,7 @@ impl Gpu {
             device: Arc::new(device),
             queue: Arc::new(queue),
             adapter_info,
+            wgpu_adapter: adapter,
             surface,
             surface_format,
             config: surface_config,
@@ -534,6 +538,14 @@ impl Gpu {
     /// the software fallback — for a host to report.
     pub fn adapter(&self) -> AdapterSummary {
         AdapterSummary::from_info(&self.adapter_info)
+    }
+
+    /// The adapter the device was opened on. A `wgpu::Device` reports its
+    /// own limits and features but not the adapter's downlevel capabilities
+    /// or per-format texture features; a host checks those here (for
+    /// example, whether the GPU can render what its shaders need).
+    pub fn wgpu_adapter(&self) -> &wgpu::Adapter {
+        &self.wgpu_adapter
     }
 
     pub fn surface(&self) -> &wgpu::Surface<'static> {

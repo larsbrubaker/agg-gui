@@ -352,3 +352,26 @@ fn app_frame_at_1280x800_with_readback() {
         read / STEADY
     );
 }
+
+/// The adapter the shared device was opened on stays reachable after the
+/// device is open, so a host can ask it what a `wgpu::Device` cannot report
+/// (downlevel flags, per-format features) without enumerating adapters
+/// again.
+#[test]
+fn the_adapter_stays_available_after_the_device_is_open() {
+    let Some(gpu) = gpu() else {
+        return;
+    };
+    let adapter = gpu.wgpu_adapter();
+    assert_eq!(&adapter.get_info(), gpu.adapter_info());
+    assert_eq!(adapter.get_info(), gpu.device().adapter_info());
+    assert_eq!(
+        adapter.limits().max_texture_dimension_2d,
+        gpu.adapter_limits().max_texture_dimension_2d
+    );
+    // The headless format renders on every adapter, so the adapter reports it.
+    assert!(adapter
+        .get_texture_format_features(HEADLESS_FORMAT)
+        .allowed_usages
+        .contains(wgpu::TextureUsages::RENDER_ATTACHMENT));
+}

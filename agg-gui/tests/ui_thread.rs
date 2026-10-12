@@ -364,3 +364,64 @@ fn rust_only_drain_hooks_run_once_per_drain_after_the_actions() {
     ui_thread::invoke_pending_actions();
     assert_eq!(HOOK_RUNS.with(|c| c.get()), 2, "and on every drain");
 }
+
+#[test]
+fn rust_only_an_interval_clears_itself_from_its_own_tick() {
+    own_queue();
+    let _clock = clock::scoped_virtual(None);
+    let ticks = Arc::new(AtomicUsize::new(0));
+    let slot: Arc<std::sync::Mutex<Option<Arc<ui_thread::RunningInterval>>>> =
+        Arc::new(std::sync::Mutex::new(None));
+    let (t, s) = (Arc::clone(&ticks), Arc::clone(&slot));
+    let interval = ui_thread::set_interval(
+        move || {
+            let count = t.fetch_add(1, Ordering::SeqCst) + 1;
+            let running = s.lock().unwrap().clone();
+            if let Some(running) = running {
+                // Still active while its own tick runs.
+                assert!(running.active());
+                if count == 2 {
+                    // C# `ClearInterval` from inside the tick: must not
+                    // deadlock on the action that is running.
+                    ui_thread::clear_interval(&running);
+                    assert!(!running.active());
+                }
+            }
+        },
+        Duration::from_millis(100),
+    );
+    *slot.lock().unwrap() = Some(Arc::clone(&interval));
+
+    for _ in 0..4 {
+        clock::advance(Duration::from_millis(100));
+        ui_thread::invoke_pending_actions();
+    }
+    assert_eq!(ticks.load(Ordering::SeqCst), 2);
+    assert!(!interval.active());
+    ui_thread::reset_for_tests();
+}
+
+#[test]
+fn rust_only_an_interval_whose_tick_panics_keeps_running() {
+    own_queue();
+    let _clock = clock::scoped_virtual(None);
+    let _handler = set_unhandled_handler(|_| {});
+    let ticks = Arc::new(AtomicUsize::new(0));
+    let t = Arc::clone(&ticks);
+    let interval = ui_thread::set_interval(
+        move || {
+            if t.fetch_add(1, Ordering::SeqCst) == 0 {
+                panic!("first tick failed");
+            }
+        },
+        Duration::from_millis(100),
+    );
+    for _ in 0..3 {
+        clock::advance(Duration::from_millis(100));
+        ui_thread::invoke_pending_actions();
+    }
+    assert_eq!(ticks.load(Ordering::SeqCst), 3);
+    assert!(interval.active());
+    ui_thread::clear_interval(&interval);
+    ui_thread::reset_for_tests();
+}

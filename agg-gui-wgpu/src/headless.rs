@@ -106,6 +106,9 @@ pub struct HeadlessGpu {
     queue: Arc<wgpu::Queue>,
     adapter_info: wgpu::AdapterInfo,
     adapter_limits: wgpu::Limits,
+    /// The adapter the device was opened on, kept for what a device cannot
+    /// report (see [`HeadlessGpu::wgpu_adapter`]).
+    wgpu_adapter: wgpu::Adapter,
     device_lost: Arc<std::sync::atomic::AtomicBool>,
 }
 
@@ -200,6 +203,13 @@ impl HeadlessGpu {
         crate::AdapterSummary::from_info(&self.adapter_info)
     }
 
+    /// The adapter the device was opened on: what a `wgpu::Device` cannot
+    /// report — downlevel capabilities, per-format texture features — is
+    /// asked of it (the same as [`crate::Gpu::wgpu_adapter`]).
+    pub fn wgpu_adapter(&self) -> &wgpu::Adapter {
+        &self.wgpu_adapter
+    }
+
     /// The adapter's own limits, which the device's request raised its
     /// texture size limit to (see `device_descriptor`).
     pub fn adapter_limits(&self) -> &wgpu::Limits {
@@ -255,6 +265,7 @@ fn request_headless_device(force_fallback_adapter: bool) -> Result<HeadlessGpu, 
         queue: Arc::new(queue),
         adapter_info: adapter.get_info(),
         adapter_limits: adapter.limits(),
+        wgpu_adapter: adapter,
         device_lost,
     })
 }

@@ -7,7 +7,9 @@
 //! copy (an action may queue more work, which runs on the next drain; a nested
 //! or concurrent drain never sees a half-built list), every queued action runs
 //! exactly once whichever thread pumps, and an interval's next run is advanced
-//! under the lock so two pumps cannot both run it.
+//! under the lock so two pumps cannot both run it. An interval's action runs
+//! with no lock held, so it may clear its own interval (C# `ClearInterval`
+//! from inside the tick) or queue more work.
 //!
 //! Times are [`crate::clock`] instants. A deferred action or interval queued
 //! from a thread drained by this queue is stamped with that thread's clock
@@ -15,7 +17,7 @@
 //! is not the UI's) is stamped by the next drain, so a virtual UI clock
 //! governs it either way.
 
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
 use std::time::Duration;
 
@@ -57,7 +59,11 @@ impl DueAt {
 /// A repeating action from `set_interval`; pass it to `clear_interval` to stop
 /// it.
 pub struct RunningInterval {
+    /// The repeating action; taken out while it runs, so no lock is held
+    /// through the call, and put back afterwards unless cleared meanwhile.
     action: Mutex<Option<RepeatAction>>,
+    /// Set by `clear_interval` (and `UiQueue::clear`); never unset.
+    cleared: AtomicBool,
     interval: Duration,
     next_run: Mutex<DueAt>,
     queue: Weak<Shared>,
@@ -66,11 +72,47 @@ pub struct RunningInterval {
 impl RunningInterval {
     /// C# `Active`: false once cleared.
     pub fn active(&self) -> bool {
-        lock(&self.action).is_some()
+        !self.cleared.load(Ordering::Acquire)
     }
 
+    /// Stop the interval: mark it cleared and drop its action (when a tick
+    /// is running it, the tick drops it on return instead).
+    fn stop(&self) {
+        self.cleared.store(true, Ordering::Release);
+        let action = lock(&self.action).take();
+        drop(action);
+    }
+
+    /// Run one tick. The action is moved out of its slot for the call, so it
+    /// can call `clear_interval` on itself without deadlocking; a second pump
+    /// reaching the same interval while a tick runs finds the slot empty and
+    /// skips that tick rather than waiting for it.
     fn execute(&self) {
-        if let Some(action) = lock(&self.action).as_mut() {
+        let Some(action) = lock(&self.action).take() else {
+            return;
+        };
+        // Put the action back even when the tick panics (the drain contains
+        // the panic and the interval keeps running, as before).
+        struct Restore<'a> {
+            interval: &'a RunningInterval,
+            action: Option<RepeatAction>,
+        }
+        impl Drop for Restore<'_> {
+            fn drop(&mut self) {
+                let mut slot = lock(&self.interval.action);
+                // Checked under the slot lock: `stop` sets the flag before
+                // taking this lock, so a clear racing this tick either sees
+                // the action back and drops it, or this sees the flag.
+                if !self.interval.cleared.load(Ordering::Acquire) {
+                    *slot = self.action.take();
+                }
+            }
+        }
+        let mut restore = Restore {
+            interval: self,
+            action: Some(action),
+        };
+        if let Some(action) = restore.action.as_mut() {
             action();
         }
     }
@@ -155,6 +197,7 @@ impl UiQueue {
     ) -> Arc<RunningInterval> {
         let running = Arc::new(RunningInterval {
             action: Mutex::new(Some(Box::new(action))),
+            cleared: AtomicBool::new(false),
             interval,
             next_run: Mutex::new(self.due_after(interval)),
             queue: Arc::downgrade(&self.shared),
@@ -210,7 +253,7 @@ impl UiQueue {
         pending.call_later.clear();
         pending.deferred.clear();
         for interval in pending.intervals.drain(..) {
-            *lock(&interval.action) = None;
+            interval.stop();
         }
     }
 
@@ -283,9 +326,9 @@ pub fn clear_interval(running: &Arc<RunningInterval>) {
     match running.queue.upgrade() {
         Some(shared) => {
             let mut pending = lock(&shared.pending);
-            *lock(&running.action) = None;
+            running.stop();
             pending.intervals.retain(|i| !Arc::ptr_eq(i, running));
         }
-        None => *lock(&running.action) = None,
+        None => running.stop(),
     }
 }
