@@ -337,10 +337,13 @@ impl Widget for FlexRow {
                 // Pass inner_w as available width so the child can report its
                 // natural width.
                 let desired = self.children[i].layout(Size::new(inner_w, slot_h));
-                content_widths[i] = desired.width.clamp(
-                    self.children[i].min_size().width,
-                    self.children[i].max_size().width,
-                );
+                // Held to the child's limits (agg-sharp's FlowLayoutWidget
+                // respects MaximumSize). The floor wins where they cross, as
+                // in `WidgetBase::clamp_size` (`f64::clamp` would panic).
+                content_widths[i] = desired
+                    .width
+                    .min(self.children[i].max_size().width)
+                    .max(self.children[i].min_size().width);
             }
         }
 

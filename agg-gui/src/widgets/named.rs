@@ -5,9 +5,11 @@
 //! Widgets that embed a `WidgetBase` take a name directly with
 //! [`Widget::with_name`]; this wrapper is for the rest (custom widgets, or a
 //! boxed child whose concrete type the caller no longer has).  It lays its
-//! single child out at the child's natural size at its own origin, paints
-//! nothing itself, and can report extra inspector `properties()` (tests use
-//! them to read a child's live state).
+//! single child out at the child's natural size at its own origin, reports
+//! the child's `min_size` / `max_size` as its own (so the row it sits in
+//! still holds the child to them), paints nothing itself, and can report
+//! extra inspector `properties()` (tests use them to read a child's live
+//! state).
 
 use crate::draw_ctx::DrawCtx;
 use crate::event::{Event, EventResult};
@@ -67,6 +69,15 @@ impl Widget for Named {
     }
     fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
         &mut self.children
+    }
+    /// The child's floor: the wrapper has no limits of its own, and the
+    /// parent reads them from the widget it lays out, which is this one.
+    fn min_size(&self) -> Size {
+        self.children.first().map_or(Size::ZERO, |c| c.min_size())
+    }
+    /// The child's cap, passed on as [`min_size`](Self::min_size) is.
+    fn max_size(&self) -> Size {
+        self.children.first().map_or(Size::MAX, |c| c.max_size())
     }
     fn layout(&mut self, available: Size) -> Size {
         // `children_mut` lets a caller take the child away; an empty wrapper

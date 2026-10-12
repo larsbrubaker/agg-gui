@@ -89,6 +89,7 @@ mod label_hidpi_backbuffer;
 mod label_theme;
 mod layer_compositing;
 mod layout_lcd;
+mod layout_limits;
 mod layout_request;
 mod lcd_backbuffer_collapse;
 mod lcd_rounded_window;

@@ -21,7 +21,7 @@ use wasm_bindgen::{JsCast, JsValue};
 
 use super::gpu::{Acquire, WebGpu};
 use super::{lifecycle, mark_dirty, report_fatal, INPUT_SINCE_FRAME, POINTERS, POLICY, PRESENTED};
-use super::{platform, sensors, APP, CANVAS, CONFIG, DIRTY, FIRST_PAINT, HOST};
+use super::{platform, sensors, APP, CANVAS, CONFIG, CURSOR, DIRTY, FIRST_PAINT, HOST};
 use crate::dom_math::{fit_backing, sanitize_dpr};
 use crate::error::WebShellError;
 use crate::host::{CanvasGeometry, Frame, WebShellControl, WebShellHost};
@@ -174,6 +174,11 @@ fn tick() {
     // what it changes shows this tick; it runs even while the GPU is not
     // ready to paint.
     agg_gui::ui_thread::invoke_pending_actions();
+    // A cursor changed by code (`agg_gui::invalidate_cursor`) reaches the
+    // canvas while the mouse rests and painting is idle, as agg-gui-shell
+    // does on every paint.
+    let icon = super::with_app(|app| CURSOR.with(|c| c.borrow_mut().after_tick(app))).flatten();
+    super::write_cursor(&canvas, icon);
 
     if !service_device_loss() {
         return;
@@ -200,6 +205,8 @@ fn tick() {
         });
         if should {
             painted = paint(w, h);
+            // The paint re-resolved hover (`App::paint`), which can change it.
+            super::sync_cursor(&canvas);
             if painted {
                 FIRST_PAINT.with(|g| g.mark_painted());
             }

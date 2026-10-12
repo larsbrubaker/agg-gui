@@ -122,8 +122,7 @@ pub(super) fn install_pointer_listeners(canvas: &web_sys::HtmlCanvasElement) {
                     modifiers: Some(mods),
                 });
                 // Reflect the hovered widget's preferred cursor on the canvas.
-                let icon = agg_gui::current_cursor_icon();
-                let _ = c.style().set_property("cursor", icon.to_css());
+                super::sync_cursor(&c);
             }
             if move_forces_repaint(kind) {
                 note_input();
@@ -156,8 +155,7 @@ pub(super) fn install_pointer_listeners(canvas: &web_sys::HtmlCanvasElement) {
                     clicks: ClickCount::Auto,
                 });
                 // A press can claim a drag cursor before any move arrives.
-                let icon = agg_gui::current_cursor_icon();
-                let _ = c.style().set_property("cursor", icon.to_css());
+                super::sync_cursor(&c);
             }
             note_input();
         });
@@ -185,8 +183,7 @@ pub(super) fn install_pointer_listeners(canvas: &web_sys::HtmlCanvasElement) {
                 });
                 // Release re-resolves hover at the release point, so a drag
                 // cursor (splitter arrows) drops without waiting for a move.
-                let icon = agg_gui::current_cursor_icon();
-                let _ = c.style().set_property("cursor", icon.to_css());
+                super::sync_cursor(&c);
             }
             note_input();
         });

@@ -67,6 +67,22 @@ thread_local! {
     static PRESENTED: Cell<bool> = const { Cell::new(false) };
     /// `start` has run on this page.
     static STARTED: Cell<bool> = const { Cell::new(false) };
+    /// The cursor last written to the canvas (see [`crate::cursor`]).
+    static CURSOR: RefCell<crate::cursor::CanvasCursor> =
+        RefCell::new(crate::cursor::CanvasCursor::default());
+}
+
+/// Write `icon` (when there is one) to the canvas' CSS `cursor`.
+fn write_cursor(canvas: &web_sys::HtmlCanvasElement, icon: Option<agg_gui::CursorIcon>) {
+    if let Some(icon) = icon {
+        let _ = canvas.style().set_property("cursor", icon.to_css());
+    }
+}
+
+/// After an input event or a paint: show the current cursor on the canvas
+/// if it changed.
+fn sync_cursor(canvas: &web_sys::HtmlCanvasElement) {
+    write_cursor(canvas, CURSOR.with(|c| c.borrow_mut().after_input()));
 }
 
 /// Request a repaint on the next animation frame. App exports call this after

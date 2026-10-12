@@ -231,7 +231,7 @@ impl Widget for TextField {
 
         // ── Background (none when frameless: the host draws the field) ────
         if self.frame {
-            ctx.set_fill_color(t.background.unwrap_or(v.widget_bg));
+            ctx.set_fill_color(t.background_for(self.focused, self.hovered, v.widget_bg));
             ctx.begin_path();
             ctx.rounded_rect(0.0, 0.0, w, h, r);
             ctx.fill();
@@ -275,7 +275,7 @@ impl Widget for TextField {
             ctx.set_fill_color(t.placeholder_color.unwrap_or(v.text_dim));
             ctx.fill_text(&self.placeholder, text_x, baseline_y);
         } else {
-            ctx.set_fill_color(t.text_color.unwrap_or(v.text_color));
+            ctx.set_fill_color(t.text_color_for(self.focused, self.hovered, v.text_color));
             ctx.fill_text(&text, text_x, baseline_y);
         }
 

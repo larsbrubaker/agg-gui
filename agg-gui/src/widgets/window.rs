@@ -438,16 +438,14 @@ impl Window {
         }
     }
 
-    /// Show or hide through [`show`](Self::show) / [`hide`](Self::hide) and
-    /// the wired `visible_cell`, the generic visibility hook's body.
+    /// Show or hide through [`show`](Self::show) / [`hide`](Self::hide)
+    /// (which keep a wired `visible_cell` in step), the generic visibility
+    /// hook's body.
     pub(crate) fn set_requested_visible(&mut self, visible: bool) {
         if visible {
             self.show();
         } else {
             self.hide();
-        }
-        if let Some(ref cell) = self.visible_cell {
-            cell.set(visible);
         }
     }
 
@@ -544,19 +542,31 @@ impl Window {
         crate::animation::request_draw();
     }
 
+    /// Show the window. A wired `visible_cell` is set too: it is the state
+    /// [`is_visible`](Self::is_visible) reads.
     pub fn show(&mut self) {
         self.visible = true;
+        if let Some(ref cell) = self.visible_cell {
+            cell.set(true);
+        }
         self.fade_out_active.set(false);
         self.visibility_anim.set_target(1.0);
         crate::animation::request_draw();
     }
+    /// Hide the window (not a close: `on_close` does not run). A wired
+    /// `visible_cell` is cleared too.
     pub fn hide(&mut self) {
         self.visible = false;
+        if let Some(ref cell) = self.visible_cell {
+            cell.set(false);
+        }
         self.visibility_anim.set_target(0.0);
         crate::animation::request_draw();
     }
+    /// Hide a shown window or show a hidden one, judged by the wired
+    /// `visible_cell` when there is one.
     pub fn toggle(&mut self) {
-        if self.visible {
+        if self.requested_visible() {
             self.hide();
         } else {
             self.show();
@@ -736,6 +746,8 @@ mod snap_glue;
 mod style;
 mod title_buttons;
 mod widget_impl;
+#[cfg(test)]
+mod visible_cell_tests;
 #[cfg(test)]
 mod window_widget_style_tests;
 

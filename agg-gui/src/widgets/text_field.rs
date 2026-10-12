@@ -60,6 +60,8 @@ mod vertical_keys;
 mod widget_impl;
 
 #[cfg(test)]
+mod edit_field_state_color_tests;
+#[cfg(test)]
 mod frame_tests;
 #[cfg(test)]
 mod inset_tests;

@@ -65,6 +65,7 @@
 #![cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 
 mod config;
+mod cursor;
 mod dom_math;
 mod error;
 mod fatal;

@@ -1,6 +1,6 @@
 //! Port of agg-sharp's `InspectorTests` (Tests/Agg.Tests/Agg.UI/InspectorTests.cs)
-//! for the tests no earlier agg-gui test asserts: refresh and selection by
-//! widget, the header, edits, value clicks, the split, the property rows and
+//! for the tests no earlier agg-gui test asserts: the snapshot, rows following
+//! expansion, refresh and selection by widget, the header, edits, value clicks, the split, the property rows and
 //! box preview, arrow keys, and saved state.
 //!
 //! agg-gui's inspector differs in shape from the C# one it inspired: the host
@@ -256,6 +256,79 @@ fn row_value(rec: &PaintRecorder, label: &str) -> Option<String> {
         .iter()
         .find(|(t, x, ty)| ty == y && *x > 12.0 && t != label)
         .map(|(t, _, _)| t.clone())
+}
+
+/// The snapshot names of the rows the panel's tree shows, top to bottom.
+fn visible_rows(panel: &mut InspectorPanel, nodes: &Rc<RefCell<Vec<InspectorNode>>>) -> Vec<String> {
+    let nodes = nodes.borrow();
+    (0..)
+        .map_while(|row| panel.tree_view.node_at_row(row))
+        .map(|idx| nodes[idx].type_name.to_string())
+        .collect()
+}
+
+#[test]
+fn collect_snapshots_every_widget_depth_first_in_root_coordinates() {
+    let page = sample_tree();
+
+    let nodes = collect(&page);
+
+    // agg-gui widgets carry no `Name`; the sample's `Fixed` widgets report
+    // theirs as their type name, so the names are the type names.
+    let names: Vec<&str> = nodes.iter().map(|n| n.type_name).collect();
+    assert_eq!(names, ["Page", "Box", "Leaf", "Hidden", "Disabled"]);
+    let depths: Vec<usize> = nodes.iter().map(|n| n.depth).collect();
+    assert_eq!(depths, [0, 1, 2, 1, 1]);
+    // C#'s `leafNode.Widget == leaf`: the snapshot holds no widget reference;
+    // its path is what reaches the live widget again.
+    let leaf_node = &nodes[LEAF];
+    assert_eq!(leaf_node.type_name, "Leaf");
+    assert_eq!(leaf_node.path, [0, 0]);
+    // C#'s RectangleDouble(30, 35, 90, 55) is (left, bottom, right, top).
+    assert_eq!(leaf_node.screen_bounds, Rect::new(30.0, 35.0, 60.0, 20.0));
+    assert_eq!(nodes[BOX].child_count, 1);
+    assert_eq!(nodes[BOX].padding, Insets::all(6.0));
+    assert!(!nodes[3].visible);
+    assert!(!nodes[4].enabled);
+
+    // C#'s row label is `TextWidget "Disabled"` (type, then name); agg-gui's
+    // tree row reads the type name and the on-screen size.
+    let shared = Rc::new(RefCell::new(nodes));
+    let mut panel = new_panel(&shared);
+    place(&mut panel, 250.0, 380.0);
+    assert_eq!(panel.tree_view.nodes[4].label, "Disabled  20×12");
+}
+
+#[test]
+fn rows_follow_expansion_with_every_node_expanded_at_first() {
+    let (mut page, nodes, mut panel) = page_with_panel(380.0);
+
+    // agg-gui opens every node it has not seen before.
+    assert_eq!(
+        visible_rows(&mut panel, &nodes),
+        ["Page", "Box", "Leaf", "Hidden", "Disabled"]
+    );
+
+    panel.set_expanded(BOX, false);
+    assert_eq!(
+        visible_rows(&mut panel, &nodes),
+        ["Page", "Box", "Hidden", "Disabled"]
+    );
+
+    // A widget added later starts open too.
+    let mut added = Fixed::new("Added", 5.0, 5.0, 0.0, 0.0);
+    added
+        .children
+        .push(Box::new(Fixed::new("Inner", 2.0, 2.0, 0.0, 0.0)));
+    page.children.push(Box::new(added));
+    refresh(&mut page, &nodes, &mut panel);
+    assert!(visible_rows(&mut panel, &nodes).contains(&"Inner".to_string()));
+
+    panel.set_expanded(PAGE, false);
+    assert_eq!(visible_rows(&mut panel, &nodes), ["Page"]);
+    panel.set_expanded(BOX, true);
+    panel.set_expanded(PAGE, true);
+    assert!(visible_rows(&mut panel, &nodes).contains(&"Leaf".to_string()));
 }
 
 #[test]
