@@ -32,7 +32,7 @@
 //!   `press_modifier_keys`/`release_modifier_keys` with `ModifierKeys`,
 //!   `select_all`, `select_none`) and image searches (`get_current_screen`,
 //!   `image_exists`, `wait_for_image`) and image gestures (`click_image`,
-//!   `drag_image`, `drop_image`, `drag_drop_image`).
+//!   `drag_image`, `drop_image`, `drag_drop_image`) and `complete_dialog`.
 //! - [`image_match`] — `FindLeastSquaresMatch`: one image inside another.
 //! - [`image_source`] — `ImageNeedle` and `ImageSource`: needles by file name
 //!   (C#'s images folder, or an application's own loader).
@@ -47,10 +47,16 @@
 //! - [`pointer_reach`] — `PointerReach`: whether a press can get to a widget.
 //! - [`pointer_state`] — C#'s `UnderMouseState`, `MouseCaptured`,
 //!   `ChildHasMouseCaptured` and `Focused` for a found widget.
+//! - [`dialog`] — `AutomationFileDialog` (C# `AutomationDialogProvider`):
+//!   the in-canvas file dialog an application shows under automation, and
+//!   the `ModalPresenter` it is shown through.
+//! - [`startup_failure_log`] — `StartupFailureLog`: an application's startup
+//!   failure, appended to `widget_not_found_message`.
 //! - [`tree_query`] — `WidgetHandle`, `NamedHit`, lookup by name, screen and
 //!   clipped rectangles, `ActuallyVisibleOnScreen`, inherited enabled state,
 //!   `Parents<T>`/`Children<T>`.
 
+pub mod dialog;
 pub mod driver;
 pub mod execute;
 pub mod image_match;
@@ -65,11 +71,16 @@ pub mod pointer_state;
 pub mod probe;
 pub mod runner;
 pub mod search_region;
+pub mod startup_failure_log;
 pub mod tree_query;
 pub mod typed_key_parser;
 pub mod waits;
 
 pub use agg_gui::NamedTarget;
+pub use dialog::{
+    parse_dialog_text, AutomationFileDialog, AutomationModalPresenter, FileDialogKind,
+    FileDialogResult, ModalPresenter, AUTOMATION_DIALOG_TEXT_EDIT, AUTOMATION_DIALOG_WARNING,
+};
 pub use driver::{
     BackgroundBusy, ClockPolicy, FrameKind, HeadlessDriver, HeadlessPainter, HeadlessWindow,
     SoftwarePainter, UiDriver,
@@ -86,6 +97,7 @@ pub use runner::{
     ImageDragDropOpts, ImageOpts, ModifierKeys, WaitOpts,
 };
 pub use search_region::{ScreenRectangle, SearchRegion};
+pub use startup_failure_log::StartupFailureLog;
 pub use tree_query::{NamedHit, WidgetHandle};
 pub use typed_key_parser::{ParseError, TypedKey, TypedKeyParser};
 pub use waits::static_delay;

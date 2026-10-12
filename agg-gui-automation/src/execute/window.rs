@@ -11,8 +11,19 @@
 //! Bringing it up (creating the [`HeadlessDriver`], painting the first frame,
 //! firing `on_load`) is the run's bring-up phase, timed by its own budget
 //! rather than the test's.
+//!
+//! The window is also a [`ModalPresenter`]: once a presenter has been asked
+//! for ([`AutomationWindow::modal_presenter`], or a modal presented on the
+//! window itself), bring-up stacks the built-in overlay layer
+//! (`dialog/overlay.rs`) above the root, where
+//! [`AutomationFileDialog`](crate::AutomationFileDialog) and other modals show.
 
+use std::cell::Cell;
+
+use agg_gui::widgets::Stack;
 use agg_gui::{App, Widget};
+
+use crate::dialog::{AutomationModalPresenter, ModalPresenter};
 
 use crate::driver::{ClockPolicy, FrameKind, HeadlessDriver, UiDriver};
 use crate::probe::ProbeWidget;
@@ -41,6 +52,8 @@ pub struct AutomationWindow {
     height: f64,
     on_load: Option<LoadHook>,
     close_hooks: CloseHooks,
+    presenter: AutomationModalPresenter,
+    presenter_used: Cell<bool>,
 }
 
 impl AutomationWindow {
@@ -63,6 +76,8 @@ impl AutomationWindow {
             height,
             on_load: None,
             close_hooks: CloseHooks::default(),
+            presenter: AutomationModalPresenter::default(),
+            presenter_used: Cell::new(false),
         }
     }
 
@@ -111,6 +126,14 @@ impl AutomationWindow {
         self
     }
 
+    /// The handle an application presents modals through (MatterCAD's
+    /// popup layer, for this window): asking for it puts the built-in
+    /// overlay layer above the root at bring-up. Clones share one queue.
+    pub fn modal_presenter(&self) -> AutomationModalPresenter {
+        self.presenter_used.set(true);
+        self.presenter.clone()
+    }
+
     /// The window's logical size.
     pub fn size(&self) -> (f64, f64) {
         (self.width, self.height)
@@ -121,8 +144,17 @@ impl AutomationWindow {
     /// Returns the driver and the close hooks for the close phase.
     pub(crate) fn bring_up(self, clock: ClockPolicy) -> (HeadlessDriver, CloseHooks) {
         let scale = agg_gui::ux_scale::effective_scale();
+        let root: Box<dyn Widget> = if self.presenter_used.get() {
+            Box::new(
+                Stack::new()
+                    .add(self.root)
+                    .add(Box::new(self.presenter.layer())),
+            )
+        } else {
+            self.root
+        };
         let mut driver = HeadlessDriver::with_clock(
-            self.root,
+            root,
             (self.width * scale).round() as u32,
             (self.height * scale).round() as u32,
             clock,
@@ -132,5 +164,15 @@ impl AutomationWindow {
             hook(driver.app_mut());
         }
         (driver, self.close_hooks)
+    }
+}
+
+/// Presenting on the window itself (before it is shown, say from `build`)
+/// queues the modal for the built-in overlay layer, as
+/// [`AutomationWindow::modal_presenter`]'s handle does afterwards.
+impl ModalPresenter for AutomationWindow {
+    fn present(&self, modal: Box<dyn Widget>) {
+        self.presenter_used.set(true);
+        self.presenter.present(modal);
     }
 }

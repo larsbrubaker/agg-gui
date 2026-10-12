@@ -88,10 +88,15 @@ pub type WidgetPredicate<'p> = &'p dyn Fn(&dyn Widget) -> bool;
 
 impl AutomationRunner {
     /// C# `WidgetNotFoundMessage`: the message a named-widget failure is
-    /// reported with. The application's last startup failure is appended
-    /// once `StartupFailureLog` lands (design slice 29).
+    /// reported with, carrying the application's last startup failure
+    /// ([`StartupFailureLog::append_to`](crate::StartupFailureLog::append_to))
+    /// when there is one: a window whose application died during startup has
+    /// none of its widgets, and the first name a test asks for is a symptom
+    /// several steps downstream of the cause.
     pub fn widget_not_found_message(operation: &str, widget_name: &str) -> String {
-        format!("{operation} Failed: Named GuiWidget not found [{widget_name}]")
+        crate::StartupFailureLog::append_to(&format!(
+            "{operation} Failed: Named GuiWidget not found [{widget_name}]"
+        ))
     }
 
     /// A window rectangle (logical, Y-up, as [`tree_query`] reports it) as

@@ -93,8 +93,10 @@ src/driver/window.rs       (exists) HeadlessWindow (the "SystemWindow" for tests
 src/driver/live.rs         (feature live) LiveDriver over agg_gui_shell::ShellSession
 src/probe.rs               (exists) ProbeWidget: generic C#-GuiWidget stand-in (name, bounds, colour, event log/callbacks, C# Click semantics)
 src/overlay.rs             RenderMouse (simulated pointer drawing), drawn by the LiveDriver (slice 31)
-src/dialog_provider.rs     AutomationFileDialog (AutomationDialogProvider)
-src/startup_failure_log.rs StartupFailureLog
+src/dialog/mod.rs          (exists) AutomationFileDialog (AutomationDialogProvider), ModalPresenter
+src/dialog/overlay.rs      (exists) AutomationWindow's built-in overlay layer, AutomationModalPresenter
+src/runner/dialog.rs       (exists) complete_dialog (MatterCAD's CompleteDialog)
+src/startup_failure_log.rs (exists) StartupFailureLog
 src/thread_stack_dump/     (feature stack-dump) ThreadStackDump
 tests/*.rs                 the 103 ports (section 8)
 tests/live/*.rs            live tests, `harness = false` (winit on macOS needs the main thread)
@@ -129,7 +131,7 @@ tests/live/*.rs            live tests, `harness = false` (winit on macOS needs t
 | `GetByNameResults.NamedObject` | `NamedHit.target: Option<NamedTarget>` (exists); `None` when the widget carries the name |
 | `GetObjectByName` | `get_object_by_name(name, &WaitOpts) -> Option<NamedHit>` (exists): the first hit, a widget or a `NamedTarget` |
 | `SetTarget` (`DebugShowBounds`) | agg-gui has no bounds overlay; `get_widget_by_name` flashes nothing until one exists |
-| `WidgetNotFoundMessage` | `widget_not_found_message(op, name)` exists; it appends `StartupFailureLog` once that lands (slice 29) |
+| `WidgetNotFoundMessage` | `widget_not_found_message(op, name)` (exists), with `StartupFailureLog::append_to` applied |
 
 **Images**
 
@@ -268,12 +270,12 @@ Rules 3 and 4 are the runner's behaviour for every consumer, not a hook: both ma
 
 ## 7. Dialog provider, live shell, diagnostics
 
-**`AutomationDialogProvider`:**
-- agg-gui has no file-dialog abstraction; MatterCAD has `FileService`. The automation crate provides `AutomationFileDialog::show(presenter, kind, callback)`. It builds an in-canvas modal (agg-gui `ModalSheet`) with C#'s warning label and a `TextField` named **"Automation Dialog TextEdit"**, focused on load.
-- Enter closes it. The text is split on `;` and quotes are trimmed, giving `file_name` and `file_names`. Text of length 2 or less is treated as "cancelled", as in C#. The callback is posted with `ui_thread::run_on_idle`.
-- `SelectFolderDialog` (NotImplemented in C#) is left out until a test needs it. `ResolveFilePath` passes the path through; `ShowFileInFolder` does nothing.
-- Presenting goes through a small `ModalPresenter` trait: `AutomationWindow` implements it with a built-in overlay stack, and MatterCAD implements it with its `popup_layer`.
-- MatterCAD adds `AutomationFileService: FileService` that opens this dialog. C#'s `CompleteDialog` then ports word for word: wait for focus, `type_text(paths)`, `{Enter}`.
+**`AutomationDialogProvider`** (exists, `src/dialog/`):
+- agg-gui has no file-dialog abstraction; MatterCAD has `FileService`. `AutomationFileDialog::show(presenter: &dyn ModalPresenter, kind: FileDialogKind, callback: impl FnOnce(FileDialogResult) + 'static)` builds an in-canvas `ModalSheet` (C#'s 600 × 200) with C#'s warning label and a `TextField` named **"Automation Dialog TextEdit"** (`AUTOMATION_DIALOG_TEXT_EDIT`), focused through `focus::request_focus` as it shows.
+- Enter closes it (the field's `on_enter`, or the sheet's default action when the field is unfocused). `parse_dialog_text` splits on `;` and trims quotes, giving `FileDialogResult { kind, file_name, file_names }`; text of length 2 or less (UTF-16 units) is "cancelled", as in C#. Escape closes it cancelled. The callback runs on idle: it waits in a UI-thread-local queue and a `ui_thread::run_on_idle` action posted from that thread runs it, so it need not be `Send`.
+- `FileDialogKind` is `Open` / `Save`. `SelectFolderDialog` (NotImplemented in C#) is left out until a test needs it. `resolve_file_path` passes the path through; `show_file_in_folder` does nothing.
+- `ModalPresenter { fn present(&self, modal: Box<dyn Widget>) }`: the modal hides itself when done and the presenter drops it. `AutomationWindow` implements it, and `AutomationWindow::modal_presenter()` hands out a cloneable `AutomationModalPresenter`; either puts the built-in overlay layer (`dialog/overlay.rs`) above the root at bring-up, so a window that never asks keeps its tree as built. MatterCAD implements it with its `popup_layer`.
+- MatterCAD adds `AutomationFileService: FileService` that opens this dialog. C#'s `CompleteDialog` is `AutomationRunner::complete_dialog(text)` (`runner/dialog.rs`): find the field within 5 s (C# `RequireWidget`'s message otherwise), wait up to 5 s for it to contain focus, `type_text(text)`, `{Enter}`, wait up to 5 s for it to disappear.
 
 **Live shell**
 - **New in `agg-gui-shell`: `ShellSession`.** It does the same window and GPU bring-up as `run`, but returns control to the caller:
@@ -285,10 +287,11 @@ Rules 3 and 4 are the runner's behaviour for every consumer, not a hook: both ma
 - Live tests are separate `harness = false` binaries (macOS needs the event loop on the main thread). The budget watchdog is a helper thread: it sets `cancel`, and after a grace period it dumps stacks and calls `process::exit`.
 - The web shell is out of scope for v1, as it is in C# (wasm can't block). The `UiDriver` trait leaves room for a later async front.
 
-**`StartupFailureLog`:**
-- process-wide `Mutex<Option<String>>`
-- `record(phase, &dyn Error or panic payload)`, `reset()`, `append_to(msg)`
-- an immediate write to the real stderr fd, which libtest's capture does not intercept.
+**`StartupFailureLog`** (exists, `src/startup_failure_log.rs`):
+- process-wide `Mutex` state; `last_failure_description()`
+- `record(phase, &dyn Error)` (display text plus `source()` chain) and `record_panic(phase, payload)`, each with the backtrace at the record site; `reset()`, `append_to(msg)`
+- an immediate write to `std::io::stderr()`, which libtest's capture (the `print!` family only) does not intercept; `set_immediate_sink` replaces it for tests
+- the time stamp is UTC `HH:mm:ss.fffZ` (C# used local time; there is no time-zone database here).
 
 **`ThreadStackDump`** (`stack-dump` feature). Same design as C#: capture a dump in-process, then walk it.
 - `minidump-writer` writes the current process from a capture thread; `minidump-processor`/`minidump-unwind` walk it with local symbols.
@@ -336,7 +339,6 @@ Rules 3 and 4 are the runner's behaviour for every consumer, not a hook: both ma
 | 26 | Flow, part 2 | NestedMaxFitOrStretchToChildrenParentWidth, NestedMinFitOrStretchToChildrenParentWidth, LeftToRightAnchorLeftBottomTests, AnchorLeftRightTests, NestedFlowWidgetsTopToBottomTests, NestedFlowWidgetsRightToLeftTests, NestedFlowWidgetsLeftToRightTests, FlowWithMaxSizeChildAllocatesToOthers |
 | 26b | Flow, part 3 | LeftRightWithAnchorLeftRightChildTests, RightLeftWithAnchorLeftRightChildTests, BottomTopWithAnchorBottomTopChildTests, TopBottomWithAnchorBottomTopChildTests, ChildVisibilityChangeCauseResize, EnsureCorrectSizeOnChildrenVisibleChange, ChildHAnchorPriority, TestVAnchorCenter |
 | 27 | G15 paint containment (the runner already captures what `report_unhandled` reports) | AThrowingDrawIsReportedAndTheEventLoopKeepsRunning, ADrawThatThrowsEveryFrameForLongerThanTheMatrixStackIsDeepStillCostsOnlyItsOwnFrames |
-| 29 | `StartupFailureLog`, `widget_not_found_message`, `AutomationFileDialog`/`ModalPresenter` | (crate unit tests) |
 | 30 | ThreadStackDump, part 1 (retry and dump-writer subprocess) | ACaptureThatLosesTheDumpRaceIsRetakenNotReparsed, ACaptureThatNeverSucceedsGivesUpAndReportsEveryAttempt, WritingADumpCapturesTheDumpWritersLogInsteadOfPrintingIt, ADumpWriterWithMoreOutputThanAPipeHoldsStillFinishes, ADumpWriterThatNeverExitsIsKilledAtTheTimeout |
 | 30b | ThreadStackDump, part 2 (minidump capture and walk) | CaptureNamesTheCallingThreadsOwnFrames, ADumpThatCannotWalkItsCapturingThreadIsRejected, RegisteredThreadsAreLabelledInTheDump, ATruncatedThreadCommandIsNotRead, ADumpWithTwoThreadsOnOneStackPointerStillReports |
 | 30c | Load and close watchdogs write dumps to `TestResults/` | AnExpectedTimeoutLeavesNoThreadDump |
@@ -352,7 +354,7 @@ Rules 3 and 4 are the runner's behaviour for every consumer, not a hook: both ma
 |---|---|---|
 | M2 | Back `TestHarness` with the runner | Built on `AutomationRunner::attach`, `HeadlessDriver::with_painter` (the wgpu `HeadlessFrame`, or no pixels), `set_background_busy` and `wait_for_idle` (section 3). `TestHarness` owns a `HeadlessDriver` (settings isolation, sample part, compute workers move to a `MatterCadAppWindow` builder) and exposes `runner()`. `frame`/`settle`/`pump_until_idle` use the driver's frame and `ClockPolicy::Real` when workers are on. Existing helpers delegate. |
 | M3 | Delete the name hacks | mattercad-app's View3D and design page implement `find_named_targets` (Object3D controls by C# name, scene children); `CONTROL_KEYS` and `scene_objects`/`controls` string parsing go. `menu_automation` uses menu-row named targets. |
-| M4 | Single name path and `complete_dialog` | MatterCAD has `run_test`/`new_part_tab_test` and the extension traits. Left: its harness drops its own `on_screen` lookup for `name_pick::find_on_screen` / `AutomationRunner::find_now` (section 6), and `complete_dialog` waits on slice 29's `AutomationFileDialog`. |
+| M4 | Single name path and `complete_dialog` | MatterCAD has `run_test`/`new_part_tab_test` and the extension traits. Left: its harness drops its own `on_screen` lookup for `name_pick::find_on_screen` / `AutomationRunner::find_now` (section 6), and its file service opens `AutomationFileDialog` through a `ModalPresenter` on its `popup_layer`, so `complete_dialog` answers it. |
 | M5–M9 | Move the 14 ported test files to the runner API, about 3 files per slice | `click_by_name`/`drag_drop_by_name`/`type_text`/`wait_for_name`/`assert` replace harness calls; `MAX_WAIT_FRAMES` becomes C#'s seconds; teleporting clicks become stepped moves (fix whatever this exposes, test-first). |
 | M10 | Remove the old helpers | Delete the deprecated `TestHarness` helpers (`click`, `type_keys`, `drag`, `MAX_WAIT_FRAMES`); update crate docs. That leaves 47 of the 61 C# AutomationTests files, which can then be ported one per slice with the same API. |
 
