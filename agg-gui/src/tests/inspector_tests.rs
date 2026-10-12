@@ -259,7 +259,10 @@ fn row_value(rec: &PaintRecorder, label: &str) -> Option<String> {
 }
 
 /// The snapshot names of the rows the panel's tree shows, top to bottom.
-fn visible_rows(panel: &mut InspectorPanel, nodes: &Rc<RefCell<Vec<InspectorNode>>>) -> Vec<String> {
+fn visible_rows(
+    panel: &mut InspectorPanel,
+    nodes: &Rc<RefCell<Vec<InspectorNode>>>,
+) -> Vec<String> {
     let nodes = nodes.borrow();
     (0..)
         .map_while(|row| panel.tree_view.node_at_row(row))

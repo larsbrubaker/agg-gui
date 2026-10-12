@@ -13,8 +13,8 @@ use std::sync::Arc;
 use super::*;
 use crate::framebuffer::Framebuffer;
 use crate::gfx_ctx::GfxCtx;
-use crate::Point;
 use crate::widget::{paint_subtree, Widget};
+use crate::Point;
 
 const FONT_BYTES: &[u8] = include_bytes!("../../../../demo/assets/CascadiaCode.ttf");
 
@@ -193,7 +193,10 @@ fn rust_only_unset_state_colors_fall_back_to_the_normal_colors() {
     for state in [State::Normal, State::Hovered, State::Focused] {
         let mut f = field("", theme);
         let (_, bg) = border_and_background(&render(&mut f, state));
-        assert!(close(bg, rgb_of(theme.background.unwrap())), "background {bg:?}");
+        assert!(
+            close(bg, rgb_of(theme.background.unwrap())),
+            "background {bg:?}"
+        );
         let mut f = field("MMMM", theme);
         let fb = render(&mut f, state);
         let p = strongest_text_pixel(&fb, rgb_of(theme.background.unwrap()));
@@ -209,5 +212,8 @@ fn rust_only_set_theme_repaints_a_laid_out_field() {
     f.set_theme(t);
     let (b, bg) = border_and_background(&render(&mut f, State::Normal));
     assert!(close(b, rgb_of(t.border_color.unwrap())), "border {b:?}");
-    assert!(close(bg, rgb_of(t.background.unwrap())), "background {bg:?}");
+    assert!(
+        close(bg, rgb_of(t.background.unwrap())),
+        "background {bg:?}"
+    );
 }

@@ -745,9 +745,9 @@ mod resize;
 mod snap_glue;
 mod style;
 mod title_buttons;
-mod widget_impl;
 #[cfg(test)]
 mod visible_cell_tests;
+mod widget_impl;
 #[cfg(test)]
 mod window_widget_style_tests;
 

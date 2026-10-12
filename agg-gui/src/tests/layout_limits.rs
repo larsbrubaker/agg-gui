@@ -97,7 +97,10 @@ fn rust_only_flex_row_clamps_a_fixed_child_to_its_max_width() {
     let (a, b) = (row.children()[0].bounds(), row.children()[1].bounds());
     assert_eq!(a.width, 100.0);
     assert_eq!(b.width, 50.0);
-    assert!(b.x >= a.x + a.width, "the second child starts after the first");
+    assert!(
+        b.x >= a.x + a.width,
+        "the second child starts after the first"
+    );
 }
 
 #[test]

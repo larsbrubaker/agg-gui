@@ -15,8 +15,8 @@ const TEST_FONT: &[u8] = include_bytes!("../../../../demo/assets/CascadiaCode.tt
 fn wired(initial: bool) -> (Window, Rc<Cell<bool>>) {
     let font = Arc::new(Font::from_slice(TEST_FONT).expect("parse the test font"));
     let cell = Rc::new(Cell::new(initial));
-    let w = Window::new("Wired", font, Box::new(Container::new()))
-        .with_visible_cell(Rc::clone(&cell));
+    let w =
+        Window::new("Wired", font, Box::new(Container::new())).with_visible_cell(Rc::clone(&cell));
     (w, cell)
 }
 
