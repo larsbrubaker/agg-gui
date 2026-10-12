@@ -322,6 +322,9 @@ pub(crate) struct RetainedWgpuLayer {
     pub(crate) view: wgpu::TextureView,
     pub(crate) width: u32,
     pub(crate) height: u32,
+    /// Sub-pixel translation the content was rastered with
+    /// (`layers::LayerPlacement`).
+    pub(crate) frac: (f64, f64),
     pub(crate) rounded_clip: Option<LayerRoundedClip>,
 }
 

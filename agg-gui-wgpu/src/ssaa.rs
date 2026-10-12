@@ -19,6 +19,11 @@
 //! composites the downsampled colour onto the active 2-D render target via
 //! the shared `tex_pipeline`.
 //!
+//! The framebuffer's colour is treated as **premultiplied**: drawing with a
+//! straight-alpha blend (`SrcAlpha / OneMinusSrcAlpha`, alpha
+//! `One / OneMinusSrcAlpha`) over a transparent clear leaves premultiplied
+//! texels, and the composite blends them `One / OneMinusSrcAlpha`.
+//!
 //! Resolving into a private same-size texture and then alpha-blending it
 //! into the target through a textured quad means pixels the widget didn't
 //! render stay transparent and the underlying 2-D content shows through —
@@ -190,9 +195,11 @@ impl SsaaFramebuffer {
 
     /// Composite the framebuffer's colour onto `target_view`'s `dst_rect`
     /// (Y-up screen-space pixels of the target).  Uses the shared 2-D
-    /// textured-quad pipeline with `BLEND_STANDARD` so transparent pixels
-    /// (where the widget didn't render) preserve the 2-D content
-    /// underneath.
+    /// textured-quad pipeline with a premultiplied blend
+    /// (`One / OneMinusSrcAlpha`): content drawn with straight-alpha
+    /// blending into a transparent-cleared framebuffer is premultiplied, so
+    /// it composites once, and transparent pixels (where the widget didn't
+    /// render) preserve the 2-D content underneath.
     ///
     /// At ≥4× linear minification (e.g. SSAA 16×) a single bilinear tap
     /// only reads 4 of the 16 source texels per output pixel; in that case

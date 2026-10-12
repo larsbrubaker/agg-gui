@@ -173,6 +173,12 @@ pub struct WgpuPipelines {
     pub gradient_bgl1: wgpu::BindGroupLayout,
 
     // ── Textured quad (SSAA framebuffer composite) ────────────────────────────
+    /// SSAA composite (`SsaaFramebuffer::blit_to`): the `tex` shader with a
+    /// premultiplied blend (`One / OneMinusSrcAlpha`). Content drawn with
+    /// `BLEND_STANDARD` (or wgpu's `ALPHA_BLENDING`) into a transparent-cleared
+    /// framebuffer is premultiplied there, so blending it straight-alpha would
+    /// apply its alpha twice. The downsample variants below blend the same way;
+    /// averaging premultiplied texels is also the correct box filter.
     pub tex_pipeline: wgpu::RenderPipeline,
     /// Image blits (`DrawCommand::Textured`: images, Label backbuffers,
     /// screenshots): the `tex` shader with a premultiplied blend
@@ -429,7 +435,7 @@ impl WgpuPipelines {
             &tex_sm,
             &[vbl_pos2_uv2()],
             surface_format,
-            Some(BLEND_STANDARD),
+            Some(BLEND_PREMUL),
             wgpu::ColorWrites::ALL,
             sample_count,
         );
@@ -454,7 +460,7 @@ impl WgpuPipelines {
             &tex_ds3_sm,
             &[vbl_pos2_uv2()],
             surface_format,
-            Some(BLEND_STANDARD),
+            Some(BLEND_PREMUL),
             wgpu::ColorWrites::ALL,
             sample_count,
         );
@@ -467,7 +473,7 @@ impl WgpuPipelines {
             &tex_ds4_sm,
             &[vbl_pos2_uv2()],
             surface_format,
-            Some(BLEND_STANDARD),
+            Some(BLEND_PREMUL),
             wgpu::ColorWrites::ALL,
             sample_count,
         );

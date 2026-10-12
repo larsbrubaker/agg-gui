@@ -244,11 +244,24 @@ impl GpuFrames {
 /// Software render of `root`'s subtree, flipped top-row-first like the GPU
 /// readback.
 pub(crate) fn software_tree(w: u32, h: u32, bg: Color, root: &mut dyn Widget) -> Vec<u8> {
+    software_tree_with(w, h, bg, root, &|_| {})
+}
+
+/// [`software_tree`] with `before` (a transform, say) applied first, as
+/// [`GpuFrames::paint`] does.
+pub(crate) fn software_tree_with(
+    w: u32,
+    h: u32,
+    bg: Color,
+    root: &mut dyn Widget,
+    before: &dyn Fn(&mut dyn DrawCtx),
+) -> Vec<u8> {
     let mut fb = Framebuffer::new(w, h);
     {
         let mut ctx = GfxCtx::new(&mut fb);
         ctx.set_lcd_mode(false);
         ctx.clear(bg);
+        before(&mut ctx);
         paint_subtree(root, &mut ctx);
     }
     fb.pixels_flipped()

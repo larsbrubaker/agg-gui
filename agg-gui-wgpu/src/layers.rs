@@ -15,6 +15,10 @@
 //!   edges built in (vs. the GL stencil path's binary edges + 1px feather).
 //! - Retained layers persist the `wgpu::Texture` across frames in
 //!   `retained_layers`, keyed by `u64` widget handle.
+//! - A layer composites at whole parent pixels: the sub-pixel part of the
+//!   push-time translation is drawn into the layer's content instead
+//!   (`LayerPlacement`), so buffered content lands where direct drawing
+//!   would and the composite never resamples.
 
 use std::sync::Arc;
 
@@ -43,6 +47,36 @@ fn scaled_layer_size(width: f64, height: f64, sx: f64, sy: f64) -> (i32, i32) {
         (width * sx).ceil().max(1.0) as i32,
         (height * sy).ceil().max(1.0) as i32,
     )
+}
+
+/// Where a layer pushed under transform `t` sits on its parent target: the
+/// composite origin on whole parent pixels, the sub-pixel remainder of the
+/// transform's translation that the layer's own content carries instead
+/// (so drawing into the layer lands on the same device pixels as drawing
+/// straight onto the parent, and the composite is a 1:1 blit that never
+/// resamples), and the texture size in physical pixels, one pixel wider or
+/// taller when the remainder pushes content over an edge.
+struct LayerPlacement {
+    origin: (f64, f64),
+    frac: (f64, f64),
+    scale: (f64, f64),
+    size: (u32, u32),
+}
+
+fn layer_placement(t: &TransAffine, width: f64, height: f64) -> LayerPlacement {
+    let (sx, sy) = layer_scale_from_transform(t);
+    let origin = (t.tx.floor(), t.ty.floor());
+    let frac = (t.tx - origin.0, t.ty - origin.1);
+    let (w, h) = scaled_layer_size(width, height, sx, sy);
+    // Grow only when the remainder carries content past the unshifted size.
+    let w = ((width * sx + frac.0).ceil().max(1.0) as i32).max(w) as u32;
+    let h = ((height * sy + frac.1).ceil().max(1.0) as i32).max(h) as u32;
+    LayerPlacement {
+        origin,
+        frac,
+        scale: (sx, sy),
+        size: (w, h),
+    }
 }
 
 fn transformed_rounded_clip(
@@ -206,19 +240,18 @@ impl WgpuGfxCtx {
         // Snapshot the parent's active scissor BEFORE the layer resets clip
         // state — the composite blit on pop must be clipped to it.
         let parent_clip = self.current_clip();
-        let origin_x = self.ctm().tx;
-        let origin_y = self.ctm().ty;
-        let (scale_x, scale_y) = layer_scale_from_transform(self.ctm());
-        let (w, h) = scaled_layer_size(width, height, scale_x, scale_y);
-        let w = w as u32;
-        let h = h as u32;
+        let placement = layer_placement(self.ctm(), width, height);
+        let (origin_x, origin_y) = placement.origin;
+        let (frac_x, frac_y) = placement.frac;
+        let (scale_x, scale_y) = placement.scale;
+        let (w, h) = placement.size;
 
         let (texture, view) = if let Some(key) = retained_key {
             // Reuse retained texture if size matches; otherwise replace.
             let need_new = self
                 .retained_layers
                 .get(&key)
-                .map(|l| l.width != w || l.height != h)
+                .map(|l| l.width != w || l.height != h || l.frac != placement.frac)
                 .unwrap_or(true);
             if need_new {
                 let (tex, vw) = self.alloc_layer_texture(w, h);
@@ -229,6 +262,7 @@ impl WgpuGfxCtx {
                         view: vw.clone(),
                         width: w,
                         height: h,
+                        frac: placement.frac,
                         rounded_clip: None,
                     },
                 );
@@ -266,7 +300,11 @@ impl WgpuGfxCtx {
 
         // Reset draw state for the layer's local coordinate system.
         self.viewport = (w as f32, h as f32);
-        self.state_stack = vec![(TransAffine::new_scaling(scale_x, scale_y), None)];
+        // The translation's sub-pixel remainder stays with the content (see
+        // `LayerPlacement`); the composite lands on whole pixels.
+        let mut layer_ctm = TransAffine::new_scaling(scale_x, scale_y);
+        layer_ctm.multiply(&TransAffine::new_translation(frac_x, frac_y));
+        self.state_stack = vec![(layer_ctm, None)];
         // The paint state carries into the layer (as in the software
         // `GfxCtx`); its save/restore stack starts afresh with `state_stack`.
         self.paint_state_stack.clear();
@@ -331,8 +369,9 @@ impl WgpuGfxCtx {
 
     /// Composite a previously-retained layer directly onto the current target,
     /// without first pushing into it as a draw target.  Returns `false` if no
-    /// such retained layer exists OR if its dimensions don't match the request
-    /// (caller falls back to a fresh `push_retained_layer_with_alpha` rebuild).
+    /// such retained layer exists OR if its dimensions or sub-pixel phase
+    /// don't match the request (caller falls back to a
+    /// fresh `push_retained_layer_with_alpha` rebuild).
     pub(crate) fn composite_retained_layer_impl(
         &mut self,
         key: u64,
@@ -340,13 +379,14 @@ impl WgpuGfxCtx {
         height: f64,
         alpha: f64,
     ) -> bool {
-        let (scale_x, scale_y) = layer_scale_from_transform(self.ctm());
-        let (w, h) = scaled_layer_size(width, height, scale_x, scale_y);
-        let (w, h) = (w as u32, h as u32);
+        let placement = layer_placement(self.ctm(), width, height);
+        let (w, h) = placement.size;
         let Some(retained) = self.retained_layers.get(&key) else {
             return false;
         };
-        if retained.width != w || retained.height != h {
+        // Content rastered at another sub-pixel phase would land up to a
+        // pixel off, so that rebuilds too.
+        if retained.width != w || retained.height != h || retained.frac != placement.frac {
             return false;
         }
         let texture = Arc::clone(&retained.texture);
@@ -357,8 +397,8 @@ impl WgpuGfxCtx {
         self.commands.push(DrawCommand::CompositeLayer {
             texture,
             view,
-            origin_x: self.ctm().tx as f32,
-            origin_y: self.ctm().ty as f32,
+            origin_x: placement.origin.0 as f32,
+            origin_y: placement.origin.1 as f32,
             layer_w: w,
             layer_h: h,
             alpha: alpha.clamp(0.0, 1.0) as f32,
@@ -371,7 +411,9 @@ impl WgpuGfxCtx {
 
 #[cfg(test)]
 mod tests {
-    use super::{layer_scale_from_transform, scaled_layer_size, transformed_rounded_clip};
+    use super::{
+        layer_placement, layer_scale_from_transform, scaled_layer_size, transformed_rounded_clip,
+    };
     use agg_gui::TransAffine;
 
     #[test]
@@ -398,5 +440,22 @@ mod tests {
         assert_eq!(clip.w, 40.0);
         assert_eq!(clip.h, 20.0);
         assert_eq!(clip.r, 10.0);
+    }
+
+    #[test]
+    fn rust_only_layer_placement_keeps_the_sub_pixel_translation_in_the_content() {
+        let mut t = TransAffine::new_scaling(1.5, 1.5);
+        t.multiply(&TransAffine::new_translation(4.5, 3.25));
+        let p = layer_placement(&t, 190.0, 80.0);
+        assert_eq!(p.origin, (4.0, 3.0));
+        assert_eq!(p.frac, (0.5, 0.25));
+        // 285 + 0.5 and 120 + 0.25 physical pixels, rounded out.
+        assert_eq!(p.size, (286, 121));
+        // A whole-pixel translation keeps the plain size.
+        let p = layer_placement(&TransAffine::new_translation(7.0, 2.0), 11.0, 7.0);
+        assert_eq!(
+            (p.origin, p.frac, p.size),
+            ((7.0, 2.0), (0.0, 0.0), (11, 7))
+        );
     }
 }
