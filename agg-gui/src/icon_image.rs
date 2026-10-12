@@ -27,13 +27,22 @@
 //! Drawing goes through [`DrawCtx::draw_image_rgba_arc`], so GPU backends key
 //! their texture cache on the cached raster's `Arc` and re-upload only when
 //! the raster changes.
+//!
+//! **LCD subpixel icons** (agg-sharp `LcdImageComposite`): an SVG icon that
+//! lands 1:1 on whole device pixels of a target that takes LCD
+//! ([`DrawCtx::takes_lcd_image_over`]) composites through its subpixel
+//! coverage ([`crate::lcd_coverage::IconLcdCoverage`]) with
+//! [`DrawCtx::draw_lcd_backbuffer_arc`], as text does.  Everywhere else — LCD
+//! off, a fractional position, a scaled, mirrored or turned draw, a
+//! transparent target, a pixel filter that added ink — it takes the plain blit.
 
 use std::fmt;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::draw_ctx::DrawCtx;
 use crate::framebuffer::unpremultiply_rgba_inplace;
 use crate::geometry::{Rect, Size};
+use crate::lcd_coverage::IconLcdCoverage;
 use crate::svg::{render_svg_tree_to_framebuffer_at_size, SvgParseOptions, SvgRenderError};
 
 /// Post-rasterisation filter over straight-alpha, top-row-first RGBA8.
@@ -55,6 +64,21 @@ struct IconRaster {
     data: Arc<Vec<u8>>,
     width: u32,
     height: u32,
+    /// SVG rasters only: the pixels before the pixel filter ran (the same
+    /// `Arc` as `data` without a filter) — what the LCD coverage's load-time
+    /// alpha is read from.
+    unfiltered: Option<Arc<Vec<u8>>>,
+    /// The LCD composite planes, built on the first LCD draw; `None` inside
+    /// when the raster cannot take one (its filter added ink).
+    lcd: Arc<OnceLock<Option<IconLcdComposite>>>,
+}
+
+/// Finished per-channel planes for [`DrawCtx::draw_lcd_backbuffer_arc`].
+struct IconLcdComposite {
+    color: Arc<Vec<u8>>,
+    alpha: Arc<Vec<u8>>,
+    /// Unique per build, so GPU texture caches never confuse two composites.
+    version: u64,
 }
 
 /// An image icon with a logical size; see the module docs.
@@ -151,9 +175,10 @@ impl IconImage {
     /// pixels.
     pub fn raster_at_scale(&self, scale: f64) -> Option<(Arc<Vec<u8>>, u32, u32)> {
         self.raster_for(self.inner.size, scale)
+            .map(|r| (r.data, r.width, r.height))
     }
 
-    fn raster_for(&self, logical: Size, scale: f64) -> Option<(Arc<Vec<u8>>, u32, u32)> {
+    fn raster_for(&self, logical: Size, scale: f64) -> Option<IconRaster> {
         let (want_w, want_h) = match &self.inner.source {
             IconSource::Rgba { width, height, .. } => (*width, *height),
             IconSource::Svg(_) => {
@@ -175,12 +200,12 @@ impl IconImage {
         {
             // Most recently used goes last.
             let r = cache.remove(pos);
-            let out = (Arc::clone(&r.data), r.width, r.height);
+            let out = r.clone();
             cache.push(r);
             return Some(out);
         }
         let raster = self.rasterise(want_w, want_h)?;
-        let out = (Arc::clone(&raster.data), raster.width, raster.height);
+        let out = raster.clone();
         if cache.len() >= MAX_CACHED_RASTERS {
             cache.remove(0);
         }
@@ -196,6 +221,8 @@ impl IconImage {
                         data: Arc::clone(data),
                         width,
                         height,
+                        unfiltered: None,
+                        lcd: Arc::new(OnceLock::new()),
                     });
                 }
                 data.as_ref().clone()
@@ -207,13 +234,25 @@ impl IconImage {
                 pixels
             }
         };
-        if let Some(filter) = &self.inner.filter {
-            filter(&mut pixels);
-        }
+        let is_svg = matches!(self.inner.source, IconSource::Svg(_));
+        let (data, unfiltered) = match &self.inner.filter {
+            Some(filter) => {
+                let unfiltered = is_svg.then(|| Arc::new(pixels.clone()));
+                filter(&mut pixels);
+                (Arc::new(pixels), unfiltered)
+            }
+            None => {
+                let data = Arc::new(pixels);
+                let unfiltered = is_svg.then(|| Arc::clone(&data));
+                (data, unfiltered)
+            }
+        };
         Some(IconRaster {
-            data: Arc::new(pixels),
+            data,
             width,
             height,
+            unfiltered,
+            lcd: Arc::new(OnceLock::new()),
         })
     }
 
@@ -234,9 +273,80 @@ impl IconImage {
             return;
         }
         let scale = crate::device_scale::device_scale();
-        if let Some((data, w, h)) = self.raster_for(Size::new(rect.width, rect.height), scale) {
-            ctx.draw_image_rgba_arc(&data, w, h, rect.x, rect.y, rect.width, rect.height);
+        if let Some(raster) = self.raster_for(Size::new(rect.width, rect.height), scale) {
+            if !self.try_draw_lcd(ctx, &raster, rect) {
+                let (w, h) = (raster.width, raster.height);
+                ctx.draw_image_rgba_arc(
+                    &raster.data,
+                    w,
+                    h,
+                    rect.x,
+                    rect.y,
+                    rect.width,
+                    rect.height,
+                );
+            }
         }
+    }
+
+    /// Composite `raster` through its LCD subpixel coverage and return `true`
+    /// when every gate allows it; return `false`, having drawn nothing,
+    /// otherwise.  Port of agg-sharp's `LcdImageComposite.TryRender`.  The
+    /// gates: the raster is an SVG one; the CTM is a pure positive-axis
+    /// scale (no turn, shear or mirror) that maps `rect` onto exactly the
+    /// raster's pixels at whole-pixel device coordinates — the planes are
+    /// finished pixels, and resampling them would smear each channel's phase
+    /// into its neighbours; the target takes an LCD image over the footprint
+    /// ([`DrawCtx::takes_lcd_image_over`]); and the pixel filter has not added
+    /// ink the coverage knows nothing about.
+    fn try_draw_lcd(&self, ctx: &mut dyn DrawCtx, raster: &IconRaster, rect: Rect) -> bool {
+        let (IconSource::Svg(tree), Some(unfiltered)) = (&self.inner.source, &raster.unfiltered)
+        else {
+            return false;
+        };
+        let t = ctx.transform();
+        let (w, h) = (raster.width, raster.height);
+        if t.shx != 0.0
+            || t.shy != 0.0
+            || rect.width * t.sx != w as f64
+            || rect.height * t.sy != h as f64
+        {
+            return false;
+        }
+        let placed_x = rect.x * t.sx + t.tx;
+        let placed_y = rect.y * t.sy + t.ty;
+        let whole = |v: f64| v.is_finite() && v.fract() == 0.0 && v.abs() < i32::MAX as f64 / 2.0;
+        if !whole(placed_x) || !whole(placed_y) {
+            return false;
+        }
+        let (left, bottom) = (placed_x as i32, placed_y as i32);
+        if !ctx.takes_lcd_image_over(left, bottom, left + w as i32, bottom + h as i32) {
+            return false;
+        }
+        let composite = raster.lcd.get_or_init(|| {
+            let coverage = IconLcdCoverage::from_svg(tree, unfiltered, w, h)?;
+            let planes = coverage.build_planes(&raster.data, w, h)?;
+            Some(IconLcdComposite {
+                color: Arc::new(planes.color),
+                alpha: Arc::new(planes.alpha),
+                version: crate::widget::next_content_version(),
+            })
+        });
+        let Some(composite) = composite else {
+            return false;
+        };
+        ctx.draw_lcd_backbuffer_arc(
+            &composite.color,
+            &composite.alpha,
+            composite.version,
+            w,
+            h,
+            rect.x,
+            rect.y,
+            rect.width,
+            rect.height,
+        );
+        true
     }
 }
 

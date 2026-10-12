@@ -26,21 +26,11 @@ use agg_rust::comp_op::CompOp;
 use agg_rust::math_stroke::{LineCap, LineJoin};
 use agg_rust::trans_affine::TransAffine;
 
-// Paint definitions live in [`crate::paints`]; re-exported here so existing
-// `agg_gui::draw_ctx::{FillRule, RadialGradientPaint, …}` import paths keep
-// resolving unchanged.
-pub use crate::paints::{
-    FillRule, GradientSpread, GradientStop, LinearGradientPaint, PatternPaint, RadialGradientPaint,
-};
-
-// ---------------------------------------------------------------------------
-// GL paint hook
-// ---------------------------------------------------------------------------
-
-// The `GlPaint` trait itself lives in `draw_ctx/gl_paint.rs`; re-exported here
-// so `agg_gui::draw_ctx::GlPaint` keeps resolving.
+// The GL paint hook (`draw_ctx/gl_paint.rs`) and the paint definitions are
+// re-exported from `draw_ctx/reexports.rs` under their old paths.
 mod gl_paint;
-pub use gl_paint::GlPaint;
+mod reexports;
+pub use reexports::*;
 
 /// Unified 2-D drawing context.
 ///
@@ -551,6 +541,18 @@ pub trait DrawCtx {
     /// Label queries this to decide between the LCD and grayscale AA
     /// paths; a backend that returns `false` will never see LCD text.
     fn has_lcd_mask_composite(&self) -> bool {
+        false
+    }
+
+    /// Whether an icon's 1:1 LCD-coverage composite
+    /// ([`draw_lcd_backbuffer_arc`](DrawCtx::draw_lcd_backbuffer_arc)) may land
+    /// on the device-pixel rect `left..right × bottom..top` (half-open, Y-up)
+    /// and keep its subpixel coverage: LCD is on for this target and every
+    /// pixel the composite can touch is opaque, since one alpha per pixel
+    /// cannot carry three channel coverages.  agg-sharp's
+    /// `CanCompositeLcdBuffer` + `TakesLcdImageOver`; see [`crate::IconImage`].
+    /// Default `false`: the icon takes its plain blit.
+    fn takes_lcd_image_over(&mut self, _left: i32, _bottom: i32, _right: i32, _top: i32) -> bool {
         false
     }
 

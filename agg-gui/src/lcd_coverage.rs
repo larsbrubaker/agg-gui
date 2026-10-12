@@ -675,6 +675,7 @@ fn flip_plane(src: &[u8], width: u32, height: u32) -> Vec<u8> {
 #[cfg(test)]
 mod fill_path_bbox_tests;
 mod filter;
+mod icon_coverage;
 #[cfg(test)]
 mod ink_diag_tests;
 #[cfg(test)]
@@ -690,6 +691,7 @@ mod mask_builder;
 #[cfg(test)]
 mod tests;
 
+pub use icon_coverage::{IconLcdCoverage, IconLcdPlanes};
 pub use mask::{
     build_bounded_mask, composite_lcd_mask, identity_xform, rasterize_gray_mask,
     rasterize_lcd_mask, rasterize_lcd_mask_multi, rasterize_text_gray_cached,

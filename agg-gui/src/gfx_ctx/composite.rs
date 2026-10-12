@@ -5,6 +5,8 @@
 //! places and culls the per-pixel LCD blits in `draw_impl.rs`. Both cull
 //! blits that miss the target before any integer pixel arithmetic, so a
 //! widget drawn at an enormous offset is skipped instead of overflowing.
+//! `opaque_under` answers `takes_lcd_image_over`: whether an icon's LCD
+//! composite lands only on opaque pixels.
 
 use super::*;
 // ---------------------------------------------------------------------------
@@ -112,4 +114,35 @@ pub(super) fn composite_framebuffers(
             }
         }
     }
+}
+
+/// True when every pixel of `fb` inside `footprint` (left, bottom, right,
+/// top; half-open, Y-up device pixels) that `clip` leaves has alpha 255;
+/// false when any does not, or when nothing of the footprint lands (the
+/// fallback draws nothing either).  Port of agg-sharp's
+/// `ImageGraphics2D.IsOpaqueUnder`, scanning only the clipped pixels as its
+/// `CompositeLcdBuffer` does.
+pub(super) fn opaque_under(
+    fb: &Framebuffer,
+    footprint: (i32, i32, i32, i32),
+    clip: Option<(f64, f64, f64, f64)>,
+) -> bool {
+    let (fw, fh) = (fb.width() as i32, fb.height() as i32);
+    let (mut x1, mut y1, mut x2, mut y2) = footprint;
+    x1 = x1.max(0);
+    y1 = y1.max(0);
+    x2 = x2.min(fw);
+    y2 = y2.min(fh);
+    if let Some((cx, cy, cw, ch)) = clip {
+        // The same pixel rounding `draw_lcd_backbuffer_arc` clips with.
+        x1 = x1.max(cx.floor() as i32);
+        y1 = y1.max(cy.floor() as i32);
+        x2 = x2.min((cx + cw).ceil() as i32);
+        y2 = y2.min((cy + ch).ceil() as i32);
+    }
+    if x1 >= x2 || y1 >= y2 {
+        return false;
+    }
+    let px = fb.pixels();
+    (y1..y2).all(|y| (x1..x2).all(|x| px[((y * fw + x) * 4 + 3) as usize] == 255))
 }

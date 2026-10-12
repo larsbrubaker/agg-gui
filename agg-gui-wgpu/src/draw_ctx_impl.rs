@@ -325,6 +325,14 @@ impl DrawCtx for WgpuGfxCtx {
         true
     }
 
+    fn takes_lcd_image_over(&mut self, _left: i32, _bottom: i32, _right: i32, _top: i32) -> bool {
+        // The same gate LCD text takes here: LCD on for this frame, and the
+        // surface drawn into is opaque (the top level, or a layer whose caller
+        // declared an opaque backdrop).  Pixels cannot be read back, so the
+        // footprint is not scanned.
+        self.lcd_mode && self.text_dst_is_opaque()
+    }
+
     fn draw_lcd_mask(
         &mut self,
         mask: &[u8],

@@ -542,6 +542,17 @@ impl crate::draw_ctx::DrawCtx for GfxCtx<'_> {
         true
     }
 
+    fn takes_lcd_image_over(&mut self, left: i32, bottom: i32, right: i32, top: i32) -> bool {
+        // LCD on for this ctx (the text path's own switch), and every pixel
+        // the clip leaves inside the footprint is opaque.
+        if !self.lcd_mode {
+            return false;
+        }
+        let clip = self.state.clip;
+        let fb = active_fb(self.base_fb, &mut self.layer_stack);
+        super::composite::opaque_under(fb, (left, bottom, right, top), clip)
+    }
+
     fn draw_lcd_mask(
         &mut self,
         mask: &[u8],

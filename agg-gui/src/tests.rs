@@ -136,6 +136,7 @@ mod shared_size_group_tests;
 mod shell_input;
 mod stack_aligned;
 mod stroke_defaults;
+mod svg_icon_lcd_tests;
 mod text_defaults;
 mod text_field_select_all;
 mod text_toggle_repaint_tests;
