@@ -233,6 +233,13 @@ pub use widgets::{
     TumbleCube, TumbleCubeCamera, Window, WrapRow, DEFAULT_COLUMN_GAP, DEFAULT_ROW_GAP,
 };
 
+// The read-only scroll bar query (`ScrollView::scroll_bar_properties`) and
+// the bars' animation times.
+pub use widgets::{
+    ScrollBarAxisProperties, ScrollBarProperties, ScrollFadedEdges, SCROLL_BAR_FADE_SECS,
+    SCROLL_BAR_GROW_SECS,
+};
+
 // Re-export AGG types so callers don't need to import agg-rust directly.
 pub use agg_rust::comp_op::CompOp;
 pub use agg_rust::math_stroke::{LineCap, LineJoin};

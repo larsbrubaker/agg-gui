@@ -1,3 +1,8 @@
+//! One scroll bar axis of a [`ScrollView`](super::ScrollView): its offset and
+//! content extent, thumb metrics, hover / drag / page interaction, the
+//! hover-grow and fade tweens, and the painted track and thumb. `ScrollView`
+//! owns one per axis and supplies the geometry; agg-sharp's `ScrollBar`.
+
 use crate::color::Color;
 use crate::draw_ctx::DrawCtx;
 use crate::geometry::{Point, Rect};
@@ -5,6 +10,13 @@ use crate::geometry::{Point, Rect};
 use super::scroll_view::{ScrollBarColor, ScrollBarKind, ScrollBarStyle, ScrollBarVisibility};
 
 pub const DEFAULT_GRAB_MARGIN: f64 = 6.0;
+
+/// Seconds a floating bar takes to grow from its dormant width to its full
+/// width on hover (and to thin back down): agg-sharp's `ScrollBar.GrowMs`.
+pub const SCROLL_BAR_GROW_SECS: f64 = 0.12;
+/// Seconds a floating bar takes to fade in or out: agg-sharp's
+/// `ScrollBar.FadeMs`. Eased out (cubic), so half way it is at 0.875.
+pub const SCROLL_BAR_FADE_SECS: f64 = 0.18;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ScrollbarOrientation {
@@ -56,8 +68,8 @@ impl Default for ScrollbarAxis {
             hovered_thumb: false,
             dragging: false,
             drag_thumb_offset: 0.0,
-            hover_anim: crate::animation::Tween::new(0.0, 0.12),
-            visibility_anim: crate::animation::Tween::new(0.0, 0.18),
+            hover_anim: crate::animation::Tween::new(0.0, SCROLL_BAR_GROW_SECS),
+            visibility_anim: crate::animation::Tween::new(0.0, SCROLL_BAR_FADE_SECS),
         }
     }
 }
@@ -276,6 +288,48 @@ impl ScrollbarAxis {
         }
     }
 
+    /// The visibility the bar is heading for: `1.0` when it should paint,
+    /// `0.0` when it should hide (agg-sharp's `ScrollBar.FadeTarget`).
+    pub fn fade_target(
+        &self,
+        viewport: f64,
+        style: ScrollBarStyle,
+        visibility: ScrollBarVisibility,
+    ) -> f64 {
+        if self.should_paint(viewport, style, visibility) {
+            1.0
+        } else {
+            0.0
+        }
+    }
+
+    /// Track and thumb rects at hover-animation parameter `t` (see
+    /// [`ScrollBarStyle::bar_width_at`]), or `None` when the content fits.
+    pub fn bar_rects(
+        &self,
+        viewport: f64,
+        style: ScrollBarStyle,
+        geom: ScrollbarGeometry,
+        t: f64,
+    ) -> Option<(Rect, Rect)> {
+        let (thumb_start, thumb_len) = self.thumb_metrics(viewport, style, geom)?;
+        let bar_w = style.bar_width_at(t);
+        let track_len = geom.track_end - geom.track_start;
+        Some(match geom.orientation {
+            ScrollbarOrientation::Vertical => {
+                let bar_x = geom.cross_end - bar_w;
+                (
+                    Rect::new(bar_x, geom.track_start, bar_w, track_len),
+                    Rect::new(bar_x, thumb_start, bar_w, thumb_len),
+                )
+            }
+            ScrollbarOrientation::Horizontal => (
+                Rect::new(geom.track_start, geom.cross_end, track_len, bar_w),
+                Rect::new(thumb_start, geom.cross_end, thumb_len, bar_w),
+            ),
+        })
+    }
+
     pub fn prepare_paint(
         &mut self,
         viewport: f64,
@@ -283,49 +337,30 @@ impl ScrollbarAxis {
         visibility: ScrollBarVisibility,
         geom: ScrollbarGeometry,
     ) -> Option<PreparedScrollbar> {
-        self.visibility_anim
-            .set_target(if self.should_paint(viewport, style, visibility) {
-                1.0
-            } else {
-                0.0
-            });
-        let alpha = self.visibility_anim.tick();
-        if !self.enabled || self.content <= viewport || alpha <= 0.001 {
-            return None;
+        let target = self.fade_target(viewport, style, visibility);
+        if style.kind == ScrollBarKind::Solid {
+            // A Solid bar has no auto-hide: it is there whenever the content
+            // overflows, at full opacity from its first frame (agg-sharp's
+            // `ScrollBarAppearanceTests.DefaultsKeepTheLegacyGeometry`).
+            self.visibility_anim = crate::animation::Tween::new(target, SCROLL_BAR_FADE_SECS);
+        } else {
+            self.visibility_anim.set_target(target);
         }
-        let (thumb_start, thumb_len) = self.thumb_metrics(viewport, style, geom)?;
+        let alpha = self.visibility_anim.tick();
+        // The width eases on even while the bar is hidden, so a bar that
+        // faded out mid-shrink is back at its dormant width when it next
+        // shows rather than resuming a stale width.
         self.hover_anim
             .set_target(if self.interact() { 1.0 } else { 0.0 });
         let t = self.hover_anim.tick();
-        let bar_w = style.bar_width_at(t);
-        let radius = bar_w * 0.5;
-        let (track, thumb) = match geom.orientation {
-            ScrollbarOrientation::Vertical => {
-                let bar_x = geom.cross_end - bar_w;
-                (
-                    Rect::new(
-                        bar_x,
-                        geom.track_start,
-                        bar_w,
-                        geom.track_end - geom.track_start,
-                    ),
-                    Rect::new(bar_x, thumb_start, bar_w, thumb_len),
-                )
-            }
-            ScrollbarOrientation::Horizontal => (
-                Rect::new(
-                    geom.track_start,
-                    geom.cross_end,
-                    geom.track_end - geom.track_start,
-                    bar_w,
-                ),
-                Rect::new(thumb_start, geom.cross_end, thumb_len, bar_w),
-            ),
-        };
+        if !self.enabled || self.content <= viewport || alpha <= 0.001 {
+            return None;
+        }
+        let (track, thumb) = self.bar_rects(viewport, style, geom, t)?;
         Some(PreparedScrollbar {
             track,
             thumb,
-            radius,
+            radius: style.bar_width_at(t) * 0.5,
             alpha,
             color: style.color,
             hovered_thumb: self.hovered_thumb,

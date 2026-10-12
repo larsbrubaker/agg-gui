@@ -19,10 +19,12 @@
 //! `HorizontalScrollShowsABarThatScrollsAndReservesItsHeight` drives a
 //! [`ScrollBarStyle::solid`] bar (agg-sharp's bar always reserves its room)
 //! through the view's own mouse events, and reads the bar from
-//! [`ScrollView::horizontal_bar_report`]: agg-sharp's `ScrollBarWidth` is the
-//! style's `bar_width`, and the room reserved at the bottom (C#'s
-//! `ScrollArea.DeviceMargin.Bottom`) is the bar with its inner and outer
-//! margins.
+//! [`ScrollView::scroll_bar_properties`]: agg-sharp's `ScrollBarWidth` is the
+//! style's `bar_width`, the bar's height (C#'s `bar.Height`) is its strip,
+//! the bar with its inner and outer margins, and the room reserved at the
+//! bottom (C#'s `ScrollArea.DeviceMargin.Bottom`) reaches from the view's
+//! edge to the strip's top: C# draws the strip at the edge, agg-gui above
+//! its resize-grip guard.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -144,15 +146,32 @@ fn horizontal_scroll_shows_a_bar_that_scrolls_and_reserves_its_height() {
         .with_h_max_scroll_cell(Rc::clone(&h_max));
     lay_out(&mut scroll, 200.0, 100.0);
 
-    let bar = scroll.horizontal_bar_report();
-    assert!(bar.shown);
+    let bar = scroll.scroll_bar_properties().horizontal;
+    assert!(bar.showing);
     assert_eq!(bar.track.height, style.bar_width);
     let room = style.bar_width + style.inner_margin + style.outer_margin;
-    assert!((bar.reserved - room).abs() < 1e-9, "{}", bar.reserved);
+    assert_eq!(bar.strip.height, room);
+    // The room reserved runs from the view's bottom edge to the top of the
+    // strip, so the content ends where the bar begins, as C#'s
+    // `DeviceMargin.Bottom == bar.Height` with the bar at the view's edge;
+    // agg-gui's strip sits above the resize-grip guard, so the guard is in it.
+    assert!(
+        (bar.reserved - (bar.strip.y + bar.strip.height)).abs() < 1e-9,
+        "{} reserved under a strip at {:?}",
+        bar.reserved,
+        bar.strip
+    );
+    // the strip plus the 4 px `BOTTOM_EDGE_GUARD` below it
+    assert!(
+        (bar.reserved - (room + 4.0)).abs() < 1e-9,
+        "{}",
+        bar.reserved
+    );
     assert_eq!(h_max.get(), 400.0);
 
     // Dragging the thumb the whole free track scrolls to the right end.
-    let thumb = bar.thumb.expect("an overflowing bar has a thumb");
+    let thumb = bar.thumb;
+    assert!(thumb.width > 0.0, "an overflowing bar has a thumb");
     let grab = Point::new(thumb.x + thumb.width / 2.0, thumb.y + thumb.height / 2.0);
     let left = |pos| Event::MouseDown {
         pos,
@@ -171,7 +190,7 @@ fn horizontal_scroll_shows_a_bar_that_scrolls_and_reserves_its_height() {
     assert_eq!(h_offset.get(), 400.0);
 
     // Clicking the track to the left of the thumb pages back towards the start.
-    let track = scroll.horizontal_bar_report().track;
+    let track = scroll.scroll_bar_properties().horizontal.track;
     let click = Point::new(1.0, track.y + track.height / 2.0);
     let _ = scroll.on_event(&left(click));
     let _ = scroll.on_event(&up(click));
@@ -181,8 +200,8 @@ fn horizontal_scroll_shows_a_bar_that_scrolls_and_reserves_its_height() {
     size.set(Size::new(100.0, 50.0));
     lay_out(&mut scroll, 200.0, 100.0);
     assert_eq!(scroll.children()[0].bounds().x, 0.0);
-    let bar = scroll.horizontal_bar_report();
-    assert!(!bar.shown);
+    let bar = scroll.scroll_bar_properties().horizontal;
+    assert!(!bar.showing);
     assert_eq!(bar.reserved, 0.0);
 }
 

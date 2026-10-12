@@ -567,8 +567,9 @@ impl ScrollView {
         let max_a = strength;
 
         // Fade appears only near edges where content is clipped.
+        let edges = self.faded_edges();
         if self.v.enabled {
-            if self.v.offset > 0.5 {
+            if edges.top {
                 // Top edge (Y-up: high Y).  Gradient transparent→opaque going up.
                 Self::fill_v_gradient(
                     ctx,
@@ -581,18 +582,18 @@ impl ScrollView {
                     false,
                 );
             }
-            if (self.v.max_scroll(vh) - self.v.offset) > 0.5 {
+            if edges.bottom {
                 // Bottom edge.  Gradient transparent→opaque going down.
                 let y_bottom = self.bounds.height - vh;
                 Self::fill_v_gradient(ctx, c, max_a, 0.0, y_bottom, vw, size, true);
             }
         }
         if self.h.enabled {
-            if self.h.offset > 0.5 {
+            if edges.left {
                 // Left edge.  Gradient transparent→opaque going left.
                 Self::fill_h_gradient(ctx, c, max_a, 0.0, self.bounds.height - vh, size, vh, true);
             }
-            if (self.h.max_scroll(vw) - self.h.offset) > 0.5 {
+            if edges.right {
                 // Right edge.  Gradient transparent→opaque going right.
                 Self::fill_h_gradient(
                     ctx,

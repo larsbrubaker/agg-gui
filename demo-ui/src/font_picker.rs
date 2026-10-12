@@ -267,7 +267,7 @@ mod tests {
 
     /// The extracted builder routes selection to the caller's `on_change`
     /// without a bound cell and without initialising the System window's
-    /// cells — so it never mutates the global system font. Arrow-key
+    /// cells — so it never mutates the global system font. Keyboard
     /// selection is enough to exercise the routing path.
     #[test]
     fn preview_combo_routes_on_change_without_system_cells() {
@@ -282,15 +282,32 @@ mod tests {
         });
         combo.layout(Size::new(150.0, 24.0));
 
-        // ArrowDown moves to index 1 and fires on_change. Cells are not
-        // initialised in this test; request_previews_once must no-op rather
-        // than panic, proving the builder does not require the system cells.
+        // The combo keyboard follows agg-sharp's DropDownList: Down on the
+        // closed list opens it (on key-up), Down steps the highlight from
+        // the selected row, and Enter picks it, firing on_change. Cells are
+        // not initialised in this test; request_previews_once must no-op
+        // rather than panic, proving the builder does not require the
+        // system cells.
+        let _ = combo.on_event(&Event::KeyUp {
+            key: Key::ArrowDown,
+            modifiers: Default::default(),
+        });
+        assert!(combo.combo.is_open(), "Down on the closed list opens it");
+        assert_eq!(count.get(), 0, "opening the list picks nothing");
+
         let res = combo.on_event(&Event::KeyDown {
             key: Key::ArrowDown,
             modifiers: Default::default(),
         });
-
         assert_eq!(res, EventResult::Consumed);
+        assert_eq!(count.get(), 0, "stepping the highlight picks nothing");
+
+        let res = combo.on_event(&Event::KeyDown {
+            key: Key::Enter,
+            modifiers: Default::default(),
+        });
+        assert_eq!(res, EventResult::Consumed);
+        assert!(!combo.combo.is_open(), "Enter closes the list");
         assert_eq!(count.get(), 1);
         assert_eq!(last.get(), 1);
     }

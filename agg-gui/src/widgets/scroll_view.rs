@@ -477,8 +477,16 @@ impl ScrollView {
         // is potentially active (has content overflow).
         let need_v = self.v.enabled && self.v.content > self.bounds.height - self.h_bar_thickness();
         let need_h = self.h.enabled && self.h.content > self.bounds.width - self.v_bar_thickness();
-        let rx = if need_v { span } else { 0.0 };
-        let ry = if need_h { span } else { 0.0 };
+        // The bar's strip sits inside the resize-grip guard, so the room it
+        // takes from the content includes the guard: without it the content
+        // ran under the strip's inner margin (agg-sharp's
+        // `ScrollBarAppearanceTests.WidthAndMarginsWidenTheStripAndReserveIt`).
+        let rx = if need_v { span + RIGHT_EDGE_GUARD } else { 0.0 };
+        let ry = if need_h {
+            span + BOTTOM_EDGE_GUARD
+        } else {
+            0.0
+        };
         (rx, ry)
     }
 
@@ -594,9 +602,9 @@ impl ScrollView {
     }
 }
 
+mod bar_properties;
 mod widget_impl;
 
-mod bar_report;
-pub use bar_report::ScrollBarReport;
+pub use bar_properties::{ScrollBarAxisProperties, ScrollBarProperties, ScrollFadedEdges};
 
 pub mod scroll_offsets;

@@ -172,8 +172,8 @@ fn measure_ratios(scale: f64) -> ((f64, f64), f64, f64) {
     set_device_scale(scale);
     let (mut scroll, _) = make_scrollable(300.0, 400.0, ScrollBarVisibility::AlwaysHidden);
 
-    let v = scroll.vertical_bar_report();
-    let h = scroll.horizontal_bar_report();
+    let v = scroll.scroll_bar_properties().vertical;
+    let h = scroll.scroll_bar_properties().horizontal;
     let view_ratio = (h.viewport / h.content, v.viewport / v.content);
 
     // half way down
@@ -228,7 +228,7 @@ fn content_taller_than_the_view_only_by_its_margins_shows_the_bar() {
         // 2 x 5 of margin
         let (scroll, _) = make_scrollable(150.0, 194.0, ScrollBarVisibility::VisibleWhenNeeded);
         assert!(
-            scroll.vertical_bar_report().shown,
+            scroll.scroll_bar_properties().vertical.showing,
             "the margins are part of how far the content moves, so there is something to \
              scroll to (scale {scale})"
         );

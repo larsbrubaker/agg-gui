@@ -3,7 +3,7 @@
 //! or the content changes, and its track follows the view it scrolls.
 //!
 //! agg-sharp's `VerticalScrollBar.Visible` and `.Height` are read from
-//! [`ScrollView::vertical_bar_report`] (agg-gui paints its bars instead of
+//! [`ScrollView::scroll_bar_properties`] (agg-gui paints its bars instead of
 //! adding them as children). `ShowState.Never` / `WhenRequired` are
 //! [`ScrollBarVisibility::AlwaysHidden`] / `VisibleWhenNeeded` on a
 //! [`ScrollBarStyle::solid`] bar, the always-drawn kind agg-sharp's bar is.
@@ -67,7 +67,7 @@ fn lay_out(scroll: &mut ScrollView, height: f64) {
 /// The track spans the view: its ends sit the style's inner margin inside
 /// the view's bottom and top.
 fn assert_track_spans_view(scroll: &ScrollView) {
-    let track = scroll.vertical_bar_report().track;
+    let track = scroll.scroll_bar_properties().vertical.track;
     let m = ScrollBarStyle::solid().inner_margin;
     let h = scroll.bounds().height;
     assert_eq!(track.y, m, "track {track:?} in a {h} tall view");
@@ -110,17 +110,17 @@ fn show_state_change_reevaluates_visibility_with_no_layout() {
 
     scroll.set_bar_visibility(ScrollBarVisibility::AlwaysHidden);
     assert!(
-        !scroll.vertical_bar_report().shown,
+        !scroll.scroll_bar_properties().vertical.showing,
         "Never means never, however tall the content is"
     );
 
     scroll.set_bar_visibility(ScrollBarVisibility::VisibleWhenNeeded);
-    let report = scroll.vertical_bar_report();
+    let bar = scroll.scroll_bar_properties().vertical;
     assert!(
-        report.shown,
+        bar.showing,
         "{} of content does not fit {}, so the bar is required the moment the mode allows it \
          - without waiting for a layout",
-        report.content, report.viewport
+        bar.content, bar.viewport
     );
 }
 
@@ -128,19 +128,19 @@ fn show_state_change_reevaluates_visibility_with_no_layout() {
 fn shrinking_the_view_shows_the_bar_and_growing_it_back_hides_it() {
     let mut scroll = make_scrollable(column_of(100.0, 150.0));
     assert!(
-        !scroll.vertical_bar_report().shown,
+        !scroll.scroll_bar_properties().vertical.showing,
         "150 of content fits the 200 tall view"
     );
 
     lay_out(&mut scroll, 100.0);
     assert!(
-        scroll.vertical_bar_report().shown,
+        scroll.scroll_bar_properties().vertical.showing,
         "the same content no longer fits the 100 the view is now"
     );
 
     lay_out(&mut scroll, 200.0);
     assert!(
-        !scroll.vertical_bar_report().shown,
+        !scroll.scroll_bar_properties().vertical.showing,
         "and it fits again, so the bar has nothing to scroll to"
     );
 }
@@ -149,21 +149,21 @@ fn shrinking_the_view_shows_the_bar_and_growing_it_back_hides_it() {
 fn removing_the_tall_content_hides_the_bar() {
     let mut scroll = make_scrollable(column_of(100.0, 500.0));
     assert!(
-        scroll.vertical_bar_report().shown,
+        scroll.scroll_bar_properties().vertical.showing,
         "500 of content in a 200 tall view needs a bar"
     );
 
     scroll.children_mut()[0].children_mut().remove(0);
     lay_out(&mut scroll, 200.0);
 
-    let report = scroll.vertical_bar_report();
+    let bar = scroll.scroll_bar_properties().vertical;
     assert!(
-        report.content <= scroll.bounds().height,
+        bar.content <= scroll.bounds().height,
         "the scrolling area cannot stay as tall as content that has been taken out of it \
          ({} of content)",
-        report.content
+        bar.content
     );
-    assert!(!report.shown, "there is nothing left to scroll to");
+    assert!(!bar.showing, "there is nothing left to scroll to");
 }
 
 #[test]
@@ -176,7 +176,7 @@ fn bar_height_follows_the_view_across_a_hidden_phase() {
     scroll.set_bar_visibility(ScrollBarVisibility::VisibleWhenNeeded);
 
     assert!(
-        scroll.vertical_bar_report().shown,
+        scroll.scroll_bar_properties().vertical.showing,
         "500 of content still does not fit the 120 tall view"
     );
     // a track sized against the height the view used to be cannot reach the
@@ -188,7 +188,7 @@ fn bar_height_follows_the_view_across_a_hidden_phase() {
 fn visible_bar_height_follows_the_view() {
     let mut scroll = make_scrollable(column_of(100.0, 500.0));
     lay_out(&mut scroll, 90.0);
-    assert!(scroll.vertical_bar_report().shown);
+    assert!(scroll.scroll_bar_properties().vertical.showing);
     assert_track_spans_view(&scroll);
 }
 
@@ -213,7 +213,7 @@ fn fit_around_scrolled_content_stays_anchored_at_the_origin() {
 
     // the host then pins the height, the way the docked sheet editor does
     lay_out(&mut scroll, 300.0);
-    let track = scroll.vertical_bar_report().track;
+    let track = scroll.scroll_bar_properties().vertical.track;
     assert_eq!(
         track.y,
         ScrollBarStyle::solid().inner_margin,
@@ -243,7 +243,7 @@ fn lay_out_two_way(scroll: &mut ScrollView) {
 #[test]
 fn rust_only_a_solid_horizontal_bar_leaves_the_content_top_at_the_view_top() {
     let mut scroll = two_way(ScrollBarVisibility::VisibleWhenNeeded);
-    let reserved = scroll.horizontal_bar_report().reserved;
+    let reserved = scroll.scroll_bar_properties().horizontal.reserved;
     assert!(reserved > 0.0, "the solid bar takes the bottom of the view");
 
     // scrolled to the top, the content's top is the view's top: the bar takes
@@ -261,8 +261,8 @@ fn rust_only_a_solid_horizontal_bar_leaves_the_content_top_at_the_view_top() {
 #[test]
 fn rust_only_a_never_shown_solid_bar_takes_no_room() {
     let mut scroll = two_way(ScrollBarVisibility::AlwaysHidden);
-    assert_eq!(scroll.horizontal_bar_report().reserved, 0.0);
-    assert_eq!(scroll.vertical_bar_report().reserved, 0.0);
+    assert_eq!(scroll.scroll_bar_properties().horizontal.reserved, 0.0);
+    assert_eq!(scroll.scroll_bar_properties().vertical.reserved, 0.0);
 
     scroll.set_scroll_offset(100_000.0);
     lay_out_two_way(&mut scroll);
