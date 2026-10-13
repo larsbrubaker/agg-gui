@@ -56,13 +56,15 @@ pub(super) fn focus_path_reachable(root: &dyn Widget, path: &[usize]) -> bool {
 
 impl super::App {
     /// Let go of focus held inside a subtree that can no longer take it (see
-    /// [`focus_path_reachable`]); the widget receives `FocusLost`. Run by
-    /// `App::layout` after pending focus requests are applied.
+    /// [`focus_path_reachable`]), or by a widget that is no longer focusable
+    /// (a field its owner's enabled cell turned off, which only learns of it at
+    /// its own layout); the widget receives `FocusLost`. Run by `App::layout`
+    /// after pending focus requests are applied.
     pub(super) fn drop_unreachable_focus(&mut self) {
-        let unreachable = self
-            .focus
-            .as_deref()
-            .is_some_and(|p| !focus_path_reachable(self.root.as_ref(), p));
+        let unreachable = self.focus.as_deref().is_some_and(|p| {
+            !focus_path_reachable(self.root.as_ref(), p)
+                || widget_at_path_ref(self.root.as_ref(), p).is_some_and(|w| !w.is_focusable())
+        });
         if unreachable {
             self.set_focus(None);
         }

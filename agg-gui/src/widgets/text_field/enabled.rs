@@ -10,7 +10,9 @@
 //! ([`with_enabled_cell`](TextField::with_enabled_cell)); the field is enabled
 //! when both say so. Paint reads the state live; the cached bitmap follows at
 //! the next layout, so write the cell and call
-//! [`crate::animation::request_layout`].
+//! [`crate::animation::request_layout`]. A focused field that its cell disables
+//! releases focus at that layout (as `TextArea` does), and `App` then drops its
+//! focus path to the field, so the field gets `FocusLost`.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -66,7 +68,7 @@ impl TextField {
 
     /// Stop editing: what losing focus does, minus the notifications (the
     /// host's focus bookkeeping sends `FocusLost`).
-    fn release_focus_state(&mut self) {
+    pub(super) fn release_focus_state(&mut self) {
         self.mouse_down = false;
         self.hovered = false;
         self.focused = false;

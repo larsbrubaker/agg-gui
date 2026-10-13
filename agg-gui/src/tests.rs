@@ -52,6 +52,7 @@ mod color_dialog_overlay;
 mod color_wheel_picker;
 mod crossed_limits;
 mod default_action;
+mod disabled_field_focus;
 /// A point drawn at Y=10 in a 100×100 buffer must be near the BOTTOM of the
 /// buffer (low row index), not the top. This verifies the Y-up invariant at
 /// the framebuffer level.

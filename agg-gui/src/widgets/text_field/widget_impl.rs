@@ -43,7 +43,7 @@ impl Widget for TextField {
     }
 
     fn accepts_text_input(&self) -> bool {
-        !self.read_only
+        self.enabled_now() && !self.read_only
     }
 
     fn ime_cursor_area(&self) -> Option<Rect> {
@@ -185,6 +185,12 @@ impl Widget for TextField {
     }
 
     fn layout(&mut self, available: Size) -> Size {
+        // An owner's cell can disable a focused field without a call into it.
+        // Release before the cache signature below reads `focused`; the app
+        // drops its focus path at the end of its own layout.
+        if !self.enabled_now() && self.focused {
+            self.release_focus_state();
+        }
         self.sync_from_text_cell();
         // Sig excludes cursor-blink phase.  Cursor paints in
         // `paint_overlay` after cache blit — no blink-driven
