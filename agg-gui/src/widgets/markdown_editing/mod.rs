@@ -130,6 +130,7 @@ pub mod editor_mouse;
 pub mod editor_state;
 mod escaping;
 pub mod format_toolbar;
+mod format_toolbar_cells;
 mod format_toolbar_widgets;
 mod group_repair;
 pub mod group_writer;

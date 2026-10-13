@@ -204,8 +204,7 @@ impl RichMarkdownEditWidget {
         self.state.is_empty()
     }
 
-    /// The hint an empty document shows while the editor is not focused
-    /// (e.g. "No notes yet").
+    /// The hint an empty document shows, focused or not (e.g. "No notes yet").
     pub fn empty_hint(&self) -> Option<&str> {
         self.empty_hint.as_deref()
     }

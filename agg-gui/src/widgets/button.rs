@@ -22,6 +22,7 @@ use crate::geometry::{Rect, Size};
 use crate::icon_image::IconImage;
 use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
 use crate::text::Font;
+use crate::theme::Visuals;
 use crate::widget::Widget;
 use crate::widgets::label::{Label, LabelAlign};
 
@@ -98,6 +99,12 @@ pub struct Button {
     /// button on a whole-pixel baseline shared by every glyph of the face.
     /// See [`with_icon_em_box`](Self::with_icon_em_box).
     icon_em_box: bool,
+    /// The glyph icon's colour, asked each paint (see
+    /// [`with_icon_color_fn`](Self::with_icon_color_fn)).
+    icon_color_fn: Option<IconColorFn>,
+    /// When true the button paints only its icon (see
+    /// [`with_flat`](Self::with_flat)).
+    flat: bool,
 
     /// When true, drop the 48 px touch-target width floor and shrink
     /// the horizontal padding. Right for icon-only toolbar buttons
@@ -109,6 +116,9 @@ pub struct Button {
     pressed: bool,
     focused: bool,
 }
+
+/// Colour of a glyph icon for the current visuals; `None` keeps the default.
+type IconColorFn = Rc<dyn Fn(&Visuals) -> Option<Color>>;
 
 impl Button {
     /// Create a button with the given label.
@@ -136,6 +146,8 @@ impl Button {
             icon: None,
             icon_image: None,
             icon_em_box: false,
+            icon_color_fn: None,
+            flat: false,
             compact: false,
             hovered: false,
             pressed: false,
@@ -491,6 +503,9 @@ impl Widget for Button {
     }
 
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
+        if self.flat {
+            return;
+        }
         let w = self.bounds.width;
         let h = self.bounds.height;
         let r = self.theme.border_radius;
@@ -614,6 +629,17 @@ impl Widget for Button {
         let h = self.bounds.height;
         let r = self.theme.border_radius;
         let v = ctx.visuals();
+
+        if self.flat {
+            // The owner paints the background and the states; only the icon is ours.
+            let color = self
+                .icon_color_fn
+                .as_ref()
+                .and_then(|f| f(&v))
+                .unwrap_or(v.text_color);
+            self.paint_leading_icon(ctx, self.icon_left_x(), h, color, enabled);
+            return;
+        }
 
         if !enabled {
             // The normal child Label was built for the enabled foreground

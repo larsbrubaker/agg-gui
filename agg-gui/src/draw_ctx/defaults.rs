@@ -175,6 +175,21 @@ pub fn pixel_snap_offset(t: &TransAffine) -> Option<(f64, f64)> {
     }
 }
 
+/// The local `translate` step that moves `t`'s origin back onto a whole device
+/// pixel.  `translate` steps in local units, which the scale stretches (a step
+/// of `d` moves the origin by `d * scale`), so under a 1.5x scale the plain
+/// `-fraction` landed 0.5 px off; dividing by the scale moves exactly
+/// `-fraction` device pixels.  A rotated or sheared transform keeps the plain
+/// step.
+pub fn pixel_snap_step(t: &TransAffine) -> Option<(f64, f64)> {
+    let (fx, fy) = pixel_snap_offset(t)?;
+    if t.shx == 0.0 && t.shy == 0.0 && t.sx != 0.0 && t.sy != 0.0 {
+        Some((-fx / t.sx, -fy / t.sy))
+    } else {
+        Some((-fx, -fy))
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Corner-quad fallback
 // ---------------------------------------------------------------------------

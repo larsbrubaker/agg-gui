@@ -645,6 +645,25 @@ fn test_agg_rasters_1px_stripes_with_zero_gray() {
     }
 }
 
+/// Under a scale (a HiDPI display at 1.5x), the snap still lands the device origin on a whole
+/// pixel: `translate` steps in local units, which the scale stretches.
+#[test]
+fn test_snap_to_pixel_lands_on_whole_device_pixels_under_a_scale() {
+    use crate::draw_ctx::DrawCtx;
+
+    for scale in [1.25, 1.5, 2.0, 3.0] {
+        let mut fb = Framebuffer::new(10, 10);
+        let mut ctx = GfxCtx::new(&mut fb);
+        ctx.scale(scale, scale);
+        ctx.translate(7.0, 11.0);
+        ctx.snap_to_pixel();
+        let after = ctx.transform();
+        assert_eq!(after.tx.fract(), 0.0, "tx {} at {scale}", after.tx);
+        assert_eq!(after.ty.fract(), 0.0, "ty {} at {scale}", after.ty);
+        assert_eq!(after.sx, scale, "the scale is untouched");
+    }
+}
+
 /// `snap_to_pixel` must zero the fractional component of the CTM translation
 /// and leave rotations / scales / integer translations alone.  Covers the
 /// `paint_subtree` round-on-translate path exercised by every widget that

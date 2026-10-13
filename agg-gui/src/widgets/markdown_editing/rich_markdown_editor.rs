@@ -136,7 +136,7 @@ impl RichMarkdownEditor {
         self.sync()
     }
 
-    /// The hint an empty document shows while the editor is not focused.
+    /// The hint an empty document shows, focused or not.
     pub fn empty_hint(&self) -> Option<&str> {
         self.editor().empty_hint()
     }

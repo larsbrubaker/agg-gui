@@ -370,8 +370,8 @@ pub trait DrawCtx {
     /// isn't well defined, and forcing a snap would visibly jitter rotated
     /// content).
     fn snap_to_pixel(&mut self) {
-        if let Some((fx, fy)) = defaults::pixel_snap_offset(&self.transform()) {
-            self.translate(-fx, -fy);
+        if let Some((dx, dy)) = defaults::pixel_snap_step(&self.transform()) {
+            self.translate(dx, dy);
         }
     }
 

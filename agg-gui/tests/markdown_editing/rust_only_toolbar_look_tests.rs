@@ -1,0 +1,311 @@
+//! The formatting toolbar's look, as agg-gui's own rich editor draws it (no C# counterpart; the
+//! look is agg-gui's, built from its theme's visuals): every button group and the size list stand
+//! on one baseline at one height with even gaps, the active style is a light accent tint over a
+//! deeper accent icon, the strokes (outline, dividers, icon bars) fill whole device pixels at 1x,
+//! 1.5x and 2x, and an empty editor shows its hint.
+
+use agg_gui::widgets::markdown_editing::{
+    group_height, DocPosition, MarkdownFormatButtonKind as K, RichMarkdownEditor, RichSelection,
+};
+use std::sync::Arc;
+
+use agg_gui::text::Font;
+use agg_gui::{App, Color, Framebuffer, GfxCtx, Rect, Size, Widget};
+
+use super::rich_markdown_edit_widget_tests::fonts;
+
+const LOGICAL: Size = Size {
+    width: 640.0,
+    height: 200.0,
+};
+
+fn icons() -> Arc<Font> {
+    Arc::new(Font::from_slice(agg_gui::fonts::FONT_AWESOME_4_7).expect("font awesome"))
+}
+
+fn at_scale<T>(scale: f64, run: impl FnOnce() -> T) -> T {
+    agg_gui::set_device_scale(scale);
+    // Painted on white, so the light theme (visuals are per thread, so tests do not leak them).
+    agg_gui::theme::set_visuals(agg_gui::theme::Visuals::light());
+    let result = run();
+    agg_gui::set_device_scale(1.0);
+    result
+}
+
+fn editor_app(markdown: &str, hint: Option<&str>) -> App {
+    let mut editor = RichMarkdownEditor::new(fonts(), icons(), None);
+    editor.set_markdown(markdown).unwrap();
+    editor.set_empty_hint(hint.map(str::to_string));
+    editor
+        .select(RichSelection::at(DocPosition::new(0, 0)))
+        .unwrap();
+    App::new(Box::new(editor))
+}
+
+/// The app laid out and painted at `scale` into a white device-pixel framebuffer (Y up).
+fn paint(app: &mut App, scale: f64) -> Framebuffer {
+    let (w, h) = (LOGICAL.width * scale, LOGICAL.height * scale);
+    app.layout(Size::new(w, h));
+    let mut fb = Framebuffer::new(w as u32, h as u32);
+    {
+        let mut ctx = GfxCtx::new(&mut fb);
+        ctx.clear(Color::white());
+        app.paint(&mut ctx);
+    }
+    fb
+}
+
+fn walk<'a>(widget: &'a dyn Widget, origin: (f64, f64), out: &mut Vec<(&'a dyn Widget, Rect)>) {
+    for child in widget.children() {
+        let b = child.bounds();
+        let at = (origin.0 + b.x, origin.1 + b.y);
+        out.push((child.as_ref(), Rect::new(at.0, at.1, b.width, b.height)));
+        walk(child.as_ref(), at, out);
+    }
+}
+
+/// The rects of every widget of `type_name`, left to right, in the app's logical Y-up space.
+fn rects(app: &App, type_name: &str) -> Vec<Rect> {
+    let mut all = Vec::new();
+    walk(app.root(), (0.0, 0.0), &mut all);
+    let mut found: Vec<Rect> = all
+        .into_iter()
+        .filter(|(w, _)| w.type_name() == type_name)
+        .map(|(_, r)| r)
+        .collect();
+    found.sort_by(|a, b| a.x.total_cmp(&b.x));
+    found
+}
+
+/// The RGB of the device pixel `(x, y)` (Y up).
+fn rgb(fb: &Framebuffer, x: i64, y: i64) -> [u8; 3] {
+    let i = ((y as usize * fb.width() as usize) + x as usize) * 4;
+    let p = fb.pixels();
+    [p[i], p[i + 1], p[i + 2]]
+}
+
+fn luma(c: [u8; 3]) -> u32 {
+    (u32::from(c[0]) * 3 + u32::from(c[1]) * 6 + u32::from(c[2])) / 10
+}
+
+fn cell_index(kind: K) -> usize {
+    K::ALL.iter().position(|k| *k == kind).expect("a button")
+}
+
+const SCALES: [f64; 3] = [1.0, 1.5, 2.0];
+
+/// The groups and the size list stand on one baseline at one height, with the same gap between
+/// each neighbouring pair, at every scale.
+#[test]
+fn rust_only_the_groups_and_the_size_list_share_one_height_baseline_and_gap() {
+    for scale in SCALES {
+        at_scale(scale, || {
+            let mut app = editor_app("Hello\n", None);
+            paint(&mut app, scale);
+            let mut items = rects(&app, "MarkdownFormatGroup");
+            items.extend(rects(&app, "MarkdownSizeList"));
+            items.sort_by(|a, b| a.x.total_cmp(&b.x));
+            assert_eq!(items.len(), 5, "four groups and the size list");
+            for r in &items {
+                assert_eq!(r.height, group_height(), "one height at {scale}");
+                assert_eq!(r.y, items[0].y, "one baseline at {scale}");
+            }
+            let gaps: Vec<f64> = items
+                .windows(2)
+                .map(|p| p[1].x - (p[0].x + p[0].width))
+                .collect();
+            for gap in &gaps {
+                assert_eq!(*gap, gaps[0], "even gaps {gaps:?} at {scale}");
+            }
+            assert!(gaps[0] >= 4.0, "the groups do not touch: {gaps:?}");
+        });
+    }
+}
+
+/// The active alignment button is a light tint of the accent with a deeper accent icon, never a
+/// solid fill; its neighbour is untinted.
+#[test]
+fn rust_only_the_active_align_button_is_a_light_tint_with_a_deeper_icon() {
+    for scale in [1.0, 2.0] {
+        at_scale(scale, || {
+            let mut app = editor_app("Hello\n", None);
+            let fb = paint(&mut app, scale);
+            let cells = rects(&app, "MarkdownFormatButton");
+            let (left, centre) = (
+                cells[cell_index(K::AlignLeft)],
+                cells[cell_index(K::AlignCenter)],
+            );
+            let sample = |cell: Rect| {
+                rgb(
+                    &fb,
+                    (cell.x * scale) as i64 + 2,
+                    ((cell.y + cell.height * 0.5) * scale) as i64,
+                )
+            };
+            let tint = sample(left);
+            assert!(
+                tint.iter().all(|c| *c >= 190) && tint[2] >= tint[0] + 8,
+                "a light blue tint, not a solid fill: {tint:?} at {scale}"
+            );
+            assert_eq!(sample(centre), [255, 255, 255], "the neighbour is untinted");
+            // The icon: the darkest pixel inside the cell is the deeper accent, darker than the tint.
+            let (x0, y0) = ((left.x * scale) as i64, (left.y * scale) as i64);
+            let (x1, y1) = (
+                ((left.x + left.width) * scale) as i64,
+                ((left.y + left.height) * scale) as i64,
+            );
+            let mut darkest = [255u8; 3];
+            for y in y0 + 2..y1 - 2 {
+                for x in x0 + 2..x1 - 2 {
+                    if luma(rgb(&fb, x, y)) < luma(darkest) {
+                        darkest = rgb(&fb, x, y);
+                    }
+                }
+            }
+            assert!(
+                luma(darkest) < luma(tint) - 60,
+                "icon {darkest:?} vs tint {tint:?}"
+            );
+            assert!(
+                darkest[2] > darkest[0],
+                "the icon is an accent, not black: {darkest:?}"
+            );
+        });
+    }
+}
+
+/// An empty editor shows its hint in the text area, with the keyboard or without it; without a
+/// hint it is blank.
+#[test]
+fn rust_only_an_empty_editor_shows_its_hint() {
+    agg_gui::theme::set_visuals(agg_gui::theme::Visuals::light());
+    let hint = "No notes yet. Type here what this design is for.";
+    let inked = |app: &mut App| {
+        let fb = paint(app, 1.0);
+        let area = rects(app, "RichMarkdownEditWidget");
+        let area = area[0];
+        let mut count = 0;
+        for y in (area.y as i64)..((area.y + area.height) as i64) {
+            for x in (area.x as i64)..((area.x + area.width) as i64) {
+                if luma(rgb(&fb, x, y)) < 235 {
+                    count += 1;
+                }
+            }
+        }
+        count
+    };
+    let with_hint = inked(&mut editor_app("", Some(hint)));
+    let mut focused_app = editor_app("", Some(hint));
+    focused_app.layout(Size::new(LOGICAL.width, LOGICAL.height));
+    {
+        let editor = focused_app
+            .root_mut()
+            .as_any_mut()
+            .and_then(|w| w.downcast_mut::<RichMarkdownEditor>())
+            .expect("the root is the editor");
+        editor.editor_mut().on_event(&agg_gui::Event::FocusGained);
+        assert!(editor.editor().is_focused());
+    }
+    let focused = inked(&mut focused_app);
+    assert!(
+        focused > 100,
+        "the hint stays while the editor has the keyboard ({focused} inked pixels)"
+    );
+    let without = inked(&mut editor_app("", None));
+    assert!(
+        with_hint > 100,
+        "the hint is drawn ({with_hint} inked pixels)"
+    );
+    assert!(
+        without < with_hint / 10,
+        "no hint, nothing drawn ({without})"
+    );
+}
+
+/// Set `AGG_GUI_TOOLBAR_SNAPSHOT` to a folder to save the editor at each scale there as
+/// `toolbar_<scale>x.png`, for looking at.
+#[test]
+fn rust_only_toolbar_snapshots() {
+    let Ok(dir) = std::env::var("AGG_GUI_TOOLBAR_SNAPSHOT") else {
+        return;
+    };
+    for scale in SCALES {
+        at_scale(scale, || {
+            let mut app = editor_app("", Some("No notes yet. Type here what this design is for."));
+            let fb = paint(&mut app, scale);
+            let rgba = fb.pixels_flipped();
+            let png =
+                agg_gui::screenshot::encode_png_rgba(&rgba, fb.width(), fb.height()).expect("png");
+            std::fs::write(format!("{dir}/toolbar_{scale}x.png"), png).expect("writes");
+        });
+    }
+}
+
+/// The outline, the dividers and the icon bars are whole device pixels: a column and a row cut
+/// through a group hold only the background and the stroke colour, and the align icon's centre
+/// column holds only solid ink and background, with no half-covered pixel between. The outline is
+/// checked at 1x, 1.5x and 2x; the glyph bars at 1x and 2x, where Font Awesome's bar heights are
+/// whole pixels (at 1.5x a bar is 1.5 pixels thick in the font itself).
+#[test]
+fn rust_only_strokes_fill_whole_device_pixels() {
+    for scale in SCALES {
+        at_scale(scale, || {
+            let mut app = editor_app("Hello\n", None);
+            let fb = paint(&mut app, scale);
+            let groups = rects(&app, "MarkdownFormatGroup");
+            let links = groups[3];
+            let stroke = rgb(&fb, (links.x * scale) as i64, (links.y * scale) as i64 + 20);
+            // Within 4/255 of a colour counts as that colour: an edge on a pixel boundary can bleed
+            // a rounding error's worth of coverage into its neighbour.
+            let near = |a: [u8; 3], b: [u8; 3]| a.iter().zip(b).all(|(p, q)| p.abs_diff(q) <= 4);
+            let in_two = |colors: Vec<[u8; 3]>, what: &str| {
+                assert!(
+                    colors
+                        .iter()
+                        .all(|c| near(*c, [255, 255, 255]) || near(*c, stroke)),
+                    "{what} at {scale}x holds a half-covered pixel: {colors:?}"
+                );
+                assert!(
+                    colors.iter().any(|c| near(*c, stroke)),
+                    "{what} meets the stroke"
+                );
+            };
+            // A column through the group's left cell, clear of the corner curve and the icon.
+            let x = ((links.x + 7.25) * scale) as i64;
+            let (y0, y1) = (
+                (links.y * scale) as i64 - 2,
+                ((links.y + links.height) * scale) as i64 + 2,
+            );
+            in_two(
+                (y0..y1).map(|y| rgb(&fb, x, y)).collect(),
+                "a column across the outline",
+            );
+            // A row through the group below the icons, across its dividers.
+            let y = ((links.y + 3.0) * scale) as i64;
+            let (x0, x1) = (
+                ((links.x + 9.0) * scale) as i64,
+                ((links.x + links.width - 9.0) * scale) as i64,
+            );
+            in_two(
+                (x0..x1).map(|x| rgb(&fb, x, y)).collect(),
+                "a row across the dividers",
+            );
+        });
+    }
+    for scale in [1.0, 2.0] {
+        at_scale(scale, || {
+            let mut app = editor_app("Hello\n", None);
+            let fb = paint(&mut app, scale);
+            let cells = rects(&app, "MarkdownFormatButton");
+            let c = cells[cell_index(K::AlignCenter)];
+            let x = ((c.x + c.width * 0.5) * scale) as i64;
+            for y in ((c.y * scale) as i64 + 3)..(((c.y + c.height) * scale) as i64 - 3) {
+                let l = luma(rgb(&fb, x, y));
+                assert!(
+                    l <= 80 || l >= 250,
+                    "a half-covered pixel ({l}) in the icon at {scale}x, row {y}"
+                );
+            }
+        });
+    }
+}

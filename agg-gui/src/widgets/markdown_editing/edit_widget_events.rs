@@ -200,7 +200,7 @@ impl RichMarkdownEditWidget {
 
     fn set_focus(&mut self, focused: bool) {
         self.focused = focused;
-        // The caret and the empty hint both depend on focus.
+        // The caret depends on focus.
         self.blink.restart(focused);
         crate::animation::request_draw();
     }

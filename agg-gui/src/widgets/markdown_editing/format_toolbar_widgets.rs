@@ -5,31 +5,35 @@
 //! implementation (the strip over the link row).  The toolbar's logic is in
 //! `format_toolbar`.
 //!
-//! A button is agg-gui's [`Button`] with a Font Awesome icon in its em box
-//! (`with_icon_em_box`, so every icon shares one baseline), its enabled and
-//! pressed states read live from the toolbar's model; the wrapper paints the
-//! faint shade C# shows for a style that covers only part of the selection,
-//! which `Button` has no state for.  Sizes are in agg-gui's logical units, so
-//! C#'s `* DeviceScale` factors fall away (the renderer applies the scale).
+//! A button is agg-gui's [`Button`] in its flat mode (`with_flat`) with a Font
+//! Awesome icon in its em box (`with_icon_em_box`, so every icon shares one
+//! baseline), taking the clicks and the tooltip; the *group* paints the
+//! cells (the accent tint of a pressed style, the faint shade of a mixed one,
+//! hover and press) with the outline and dividers, in one device-pixel grid
+//! (`format_toolbar_cells`), so the strokes are crisp at any scale and the end
+//! cells follow the outline's rounded corners.  The strip reads each group's
+//! and the size list's margin and anchor, so groups and list are spaced evenly
+//! and stand on one baseline; the list is as tall as the groups.  Sizes are in
+//! agg-gui's logical units, so C#'s `* DeviceScale` factors fall away (the
+//! renderer applies the scale).
 
 use std::cell::Cell;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use crate::color::Color;
 use crate::draw_ctx::DrawCtx;
 use crate::event::{Event, EventResult};
 use crate::geometry::{Rect, Size};
 use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
 use crate::text::Font;
 use crate::widget::Widget;
-use crate::widgets::{Button, ComboBox, FlowLeftRightWithWrapping};
+use crate::widgets::{Button, ComboBox, ComboBoxStyle, FlowLeftRightWithWrapping};
 
 use super::format_toolbar::{
     MarkdownFormatButtonKind, MarkdownFormatToolbar, ToolbarRequest, ToolbarShared,
     DESIGN_EDGE_SPACE, ROW_DESIGN_PADDING,
 };
-use super::inline_style::RichStyleCoverage;
+use super::format_toolbar_cells::{icon_color, paint_group};
 
 /// The button's width in design units.
 pub const BUTTON_DESIGN_WIDTH: f64 = 30.0;
@@ -68,7 +72,7 @@ pub(super) fn build_strip(
     strip.row_margin = Insets::ZERO;
     strip.padding = Insets::symmetric(0.0, DESIGN_EDGE_SPACE - ROW_DESIGN_PADDING);
     for (i, kinds) in MarkdownFormatButtonKind::GROUPS.iter().enumerate() {
-        let mut group = MarkdownFormatGroup::new();
+        let mut group = MarkdownFormatGroup::new(shared);
         for kind in kinds.iter() {
             group.add_button(MarkdownFormatButton::new(
                 shared, *kind, icon_font, font, mac,
@@ -88,7 +92,6 @@ pub struct MarkdownFormatButton {
     bounds: Rect,
     base: WidgetBase,
     children: Vec<Box<dyn Widget>>,
-    shared: Rc<ToolbarShared>,
     kind: MarkdownFormatButtonKind,
 }
 
@@ -100,17 +103,22 @@ impl MarkdownFormatButton {
         font: &Arc<Font>,
         mac: bool,
     ) -> Self {
-        let (enabled, active, click) = (Rc::clone(shared), Rc::clone(shared), Rc::clone(shared));
+        let (enabled, click) = (Rc::clone(shared), Rc::clone(shared));
         let index = kind.index();
+        let colors = Rc::clone(shared);
         let button = Button::new("", Arc::clone(font))
             .with_icon_sized(kind.icon(), Arc::clone(icon_font), ICON_DESIGN_SIZE)
             .with_icon_em_box()
-            // C#'s button is transparent until hovered or pressed; the group draws the outline.
-            .with_ghost()
+            // The group paints the cells (tint, hover, press) so the end cells take its rounded
+            // corners; the button draws the icon and takes the clicks.
+            .with_flat()
             .with_compact()
             .with_focus_on_click(false)
             .with_enabled_fn(move || enabled.model.borrow().buttons[index].enabled)
-            .with_active_fn(move || active.model.borrow().buttons[index].is_pressed())
+            .with_icon_color_fn(move |v| {
+                let state = colors.model.borrow().buttons[index];
+                Some(icon_color(v, state.enabled, state.is_pressed()))
+            })
             .on_click(move || click.push(ToolbarRequest::Click(kind)))
             .with_min_size(Size::new(BUTTON_DESIGN_WIDTH, group_height() - 2.0))
             .with_max_size(Size::new(BUTTON_DESIGN_WIDTH, group_height() - 2.0))
@@ -119,7 +127,6 @@ impl MarkdownFormatButton {
             bounds: Rect::default(),
             base: WidgetBase::new(),
             children: vec![Box::new(button)],
-            shared: Rc::clone(shared),
             kind,
         }
     }
@@ -164,16 +171,8 @@ impl Widget for MarkdownFormatButton {
         size
     }
 
-    fn paint(&mut self, ctx: &mut dyn DrawCtx) {
-        // A style on part of the selection: the faint shade (C#'s MinimalShade).
-        let state = self.shared.model.borrow().buttons[self.kind.index()];
-        if state.coverage == RichStyleCoverage::Mixed {
-            ctx.set_fill_color(Color::rgba(0.0, 0.0, 0.0, 0.12));
-            ctx.begin_path();
-            ctx.rect(0.0, 0.0, self.bounds.width, self.bounds.height);
-            ctx.fill();
-        }
-    }
+    // The group paints the cell behind the icon (see `MarkdownFormatGroup::paint`).
+    fn paint(&mut self, _ctx: &mut dyn DrawCtx) {}
 
     fn on_event(&mut self, _event: &Event) -> EventResult {
         EventResult::Ignored
@@ -187,10 +186,11 @@ pub struct MarkdownFormatGroup {
     bounds: Rect,
     base: WidgetBase,
     children: Vec<Box<dyn Widget>>,
+    shared: Rc<ToolbarShared>,
 }
 
 impl MarkdownFormatGroup {
-    fn new() -> Self {
+    fn new(shared: &Rc<ToolbarShared>) -> Self {
         let mut base = WidgetBase::new();
         base.margin = Insets::symmetric(GROUP_DESIGN_SPACING / 2.0, 0.0);
         base.v_anchor = VAnchor::CENTER;
@@ -198,6 +198,7 @@ impl MarkdownFormatGroup {
             bounds: Rect::default(),
             base,
             children: Vec::new(),
+            shared: Rc::clone(shared),
         }
     }
 
@@ -239,6 +240,14 @@ impl Widget for MarkdownFormatGroup {
     fn widget_base_mut(&mut self) -> Option<&mut WidgetBase> {
         Some(&mut self.base)
     }
+    // The strip reads these from the widget, not its base: without them the groups and the size
+    // list ran together with no gap between them and sat on the row's bottom edge.
+    fn margin(&self) -> Insets {
+        self.base.margin
+    }
+    fn v_anchor(&self) -> VAnchor {
+        self.base.v_anchor
+    }
 
     // One unit of padding inside the outline and one between buttons, where the dividers go.
     fn layout(&mut self, available: Size) -> Size {
@@ -255,25 +264,7 @@ impl Widget for MarkdownFormatGroup {
     }
 
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
-        let visuals = ctx.visuals();
-        let color = visuals.widget_stroke;
-        let (w, h) = (self.bounds.width, self.bounds.height);
-        ctx.set_stroke_color(color);
-        ctx.set_line_width(1.0);
-        ctx.begin_path();
-        ctx.rounded_rect(0.5, 0.5, w - 1.0, h - 1.0, GROUP_DESIGN_RADIUS);
-        ctx.stroke();
-        // A divider fills each gap between two buttons, inside the outline.
-        ctx.set_fill_color(color);
-        for pair in self.children.windows(2) {
-            let (before, after) = (pair[0].bounds(), pair[1].bounds());
-            let gap = after.x - (before.x + before.width);
-            if gap > 0.0 {
-                ctx.begin_path();
-                ctx.rect(before.x + before.width, before.y, gap, before.height);
-                ctx.fill();
-            }
-        }
+        paint_group(ctx, self.bounds, &self.children, &self.shared);
     }
 
     fn on_event(&mut self, _event: &Event) -> EventResult {
@@ -321,6 +312,12 @@ impl SizeListWidget {
         let combo = ComboBox::new(items.clone(), 0, Arc::clone(&self.font))
             .with_no_selection("")
             .with_fit_width(true)
+            // As tall as the groups, with their corner radius, so the row reads as one set.
+            .with_style(ComboBoxStyle {
+                height: Some(group_height()),
+                radius: Some(GROUP_DESIGN_RADIUS),
+                ..ComboBoxStyle::default()
+            })
             .with_enabled_fn(move || enabled.model.borrow().size_enabled)
             .on_change(move |index| {
                 // A pick of the entry already shown changes nothing (C#'s `refreshing` guard).
@@ -366,6 +363,14 @@ impl Widget for SizeListWidget {
     }
     fn widget_base_mut(&mut self) -> Option<&mut WidgetBase> {
         Some(&mut self.base)
+    }
+    // The strip reads these from the widget, not its base: without them the groups and the size
+    // list ran together with no gap between them and sat on the row's bottom edge.
+    fn margin(&self) -> Insets {
+        self.base.margin
+    }
+    fn v_anchor(&self) -> VAnchor {
+        self.base.v_anchor
     }
 
     fn layout(&mut self, available: Size) -> Size {

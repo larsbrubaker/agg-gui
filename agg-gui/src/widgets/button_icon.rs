@@ -7,6 +7,7 @@
 //! A button shows at most one leading icon: an [`IconImage`] when one is set
 //! (artwork icons, drawn at device resolution), otherwise the glyph.
 
+use std::rc::Rc;
 use std::sync::Arc;
 
 use crate::color::Color;
@@ -87,6 +88,39 @@ impl Button {
         self
     }
 
+    /// Colours the glyph icon of a [`with_flat`](Self::with_flat) button: `f`
+    /// gets the current visuals on every paint and returns the colour, or
+    /// `None` for the theme's text colour.  Lets an owner that paints its
+    /// own states tint the icon (a pressed style's deeper accent, a disabled
+    /// fade) without the button's own background logic.
+    pub fn with_icon_color_fn(
+        mut self,
+        f: impl Fn(&crate::theme::Visuals) -> Option<Color> + 'static,
+    ) -> Self {
+        self.icon_color_fn = Some(Rc::new(f));
+        self
+    }
+
+    /// A button that paints only its icon: no fill, outline, hover or press
+    /// shade, no focus ring and no disabled cover.  Its owner draws the
+    /// background and reads [`is_hovered`](Self::is_hovered) /
+    /// [`is_pressed`](Self::is_pressed) to shade it, which is how a toolbar
+    /// of grouped buttons gives its end cells the group's rounded corners.
+    pub fn with_flat(mut self) -> Self {
+        self.flat = true;
+        self
+    }
+
+    /// Whether the pointer is over the button.
+    pub fn is_hovered(&self) -> bool {
+        self.hovered
+    }
+
+    /// Whether the button is held down by the pointer.
+    pub fn is_pressed(&self) -> bool {
+        self.pressed
+    }
+
     /// The glyph icon's em box in the button's local Y-up coordinates: the
     /// glyph's advance wide, the face's ascent to descent tall, standing on
     /// the baseline the icon is drawn on (C#'s `IconEmBox`).  `None` without
@@ -110,7 +144,7 @@ impl Button {
 
     /// Where the leading icon's left edge sits: left of the label child by
     /// the icon block (as `paint` places it).
-    fn icon_left_x(&self) -> f64 {
+    pub(super) fn icon_left_x(&self) -> f64 {
         let label_x = self
             .children
             .first()
@@ -206,7 +240,17 @@ impl Button {
         ctx.set_font(Arc::clone(&icon.font));
         ctx.set_font_size(icon.font_size);
         ctx.set_fill_color(color);
-        ctx.fill_text(&icon.glyph.to_string(), left, baseline);
+        if self.icon_em_box {
+            // The em box is snapped to whole device pixels in the button's own
+            // space; snapping the button's origin too keeps the glyph's left
+            // edge and baseline on pixel boundaries wherever the button sits.
+            ctx.save();
+            ctx.snap_to_pixel();
+            ctx.fill_text(&icon.glyph.to_string(), left, baseline);
+            ctx.restore();
+        } else {
+            ctx.fill_text(&icon.glyph.to_string(), left, baseline);
+        }
     }
 }
 

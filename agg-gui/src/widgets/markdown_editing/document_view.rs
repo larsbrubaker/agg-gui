@@ -77,8 +77,7 @@ pub struct RichViewPaint<'a> {
     pub selection: &'a RichSelection,
     /// Whether the caret shows on the side of a wrap before it.
     pub caret_at_line_end: bool,
-    /// Whether the editor has focus: only then the caret draws, and only
-    /// without focus the empty hint.
+    /// Whether the editor has focus: only then the caret draws.
     pub focused: bool,
     /// Whether the blink is in its showing half.
     pub caret_showing: bool,
@@ -535,8 +534,10 @@ impl RichDocumentView {
         }
         self.drawn = first..end;
 
+        // The hint stays while the empty editor has the keyboard, as a text field's does, so a
+        // user who lands in an empty editor still sees what to write there; typing replaces it.
         let hint = paint.empty_hint.filter(|h| !h.is_empty());
-        if let (false, Some(hint)) = (paint.focused, hint) {
+        if let Some(hint) = hint {
             let entry = &self.entries[0];
             let block = paint
                 .document
