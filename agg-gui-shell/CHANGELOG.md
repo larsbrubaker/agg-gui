@@ -10,6 +10,23 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- `ShellHost::on_open_files(&mut self, app, paths: Vec<PathBuf>)` (macOS): the
+  OS asked the app to open files (Finder double-click, Open With, a drop on the
+  Dock icon, `open` while running). The shell adds `application:openFiles:` to
+  winit's app delegate at run time, so no C or Objective-C source is needed;
+  paths that arrive during start-up are queued and delivered on the first idle
+  pass. Windows and Linux pass files as process arguments and never call it.
+  The `objc2-foundation` dependency gains `NSArray`.
+
+- Window position persistence: `WindowBoundsStore::load_position` and
+  `save_position` (default methods, so existing stores keep compiling) carry a
+  `SavedPosition { x, y }` (outer top-left, physical px). The shell restores it
+  in `run`, clamped onto a connected monitor so a window last left on an
+  unplugged display reopens on a visible one, tracks `WindowEvent::Moved`
+  (ignoring maximized, fullscreen and minimized windows), and saves it on the
+  same idle, no-button-held cadence as the size and once on exit.
+  `ShellInit::restored_position` reports what the store returned.
+
 - Window activation: winit's `WindowEvent::Focused` reaches the app as
   `App::on_window_activated` / `App::on_window_deactivated` (through the
   input forwarder, so an automation run with real input off ignores it). A

@@ -23,12 +23,15 @@ use winit::event::{ElementState, Event, StartCause, WindowEvent};
 use winit::event_loop::ActiveEventLoop;
 use winit::window::{Fullscreen, Window};
 
-use crate::bounds::{BoundsAutoSave, SavedBounds, WindowBoundsStore, WindowedSizeTracker};
+use crate::bounds::{
+    BoundsAutoSave, ChangeGate, SavedBounds, WindowBoundsStore, WindowedSizeTracker,
+};
 use crate::config::{RedrawPolicy, ScreenshotConfig};
 use crate::host::{ExitAction, ShellControl, ShellHost, WindowGeometry};
 use crate::input::{shift_held, touch_event, wheel_delta};
 use crate::out_of_view_capture::{OutOfViewMouseCapture, PointerEventKind};
 use crate::paint::{schedule_skipped_frame, PaintRequest, Painter};
+use crate::position::{SavedPosition, WindowedPositionTracker};
 use crate::redraw_schedule::{next_control_flow, paint_blocked, LoopState};
 use crate::screenshot::capture_exhausted;
 use crate::waker::HostWakerGuard;
@@ -87,6 +90,10 @@ pub(crate) struct ShellLoop<H: ShellHost> {
     /// what gets persisted, so a restore doesn't reopen a windowed window at
     /// the maximized rect.
     pub(crate) windowed_size: WindowedSizeTracker,
+    /// Last window position seen while the window was neither maximized,
+    /// fullscreen nor minimized (`position.rs`).
+    pub(crate) windowed_position: WindowedPositionTracker,
+    pub(crate) position_auto: ChangeGate<SavedPosition>,
     pub(crate) maximized: bool,
     /// The monitor the window is on, kept through a measurement of nothing
     /// (off screen, mid hot-plug); refreshed with every geometry report.
@@ -169,6 +176,18 @@ impl<H: ShellHost> ShellLoop<H> {
                 );
                 self.notify_geometry();
                 self.window.request_redraw();
+            }
+
+            WindowEvent::Moved(position) => {
+                self.windowed_position.note_move(
+                    SavedPosition {
+                        x: position.x,
+                        y: position.y,
+                    },
+                    self.window.is_maximized(),
+                    self.window.fullscreen().is_some(),
+                    self.window.is_minimized().unwrap_or(false),
+                );
             }
 
             WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
@@ -423,6 +442,14 @@ impl<H: ShellHost> ShellLoop<H> {
         // Items picked in the native menu bar (`menu_bar`), queued during
         // AppKit's menu tracking and run here on a clean stack.
         if crate::menu_bar::run_pending_activations() {
+            self.window.request_redraw();
+        }
+
+        // Files the OS asked us to open (Finder, Dock drop). Paths that came
+        // in during start-up wait in the queue until this first pass.
+        let files = crate::open_files::take_open_files();
+        if !files.is_empty() {
+            self.host.on_open_files(&mut self.app, files);
             self.window.request_redraw();
         }
 
@@ -704,11 +731,14 @@ impl<H: ShellHost> ShellLoop<H> {
             return;
         };
         let bounds = self.current_bounds();
-        if self
-            .bounds_auto
-            .should_save(self.input.buttons_down() == 0, bounds)
-        {
+        let idle = self.input.buttons_down() == 0;
+        if self.bounds_auto.should_save(idle, bounds) {
             store.save(bounds);
+        }
+        if let Some(position) = self.windowed_position.position() {
+            if self.position_auto.should_save(idle, position) {
+                store.save_position(position);
+            }
         }
     }
 
@@ -724,6 +754,9 @@ impl<H: ShellHost> ShellLoop<H> {
             // the idle gate skipped — and an app whose store only records the
             // bounds writes them out from its own `on_exit` flush.
             store.save(self.current_bounds());
+            if let Some(position) = self.windowed_position.position() {
+                store.save_position(position);
+            }
         }
         self.host.on_exit(&mut self.app);
         // The close never waits on the GPU for long (agg-sharp `GpuTeardown`,
@@ -744,6 +777,7 @@ pub struct ShellInit<'a> {
     pub(crate) window: &'a Arc<Window>,
     pub(crate) gpu: &'a Gpu,
     pub(crate) restored_bounds: Option<SavedBounds>,
+    pub(crate) restored_position: Option<SavedPosition>,
 }
 
 impl ShellInit<'_> {
@@ -769,6 +803,13 @@ impl ShellInit<'_> {
     /// restored launch from a first one.
     pub fn restored_bounds(&self) -> Option<SavedBounds> {
         self.restored_bounds
+    }
+
+    /// What the [`WindowBoundsStore`] returned for the position, before the
+    /// shell moved it onto a connected monitor. Read the window's
+    /// `outer_position()` for where the window actually opened.
+    pub fn restored_position(&self) -> Option<SavedPosition> {
+        self.restored_position
     }
 
     /// `agg_gui::device_scale()`, already applied from the window.

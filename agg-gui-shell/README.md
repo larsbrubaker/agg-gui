@@ -45,7 +45,12 @@ constructed.
   `WindowBoundsStore` the app implements, sanitised against the real monitor
   and the GPU's maximum texture dimension. Sizes round-trip in physical pixels;
   restoring them as logical ones is the DPI ratchet that eventually grows the
-  window past what the GPU can allocate.
+  window past what the GPU can allocate. The window position is restored
+  too (`load_position` / `save_position`), moved onto a connected monitor when
+  its last one is gone.
+- **Open-file events (macOS)** — a Finder double-click, Open With or a drop on
+  the Dock icon reaches `ShellHost::on_open_files`, including paths delivered
+  while the app was still starting.
 - **Deterministic screenshots** — paint N settle frames, read the surface back,
   write a PNG, exit. Failures come back as a `ShellError`; the shell never
   exits the process itself.

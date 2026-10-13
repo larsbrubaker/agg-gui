@@ -24,6 +24,10 @@
 //! - Window creation with DPI-safe restore of a saved size (see
 //!   [`WindowBoundsStore`]) and the paint-first-then-show ordering that avoids
 //!   a white flash on start-up.
+//! - Window position restore, clamped onto a connected monitor
+//!   ([`WindowBoundsStore::load_position`] / [`WindowBoundsStore::save_position`]).
+//! - Files the OS asks the app to open on macOS (Finder, Dock drop), queued from
+//!   start-up and handed to [`ShellHost::on_open_files`].
 //! - Mouse, wheel (including the shift→horizontal remap), trackpad pinch (as
 //!   a marked wheel), keyboard **down and
 //!   up**, touch, cursor-leave, modifiers, and the OS cursor icon.
@@ -87,8 +91,10 @@ mod ime;
 mod input;
 mod lcd_display;
 pub mod menu_bar;
+mod open_files;
 mod out_of_view_capture;
 mod paint;
+mod position;
 mod redraw_schedule;
 mod run;
 mod screenshot;
@@ -101,6 +107,7 @@ pub use config::{RedrawPolicy, ScreenshotConfig, ShellConfig, WindowIcon, Window
 pub use display_metrics::{scaled_window_size, usable_display_scale, DisplayUsableSize};
 pub use host::{default_paint, Frame, NoHost, ShellControl, ShellHost, WindowGeometry};
 pub use lcd_display::WindowsLcdDisplayEnvironmentProvider;
+pub use position::SavedPosition;
 pub use run::run;
 pub use shell_loop::ShellInit;
 

@@ -176,6 +176,18 @@ pub trait ShellHost {
     /// must not run inside event dispatch, and exit/relaunch requests.
     fn on_idle(&mut self, _app: &mut App, _control: &mut ShellControl<'_>) {}
 
+    /// The OS asked the app to open files (macOS only): a Finder double-click,
+    /// Open With, a file dropped on the Dock icon, or `open` while the app
+    /// runs. Paths that arrive while the app is still starting (a Finder
+    /// launch delivers them early) are held and handed over here once the
+    /// window, the app and the host exist, so this fires from the first idle
+    /// iteration. Windows and Linux pass files as process arguments, which the
+    /// app reads itself, and never call this.
+    ///
+    /// Runs on the UI thread, in the idle pass before [`ShellHost::on_idle`];
+    /// a redraw is requested afterwards. `paths` is never empty.
+    fn on_open_files(&mut self, _app: &mut App, _paths: Vec<std::path::PathBuf>) {}
+
     /// The wgpu device was lost (TDR, driver reset, GPU removal, RDP session
     /// change) and the shell has rebuilt it. **Every GPU resource created from
     /// the old device is dead** — textures, buffers, pipelines cached by

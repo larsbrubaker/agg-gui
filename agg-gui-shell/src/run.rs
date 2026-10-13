@@ -17,11 +17,14 @@ use winit::event_loop::EventLoop;
 use winit::window::{Icon, Window, WindowAttributes};
 
 use crate::bounds::{
-    sanitize_restored_window_size, BoundsAutoSave, SavedBounds, WindowedSizeTracker,
+    sanitize_restored_window_size, BoundsAutoSave, ChangeGate, SavedBounds, WindowedSizeTracker,
 };
 use crate::config::{ShellConfig, WindowIcon, WindowSize};
 use crate::host::{ExitAction, ShellHost};
 use crate::paint::{PaintRequest, Painter};
+use crate::position::{
+    clamp_restored_position, MonitorRect, SavedPosition, WindowedPositionTracker,
+};
 use crate::shell_loop::{ShellInit, ShellLoop};
 use crate::waker::HostWakerGuard;
 use crate::ShellError;
@@ -74,9 +77,14 @@ where
     agg_gui::clipboard::use_system_clipboard();
     let clipboard_guard = SystemClipboardGuard;
     let event_loop = EventLoop::new().map_err(ShellError::EventLoop)?;
+    // winit's delegate exists now; make it answer Finder's open-file requests
+    // (macOS). Paths that arrive before the host is built are queued.
+    crate::open_files::install();
 
     let restored_bounds = config.bounds_store.as_ref().and_then(|s| s.load());
-    let (window, restored_size) = create_window(&event_loop, &config, restored_bounds)?;
+    let restored_position = config.bounds_store.as_ref().and_then(|s| s.load_position());
+    let (window, restored_size) =
+        create_window(&event_loop, &config, restored_bounds, restored_position)?;
     agg_gui::set_device_scale(crate::display_metrics::usable_display_scale(
         window.scale_factor(),
     ));
@@ -112,6 +120,7 @@ where
         window: &window,
         gpu: &gpu,
         restored_bounds,
+        restored_position,
     })?;
 
     // Only now: window up, GPU up, app built. Cleared on every exit path by
@@ -127,6 +136,15 @@ where
         WindowedSizeTracker::new(restored_size, (gpu.config().width, gpu.config().height));
     let mut bounds_auto = BoundsAutoSave::default();
     bounds_auto.seed(restored_bounds);
+    // The position the window really opened at (after the monitor clamp), so
+    // a clamped position is saved back and an unmoved one is not rewritten.
+    let opened_at = window
+        .outer_position()
+        .ok()
+        .map(|p| SavedPosition { x: p.x, y: p.y });
+    let windowed_position = WindowedPositionTracker::new(opened_at);
+    let mut position_auto = ChangeGate::<SavedPosition>::default();
+    position_auto.seed(restored_position);
 
     let exit = Rc::new(Cell::new(None::<ExitAction>));
     let error = Rc::new(RefCell::new(None::<ShellError>));
@@ -157,6 +175,8 @@ where
         bounds_store: config.bounds_store,
         bounds_auto,
         windowed_size,
+        windowed_position,
+        position_auto,
         maximized,
         display_size: crate::display_metrics::DisplayUsableSize::new(),
         exit: Rc::clone(&exit),
@@ -234,6 +254,7 @@ fn create_window(
     event_loop: &EventLoop<()>,
     config: &ShellConfig,
     restored: Option<SavedBounds>,
+    restored_position: Option<SavedPosition>,
 ) -> Result<CreatedWindow, ShellError> {
     // A restored size is physical px and may be corrupt (an old DPI-ratchet
     // bug, a zeroed file), so it is sanitised before winit ever sees it. This
@@ -314,6 +335,29 @@ fn create_window(
                     fitted.1.max(1) as u32,
                 ));
             }
+        }
+    }
+    // A restored position goes where it lands on a connected monitor, not
+    // where an unplugged one used to be (`clamp_restored_position`). It is
+    // applied now, while the window is still hidden, because winit 0.30 lists
+    // monitors only from a live window.
+    if let (Some(saved_position), false) = (restored_position, config.fullscreen) {
+        let monitors: Vec<MonitorRect> = window
+            .available_monitors()
+            .map(|m| {
+                let (p, s) = (m.position(), m.size());
+                MonitorRect {
+                    x: p.x,
+                    y: p.y,
+                    width: s.width,
+                    height: s.height,
+                }
+            })
+            .collect();
+        let inner = window.inner_size();
+        let window_size = restored_size.unwrap_or((inner.width, inner.height));
+        if let Some(p) = clamp_restored_position(saved_position, window_size, &monitors) {
+            window.set_outer_position(winit::dpi::PhysicalPosition::new(p.x, p.y));
         }
     }
     Ok((window, restored_size))

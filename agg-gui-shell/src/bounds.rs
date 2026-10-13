@@ -29,6 +29,8 @@ const MIN_H: u32 = 150;
 /// GPU will reject.
 const FALLBACK_MAX_DIM: u32 = 8192;
 
+use crate::position::SavedPosition;
+
 /// A persisted window geometry. Sizes are **physical pixels**.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SavedBounds {
@@ -54,6 +56,21 @@ pub trait WindowBoundsStore {
     /// that already batches its own state can just record the value here and
     /// let its own save path write it.
     fn save(&self, bounds: SavedBounds);
+
+    /// Where the window was on the last run (outer top-left, physical px), or
+    /// `None` to let the OS place it. The shell clamps the value onto a
+    /// connected monitor before using it, so a store may return whatever it
+    /// saved. Defaults to `None`, so a store written before positions existed
+    /// keeps working.
+    fn load_position(&self) -> Option<SavedPosition> {
+        None
+    }
+
+    /// Persist the window position. Called on the same cadence as
+    /// [`save`](WindowBoundsStore::save) (idle, no mouse button held, and once
+    /// on exit), only for positions of a normal window: never while it is
+    /// maximized, fullscreen or minimized. Defaults to doing nothing.
+    fn save_position(&self, _position: SavedPosition) {}
 }
 
 /// Clamp a saved (physical-px) window size into a usable, GPU-safe range.
@@ -129,25 +146,31 @@ impl WindowedSizeTracker {
     }
 }
 
-/// Diff-and-gate policy for writing bounds back, mirroring
+/// Diff-and-gate policy for writing a value back, mirroring
 /// `agg_gui::persistence::AutoSave` for a value type rather than a blob:
-/// write only when the bounds actually changed AND no mouse button is held,
-/// so a drag-resize doesn't hit the store on every intermediate size.
-#[derive(Default)]
-pub(crate) struct BoundsAutoSave {
-    last_saved: Option<SavedBounds>,
+/// write only when the value actually changed AND no mouse button is held,
+/// so a drag-resize or drag-move doesn't hit the store on every intermediate
+/// value.
+pub(crate) struct ChangeGate<T> {
+    last_saved: Option<T>,
 }
 
-impl BoundsAutoSave {
+impl<T> Default for ChangeGate<T> {
+    fn default() -> Self {
+        Self { last_saved: None }
+    }
+}
+
+impl<T: Copy + PartialEq> ChangeGate<T> {
     /// Seed with what was loaded at startup so the first tick doesn't write
     /// the same value straight back.
-    pub(crate) fn seed(&mut self, bounds: Option<SavedBounds>) {
-        self.last_saved = bounds;
+    pub(crate) fn seed(&mut self, value: Option<T>) {
+        self.last_saved = value;
     }
 
     /// Should `current` be persisted now? Returns `true` at most once per
     /// distinct value.
-    pub(crate) fn should_save(&mut self, idle: bool, current: SavedBounds) -> bool {
+    pub(crate) fn should_save(&mut self, idle: bool, current: T) -> bool {
         if !idle || self.last_saved == Some(current) {
             return false;
         }
@@ -155,6 +178,9 @@ impl BoundsAutoSave {
         true
     }
 }
+
+/// The gate for [`SavedBounds`].
+pub(crate) type BoundsAutoSave = ChangeGate<SavedBounds>;
 
 #[cfg(test)]
 mod tests {
