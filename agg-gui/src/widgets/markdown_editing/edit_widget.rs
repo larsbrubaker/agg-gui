@@ -16,8 +16,10 @@
 //!   rich copies are styled at ([`RichMarkdownEditWidget::set_default_font_size`],
 //!   C#'s `Theme.DefaultFontSize`).
 //! - The image loader is the viewer's provider contract
-//!   ([`RichMarkdownEditWidget::set_image_provider`]) plus its http(s)
-//!   fetcher, rather than C#'s static `MarkdownWidget.RetrieveImageSquenceAsync`.
+//!   ([`RichMarkdownEditWidget::set_image_provider`]) plus its remote image
+//!   loader for http(s) and `file://` urls
+//!   ([`RichMarkdownEditWidget::set_remote_image_loader`]), rather than C#'s
+//!   static `MarkdownWidget.RetrieveImageSquenceAsync`.
 //! - The toolbar's [`super::RichEditCommands`] is implemented by the state;
 //!   reach it through [`RichMarkdownEditWidget::state_mut`].
 
@@ -247,10 +249,25 @@ impl RichMarkdownEditWidget {
     }
 
     /// Sets where images come from: RGBA8 pixels, top row first, and size,
-    /// as the markdown viewer's `with_image_provider` takes them.  An http(s)
-    /// url the provider does not supply is fetched.
+    /// as the markdown viewer's `with_image_provider` takes them.  An http(s) or
+    /// `file://` url the provider does not supply goes to the remote image
+    /// loader ([`Self::set_remote_image_loader`]), off the UI frame.
     pub fn set_image_provider(&mut self, provider: Option<RichImageProvider>) {
         self.shared.images.borrow_mut().set_provider(provider);
+    }
+
+    /// Sets the loader that reads http(s) and `file://` images (the viewer's
+    /// `with_remote_image_loader`); `None` uses the process default
+    /// ([`crate::set_default_remote_image_loader`]), and with neither such an
+    /// image does not load.
+    pub fn set_remote_image_loader(
+        &mut self,
+        loader: Option<std::sync::Arc<dyn crate::RemoteImageLoader>>,
+    ) {
+        self.shared
+            .images
+            .borrow_mut()
+            .set_remote_image_loader(loader);
     }
 
     /// Maps an image's url as written in the markdown to what the loader

@@ -3,10 +3,13 @@
 //! Loads the images a rich document's image atoms point at, one load per url,
 //! through the markdown viewer's own loading: the host's image provider (the
 //! viewer's `with_image_provider` contract: RGBA8, top row first) and, for an
-//! http(s) url the provider does not supply, the viewer's remote image loader
-//! (`markdown::image_loader`: this cache's own, else the process default;
-//! with neither, the image does not load and no request is made).  The edit widget hands [`RichImageCache::loaded`]
-//! to its painter and layout style.
+//! http(s) or `file://` url the provider does not supply, the viewer's remote
+//! image loader (`markdown::image_loader`: this cache's own, else the process
+//! default; with neither, the image does not load and no request is made).  A
+//! `file://` picture is offered to the loader exactly as `MarkdownView` offers
+//! it, so a host reads local pictures off the frame; a file the loader cannot
+//! read ends as the same failed load the viewer shows.  The edit widget hands
+//! [`RichImageCache::loaded`] to its painter and layout style.
 //!
 //! Differences from C#, where a loaded image raised a callback that the
 //! document view turned into a relayout on the UI thread:
@@ -28,6 +31,13 @@ use super::inline::InlineAtom;
 use crate::widgets::markdown::image_loader::{load_remote_image, RemoteImageLoader};
 use crate::widgets::markdown::{is_fetchable_url, ImagePixels, ImageState};
 
+/// Whether `url` is one the remote image loader is offered: http(s) or a
+/// `file://` picture.
+fn is_loader_url(url: &str) -> bool {
+    url.starts_with("file://")
+        || (is_fetchable_url(url) && (url.starts_with("http://") || url.starts_with("https://")))
+}
+
 /// Supplies an image's RGBA8 pixels (top row first) and size, or `None`.
 pub type RichImageProvider = Box<dyn Fn(&str) -> Option<(Vec<u8>, u32, u32)>>;
 
@@ -47,14 +57,15 @@ pub struct RichImageCache {
     loads: RefCell<HashMap<String, Load>>,
     provider: Option<RichImageProvider>,
     resolve_url: Option<RichResolveUrl>,
-    /// Fetches http(s) images; `None` uses the process default
-    /// (`markdown::set_default_remote_image_loader`), and with neither an
-    /// http(s) image does not load.
+    /// Fetches http(s) and `file://` images; `None` uses the process default
+    /// (`markdown::set_default_remote_image_loader`), and with neither such an
+    /// image does not load.
     remote_loader: Option<Arc<dyn RemoteImageLoader>>,
 }
 
 impl RichImageCache {
-    /// An empty cache with no provider: only http(s) images load.
+    /// An empty cache with no provider: only http(s) and `file://` images load, and
+    /// only through an installed loader.
     pub fn new() -> Self {
         Self::default()
     }
@@ -70,7 +81,7 @@ impl RichImageCache {
         self.resolve_url = resolve;
     }
 
-    /// Sets the loader that fetches http(s) images (the viewer's
+    /// Sets the loader that fetches http(s) and `file://` images (the viewer's
     /// `with_remote_image_loader`); `None` uses the process default.
     pub fn set_remote_image_loader(&mut self, loader: Option<Arc<dyn RemoteImageLoader>>) {
         self.remote_loader = loader;
@@ -137,11 +148,10 @@ impl RichImageCache {
                 },
                 true,
             ),
-            None if is_fetchable_url(&resolved)
-                && (resolved.starts_with("http://") || resolved.starts_with("https://")) =>
-            {
-                (ImageState::Loading, false)
-            }
+            // `file://` goes to the loader like an http(s) url (the viewer's rule,
+            // `MarkdownView::file_url_has_loader`); with no loader installed
+            // `load_remote_image` below leaves it failed and nothing is asked.
+            None if is_loader_url(&resolved) => (ImageState::Loading, false),
             None => (ImageState::Failed, true),
         };
         let state = Arc::new(Mutex::new(state));

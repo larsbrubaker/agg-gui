@@ -60,6 +60,8 @@ mod rust_only_device_scale_tests;
 mod rust_only_document_view_tests;
 #[path = "markdown_editing/rust_only_edit_error_tests.rs"]
 mod rust_only_edit_error_tests;
+#[path = "markdown_editing/rust_only_image_loader_tests.rs"]
+mod rust_only_image_loader_tests;
 #[path = "markdown_editing/rust_only_parser_inline_tests.rs"]
 mod rust_only_parser_inline_tests;
 #[path = "markdown_editing/rust_only_pipe_table_tests.rs"]
