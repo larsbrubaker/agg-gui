@@ -145,56 +145,96 @@ fn bullets(ctx: &mut dyn DrawCtx, g: &Grid) {
     fill_rects(ctx, &rects);
 }
 
-/// The digits 1, 2 and 3 as rectilinear 3 x 5 cell shapes, each followed by a bar.
+/// The numerals 1 and 2, one above the other, each followed by a bar.  The
+/// numerals are drawn from straight bars only, like a seven-segment display, so
+/// they stay legible in a 16-unit box and have no half-covered pixel.  Their
+/// stroke is the bars' thickness wherever two numerals with open counters fit
+/// the box (1.5x and 2x); at 1x, where two-pixel strokes would close the "2" up,
+/// it is one pixel.  The bars sit on the bulleted list's first and third bar
+/// rows, so the two list icons share a rhythm: the first bar is level with the
+/// "1"'s top and the second with the "2"'s base.  At least a stroke's width of
+/// clear space separates the numerals.
 fn numbers(ctx: &mut dyn DrawCtx, g: &Grid) {
-    const DIGITS: [[&str; 5]; 3] = [
-        [".#.", "##.", ".#.", ".#.", ".#."],
-        ["###", "..#", "###", "#..", "###"],
-        ["###", "..#", "###", "..#", "###"],
-    ];
-    let c = (g.s * 0.8).round().max(1.0);
-    let (dw, dh) = (3.0 * c, 5.0 * c);
-    let gap = ((g.n - 3.0 * dh) / 2.0).floor().max(c);
-    let top = ((g.n - (3.0 * dh + 2.0 * gap)) / 2.0).floor();
-    let bar_x = dw + g.t.max(2.0) + 1.0;
+    // The numeral's height for a stroke `c`, leaving a gap of one stroke and a pixel.
+    let height = |c: f64| ((g.n - c - 1.0) / 2.0).floor();
+    // A "2" needs its three bars plus two counters of two pixels to stay open.
+    let c = if height(g.t) >= 3.0 * g.t + 4.0 {
+        g.t
+    } else {
+        1.0
+    };
+    let h = height(c);
+    let w = (h * 0.66).round();
+    let bar_x = w + (c + 1.0).max(2.0);
+    // The bulleted list's bar rows (see `bullets`).
+    let pitch = ((g.n - g.t) / 2.0).floor();
+    let (first_bar, last_bar) = (0.0, 2.0 * pitch);
+    // The "2" ends where the last bar ends, the "1" starts where the first starts.
+    let y2 = last_bar + g.t - h;
+    // What is left of the height after the three bars of the 2 goes to its
+    // two verticals, the upper one the shorter.
+    let upper = ((h - 3.0 * c) / 2.0).floor();
+    let lower = h - 3.0 * c - upper;
     let mut rects = Vec::new();
-    for (i, digit) in DIGITS.iter().enumerate() {
-        let y = top + i as f64 * (dh + gap);
-        for (row, cells) in digit.iter().enumerate() {
-            let mut col = 0;
-            let bytes = cells.as_bytes();
-            while col < 3 {
-                if bytes[col] == b'#' {
-                    let start = col;
-                    while col < 3 && bytes[col] == b'#' {
-                        col += 1;
-                    }
-                    rects.push((
-                        start as f64 * c,
-                        y + row as f64 * c,
-                        (col - start) as f64 * c,
-                        c,
-                    ));
-                } else {
-                    col += 1;
-                }
-            }
-        }
-        rects.push((bar_x, y + ((dh - g.t) / 2.0).floor(), g.n - bar_x, g.t));
+    // A 1: a stem right of the middle with a flag of one step below its top,
+    // or two where the numeral is tall enough and the room is there.  It has no
+    // base, which would run into the 2's top bar below it and read as a fraction.
+    let stem = ((w - c) * 0.6).round();
+    rects.push((stem, 0.0, c, h));
+    let steps = (if h >= 10.0 { 2.0_f64 } else { 1.0 }).min((stem / c).floor());
+    for step in 1..=steps as usize {
+        let k = step as f64;
+        rects.push((stem - k * c, k * c, c, c));
     }
+    // A 2: top bar, upper right vertical, middle bar, lower left vertical, base.
+    rects.push((0.0, y2, w, c));
+    rects.push((w - c, y2 + c, c, upper));
+    rects.push((0.0, y2 + c + upper, w, c));
+    rects.push((0.0, y2 + 2.0 * c + upper, c, lower));
+    rects.push((0.0, y2 + h - c, w, c));
+    rects.push((bar_x, first_bar, g.n - bar_x, g.t));
+    rects.push((bar_x, last_bar, g.n - bar_x, g.t));
     fill_rects(ctx, &rects);
 }
 
-/// A rule down the left and three text lines beside it.
+/// An opening quotation mark twice, the "66" of a quote: each mark is a block
+/// with a tail that rises from its left edge and curls over to a flat tip on the
+/// right.  The block's left, right and bottom sides and the tip's top are
+/// straight, on whole device pixels.
 fn quote(ctx: &mut dyn DrawCtx, g: &Grid) {
-    let pitch = ((g.n - g.t) / 2.0).floor();
-    let x = g.t + g.t.max(2.0) + 1.0;
-    let mut rects = vec![(0.0, 0.0, g.t, g.n)];
-    for (i, share) in [1.0, 0.62, 0.84].iter().enumerate() {
-        let w = ((g.n - x) * share).round();
-        rects.push((x, i as f64 * pitch, w, g.t));
+    let gap = (g.n * 0.125).round();
+    let w = ((g.n - gap) / 2.0).floor();
+    let h = (g.n * 0.6).round();
+    let top = ((g.n - h) / 2.0).floor();
+    let x0 = ((g.n - (2.0 * w + gap)) / 2.0).floor();
+    // The block's height and its corner radius; the tail's tip is as wide as
+    // the block is thick.
+    let bulb = (h * 0.55).round();
+    let r = (g.n * 0.1).round().max(1.0);
+    let tip = (w * 0.4).round().max(2.0);
+    ctx.begin_path();
+    for i in 0..2 {
+        let x = x0 + i as f64 * (w + gap);
+        let (y_bulb, bottom) = (top + h - bulb, top + h);
+        // Round the block's two lower corners and its upper right.
+        ctx.move_to(x, y_bulb);
+        ctx.line_to(x, bottom - r);
+        ctx.quad_to(x, bottom, x + r, bottom);
+        ctx.line_to(x + w - r, bottom);
+        ctx.quad_to(x + w, bottom, x + w, bottom - r);
+        ctx.line_to(x + w, y_bulb + r);
+        ctx.quad_to(x + w, y_bulb, x + w - r, y_bulb);
+        // Back along the block's top to where the tail's inner edge leaves it,
+        // then up that edge to the tip's right side.
+        let inner = x + w * 0.55;
+        ctx.line_to(inner, y_bulb);
+        ctx.cubic_to(inner, y_bulb - h * 0.2, x + w, top + h * 0.25, x + w, top);
+        ctx.line_to(x + w - tip, top);
+        // Down and round the tail's outer edge to the block's left side.
+        ctx.cubic_to(x + w * 0.2, top, x, top + h * 0.2, x, y_bulb);
+        ctx.close_path();
     }
-    fill_rects(ctx, &rects);
+    ctx.fill();
 }
 
 /// A bold B: a stem and two bowls, the lower a little wider.

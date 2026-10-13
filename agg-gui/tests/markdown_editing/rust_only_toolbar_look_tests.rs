@@ -313,6 +313,7 @@ fn rust_only_strokes_fill_whole_device_pixels() {
 #[derive(Clone, Copy)]
 enum Edge {
     Top,
+    Bottom,
     Left,
     Right,
 }
@@ -346,6 +347,36 @@ fn cell_coverage(fb: &Framebuffer, cell: Rect, scale: f64) -> Vec<Vec<f64>> {
         .collect()
 }
 
+/// Which way `ink_runs` projects the coverage.
+#[derive(Clone, Copy)]
+enum Axis {
+    Rows,
+    Columns,
+}
+
+/// The `[start, end)` ranges of consecutive rows (or columns) holding any ink, in order.
+fn ink_runs(rows: &[Vec<f64>], axis: Axis) -> Vec<(usize, usize)> {
+    let lines: Vec<bool> = match axis {
+        Axis::Rows => rows.iter().map(|r| r.iter().any(|c| *c > 0.08)).collect(),
+        Axis::Columns => (0..rows[0].len())
+            .map(|x| rows.iter().any(|r| r[x] > 0.08))
+            .collect(),
+    };
+    let mut runs = Vec::new();
+    let mut start = None;
+    for (i, inked) in lines.iter().copied().chain([false]).enumerate() {
+        match (inked, start) {
+            (true, None) => start = Some(i),
+            (false, Some(s)) => {
+                runs.push((s, i));
+                start = None;
+            }
+            _ => {}
+        }
+    }
+    runs
+}
+
 /// True when the outermost row or column of ink on `edge` holds solid pixels: a
 /// straight edge on a pixel boundary has its extreme line fully inked, while one that straddles
 /// two lines leaves a partly covered extreme line.
@@ -354,6 +385,10 @@ fn edge_is_crisp(rows: &[Vec<f64>], edge: Edge) -> bool {
     let solid = |c: f64| c >= 0.95;
     let line: Vec<f64> = match edge {
         Edge::Top => match rows.iter().rposition(|r| r.iter().any(|c| inked(*c))) {
+            Some(y) => rows[y].clone(),
+            None => return false,
+        },
+        Edge::Bottom => match rows.iter().position(|r| r.iter().any(|c| inked(*c))) {
             Some(y) => rows[y].clone(),
             None => return false,
         },
@@ -377,11 +412,12 @@ fn edge_is_crisp(rows: &[Vec<f64>], edge: Edge) -> bool {
 
 /// Every icon is drawn at every scale, and the ones with straight edges have those edges on
 /// whole device pixels: the extreme row or column of ink is fully inked, with no half-covered
-/// line beside it. The icons made only of bars (align, numbered list, quote) hold no
-/// half-covered pixel anywhere.
+/// line beside it. The icons made only of bars (align, numbered list) hold no half-covered
+/// pixel anywhere. The quote is two filled marks with their sides and tips on whole pixels, and the
+/// numbered list is two numerals above two bars, each readable as separate ink.
 #[test]
 fn rust_only_every_icon_is_drawn_and_crisp_at_every_scale() {
-    use Edge::{Left, Right, Top};
+    use Edge::{Bottom, Left, Right, Top};
     let probes: [(K, &[Edge]); 13] = [
         (K::Bold, &[Left]),
         (K::Italic, &[Top]),
@@ -392,18 +428,12 @@ fn rust_only_every_icon_is_drawn_and_crisp_at_every_scale() {
         (K::AlignRight, &[Top, Right]),
         (K::BulletList, &[Right]),
         (K::NumberedList, &[Right]),
-        (K::Quote, &[Left]),
+        (K::Quote, &[Top, Bottom, Left, Right]),
         (K::Link, &[]),
         (K::CodeBlock, &[Top, Left]),
         (K::Table, &[Top, Left]),
     ];
-    let bars_only = [
-        K::AlignLeft,
-        K::AlignCenter,
-        K::AlignRight,
-        K::NumberedList,
-        K::Quote,
-    ];
+    let bars_only = [K::AlignLeft, K::AlignCenter, K::AlignRight, K::NumberedList];
     for scale in SCALES {
         at_scale(scale, || {
             let mut app = editor_app("Hello\n", None);
@@ -417,10 +447,79 @@ fn rust_only_every_icon_is_drawn_and_crisp_at_every_scale() {
                         "{kind:?}: a soft {} edge at {scale}x",
                         match edge {
                             Edge::Top => "top",
+                            Edge::Bottom => "bottom",
                             Edge::Left => "left",
                             Edge::Right => "right",
                         }
                     );
+                }
+                match kind {
+                    K::Quote => {
+                        // Two marks: two runs of inked columns with a clear gap between.
+                        let runs = ink_runs(&rows, Axis::Columns);
+                        assert_eq!(runs.len(), 2, "the quote is two marks at {scale}x");
+                        assert_eq!(runs[0].1 - runs[0].0, runs[1].1 - runs[1].0);
+                        // Each mark is a solid shape, with an inked body and a tail above it.
+                        let body = rows
+                            .iter()
+                            .map(|r| r.iter().filter(|c| **c >= 0.95).count())
+                            .max()
+                            .unwrap();
+                        assert!(
+                            body >= 2 * (runs[0].1 - runs[0].0 - 1),
+                            "the marks' bulbs are solid at {scale}x"
+                        );
+                    }
+                    K::NumberedList => {
+                        // Rows are listed from the bottom: the "2" first, then the "1".
+                        let right = rows[0].len() * 3 / 5;
+                        let part = |from: usize, to: usize| -> Vec<Vec<f64>> {
+                            rows.iter().map(|r| r[from..to].to_vec()).collect()
+                        };
+                        let bars = ink_runs(&part(right, rows[0].len()), Axis::Rows);
+                        assert_eq!(bars.len(), 2, "two bars at {scale}x");
+                        let bar = bars[0].1 - bars[0].0;
+                        assert_eq!(bar, bars[1].1 - bars[1].0, "equal bars at {scale}x");
+                        // The bars are level with the bulleted list's first and third bars.
+                        let bullets = cell_coverage(&fb, cells[cell_index(K::BulletList)], scale);
+                        let rungs = ink_runs(
+                            &bullets
+                                .iter()
+                                .map(|r| r[right..].to_vec())
+                                .collect::<Vec<_>>(),
+                            Axis::Rows,
+                        );
+                        assert_eq!(rungs.len(), 3, "three bullet bars at {scale}x");
+                        assert_eq!(bars[0], rungs[0], "the lower bar is the third row's");
+                        assert_eq!(bars[1], rungs[2], "the upper bar is the first row's");
+                        // Two numerals, each at least 7 pixels tall and 4 wide, with a gap of
+                        // at least one stroke between them.
+                        let numerals = part(0, rows[0].len() * 2 / 5);
+                        let rows_ink = ink_runs(&numerals, Axis::Rows);
+                        assert_eq!(rows_ink.len(), 2, "two numerals at {scale}x: {rows_ink:?}");
+                        for (lo, hi) in &rows_ink {
+                            assert!(hi - lo >= 7, "numeral height {} at {scale}x", hi - lo);
+                        }
+                        let columns = ink_runs(&numerals, Axis::Columns);
+                        let (first, last) = (columns[0].0, columns.last().unwrap().1);
+                        assert!(last - first >= 4, "numeral width at {scale}x");
+                        // The stroke is the 2's base: the rows from the bottom as wide as the
+                        // lowest one. It matches the bars' thickness wherever the box allows
+                        // (1.5x and 2x) and is one pixel at 1x.
+                        let ink = |y: usize| numerals[y].iter().filter(|c| **c > 0.5).count();
+                        let base = rows_ink[0].0;
+                        let stroke = (base..rows_ink[0].1)
+                            .take_while(|y| ink(*y) == ink(base))
+                            .count();
+                        assert_eq!(
+                            stroke,
+                            if scale >= 1.5 { bar } else { 1 },
+                            "the numeral stroke at {scale}x"
+                        );
+                        let gap = rows_ink[1].0 - rows_ink[0].1;
+                        assert!(gap >= stroke, "a gap of {gap} between numerals at {scale}x");
+                    }
+                    _ => {}
                 }
                 if bars_only.contains(&kind) {
                     let soft = rows
