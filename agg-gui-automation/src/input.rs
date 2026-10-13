@@ -105,26 +105,35 @@ pub enum MouseAction {
     RightUp,
     MiddleDown,
     MiddleUp,
+    /// The press of an extra button (agg-gui's [`MouseButton::Other`]: a
+    /// mouse's back or forward button).
+    OtherDown(u8),
+    /// The release of an extra button.
+    OtherUp(u8),
 }
 
 impl MouseAction {
-    /// C# `GetMouseDown`: the press of `button`. agg-gui's `Other` buttons
-    /// have no C# counterpart; they press as the left button, as C#'s
-    /// `MapButtons` falls back to `Left`.
+    /// C# `GetMouseDown`: the press of `button`. An extra button
+    /// ([`MouseButton::Other`]) presses as itself: C#'s automation can press
+    /// any WinForms button (`XButton1` is the back button), so a test of a
+    /// back-button gesture needs it delivered as that button, not folded into
+    /// the left one.
     pub fn down(button: MouseButton) -> Self {
         match button {
+            MouseButton::Left => MouseAction::LeftDown,
             MouseButton::Right => MouseAction::RightDown,
             MouseButton::Middle => MouseAction::MiddleDown,
-            MouseButton::Left | MouseButton::Other(_) => MouseAction::LeftDown,
+            MouseButton::Other(n) => MouseAction::OtherDown(n),
         }
     }
 
     /// C# `GetMouseUp`: the release of `button` (see [`down`](Self::down)).
     pub fn up(button: MouseButton) -> Self {
         match button {
+            MouseButton::Left => MouseAction::LeftUp,
             MouseButton::Right => MouseAction::RightUp,
             MouseButton::Middle => MouseAction::MiddleUp,
-            MouseButton::Left | MouseButton::Other(_) => MouseAction::LeftUp,
+            MouseButton::Other(n) => MouseAction::OtherUp(n),
         }
     }
 
@@ -134,6 +143,7 @@ impl MouseAction {
             MouseAction::LeftDown | MouseAction::LeftUp => MouseButton::Left,
             MouseAction::RightDown | MouseAction::RightUp => MouseButton::Right,
             MouseAction::MiddleDown | MouseAction::MiddleUp => MouseButton::Middle,
+            MouseAction::OtherDown(n) | MouseAction::OtherUp(n) => MouseButton::Other(n),
         }
     }
 
@@ -141,7 +151,10 @@ impl MouseAction {
     pub fn is_down(self) -> bool {
         matches!(
             self,
-            MouseAction::LeftDown | MouseAction::RightDown | MouseAction::MiddleDown
+            MouseAction::LeftDown
+                | MouseAction::RightDown
+                | MouseAction::MiddleDown
+                | MouseAction::OtherDown(_)
         )
     }
 }

@@ -401,6 +401,44 @@ impl AutomationRunner {
         })
     }
 
+    /// `previous` — a named target `widget_name` names inside a widget — as
+    /// it is now, for a click that re-aims while the pointer travels (a part
+    /// in a 3D view moves while the camera frames it). Of the targets the
+    /// same widget reports under that name, the one carrying the same object
+    /// ([`Rc::ptr_eq`](std::rc::Rc::ptr_eq)), else the one at the same
+    /// rectangle, else the only one; aimed at the centre of what shows
+    /// ([`name_pick::aimed`]). `None` when the widget is gone or none of its
+    /// targets can be told to be this one, and for a hit on a widget itself.
+    pub fn refind_target(&self, widget_name: &str, previous: &NamedHit) -> Option<NamedHit> {
+        let target = previous.target.as_ref()?;
+        let root = self.driver.root();
+        let path = previous.handle.resolve(root)?;
+        let same_widget: Vec<NamedHit> = tree_query::find_named_hits(root, widget_name)
+            .into_iter()
+            .filter(|hit| hit.target.is_some() && hit.handle.path() == path.as_slice())
+            .collect();
+        let same_object = target.object.as_ref().and_then(|object| {
+            same_widget.iter().find(|hit| {
+                hit.target
+                    .as_ref()
+                    .and_then(|t| t.object.as_ref())
+                    .is_some_and(|o| std::rc::Rc::ptr_eq(o, object))
+            })
+        });
+        let current = same_object
+            .or_else(|| {
+                same_widget.iter().find(|hit| {
+                    hit.target.as_ref().map(|t| t.rect_local) == Some(target.rect_local)
+                })
+            })
+            .or_else(|| (same_widget.len() == 1).then(|| &same_widget[0]))?;
+        Some(name_pick::aimed(
+            root,
+            current.clone(),
+            self.driver.logical_size(),
+        ))
+    }
+
     /// C# `WaitForWidgetEnabled`: wait up to `secs_to_wait` for the named
     /// widget to be visible and enabled (it and every ancestor,
     /// [`tree_query::actually_enabled`]). A name that belongs to a target a

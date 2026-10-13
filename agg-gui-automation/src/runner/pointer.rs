@@ -16,6 +16,12 @@
 //! held button waits one frame before its release (`HoldButton`). A click
 //! ends as C#'s does: draw, draw, `delay(0.2)`.
 //!
+//! A click by name re-aims at every step of its move: at the widget's
+//! current rectangle, and for a named target inside a widget (a part in a
+//! 3D view) at the target as the widget reports it now
+//! ([`AutomationRunner::refind_target`]), so a target that moves while the
+//! pointer travels (a camera framing animation) is still the one pressed.
+//!
 //! Widget offsets ([`ClickOpts::offset`]) are logical units, Y-up from the
 //! widget's lower-left corner, as in C#; the pointer itself is physical
 //! pixels, Y-down ([`input`](crate::input) module docs). The name lookups
@@ -27,12 +33,12 @@
 
 use std::time::Duration;
 
-use agg_gui::clock;
+use agg_gui::{clock, MouseButton};
 
 use super::{AutomationRunner, WaitOpts, DEFAULT_WIDGET_WAIT_SECONDS};
 use crate::input::{InputMethod, MouseAction, Point2D};
 use crate::search_region::SearchRegion;
-use crate::tree_query::{self, WidgetHandle};
+use crate::tree_query::{self, NamedHit, WidgetHandle};
 
 /// C# `ClickOrigin`: whether a click's offset is measured from the
 /// widget's lower-left corner or from its center (the lookup's offset hint).
@@ -59,6 +65,11 @@ pub struct ClickOpts<'a> {
     pub is_double_click: bool,
     /// How long to wait for the name to show up.
     pub secs_to_wait: f64,
+    /// The button pressed (C#'s `MouseButtons`), [`MouseButton::Left`] by
+    /// default; [`MouseButton::Other`] presses an extra button such as a
+    /// mouse's back button. The right-click gestures always press
+    /// [`MouseButton::Right`].
+    pub button: MouseButton,
 }
 
 impl Default for ClickOpts<'_> {
@@ -69,6 +80,7 @@ impl Default for ClickOpts<'_> {
             origin: ClickOrigin::Center,
             is_double_click: false,
             secs_to_wait: DEFAULT_WIDGET_WAIT_SECONDS,
+            button: MouseButton::Left,
         }
     }
 }
@@ -79,6 +91,30 @@ impl<'a> ClickOpts<'a> {
             secs_to_wait: self.secs_to_wait,
             search_region: self.search_region,
             only_visible: true,
+        }
+    }
+}
+
+/// What a stepped move onto a widget aims at, offset hint first (the
+/// offset from the widget's lower-left corner that
+/// [`ClickOrigin::Center`] adds).
+pub(super) enum Aim<'n> {
+    /// A fixed hint: a widget clicked by handle, or by its own name.
+    Hint(Point2D),
+    /// A named target inside the widget, looked up again at every step.
+    Target { name: &'n str, hit: NamedHit },
+}
+
+impl<'n> Aim<'n> {
+    /// The aim of a click on `hit`, found under `name`.
+    pub(super) fn of_hit(name: &'n str, hit: &NamedHit) -> Self {
+        if hit.target.is_some() {
+            Aim::Target {
+                name,
+                hit: hit.clone(),
+            }
+        } else {
+            Aim::Hint(Point2D::from_f64(hit.offset_hint.x, hit.offset_hint.y))
         }
     }
 }
@@ -220,31 +256,50 @@ impl AutomationRunner {
         Some(self.window_to_pointer(on_window))
     }
 
+    /// The offset hint `aim` gives now. A named target is looked up again
+    /// ([`refind_target`](Self::refind_target)) and `aim` follows it; one
+    /// that can no longer be told apart keeps its last aim.
+    fn current_hint(&self, aim: &mut Aim) -> Point2D {
+        match aim {
+            Aim::Hint(hint) => *hint,
+            Aim::Target { name, hit } => {
+                if let Some(now) = self.refind_target(name, hit) {
+                    *hit = now;
+                }
+                Point2D::from_f64(hit.offset_hint.x, hit.offset_hint.y)
+            }
+        }
+    }
+
     /// C# `MoveMouseToWidget`: a stepped move onto `widget`, re-aiming at
-    /// every step so a widget that moves while the pointer travels is still
-    /// hit. Returns where the pointer ended.
+    /// every step so a widget, or a named target in it, that moves while
+    /// the pointer travels is still hit. Returns where the pointer ended.
     fn move_mouse_to_widget(
         &mut self,
         widget: &WidgetHandle,
-        mut offset: Point2D,
-        offset_hint: Point2D,
+        offset: Point2D,
+        mut aim: Aim,
         origin: ClickOrigin,
         operation: &str,
     ) -> Point2D {
         let gone = || panic!("{operation} Failed: the widget is no longer in the window");
         let start = self.input.current_mouse_position();
-        if origin == ClickOrigin::Center {
-            offset = offset + offset_hint;
-        }
+        let mut aimed_offset = |runner: &Self| {
+            if origin == ClickOrigin::Center {
+                offset + runner.current_hint(&mut aim)
+            } else {
+                offset
+            }
+        };
         let mut screen_position = self
-            .widget_pointer_position(widget, offset)
+            .widget_pointer_position(widget, aimed_offset(self))
             .unwrap_or_else(gone);
 
         let move_started = clock::now();
         let steps = self.config.mouse_move_steps;
         for i in 0..steps {
             screen_position = self
-                .widget_pointer_position(widget, offset)
+                .widget_pointer_position(widget, aimed_offset(self))
                 .unwrap_or_else(gone);
             let current = eased_step(start, screen_position, i, steps);
             self.move_pointer(current.x, current.y);
@@ -285,13 +340,13 @@ impl AutomationRunner {
                 Self::widget_not_found_message("ClickByName", widget_name)
             );
         };
-        let offset_hint = Point2D::from_f64(hit.offset_hint.x, hit.offset_hint.y);
         self.click_widget_at(
             &hit.handle,
             opts.origin,
             opts.offset,
-            offset_hint,
+            Aim::of_hit(widget_name, &hit),
             opts.is_double_click,
+            opts.button,
         );
         self
     }
@@ -328,25 +383,27 @@ impl AutomationRunner {
             widget,
             ClickOrigin::Center,
             Point2D::ZERO,
-            offset_hint,
+            Aim::Hint(offset_hint),
             is_double_click,
+            MouseButton::Left,
         );
         self
     }
 
-    /// C#'s private `ClickWidget`: move onto the widget, press, hold,
-    /// release, then draw, draw and `delay(0.2)`.
+    /// C#'s private `ClickWidget`: move onto the widget, press `button`,
+    /// hold, release, then draw, draw and `delay(0.2)`.
     fn click_widget_at(
         &mut self,
         widget: &WidgetHandle,
         origin: ClickOrigin,
         offset: Point2D,
-        offset_hint: Point2D,
+        aim: Aim,
         is_double_click: bool,
+        button: MouseButton,
     ) {
-        let screen_position =
-            self.move_mouse_to_widget(widget, offset, offset_hint, origin, "ClickWidget");
-        self.send_mouse(MouseAction::LeftDown, screen_position, 0);
+        let (down, up) = (MouseAction::down(button), MouseAction::up(button));
+        let screen_position = self.move_mouse_to_widget(widget, offset, aim, origin, "ClickWidget");
+        self.send_mouse(down, screen_position, 0);
 
         if !is_double_click {
             // Only a single click can afford to settle here; for a double
@@ -365,13 +422,13 @@ impl AutomationRunner {
             // first press, and a loaded machine could spend the whole
             // double-click window on intervening frames. So the three events
             // go back to back, and the draws happen after the pair.
-            self.send_mouse(MouseAction::LeftUp, screen_position, 0);
-            self.send_mouse(MouseAction::LeftDown, screen_position, 2);
+            self.send_mouse(up, screen_position, 0);
+            self.send_mouse(down, screen_position, 2);
         }
 
         self.hold_button();
 
-        self.send_mouse(MouseAction::LeftUp, screen_position, 0);
+        self.send_mouse(up, screen_position, 0);
 
         self.wait_for_draw();
 
@@ -388,7 +445,7 @@ impl AutomationRunner {
     }
 
     /// C# `RightClickByName`: as [`click_by_name_with`](Self::click_by_name_with)
-    /// with the right button. Panics with C#'s message (which names
+    /// with the right button (`opts.button` is not asked). Panics with C#'s message (which names
     /// `ClickByName`) when no such widget turns up.
     pub fn right_click_by_name_with(&mut self, widget_name: &str, opts: &ClickOpts) -> &mut Self {
         let Some(hit) = self.get_widget_hit_by_name(widget_name, &opts.wait_opts()) else {
@@ -397,12 +454,11 @@ impl AutomationRunner {
                 Self::widget_not_found_message("ClickByName", widget_name)
             );
         };
-        let offset_hint = Point2D::from_f64(hit.offset_hint.x, hit.offset_hint.y);
         self.right_click_widget_at(
             &hit.handle,
             opts.origin,
             opts.offset,
-            offset_hint,
+            Aim::of_hit(widget_name, &hit),
             opts.is_double_click,
         );
         self
@@ -416,7 +472,7 @@ impl AutomationRunner {
             widget,
             ClickOrigin::Center,
             Point2D::ZERO,
-            offset_hint,
+            Aim::Hint(offset_hint),
             false,
         );
         self
@@ -429,11 +485,11 @@ impl AutomationRunner {
         widget: &WidgetHandle,
         origin: ClickOrigin,
         offset: Point2D,
-        offset_hint: Point2D,
+        aim: Aim,
         is_double_click: bool,
     ) {
         let screen_position =
-            self.move_mouse_to_widget(widget, offset, offset_hint, origin, "RightClickWidget");
+            self.move_mouse_to_widget(widget, offset, aim, origin, "RightClickWidget");
         self.send_mouse(MouseAction::RightDown, screen_position, 0);
         self.wait_for_draw();
 

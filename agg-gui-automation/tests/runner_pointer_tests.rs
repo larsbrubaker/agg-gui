@@ -192,6 +192,55 @@ fn rust_only_right_click_by_name_uses_the_right_button() {
 }
 
 #[test]
+fn rust_only_click_by_name_presses_the_button_it_is_given() {
+    // A mouse's back button: the DOM's `MouseEvent.button` 3, which the web
+    // shell reports as `MouseButton::Other(3)`.
+    const BACK: MouseButton = MouseButton::Other(3);
+    show_window_and_execute_tests(RunOptions::default(), window_with_target, |runner, log| {
+        assert_eq!(ClickOpts::default().button, MouseButton::Left);
+        runner.click_by_name_with(
+            "target",
+            &ClickOpts {
+                button: BACK,
+                ..ClickOpts::default()
+            },
+        );
+        assert_eq!(presses(log), vec![(Point::new(40.0, 10.0), BACK)]);
+        assert_eq!(releases(log), vec![(Point::new(40.0, 10.0), BACK)]);
+        assert!(!runner.input_method().left_button_down());
+
+        // A double click with another button presses that button twice.
+        runner.double_click_by_name_with(
+            "target",
+            &ClickOpts {
+                button: MouseButton::Middle,
+                ..ClickOpts::default()
+            },
+        );
+        assert_eq!(
+            presses(log)[1..],
+            [
+                (Point::new(40.0, 10.0), MouseButton::Middle),
+                (Point::new(40.0, 10.0), MouseButton::Middle)
+            ]
+        );
+        assert_eq!(runner.driver().forwarder().click_count(), 2);
+        runner.mark_test_complete();
+    })
+    .expect("clicks press the button they are given");
+}
+
+#[test]
+fn rust_only_mouse_actions_carry_extra_buttons() {
+    let back = MouseButton::Other(3);
+    assert_eq!(MouseAction::down(back), MouseAction::OtherDown(3));
+    assert_eq!(MouseAction::up(back), MouseAction::OtherUp(3));
+    assert_eq!(MouseAction::OtherDown(3).button(), back);
+    assert!(MouseAction::OtherDown(3).is_down());
+    assert!(!MouseAction::OtherUp(3).is_down());
+}
+
+#[test]
 fn rust_only_move_to_by_name_moves_without_pressing() {
     show_window_and_execute_tests(RunOptions::default(), window_with_target, |runner, log| {
         assert!(runner.move_to_by_name("target", &ClickOpts::default()));

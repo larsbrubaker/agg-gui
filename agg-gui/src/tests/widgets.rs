@@ -7,6 +7,7 @@ mod combo_keyboard;
 mod combo_lazy_fonts;
 mod combo_state_style;
 mod combo_style;
+mod combo_tooltip;
 mod menu_tests;
 mod password_reveal;
 mod popup_theme_change_tests;
