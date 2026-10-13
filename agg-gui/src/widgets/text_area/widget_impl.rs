@@ -1,24 +1,6 @@
 use super::*;
 
-/// Clamp the caret's vertical span `[p_y, p_y + line_h]` (Y-up) to the padded
-/// inner band `[inner_lo, inner_hi]`, returning the visible sub-segment. Yields
-/// `None` when the caret's line has scrolled entirely outside the inner rect,
-/// so the un-clipped `paint_overlay` never strokes the caret over the
-/// border/padding.
-pub(crate) fn caret_visible_segment(
-    p_y: f64,
-    line_h: f64,
-    inner_lo: f64,
-    inner_hi: f64,
-) -> Option<(f64, f64)> {
-    let y0 = p_y.max(inner_lo);
-    let y1 = (p_y + line_h).min(inner_hi);
-    if y1 > y0 {
-        Some((y0, y1))
-    } else {
-        None
-    }
-}
+pub(crate) use super::geometry::caret_visible_segment;
 
 impl Widget for TextArea {
     crate::widgets::widget_as_any!();
@@ -39,6 +21,17 @@ impl Widget for TextArea {
     }
 
     fn is_focusable(&self) -> bool {
+        self.enabled_now()
+    }
+
+    fn is_enabled(&self) -> bool {
+        self.enabled_now()
+    }
+
+    fn try_set_enabled(&mut self, enabled: bool) -> bool {
+        // The inspector pins the state: a bound cell no longer overrides it.
+        self.enabled_cell = None;
+        self.set_enabled(enabled);
         true
     }
 
@@ -47,7 +40,7 @@ impl Widget for TextArea {
     }
 
     fn accepts_text_input(&self) -> bool {
-        true
+        self.enabled_now()
     }
 
     fn ime_cursor_area(&self) -> Option<Rect> {
@@ -131,6 +124,10 @@ impl Widget for TextArea {
     }
 
     fn layout(&mut self, available: Size) -> Size {
+        // An owner's cell can disable a focused area without a call into it.
+        if !self.enabled_now() && self.focused {
+            self.release_focus_state();
+        }
         // Fill the slot we're given.  A parent that allocates us via
         // a flex-weight gets everything; a parent that asks for our
         // natural size gets the same (the caller is opting into
@@ -347,7 +344,12 @@ impl Widget for TextArea {
         // same content alignment as real text.
         t = pt::start();
         if st.text.is_empty() && !self.hint.is_empty() {
-            ctx.set_fill_color(self.theme.placeholder_color_for(self.focused, v.text_dim));
+            let hint = self.theme.placeholder_color_for(self.focused, v.text_dim);
+            ctx.set_fill_color(if self.enabled_now() {
+                hint
+            } else {
+                Self::disabled_hint_color(hint)
+            });
             let hint_w = measure_advance(&self.font, &self.hint, self.font_size);
             let slack = (self.inner_width() - hint_w).max(0.0);
             let hint_x = self.padding
@@ -432,6 +434,15 @@ impl Widget for TextArea {
     }
 
     fn on_event(&mut self, event: &Event) -> EventResult {
+        // A disabled area takes no input (C# `Enabled = false`); it only lets
+        // go of focus and hover.
+        if !self.enabled_now() && !matches!(event, Event::FocusLost) {
+            if matches!(event, Event::MouseMove { .. }) && self.hovered {
+                self.hovered = false;
+                crate::animation::request_draw();
+            }
+            return EventResult::Ignored;
+        }
         // While the right-click menu is open it captures events (see
         // `has_active_modal`); route them through it first.
         if let Some(result) = self.route_context_menu(event) {

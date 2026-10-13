@@ -169,6 +169,8 @@ struct TextAreaSig {
     /// How far the text has scrolled sideways (`no_wrap.rs`); always `0`
     /// bits while the area wraps.
     h_offset_bits: u64,
+    /// Whether the area is enabled: a disabled area draws its hint faded.
+    enabled: bool,
 }
 
 /// A callback handed the current text.
@@ -339,6 +341,9 @@ pub struct TextArea {
     /// The input-method composition placed in the buffer, if one is in
     /// progress. See `text_area/ime.rs`.
     composition: Option<ime::Composition>,
+    /// Enabled state; see `text_area/enabled.rs`.
+    enabled: bool,
+    enabled_cell: Option<Rc<Cell<bool>>>,
 }
 
 impl TextArea {
@@ -397,6 +402,8 @@ impl TextArea {
             word_wrap: true,
             h_offset: 0.0,
             composition: None,
+            enabled: true,
+            enabled_cell: None,
         }
     }
 
@@ -425,6 +432,7 @@ impl TextArea {
                 self.vbar.offset.to_bits()
             },
             h_offset_bits: self.h_offset.to_bits(),
+            enabled: self.enabled_now(),
         }
     }
 
@@ -719,6 +727,7 @@ mod callbacks;
 mod caret_api;
 mod context_menu;
 mod edit_ops;
+mod enabled;
 mod frame;
 mod geometry;
 mod highlight;
@@ -735,6 +744,8 @@ use wrap::{wrap_text_indexed, WrappedLine};
 mod band_tests;
 #[cfg(test)]
 mod caret_api_tests;
+#[cfg(test)]
+mod disabled_tests;
 #[cfg(test)]
 mod edit_complete_tests;
 #[cfg(test)]

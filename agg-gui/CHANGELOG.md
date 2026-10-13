@@ -57,6 +57,9 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 - `TextField::with_enabled`, `with_enabled_cell`, `set_enabled` and the `Widget` enabled hooks: a
   disabled field takes neither focus nor input and draws its hint faded to alpha 50 of 255, as
   agg-sharp's disabled `ThemedTextEditWidget` does.
+- `TextArea::with_enabled`, `with_enabled_cell`, `set_enabled` and the `Widget` enabled hooks, as
+  `TextField`'s: a disabled area takes neither focus nor input and draws its hint faded to alpha 50
+  of 255; an area an owner's cell disables while focused releases focus at the next layout.
 
 - A widget hosted in a popup-menu row shows its `tooltip_text` on hover, as a text row shows
   its `MenuItem::tooltip` (the deepest tipped widget under the pointer wins).

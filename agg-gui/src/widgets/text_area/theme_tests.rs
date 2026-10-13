@@ -23,7 +23,7 @@ const W: u32 = 200;
 const H: u32 = 100;
 
 #[derive(Clone, Copy)]
-enum State {
+pub(super) enum State {
     Normal,
     Hovered,
     Focused,
@@ -34,7 +34,7 @@ fn c(r: f32, g: f32, b: f32) -> Color {
 }
 
 /// One distinct colour per state and role, none equal to another.
-fn colors() -> TextFieldTheme {
+pub(super) fn colors() -> TextFieldTheme {
     TextFieldTheme {
         background: Some(c(0.1, 0.1, 0.4)),
         background_hovered: Some(c(0.1, 0.4, 0.1)),
@@ -51,7 +51,7 @@ fn colors() -> TextFieldTheme {
     }
 }
 
-fn area(text: &str, hint: &str, theme: TextFieldTheme) -> TextArea {
+pub(super) fn area(text: &str, hint: &str, theme: TextFieldTheme) -> TextArea {
     TextArea::new(Arc::new(Font::from_slice(FONT_BYTES).expect("font")))
         .with_font_size(24.0)
         .with_text(text)
@@ -60,7 +60,7 @@ fn area(text: &str, hint: &str, theme: TextFieldTheme) -> TextArea {
 }
 
 /// Put `ta` in `state`, lay it out at `W` x `H` and paint it over magenta.
-fn render(ta: &mut TextArea, state: State) -> Framebuffer {
+pub(super) fn render(ta: &mut TextArea, state: State) -> Framebuffer {
     let _profile = crate::input_profile::profile_test_lock();
     crate::device_scale::set_device_scale(1.0);
     crate::font_settings::set_lcd_enabled(false);
@@ -91,18 +91,18 @@ fn render(ta: &mut TextArea, state: State) -> Framebuffer {
 }
 
 /// RGB of the pixel at `(x, y)`, Y-up (row 0 is the bottom).
-fn rgb(fb: &Framebuffer, x: u32, y: u32) -> [u8; 3] {
+pub(super) fn rgb(fb: &Framebuffer, x: u32, y: u32) -> [u8; 3] {
     let i = ((y * fb.width() + x) * 4) as usize;
     let p = fb.pixels();
     [p[i], p[i + 1], p[i + 2]]
 }
 
-fn rgb_of(c: Color) -> [u8; 3] {
+pub(super) fn rgb_of(c: Color) -> [u8; 3] {
     let c = c.to_rgba8();
     [c.r, c.g, c.b]
 }
 
-fn close(a: [u8; 3], b: [u8; 3]) -> bool {
+pub(super) fn close(a: [u8; 3], b: [u8; 3]) -> bool {
     a.iter().zip(b).all(|(x, y)| x.abs_diff(y) <= 2)
 }
 
@@ -112,7 +112,7 @@ fn border_and_background(fb: &Framebuffer) -> ([u8; 3], [u8; 3]) {
 }
 
 /// The pixel inside the border farthest from `background`.
-fn strongest_pixel(fb: &Framebuffer, background: [u8; 3]) -> [u8; 3] {
+pub(super) fn strongest_pixel(fb: &Framebuffer, background: [u8; 3]) -> [u8; 3] {
     let dist = |p: [u8; 3]| -> u32 {
         p.iter()
             .zip(background)

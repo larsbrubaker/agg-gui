@@ -9,6 +9,26 @@
 
 use super::*;
 
+/// Clamp the caret's vertical span `[p_y, p_y + line_h]` (Y-up) to the padded
+/// inner band `[inner_lo, inner_hi]`, returning the visible sub-segment. Yields
+/// `None` when the caret's line has scrolled entirely outside the inner rect,
+/// so the un-clipped `paint_overlay` never strokes the caret over the
+/// border/padding.
+pub(crate) fn caret_visible_segment(
+    p_y: f64,
+    line_h: f64,
+    inner_lo: f64,
+    inner_hi: f64,
+) -> Option<(f64, f64)> {
+    let y0 = p_y.max(inner_lo);
+    let y1 = (p_y + line_h).min(inner_hi);
+    if y1 > y0 {
+        Some((y0, y1))
+    } else {
+        None
+    }
+}
+
 impl TextArea {
     /// Locate the (line_index, byte_pos_in_text) that the given cursor
     /// byte offset lives on.  Returns `(0, 0)` on empty content.
