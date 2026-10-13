@@ -18,7 +18,8 @@
 //!   shell's frame (`set_surface_texture`, `begin_frame`, paint, `end_frame`,
 //!   release) around a paint closure or an [`App`](agg_gui::App). Custom
 //!   render passes ([`crate::WgpuCustomRender`]) queued during paint run
-//!   inside it as they do on a window.
+//!   inside it as they do on a window. Frames are paced as a window's are:
+//!   at most two on the GPU at once (see [`HeadlessFrame::render`]).
 //!
 //! The read-back copy is `screenshot_readback::read_texture_rgba`, the one
 //! [`WgpuGfxCtx::read_screenshot`] uses. Native only: the device request
@@ -394,9 +395,15 @@ impl HeadlessTarget {
 /// Keep one per harness and render many frames through it — the context's
 /// pipelines, glyph and texture caches and retained layers persist between
 /// frames as they do in a shell.
+///
+/// Frames are paced as a window's are: at most two on the GPU at once, as a
+/// double-buffered swap chain's present allows (see [`Self::render`]).
 pub struct HeadlessFrame {
     ctx: WgpuGfxCtx,
     target: HeadlessTarget,
+    /// The submission that ended the previous frame, waited on once the next
+    /// frame is submitted.
+    previous: Option<wgpu::SubmissionIndex>,
 }
 
 impl HeadlessFrame {
@@ -412,7 +419,11 @@ impl HeadlessFrame {
             w as f32,
             h as f32,
         );
-        Self { ctx, target }
+        Self {
+            ctx,
+            target,
+            previous: None,
+        }
     }
 
     /// `(width, height)` in device pixels.
@@ -463,7 +474,28 @@ impl HeadlessFrame {
     /// `paint` must not call `reset` (that drops the clear) and every frame's
     /// pixels are determined by what it paints. LCD text follows
     /// `agg_gui::font_settings::lcd_enabled`, as `begin_frame` sets it.
-    pub fn render(&mut self, clear: Color, paint: impl FnOnce(&mut WgpuGfxCtx)) {
+    ///
+    /// Once the frame is submitted, `render` waits until the frame before it
+    /// has finished on the GPU, so at most two frames (this one and its
+    /// predecessor) are ever in flight, as with a window's double-buffered
+    /// swap chain; the CPU still prepares a frame while the GPU draws the
+    /// last. A headless frame has no present to block on, so unpaced a
+    /// harness ran as far ahead of the GPU as the backend's queue let it
+    /// (Metal allows 4096 outstanding command buffers), and several test
+    /// processes sharing the GPU spent their time blocked in the driver
+    /// rather than drawing. The wait covers every submission on the device
+    /// up to that frame, other threads' included (the device may be
+    /// [`HeadlessGpu::shared`]).
+    ///
+    /// Returns the submission index that ends this frame: everything the
+    /// frame submitted (its 2-D commands and custom render passes) is done
+    /// once the GPU has reached it, e.g. through
+    /// `device.poll(wgpu::PollType::Wait { submission_index: Some(index), .. })`.
+    pub fn render(
+        &mut self,
+        clear: Color,
+        paint: impl FnOnce(&mut WgpuGfxCtx),
+    ) -> wgpu::SubmissionIndex {
         let (w, h) = self.target.size();
         self.ctx.reset(w as f32, h as f32);
         self.ctx.set_surface_texture(self.target.texture.clone());
@@ -472,13 +504,37 @@ impl HeadlessFrame {
         paint(&mut self.ctx);
         self.ctx.end_frame();
         self.ctx.release_frame_texture();
+        self.pace()
+    }
+
+    /// End the frame's submissions and wait for the frame before it.
+    ///
+    /// The frame may make several submissions (`end_frame`'s, and none at all
+    /// when there was nothing to flush), so its end is marked with an empty
+    /// submission, numbered after all of them; waiting on that index waits
+    /// for the whole frame.
+    fn pace(&mut self) -> wgpu::SubmissionIndex {
+        let this_frame = self.target.queue.submit(std::iter::empty());
+        if let Some(previous) = self.previous.replace(this_frame.clone()) {
+            // Neither `PollError` can happen here: there is no timeout, and
+            // the index came from this queue. A lost device is reported
+            // through its device-lost callback (`HeadlessGpu::device_lost`),
+            // not here; log rather than fail a frame that already ran.
+            if let Err(e) = self.target.device.poll(wgpu::PollType::Wait {
+                submission_index: Some(previous),
+                timeout: None,
+            }) {
+                log::warn!("waiting for the previous headless frame on the GPU: {e}");
+            }
+        }
+        this_frame
     }
 
     /// [`Self::render`] painting `app`: agg-gui-shell's `default_paint`
     /// without its layout, which stays the caller's decision (lay `app` out
     /// at the frame's size, in logical pixels, before the first render).
-    pub fn render_app(&mut self, clear: Color, app: &mut App) {
-        self.render(clear, |ctx| app.paint(ctx));
+    pub fn render_app(&mut self, clear: Color, app: &mut App) -> wgpu::SubmissionIndex {
+        self.render(clear, |ctx| app.paint(ctx))
     }
 
     /// The last rendered frame as RGBA8, top row first — see

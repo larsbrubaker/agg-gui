@@ -8,6 +8,17 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ## [Unreleased]
 
+### Changed
+
+- `HeadlessFrame::render` (and `render_app`) keeps at most two frames on the
+  GPU, as a window's double-buffered swap chain does: once a frame is
+  submitted it waits until the frame before it has finished, and it returns
+  the `wgpu::SubmissionIndex` that ends the frame. Unpaced, a headless harness
+  ran as far ahead of the GPU as the backend allowed (Metal: 4096 outstanding
+  command buffers), and several test processes sharing the GPU spent most of
+  their time blocked in the driver (MatterCAD's headless UI tests: about 90%
+  of the time in `-[MTLCommandQueue commandBuffer]`).
+
 ### Fixed
 
 - The `lcb_flatten` pass (a two-plane LCD backbuffer blitted inside a transparent layer) emits the

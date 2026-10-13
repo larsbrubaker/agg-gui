@@ -35,7 +35,8 @@ instead.
   `HeadlessGpu::shared()` (one device per process, requested as `Gpu::new`
   requests a window's), `HeadlessTarget` (an offscreen texture in the shells'
   frame format with RGBA read-back), and `HeadlessFrame`, which runs a shell's
-  frame around a paint closure or an `App` — custom render passes included.
+  frame around a paint closure or an `App` — custom render passes included —
+  and paces its frames as a window's swap chain does: at most two on the GPU.
 
 ## Usage
 
