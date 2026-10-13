@@ -45,7 +45,11 @@ fn auto_expanding_text_is_the_text_plus_its_padding() {
                 .with_fit_width(true)
                 .with_inner_padding(Insets::all(5.0))
                 .with_v_anchor(VAnchor::FIT)
-                .add(Box::new(Label::new("Padded", font()).with_font_size(12.0)));
+                .add(Box::new(
+                    Label::new("Padded", font())
+                        .with_font_size(12.0)
+                        .with_enforce_integer_bounds(false),
+                ));
             let size = layout_at(&mut text, Size::new(1000.0, 1000.0));
 
             let width = size.width * scale;

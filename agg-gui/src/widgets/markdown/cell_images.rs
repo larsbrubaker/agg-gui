@@ -188,7 +188,7 @@ impl MarkdownView {
                 // installed later loads it on a later paint.
                 image_loader::load_remote_image(
                     self.remote_image_loader.clone(),
-                    entry.url.clone(),
+                    entry.load_url.clone(),
                     std::sync::Arc::clone(&entry.state),
                 );
             }

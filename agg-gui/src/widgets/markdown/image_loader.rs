@@ -13,6 +13,12 @@
 //! ([`crate::http_fetch::fetch_bytes`]: pure-Rust TLS on native, the
 //! browser's fetch on wasm), opt-in in one line.
 //!
+//! A `file://` picture is offered to an installed loader too (the view's or
+//! the default), so a host can read local pictures off the frame; with no
+//! loader it stays a placeholder. [`super::MarkdownView::with_image_url_resolver`]
+//! turns an image's source url into the url that loads (agg-sharp's
+//! `ResolveImageSource`), e.g. a relative path against a content folder.
+//!
 //! A loader gets the url and a [`RemoteImageDone`], which it completes from
 //! any thread with the image's bytes (decoded here: PNG/JPEG/…, SVG, and an
 //! animated GIF as an image sequence), decoded pixels, or a sequence. The
@@ -28,9 +34,10 @@ use std::sync::{Arc, Mutex, RwLock};
 use crate::framebuffer::unpremultiply_rgba_inplace;
 use crate::image_sequence::ImageSequence;
 
-use super::{ImagePixels, ImageState};
+use super::{is_fetchable_url, ImageEntry, ImagePixels, ImageState};
 
-/// Fetches remote images for markdown views on the host's behalf.
+/// Fetches remote images for markdown views on the host's behalf. A `file://`
+/// url reaches it too (when it is installed), so a host can read local pictures.
 ///
 /// `load` must not block: start the request and return, then complete `done`
 /// (from any thread) when the bytes arrive. Dropping `done` uncompleted
@@ -190,6 +197,75 @@ impl super::MarkdownView {
     pub fn with_remote_image_loader(mut self, loader: Arc<dyn RemoteImageLoader>) -> Self {
         self.remote_image_loader = Some(loader);
         self
+    }
+
+    /// Return the cache index for `url`, loading it via the provider if not yet cached.
+    pub(super) fn get_or_load_image(&mut self, url: &str) -> usize {
+        // Check if already cached.
+        if let Some(idx) = self.image_cache.iter().position(|e| e.url == url) {
+            return idx;
+        }
+
+        let load_url = self.resolve_image_url(url);
+        let state = Arc::new(Mutex::new(
+            if let Some(image) = self.provided_sequence(&load_url) {
+                ImageState::Ready { image, seen: false }
+            } else if let Some((data, width, height)) =
+                self.image_provider.as_ref().and_then(|p| p(&load_url))
+            {
+                ImageState::Ready {
+                    image: ImagePixels {
+                        data: Arc::new(data),
+                        width,
+                        height,
+                        sequence: None,
+                    },
+                    seen: false,
+                }
+            } else if is_fetchable_url(&load_url) || self.file_url_has_loader(&load_url) {
+                ImageState::RemotePending
+            } else {
+                ImageState::Failed
+            },
+        ));
+
+        let idx = self.image_cache.len();
+        self.image_cache.push(ImageEntry {
+            url: url.to_string(),
+            load_url,
+            state,
+            animation: Default::default(),
+        });
+        idx
+    }
+
+    /// Resolve every image's source url through `resolver` before it loads
+    /// (agg-sharp's `MarkdownWidget.ResolveImageSource`, which
+    /// `ImageLinkSimpleX` asks before retrieving a picture), e.g. a relative
+    /// path made absolute against a content folder. The resolved url is what
+    /// the image providers, the loader and the sequence provider are handed;
+    /// the markdown's own url still names the image for clicks, copying
+    /// and [`MarkdownView::is_image_animating`]. With no resolver the url
+    /// loads as written.
+    pub fn with_image_url_resolver(mut self, resolver: impl Fn(&str) -> String + 'static) -> Self {
+        self.image_url_resolver = Some(Box::new(resolver));
+        self
+    }
+
+    /// The url `url` loads from: the resolver's answer, else `url` itself.
+    pub(super) fn resolve_image_url(&self, url: &str) -> String {
+        match &self.image_url_resolver {
+            Some(resolver) if !url.trim().is_empty() => resolver(url),
+            _ => url.to_string(),
+        }
+    }
+
+    /// Whether `url` is a `file://` picture and a loader (the view's or the
+    /// process default) is installed to read it. Without one a local picture
+    /// stays failed, so no host is asked to open files it never offered.
+    pub(super) fn file_url_has_loader(&self, url: &str) -> bool {
+        url.starts_with("file://")
+            && (self.remote_image_loader.is_some() || default_remote_image_loader().is_some())
     }
 
     /// Replace (or with `None`, remove) this view's own remote image loader.

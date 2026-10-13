@@ -21,7 +21,9 @@
 //! ([`set_default_remote_image_loader`]). With none installed the view makes
 //! no network request and shows the image's placeholder. Install
 //! [`HttpRemoteImageLoader`] to have agg-gui fetch them itself
-//! (`image_loader.rs`).
+//! (`image_loader.rs`). A `file://` picture goes to an installed loader the
+//! same way, and [`MarkdownView::with_image_url_resolver`] turns an image's
+//! source url into the url that loads (agg-sharp's `ResolveImageSource`).
 //!
 //! # Supported Markdown features
 //!
@@ -298,7 +300,11 @@ enum ParagraphItem {
 // ── Image cache entry ──────────────────────────────────────────────────────────
 
 struct ImageEntry {
+    /// The url the markdown names (layout and context menus look entries up by it).
     url: String,
+    /// The url the pictures load from: `url` after the view's resolver
+    /// ([`MarkdownView::with_image_url_resolver`]).
+    load_url: String,
     state: Arc<Mutex<ImageState>>,
     /// Playback of an animated image (`animated_image.rs`).
     animation: animated_image::AnimationClock,
@@ -337,6 +343,9 @@ type ImageProvider = Box<dyn Fn(&str) -> Option<(Vec<u8>, u32, u32)>>;
 /// Resolves an image URL to an animated [`crate::image_sequence::ImageSequence`].
 type SequenceProvider = Box<dyn Fn(&str) -> Option<crate::image_sequence::ImageSequence>>;
 
+/// Turns an image's source url into the url to load.
+type ImageUrlResolver = Box<dyn Fn(&str) -> String>;
+
 /// A callback handed a link or image URL.
 type UrlCallback = Box<dyn FnMut(&str)>;
 
@@ -366,6 +375,9 @@ pub struct MarkdownView {
     /// Fetches remote images ([`MarkdownView::with_remote_image_loader`]);
     /// `None` falls back to the process default (`image_loader.rs`).
     remote_image_loader: Option<Arc<dyn RemoteImageLoader>>,
+    /// Turns an image's source url into the url that loads
+    /// ([`MarkdownView::with_image_url_resolver`]).
+    image_url_resolver: Option<ImageUrlResolver>,
 
     /// Cached image data, indexed by `LineRun::Image::cache_idx`.
     image_cache: Vec<ImageEntry>,
@@ -413,6 +425,7 @@ impl MarkdownView {
             image_provider: None,
             sequence_provider: None,
             remote_image_loader: None,
+            image_url_resolver: None,
             image_cache: Vec::new(),
             items: Vec::new(),
             content_h: 0.0,
@@ -555,46 +568,6 @@ impl MarkdownView {
     pub fn with_v_anchor(mut self, v: VAnchor) -> Self {
         self.base.v_anchor = v;
         self
-    }
-
-    // ── Image cache management ────────────────────────────────────────────────
-
-    /// Return the cache index for `url`, loading it via the provider if not yet cached.
-    fn get_or_load_image(&mut self, url: &str) -> usize {
-        // Check if already cached.
-        if let Some(idx) = self.image_cache.iter().position(|e| e.url == url) {
-            return idx;
-        }
-
-        let state = Arc::new(Mutex::new(
-            if let Some(image) = self.provided_sequence(url) {
-                ImageState::Ready { image, seen: false }
-            } else if let Some((data, width, height)) =
-                self.image_provider.as_ref().and_then(|p| p(url))
-            {
-                ImageState::Ready {
-                    image: ImagePixels {
-                        data: Arc::new(data),
-                        width,
-                        height,
-                        sequence: None,
-                    },
-                    seen: false,
-                }
-            } else if is_fetchable_url(url) {
-                ImageState::RemotePending
-            } else {
-                ImageState::Failed
-            },
-        ));
-
-        let idx = self.image_cache.len();
-        self.image_cache.push(ImageEntry {
-            url: url.to_string(),
-            state,
-            animation: Default::default(),
-        });
-        idx
     }
 
     /// The url of the link drawn under `pos` (this view's coordinates), as a

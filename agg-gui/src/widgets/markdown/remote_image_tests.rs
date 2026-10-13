@@ -272,3 +272,87 @@ fn rust_only_in_flight_count_rises_and_falls() {
         .all(|entry| matches!(*entry.state.lock().expect("state"), ImageState::Failed)));
     assert!(!view_of(&host).needs_draw(), "nothing left to poll for");
 }
+
+#[test]
+fn rust_only_resolver_turns_the_source_into_the_url_that_loads() {
+    let loader = Arc::new(FakeLoader::default());
+    let view = MarkdownView::new("![pic](images/red.png)", font())
+        .with_image_url_resolver(|url| format!("https://example.com/content/{url}"))
+        .with_remote_image_loader(loader.clone());
+    let mut host = host_with(view);
+    paint(&mut host);
+    assert_eq!(
+        loader.requests(),
+        vec!["https://example.com/content/images/red.png".to_string()]
+    );
+
+    loader.take(0).deliver_bytes(&red_png());
+    assert!(has_pure_red(&paint(&mut host)));
+}
+
+#[test]
+fn rust_only_resolver_url_reaches_the_image_provider() {
+    let asked = Arc::new(Mutex::new(Vec::<String>::new()));
+    let seen = Arc::clone(&asked);
+    let view = MarkdownView::new("![pic](red.png)", font())
+        .with_image_url_resolver(|url| format!("/content/{url}"))
+        .with_image_provider(move |url| {
+            seen.lock().expect("asked").push(url.to_string());
+            Some(([255u8, 0, 0, 255].repeat(16 * 16), 16, 16))
+        });
+    let mut host = host_with(view);
+    assert!(has_pure_red(&paint(&mut host)));
+    assert_eq!(*asked.lock().expect("asked"), vec!["/content/red.png"]);
+}
+
+#[test]
+fn rust_only_no_resolver_loads_the_url_as_written() {
+    let loader = Arc::new(FakeLoader::default());
+    let view = MarkdownView::new(format!("![remote]({RED_URL})"), font())
+        .with_remote_image_loader(loader.clone());
+    let mut host = host_with(view);
+    paint(&mut host);
+    assert_eq!(loader.requests(), vec![RED_URL.to_string()]);
+}
+
+#[test]
+fn rust_only_loader_is_offered_file_urls() {
+    let loader = Arc::new(FakeLoader::default());
+    let view = MarkdownView::new("![pic](file:///content/red.png)", font())
+        .with_remote_image_loader(loader.clone());
+    let mut host = host_with(view);
+    paint(&mut host);
+    assert_eq!(
+        loader.requests(),
+        vec!["file:///content/red.png".to_string()]
+    );
+
+    loader.take(0).deliver_bytes(&red_png());
+    assert!(has_pure_red(&paint(&mut host)));
+}
+
+#[test]
+fn rust_only_resolver_can_point_a_relative_picture_at_a_file_url() {
+    let loader = Arc::new(FakeLoader::default());
+    let view = MarkdownView::new("![pic](red.png)", font())
+        .with_image_url_resolver(|url| format!("file:///docs/help/{url}"))
+        .with_remote_image_loader(loader.clone());
+    let mut host = host_with(view);
+    paint(&mut host);
+    assert_eq!(
+        loader.requests(),
+        vec!["file:///docs/help/red.png".to_string()]
+    );
+}
+
+#[test]
+fn rust_only_file_url_without_a_loader_stays_failed() {
+    let view = MarkdownView::new("![pic](file:///content/red.png)", font());
+    let mut host = host_with(view);
+    paint(&mut host);
+    assert!(matches!(
+        *view_of(&host).image_cache[0].state.lock().expect("state"),
+        ImageState::Failed
+    ));
+    assert_eq!(view_of(&host).remote_images_in_flight(), 0);
+}

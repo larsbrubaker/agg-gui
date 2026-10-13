@@ -313,6 +313,14 @@ impl Label {
         self.base.max_size = s;
         self
     }
+    /// Whether a layout rounds this label's size and position to whole pixels
+    /// (agg-sharp's per-widget `EnforceIntegerBounds`). A label starts with the
+    /// process default at construction; `false` keeps its exact fractional
+    /// text size, as agg-sharp's `TextWidget` has it under C#'s default.
+    pub fn with_enforce_integer_bounds(mut self, enforce: bool) -> Self {
+        self.base.enforce_integer_bounds = enforce;
+        self
+    }
 
     // ── getter methods ────────────────────────────────────────────────────────
 
@@ -689,6 +697,9 @@ impl Widget for Label {
     }
     fn widget_base_mut(&mut self) -> Option<&mut WidgetBase> {
         Some(&mut self.base)
+    }
+    fn enforce_integer_bounds(&self) -> bool {
+        self.base.enforce_integer_bounds
     }
     fn h_anchor(&self) -> HAnchor {
         self.base.h_anchor

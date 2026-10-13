@@ -162,3 +162,32 @@ fn rust_only_flex_column_keeps_exact_sizes_for_a_child_without_integer_bounds() 
     assert_eq!((child.width, child.height), (22.67, 22.67));
     assert_eq!(size, Size::new(22.67 + 8.0, 22.67 + 18.0));
 }
+
+#[test]
+fn rust_only_label_integer_bounds_are_per_widget() {
+    use crate::text::Font;
+    use crate::widgets::Label;
+    use std::sync::Arc;
+    let font = Arc::new(
+        Font::from_slice(include_bytes!("../../../demo/assets/Nunito_Regular.ttf")).expect("font"),
+    );
+    let width_in_row = |enforce: bool| {
+        let mut row = FlexRow::new()
+            .with_gap(0.0)
+            .with_fit_width(true)
+            .with_inner_padding(Insets::ZERO)
+            .add(Box::new(
+                Label::new("Padded", Arc::clone(&font))
+                    .with_font_size(12.0)
+                    .with_enforce_integer_bounds(enforce),
+            ));
+        row.layout(Size::new(1000.0, 1000.0)).width
+    };
+    let exact = Label::new("Padded", Arc::clone(&font))
+        .with_font_size(12.0)
+        .layout(Size::new(1000.0, 1000.0))
+        .width;
+    assert_ne!(exact, exact.round(), "the text is a fractional width");
+    assert_eq!(width_in_row(false), exact);
+    assert_eq!(width_in_row(true), exact.round());
+}
