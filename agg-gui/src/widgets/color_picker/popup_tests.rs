@@ -359,3 +359,40 @@ fn transparent_swatch_fill_shows_for_a_transparent_colour_only() {
     cell.set(Color::rgb(0.0, 0.0, 1.0));
     assert_eq!(paint_swatch(&mut shaded), [0, 0, 255]);
 }
+
+#[test]
+fn rust_only_closing_the_popup_by_keyboard_keeps_the_picker_focused_in_the_app() {
+    // `is_focusable` is the popup mode, fixed when the picker is built, not
+    // the popup being open: `App` drops focus from a widget that stops being
+    // focusable, and a picker the user is navigating by keyboard must keep it
+    // through Escape closing its popup.
+    let cell = Rc::new(Cell::new(Color::rgb(1.0, 0.0, 0.0)));
+    let selected = Rc::new(RefCell::new(Vec::new()));
+    let picker = popup_picker(&cell, &selected);
+    let mut app = crate::App::new(Box::new(picker));
+    app.layout(ROOM);
+    app.focus_first();
+    assert!(app.has_focus());
+    app.on_key_down(Key::Enter, Modifiers::default());
+    app.on_key_down(Key::Escape, Modifiers::default());
+    app.layout(ROOM);
+    assert!(
+        app.has_focus(),
+        "the picker keeps focus after its popup closes"
+    );
+    // A click on the swatch opens it, a second one closes it; focus stays.
+    app.on_mouse_down(
+        12.0,
+        ROOM.height - 12.0,
+        MouseButton::Left,
+        Modifiers::default(),
+    );
+    app.on_mouse_up(
+        12.0,
+        ROOM.height - 12.0,
+        MouseButton::Left,
+        Modifiers::default(),
+    );
+    app.layout(ROOM);
+    assert!(app.has_focus());
+}
