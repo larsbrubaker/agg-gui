@@ -182,6 +182,8 @@ mod lcd_arc_cache_tests;
 #[cfg(test)]
 mod lcd_gpu_composite_tests;
 #[cfg(test)]
+mod lcd_text_scale_readback_tests;
+#[cfg(test)]
 mod radial_gradient_readback_tests;
 #[cfg(test)]
 mod root_transform_readback_tests;
@@ -693,7 +695,7 @@ impl WgpuGfxCtx {
         self.commands.push(DrawCommand::Clear(clear));
         // Sync the per-ctx LCD flag from the global typography setting so
         // any subsequent `fill_text` routes through the cached subpixel mask
-        // path when LCD is enabled (default at scale ≤ 1.25).  Without this
+        // path when LCD is enabled (default at scale ≤ 1.25; an explicit choice at any scale).  Without this
         // shells that drive the loop via `begin_frame` instead of a helper
         // that sets it silently fall through to the aliased tessellated-
         // outline path even when the global says LCD is on.

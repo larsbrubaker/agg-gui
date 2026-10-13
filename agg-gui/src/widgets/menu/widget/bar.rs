@@ -453,10 +453,10 @@ impl Widget for MenuBar {
 
     fn backbuffer_mode(&self) -> crate::widget::BackbufferMode {
         // Mirror Label: when the global LCD toggle is on (which the
-        // default rule wires to "scale ≤ 1.25"), use the per-channel LCD
-        // coverage cache so text on the bar is subpixel-rendered exactly
-        // like Label text.  Falls back to RGBA at HiDPI where LCD gains
-        // nothing.  MenuBar paints `top_bar_bg` as an opaque full-width
+        // default rule wires to "scale ≤ 1.25", and an explicit choice
+        // holds at any scale), use the per-channel LCD coverage cache so
+        // text on the bar is subpixel-rendered exactly like Label text.
+        // Falls back to RGBA when LCD is off.  MenuBar paints `top_bar_bg` as an opaque full-width
         // fill before any other content, satisfying LcdCoverage's
         // "widget must cover its bounds with opaque content" contract.
         if crate::font_settings::lcd_enabled() {

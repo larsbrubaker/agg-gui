@@ -100,8 +100,7 @@ fn double_mouse_down_event_selects_word() {
 #[test]
 fn backbuffer_mode_follows_lcd_setting() {
     use crate::widget::BackbufferMode;
-    // Standard density so the high-scale hard cap in `lcd_enabled` doesn't mask
-    // the explicit override under test.
+    // Standard density keeps the explicit override the only thing under test.
     crate::device_scale::set_device_scale(1.0);
     crate::ux_scale::set_ux_scale(1.0);
 

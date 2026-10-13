@@ -82,13 +82,11 @@ thread_local! {
     /// System-wide LCD-subpixel override.  When `Some(true|false)`, text-
     /// rendering widgets honour it directly.  When `None` (the default),
     /// [`lcd_enabled`] derives the effective value from
-    /// [`crate::device_scale`]: LCD is enabled at standard DPI (scale ≤
-    /// 1.25) and disabled at HiDPI, because LCD subpixel rendering only
-    /// pays off when subpixels are roughly the size of a glyph stem; at
-    /// 2× scale the AA halo is already wide enough that grayscale wins on
-    /// chroma fringing while looking identical otherwise.  An explicit
-    /// [`set_lcd_enabled`] overrides the auto-derivation; apps that just
-    /// want the default should never need to call it.
+    /// the effective scale: LCD is on at standard DPI (scale ≤
+    /// [`LCD_DEFAULT_MAX_SCALE`]) and off above it, because a platform with
+    /// no display detection cannot tell a striped LCD from a Retina panel.
+    /// An explicit [`set_lcd_enabled`] overrides the auto-derivation at every
+    /// scale; apps that just want the default should never need to call it.
     static LCD_ENABLED:     RefCell<Option<bool>> = const { RefCell::new(None) };
     /// System-wide hinting toggle — forwarded to the font engine when the
     /// engine supports it.  `ttf-parser` does NOT run a hinting interpreter,
@@ -247,33 +245,40 @@ pub fn set_line_box(line_box: LineBox) {
 // LCD subpixel toggle
 // ---------------------------------------------------------------------------
 
+/// The effective scale (device DPR × UX zoom) up to which LCD is the *default*
+/// when nothing has pinned it with [`set_lcd_enabled`].
+///
+/// This is only a default, never a cap.  A platform that cannot say whether the
+/// display is an RGB-stripe LCD (the browser, macOS, Linux) is guessed from
+/// density: 1.0 and 1.25 desktops default to LCD, while a 2x Retina or HiDPI
+/// panel does not, because macOS itself turned subpixel text off there and
+/// fringing on a display that is not striped looks worse than grayscale.
+/// Windows reports ClearType truthfully (`lcd_display_detection`); an app that
+/// has that answer publishes it with [`set_lcd_enabled`] and gets LCD at every
+/// scale, which is the 150% laptop case.  agg-sharp (`LcdRenderSettings`) kept
+/// the same 1.25 constant as a hard gate on the toggle; that was the reference's
+/// conservative first cut and it left every 150% ClearType display on grayscale.
+pub const LCD_DEFAULT_MAX_SCALE: f64 = 1.25;
+
 /// Whether widgets should rasterise text through the LCD subpixel path.
 ///
-/// Whether widgets should rasterise text through the LCD subpixel path.
+/// An explicit choice set with [`set_lcd_enabled`] is honoured at **any**
+/// effective scale: subpixel text helps on every RGB-stripe LCD whatever the
+/// OS scaling, and the display facts (is it striped, did the user pick
+/// ClearType) belong to the platform layer, not to a scale threshold.  What
+/// still keeps LCD out of a draw is local to the draw: the destination must be
+/// opaque (otherwise per-channel coverage collapses to one alpha), as the
+/// backbuffer, layer and blit code enforce.
 ///
-/// **Hard cap first:** LCD is NEVER used above standard density.  The gate
-/// keys on the *effective* scale ([`crate::ux_scale::effective_scale`] =
-/// device DPR × UX zoom), because LCD subpixel rendering only pays off when
-/// individual physical pixels are large enough to resolve the R/G/B
-/// sub-stripes — and "small pixels" come from a high UX zoom (mobile /
-/// accessibility) just as much as from a HiDPI panel.  Above `1.25×` it is
-/// pure overhead with no visible benefit, so we force the cheaper grayscale
-/// path *regardless of any explicit override*.  This also keeps
-/// CPU-backbuffered widgets (the menu bar) off the LCD blit at high scale,
-/// where they would otherwise shrink.
-///
-/// At standard density the explicit override set via [`set_lcd_enabled`]
-/// wins if present; otherwise LCD defaults on.  So platform shells generally
-/// don't need to call [`set_lcd_enabled`] at all.
+/// With no explicit choice the default is LCD on up to
+/// [`LCD_DEFAULT_MAX_SCALE`] and off above it, keyed on the *effective* scale
+/// ([`crate::ux_scale::effective_scale`]) so a UX zoom (mobile, accessibility)
+/// is treated as the density it produces.
 pub fn lcd_enabled() -> bool {
-    // Never LCD at high effective density — overrides included.
-    if crate::ux_scale::effective_scale() > 1.25 {
-        return false;
-    }
     if let Some(explicit) = LCD_ENABLED.with(|c| *c.borrow()) {
         return explicit;
     }
-    true
+    crate::ux_scale::effective_scale() <= LCD_DEFAULT_MAX_SCALE
 }
 
 /// Pin LCD subpixel rendering to a specific value, overriding the
@@ -402,8 +407,8 @@ mod tests {
     #[test]
     fn test_lcd_flag_explicit_override_round_trips() {
         // Reset to known state — thread-locals can leak across tests reusing
-        // the same worker thread.  Standard density so the high-scale cap in
-        // `lcd_enabled` doesn't mask the override under test.
+        // the same worker thread.  Standard density keeps the override the only
+        // thing under test.
         crate::device_scale::set_device_scale(1.0);
         crate::ux_scale::set_ux_scale(1.0);
         set_lcd_enabled(false);
@@ -449,21 +454,54 @@ mod tests {
             !lcd_enabled(),
             "high effective scale via ux zoom should default to LCD off"
         );
-        // The high-scale gate is a HARD CAP: it wins even over an explicit
-        // override, so "force LCD on" can't reintroduce the overhead (and the
-        // tiny-menu blit) at high density.
+        // An explicit choice is NOT capped: a 150% ClearType laptop is the
+        // case the user turns LCD on for.  (Before, the effective-scale gate
+        // overrode the toggle above 1.25.)
         set_lcd_enabled(true);
         assert!(
-            !lcd_enabled(),
-            "explicit LCD-on override must still be capped off at high effective scale"
+            lcd_enabled(),
+            "explicit LCD-on must be honoured at high effective scale"
         );
-        // ...but at standard density the explicit override is honoured.
+        set_lcd_enabled(false);
         set_ux_scale(1.0);
         assert!(
-            lcd_enabled(),
-            "override LCD-on must apply at standard density"
+            !lcd_enabled(),
+            "explicit LCD-off must be honoured at standard density"
         );
         // Restore sane state for sibling tests.
+        clear_lcd_enabled_override();
+        set_ux_scale(1.0);
+        set_device_scale(1.0);
+    }
+
+    /// The scale a Windows 150% display reports: an explicit LCD-on (what the
+    /// app publishes after ClearType detection) is honoured, the no-override
+    /// default stays off above `LCD_DEFAULT_MAX_SCALE`, and the boundary and
+    /// both ways of reaching the scale (device DPR, UX zoom) behave alike.
+    #[test]
+    fn lcd_enabled_is_honoured_at_scale_1_5_and_only_the_default_stops_at_the_threshold() {
+        use crate::device_scale::set_device_scale;
+        use crate::ux_scale::set_ux_scale;
+        for (device, ux) in [(1.5, 1.0), (1.0, 1.5), (2.0, 1.0), (3.0, 1.7)] {
+            set_device_scale(device);
+            set_ux_scale(ux);
+            clear_lcd_enabled_override();
+            assert!(
+                !lcd_enabled(),
+                "default at device {device} x ux {ux} stays grayscale (no display detection)"
+            );
+            set_lcd_enabled(true);
+            assert!(
+                lcd_enabled(),
+                "explicit LCD-on at device {device} x ux {ux} must draw LCD"
+            );
+            set_lcd_enabled(false);
+            assert!(!lcd_enabled(), "explicit off at {device} x {ux}");
+        }
+        set_device_scale(1.25);
+        set_ux_scale(1.0);
+        clear_lcd_enabled_override();
+        assert!(lcd_enabled(), "the default threshold itself is inclusive");
         clear_lcd_enabled_override();
         set_ux_scale(1.0);
         set_device_scale(1.0);

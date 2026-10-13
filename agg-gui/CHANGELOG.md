@@ -8,6 +8,15 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ## [Unreleased]
 
+### Changed
+
+- `font_settings::lcd_enabled()` no longer refuses LCD subpixel text above an effective scale of
+  1.25: an explicit `set_lcd_enabled(true)` is honoured at every scale (a 150% ClearType laptop
+  gets subpixel text, as in agg-sharp).  The 1.25 threshold remains only as the *default* when
+  nothing was pinned (`font_settings::LCD_DEFAULT_MAX_SCALE`), since a platform without display
+  detection cannot tell a striped LCD from a Retina panel.  The opaque-destination rule and the
+  collapse of LCD coverage over transparent pixels are unchanged.
+
 ### Added
 
 - A widget hosted in a popup-menu row shows its `tooltip_text` on hover, as a text row shows

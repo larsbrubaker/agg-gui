@@ -94,7 +94,7 @@ impl Widget for TextArea {
 
     fn backbuffer_mode(&self) -> BackbufferMode {
         // Same decision as `Label` / `TextField`: LCD-subpixel coverage buffer
-        // when the global toggle is on (default at scale ≤ 1.25), grayscale
+        // when the global toggle is on (default at scale ≤ 1.25; an explicit choice at any scale), grayscale
         // RGBA otherwise. `backbuffer_mode`'s mode-flip detection in
         // `paint_subtree_backbuffered` re-rasters when the toggle changes.
         if crate::font_settings::lcd_enabled() {
