@@ -114,6 +114,34 @@ impl RowWidgets {
         }
     }
 
+    /// The tooltip of the row widget (or the widget inside it) under `pointer`, in the menu's
+    /// space: the deepest [`Widget::tooltip_text`] along the hit path, with a key naming it
+    /// (the row's id, then the hit path) for the tooltip controller. Row widgets live outside
+    /// the root widget tree, so the central tooltip pass never sees them.
+    pub(super) fn tip_at(
+        &self,
+        items: &[MenuEntry],
+        layouts: &[PopupLayout],
+        pointer: Point,
+    ) -> Option<(Vec<usize>, String)> {
+        let visible = widget_rows(items, layouts);
+        let (id, _) = visible.iter().find(|(_, rect)| contains(*rect, pointer))?;
+        let rows = self.rows.borrow();
+        let row = rows.iter().find(|r| r.id == *id)?;
+        let path = hit_test_subtree(row.widget.as_ref(), local(row.widget.as_ref(), pointer))?;
+        let mut widget: &dyn Widget = row.widget.as_ref();
+        let mut tip = widget.tooltip_text();
+        for &index in &path {
+            widget = widget.children().get(index)?.as_ref();
+            if let Some(text) = widget.tooltip_text() {
+                tip = Some(text);
+            }
+        }
+        let mut key = vec![*id];
+        key.extend(path);
+        tip.map(|text| (key, text.to_string()))
+    }
+
     /// Route a pointer event to the row widgets.  Returns `Some` when the
     /// event belongs to a row widget and the menu must not handle it;
     /// `None` lets the menu handle it as usual (a `MouseMove` is delivered

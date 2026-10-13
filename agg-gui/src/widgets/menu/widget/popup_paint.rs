@@ -301,6 +301,27 @@ pub(super) fn offer_hovered_row_tooltip(
     }
 }
 
+/// Offer the tooltip of the row widget under the pointer (see `RowWidgets::tip_at`) to the
+/// central controller for this frame. The key starts with `usize::MAX`, which no popup row path
+/// does, so a widget's tip never reads as a row's.
+pub(super) fn offer_row_widget_tooltip(
+    ctx: &dyn DrawCtx,
+    row_widgets: &super::super::row_widgets::RowWidgets,
+    items: &[MenuEntry],
+    layouts: &[PopupLayout],
+) {
+    if row_widgets.is_empty() {
+        return;
+    }
+    let Some(pointer) = pointer_in_paint_space(ctx) else {
+        return;
+    };
+    if let Some((mut key, text)) = row_widgets.tip_at(items, layouts, pointer) {
+        key.insert(0, usize::MAX);
+        crate::widgets::tooltip::controller::offer_overlay_target(&key, &text);
+    }
+}
+
 /// The pointer in `ctx`'s current local space, i.e. the space the popup's
 /// layouts were painted in.
 ///

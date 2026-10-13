@@ -243,6 +243,7 @@ impl PopupMenu {
             }
         }
         popup_paint::offer_hovered_row_tooltip(ctx, &self.items, &self.state, &layouts);
+        popup_paint::offer_row_widget_tooltip(ctx, &self.row_widgets, &self.items, &layouts);
     }
 }
 
@@ -288,6 +289,8 @@ mod tests_item_slot;
 mod tests_keyboard;
 #[cfg(test)]
 mod tests_menu_model_builder;
+#[cfg(test)]
+mod tests_row_widget_tooltip;
 #[cfg(test)]
 mod tests_rows;
 #[cfg(test)]
