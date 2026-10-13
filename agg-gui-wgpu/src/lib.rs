@@ -157,12 +157,16 @@ mod screenshot_capture;
 /// Scaled / region capture readback — small-output companion to
 /// `screenshot_capture`'s full-surface readbacks.
 mod screenshot_scaled;
+/// When the Arc-keyed texture caches sweep their dead entries (once a frame) — see `sweep.rs`.
+mod sweep;
 pub use screenshot_scaled::RectInPixels;
 mod shaders;
 mod text_render;
 
 #[cfg(test)]
 mod clip_path_readback_tests;
+#[cfg(test)]
+mod dead_sweep_tests;
 #[cfg(test)]
 mod frame_release_tests;
 #[cfg(test)]
@@ -400,6 +404,10 @@ pub struct WgpuGfxCtx {
     pub(crate) arc_texture_cache: HashMap<usize, ArcTextureEntry>,
     /// Buffer-address-keyed cache for LCD coverage masks and backbuffer planes.
     pub(crate) lcd_arc_texture_cache: HashMap<usize, LcdArcTextureEntry>,
+    /// Which frame the texture caches above last swept their dead entries in (see
+    /// [`sweep::DeadEntrySweeps`]): the sweep is O(entries), and a text-heavy page makes a few
+    /// thousand lookups a frame.
+    pub(crate) dead_sweeps: sweep::DeadEntrySweeps,
 
     // ── layer stack (wired in Phase 8) ────────────────────────────────────────
     pub(crate) layer_stack: Vec<WgpuLayerEntry>,
@@ -597,6 +605,7 @@ impl WgpuGfxCtx {
             texture_cache_order: VecDeque::new(),
             arc_texture_cache: HashMap::new(),
             lcd_arc_texture_cache: HashMap::new(),
+            dead_sweeps: sweep::DeadEntrySweeps::default(),
             layer_stack: Vec::new(),
             retained_layers: HashMap::new(),
             fill_color: Color::rgba(0.0, 0.0, 0.0, 1.0),
@@ -702,6 +711,7 @@ impl WgpuGfxCtx {
     /// whose starting pixels a test pins.
     pub(crate) fn begin_frame_cleared(&mut self, view: wgpu::TextureView, clear: Color) {
         self.surface_view = Some(view);
+        self.dead_sweeps.begin_frame();
         self.commands.push(DrawCommand::Clear(clear));
         // Sync the per-ctx LCD flag from the global typography setting so
         // any subsequent `fill_text` routes through the cached subpixel mask

@@ -171,16 +171,11 @@ impl WgpuGfxCtx {
         let verts = self.build_image_verts(dst_x, dst_y, dst_w, dst_h);
         let key = Arc::as_ptr(data) as *const u8 as usize;
 
-        // Sweep dead entries (Arc dropped → weak.upgrade fails).  Bounded by
-        // L1 cache cap so the scan stays cheap.
-        let dead_keys: Vec<usize> = self
-            .arc_texture_cache
-            .iter()
-            .filter(|(_, e)| e.weak.strong_count() == 0)
-            .map(|(k, _)| *k)
-            .collect();
-        for k in dead_keys {
-            self.arc_texture_cache.remove(&k);
+        // Sweep dead entries (Arc dropped → weak.upgrade fails), once a frame: every `Label`
+        // draws through here with a texture of its own, so a sweep per call is O(labels²).
+        if self.dead_sweeps.arc_due() {
+            self.arc_texture_cache
+                .retain(|_, e| e.weak.strong_count() != 0);
         }
 
         // Look up by pointer + verify via Weak::upgrade so a recycled pointer
@@ -260,14 +255,9 @@ impl WgpuGfxCtx {
         let verts = self.build_image_verts_corners(corners);
         let key = Arc::as_ptr(data) as *const u8 as usize;
 
-        let dead_keys: Vec<usize> = self
-            .arc_texture_cache
-            .iter()
-            .filter(|(_, e)| e.weak.strong_count() == 0)
-            .map(|(k, _)| *k)
-            .collect();
-        for k in dead_keys {
-            self.arc_texture_cache.remove(&k);
+        if self.dead_sweeps.arc_due() {
+            self.arc_texture_cache
+                .retain(|_, e| e.weak.strong_count() != 0);
         }
 
         let existing = self

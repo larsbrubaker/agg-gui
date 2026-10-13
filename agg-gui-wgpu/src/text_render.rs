@@ -477,15 +477,11 @@ impl WgpuGfxCtx {
 
         // Sweep dead entries AFTER the touch, but never the entry we just used
         // (its weak may legitimately be dead post-relocation while its texture
-        // is live and about to be drawn).
-        let dead_keys: Vec<usize> = self
-            .lcd_arc_texture_cache
-            .iter()
-            .filter(|(k, e)| **k != key && e.weak.strong_count() == 0)
-            .map(|(k, _)| *k)
-            .collect();
-        for k in dead_keys {
-            self.lcd_arc_texture_cache.remove(&k);
+        // is live and about to be drawn). Once a frame: every cached text run draws through
+        // here, so a sweep per call is O(runs²).
+        if self.dead_sweeps.lcd_due() {
+            self.lcd_arc_texture_cache
+                .retain(|k, e| *k == key || e.weak.strong_count() != 0);
         }
 
         result

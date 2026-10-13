@@ -23,6 +23,30 @@ macro_rules! widget_paint_hooks {
                 .map_or(false, |b| b.draw_on_top_of_siblings)
         }
 
+        /// Whether the paint traversal may skip this widget, and its whole
+        /// subtree, while none of it is inside the clip it would paint under
+        /// (a card scrolled out of a `ScrollView`, past the window's edge).
+        ///
+        /// The traversal always visits children a clipping ancestor hides:
+        /// their pixels are discarded, but their `paint`, their descendants'
+        /// `paint` and the draw commands they record still cost. A repeated
+        /// item of a long scrolling list (hundreds of labels each) opts in so
+        /// only what is on screen is painted, as C# `GuiWidget.DrawChild`
+        /// does for every widget (`CurrentScreenClipping`). The check is
+        /// [`is_local_rect_in_paint_clip`](crate::widget::is_local_rect_in_paint_clip)
+        /// on the widget's bounds, so it needs a clip to compare against
+        /// (none: painted) and is not meaningful below a CPU-backbuffered
+        /// ancestor, whose context is bitmap-relative.
+        ///
+        /// A widget that returns `true` must not need `paint` to run while
+        /// hidden: nothing it keeps up to date there (animation state, wakes)
+        /// advances until it is on screen again.
+        ///
+        /// Default: `false` (painted wherever the traversal reaches it).
+        fn skip_paint_when_clipped_out(&self) -> bool {
+            false
+        }
+
         /// Whether this widget renders into its own offscreen buffer before
         /// compositing into the parent.
         ///

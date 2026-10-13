@@ -36,6 +36,21 @@ pub fn current_paint_clip() -> Option<Rect> {
     PAINT_CLIP_STACK.with(|stack| stack.borrow().last().copied())
 }
 
+/// Runs `f` with an empty paint clip stack, then puts the outer one back. For painting into a
+/// fresh sub context (a CPU backbuffer): its transform's root is the bitmap, so the outer
+/// entries, in the outer root's coordinates, mean nothing there.
+pub(super) fn with_cleared_paint_clip<R>(f: impl FnOnce() -> R) -> R {
+    struct Restore(Vec<Rect>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let outer = std::mem::take(&mut self.0);
+            PAINT_CLIP_STACK.with(|stack| *stack.borrow_mut() = outer);
+        }
+    }
+    let _restore = Restore(PAINT_CLIP_STACK.with(|stack| std::mem::take(&mut *stack.borrow_mut())));
+    f()
+}
+
 /// Whether the local rect `(x, y, w, h)` (in `ctx`'s current coordinates)
 /// overlaps the active paint clip with non-zero area. Outside any clipped
 /// subtree (no clip pushed) everything counts as visible.
@@ -311,7 +326,13 @@ fn paint_child(widget: &mut dyn Widget, ctx: &mut dyn DrawCtx, i: usize) {
         ctx.translate(child_bounds.x, child_bounds.y);
     }
     let child = &mut widget.children_mut()[i];
-    paint_subtree(child.as_mut(), ctx);
+    // `ctx` is at the child's origin and the clip stack holds the parent's children clip and
+    // the slot clip, so a hidden opt-in child (and its subtree) is skipped whole.
+    if !child.skip_paint_when_clipped_out()
+        || is_local_rect_in_paint_clip(ctx, 0.0, 0.0, child_bounds.width, child_bounds.height)
+    {
+        paint_subtree(child.as_mut(), ctx);
+    }
     if slot_clip.is_some() {
         PAINT_CLIP_STACK.with(|stack| {
             stack.borrow_mut().pop();

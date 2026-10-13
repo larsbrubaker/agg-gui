@@ -34,6 +34,17 @@ use crate::widget::keyboard_scroll::with_paint_lift_cleared;
 
 use super::*;
 
+/// Paints `widget`'s subtree (no overlay) into a fresh CPU sub ctx. That ctx has its own root:
+/// the bitmap, without App's keyboard lift ([`with_paint_lift_cleared`]) and without the outer
+/// paint clip, whose rects are in the outer root's coordinates ([`with_cleared_paint_clip`]), so
+/// a clip query below it (`is_local_rect_in_paint_clip`, `skip_paint_when_clipped_out`) compares
+/// like with like, and with nothing to compare against counts everything as visible.
+fn paint_into_sub_ctx(widget: &mut dyn Widget, sub: &mut dyn DrawCtx) {
+    with_paint_lift_cleared(|| {
+        with_cleared_paint_clip(|| paint_subtree_direct_no_overlay(widget, sub))
+    });
+}
+
 pub(super) fn paint_subtree_unified_backbuffer(
     widget: &mut dyn Widget,
     ctx: &mut dyn DrawCtx,
@@ -373,7 +384,7 @@ pub(super) fn paint_subtree_backbuffered(widget: &mut dyn Widget, ctx: &mut dyn 
                 }
                 tm.lcd_ctx_setup_ms += pt::ms(&t_setup);
                 let t_paint = pt::start();
-                with_paint_lift_cleared(|| paint_subtree_direct_no_overlay(widget, &mut sub));
+                paint_into_sub_ctx(widget, &mut sub);
                 tm.widget_paint_ms += pt::ms(&t_paint);
             }
             // Map the widget-local Y-up logical strip (lo, hi) to top-down
@@ -436,9 +447,7 @@ pub(super) fn paint_subtree_backbuffered(widget: &mut dyn Widget, ctx: &mut dyn 
                         if over_bottom_logical != 0.0 {
                             sub.translate(0.0, over_bottom_logical);
                         }
-                        with_paint_lift_cleared(|| {
-                            paint_subtree_direct_no_overlay(widget, &mut sub)
-                        });
+                        paint_into_sub_ctx(widget, &mut sub);
                     }
                     // Two conversions to make the bitmap directly blittable:
                     //   1. Row order — Framebuffer is Y-up, blit lane is top-down.
@@ -487,9 +496,7 @@ pub(super) fn paint_subtree_backbuffered(widget: &mut dyn Widget, ctx: &mut dyn 
                         }
                         tm.lcd_ctx_setup_ms += pt::ms(&t_setup);
                         let t_paint = pt::start();
-                        with_paint_lift_cleared(|| {
-                            paint_subtree_direct_no_overlay(widget, &mut sub)
-                        });
+                        paint_into_sub_ctx(widget, &mut sub);
                         tm.widget_paint_ms += pt::ms(&t_paint);
                     }
                     let t_plane = pt::start();
