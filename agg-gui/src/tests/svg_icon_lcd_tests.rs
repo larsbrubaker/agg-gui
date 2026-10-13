@@ -500,3 +500,73 @@ fn an_lcd_buffer_destination_keeps_the_chroma() {
     }
     assert_same_footprint(&actual, &expected, WHITE);
 }
+
+/// Port of `AnLcdIconInAStraightBackbufferCompositesLikeADirectDraw`
+/// (`backbufferAlpha` 0 and 128): an LCD icon drawn into the transparent or
+/// half-transparent pixels of a backbuffer, then composited onto an opaque
+/// surface, matches the icon drawn straight onto that surface.  C#'s
+/// straight-held `BlenderPreMultBGRA` widget backbuffer is a transparent
+/// compositing layer here ([`GfxCtx::push_layer`]); the icon takes the plain
+/// blit on its non-opaque pixels, because one alpha per pixel cannot carry
+/// three channel coverages.  Tolerance 2 is two byte roundings (into the
+/// layer, then onto the surface).
+#[test]
+fn an_lcd_icon_in_a_straight_backbuffer_composites_like_a_direct_draw() {
+    const SURFACE: Color = Color {
+        r: 128.0 / 255.0,
+        g: 128.0 / 255.0,
+        b: 128.0 / 255.0,
+        a: 1.0,
+    };
+    for backbuffer_alpha in [0u8, 128] {
+        let icon = load_svg_icon(CORNER, true);
+        let under = Color::rgba(
+            40.0 / 255.0,
+            60.0 / 255.0,
+            200.0 / 255.0,
+            backbuffer_alpha as f32 / 255.0,
+        );
+        let n = CANVAS_SIZE as f64;
+        let fill_under = |ctx: &mut GfxCtx| {
+            ctx.set_fill_color(under);
+            ctx.begin_path();
+            ctx.rect(0.0, 0.0, n, n);
+            ctx.fill();
+        };
+
+        let mut buffered = opaque(SURFACE);
+        {
+            let mut ctx = GfxCtx::new(&mut buffered);
+            ctx.set_lcd_mode(true);
+            ctx.push_layer(n, n);
+            fill_under(&mut ctx);
+            icon.draw(&mut ctx, 8.0, 8.0);
+            ctx.pop_layer();
+        }
+
+        let mut direct = opaque(SURFACE);
+        {
+            let mut ctx = GfxCtx::new(&mut direct);
+            ctx.set_lcd_mode(true);
+            fill_under(&mut ctx);
+            render_plain(&mut ctx, &icon, 8.0, 8.0);
+        }
+
+        let background = pixel(&direct, 0, 0);
+        assert!(
+            width_of(painted_bounds(&direct, background)) > 0,
+            "the icon has to have painted, or the comparison proves nothing"
+        );
+        let worst = buffered
+            .pixels()
+            .iter()
+            .zip(direct.pixels())
+            .map(|(a, b)| (*a as i32 - *b as i32).abs())
+            .max()
+            .unwrap_or(0);
+        assert!(
+            worst <= 2,
+            "backbuffer alpha {backbuffer_alpha}: worst channel difference {worst}"
+        );
+    }
+}

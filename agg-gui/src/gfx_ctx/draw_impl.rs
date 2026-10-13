@@ -474,68 +474,31 @@ impl crate::draw_ctx::DrawCtx for GfxCtx<'_> {
         let Some((sx, sy)) = blit_origin(dev_x, dev_y, w, h, fw, fh) else {
             return;
         };
-        let (cx1, cy1, cx2, cy2) = match clip {
-            Some((cx, cy, cw, ch)) => (
-                cx.floor() as i32,
-                cy.floor() as i32,
-                (cx + cw).ceil() as i32,
-                (cy + ch).ceil() as i32,
-            ),
-            None => (0, 0, fw, fh),
-        };
-        let fw_u = fw as usize;
-        let pixels = fb.pixels_mut();
-
-        for src_y in 0..h_u {
-            // Top-row-first src → Y-up dst: src row 0 (visually top)
-            // lands at dst_y + h - 1 (the visually-top dst row).
-            let dy = sy + (h_u - 1 - src_y) as i32;
-            if dy < 0 || dy >= fh || dy < cy1 || dy >= cy2 {
-                continue;
-            }
-            let dy_u = dy as usize;
-            for src_x in 0..w_u {
-                let dx = sx + src_x as i32;
-                if dx < 0 || dx >= fw || dx < cx1 || dx >= cx2 {
-                    continue;
-                }
-                let ci = (src_y * w_u + src_x) * 3;
-
-                let sa_r = (alpha[ci] as f32 / 255.0) * ga;
-                let sa_g = (alpha[ci + 1] as f32 / 255.0) * ga;
-                let sa_b = (alpha[ci + 2] as f32 / 255.0) * ga;
-                if sa_r == 0.0 && sa_g == 0.0 && sa_b == 0.0 {
-                    continue;
-                }
-
-                let sc_r = (color[ci] as f32 / 255.0) * ga;
-                let sc_g = (color[ci + 1] as f32 / 255.0) * ga;
-                let sc_b = (color[ci + 2] as f32 / 255.0) * ga;
-
-                let di = (dy_u * fw_u + dx as usize) * 4;
-                // Framebuffer holds premultiplied RGBA.  Per-channel
-                // src-over is `dst = src + dst * (1 - src_a)` since src
-                // is already premultiplied.  Alpha composites via
-                // max-channel-alpha so the destination picks up full
-                // opacity wherever any subpixel was painted — matches
-                // "this pixel was drawn on" for subsequent SrcOver blits.
-                let dc_r = pixels[di] as f32 / 255.0;
-                let dc_g = pixels[di + 1] as f32 / 255.0;
-                let dc_b = pixels[di + 2] as f32 / 255.0;
-                let da = pixels[di + 3] as f32 / 255.0;
-
-                let rc_r = sc_r + dc_r * (1.0 - sa_r);
-                let rc_g = sc_g + dc_g * (1.0 - sa_g);
-                let rc_b = sc_b + dc_b * (1.0 - sa_b);
-                let src_a_max = sa_r.max(sa_g).max(sa_b);
-                let ra = src_a_max + da * (1.0 - src_a_max);
-
-                pixels[di] = (rc_r * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
-                pixels[di + 1] = (rc_g * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
-                pixels[di + 2] = (rc_b * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
-                pixels[di + 3] = (ra * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
-            }
+        // Per channel only onto opaque pixels (agg-sharp `CompositeLcdBuffer`
+        // / `IsOpaqueUnder`): one alpha per pixel cannot carry three channel
+        // coverages, so a pixel that is not opaque, e.g. a transparent
+        // compositing layer's, would keep the strongest channel's alpha and
+        // premultiplied chroma that the later composite onto its real
+        // background darkens.  Those take the collapsed single-alpha draw,
+        // and a composite the clip or target removes builds nothing.
+        let footprint = (
+            sx,
+            sy,
+            sx.saturating_add(w as i32),
+            sy.saturating_add(h as i32),
+        );
+        if !super::composite::footprint_lands(fb, footprint, clip) {
+            return;
         }
+        if !super::composite::opaque_under(fb, footprint, clip) {
+            if let Some(src) = super::composite::collapsed_lcd_framebuffer(color, alpha, w, h) {
+                composite_framebuffers(fb, &src, sx, sy, ga as f64, clip);
+            }
+            return;
+        }
+        super::composite::composite_lcd_planes_per_channel(
+            fb, color, alpha, w, h, sx, sy, ga, clip,
+        );
     }
 
     fn has_lcd_mask_composite(&self) -> bool {

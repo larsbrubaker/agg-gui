@@ -94,6 +94,7 @@ mod layout_lcd;
 mod layout_limits;
 mod layout_request;
 mod lcd_backbuffer_collapse;
+mod lcd_backbuffer_opacity_gate;
 mod lcd_rounded_window;
 mod logical_root_transform;
 mod mouse_down_focus_grab_tests;

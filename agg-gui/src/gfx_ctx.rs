@@ -656,6 +656,8 @@ mod rotated_blit;
 mod sampled;
 mod stroke;
 
+#[cfg(test)]
+pub(crate) use composite::composite_lcd_planes_per_channel;
 use composite::{blit_origin, composite_framebuffers};
 use draw_impl::active_fb;
 pub(crate) use draw_impl::{apply_clip, rasterize_fill, rasterize_stroke};

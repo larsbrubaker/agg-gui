@@ -15,11 +15,8 @@
 //! - `FlipPlane` is the private `flip_plane`.
 
 use super::*;
-use crate::draw_ctx::DrawCtx;
 use crate::framebuffer::Framebuffer;
-use crate::gfx_ctx::GfxCtx;
 use agg_rust::basics::PATH_FLAGS_NONE;
-use std::sync::Arc;
 
 use super::lcd_composite_tests::{c8, fractional_triangle};
 
@@ -303,15 +300,26 @@ fn collapsed_image_keeps_position_and_channel_order() {
     assert_eq!(read(1, 1), [0, 0, 0, 0], "collapsed (1, 1)");
 }
 
-/// Composite an LCD buffer onto a premultiplied framebuffer through the
-/// software `GfxCtx`, `fade` as global alpha.
+/// Composite an LCD buffer onto a premultiplied framebuffer with the
+/// per-channel primitive (C# `LcdBuffer.CompositeOnto`), `fade` as global
+/// alpha.  The primitive, not `GfxCtx::draw_lcd_backbuffer_arc`: that one is
+/// C#'s `CompositeLcdBuffer` and refuses destinations that are not opaque
+/// (`lcd_backbuffer_opacity_gate`), which these tests deliberately use.
 fn composite_onto(src: &LcdBuffer, fb: &mut Framebuffer, fade: f64) {
-    let color = Arc::new(src.color_plane_flipped());
-    let alpha = Arc::new(src.alpha_plane_flipped());
+    let color = src.color_plane_flipped();
+    let alpha = src.alpha_plane_flipped();
     let (w, h) = (src.width(), src.height());
-    let mut ctx = GfxCtx::new(fb);
-    ctx.set_global_alpha(fade);
-    ctx.draw_lcd_backbuffer_arc(&color, &alpha, 0, w, h, 0.0, 0.0, w as f64, h as f64);
+    crate::gfx_ctx::composite_lcd_planes_per_channel(
+        fb,
+        &color,
+        &alpha,
+        w,
+        h,
+        0,
+        0,
+        fade.clamp(0.0, 1.0) as f32,
+        None,
+    );
 }
 
 fn premultiplied_image(w: u32, h: u32, fill: [u8; 4]) -> Framebuffer {
