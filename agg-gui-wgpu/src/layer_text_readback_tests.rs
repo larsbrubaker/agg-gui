@@ -244,12 +244,11 @@ type PlanePair = (Arc<Vec<u8>>, Arc<Vec<u8>>);
 /// all their text.  The Rec.709-weighted mean is the collapse that leaves
 /// `sum_i w_i * out_i` unchanged against a neutral destination.
 ///
-/// The light-on-dark arm is a **consistency guard** rather than a bug repro: the
-/// shader emits a premultiplied sample and never unpremultiplies, so it has no
-/// clamp to lose ink to and needs no alpha lift.  Its job is to catch a future
-/// "fix" that ports the CPU side's lift into the shader, where it would be
-/// actively wrong — the lift buys clamp-freedom the shader already has, at the
-/// cost of a `dst * (a - weighted)` luminance error the shader currently avoids.
+/// The light-on-dark arm guards the other polarity: the collapsed sample is the
+/// ink's own colour (`c_i / a_i`) at the weighted alpha, which is just as
+/// luminance-exact as the old premultiplied colour plane and never exceeds
+/// 1.0, so light text needs no alpha lift either.  A lift would cost a
+/// `dst * (a - weighted)` luminance error.
 #[test]
 fn flattened_lcd_backbuffer_luminance_inside_layer() {
     let Some((device, queue)) = try_device() else {

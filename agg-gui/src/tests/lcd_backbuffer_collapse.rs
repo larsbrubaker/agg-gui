@@ -119,11 +119,12 @@ fn probe_planes(level: f64) -> (Arc<Vec<u8>>, Arc<Vec<u8>>) {
 /// drift out of sync with the collapse rule, while
 /// `lcd_coverage::tests::collapsed_backbuffer_luminance_matches_per_channel_composite`
 /// independently pins what that rule must actually compute.  A regression to
-/// `max`, or a copy that forgets the light-text alpha lift, fails here.
+/// `max`, or a copy that divides the colour plane by the collapsed alpha
+/// instead of each channel's own alpha, fails here.
 #[test]
 fn default_draw_lcd_backbuffer_arc_uses_shared_weighted_collapse() {
-    // Both polarities: dark text exercises the weighted mean, light text
-    // exercises the lift that keeps the unpremultiply from clamping.
+    // Both polarities: dark and light text, whose colour planes are not
+    // proportional to the collapsed alpha.
     for level in [0.1, 0.9] {
         let (color, alpha) = probe_planes(level);
         let w = COVS.len() as u32;
@@ -159,4 +160,66 @@ fn default_draw_lcd_backbuffer_arc_uses_shared_weighted_collapse() {
             );
         }
     }
+}
+
+/// Non-black text collapses to one colour, not to per-channel coverage: the
+/// colour plane holds `ink_i * a_i`, and the collapsed sample must be the ink
+/// itself at the weighted alpha. Gray ink at every glyph-edge coverage the LCD
+/// pipeline produces must come out with equal channels (it came out with a
+/// spread of 29 for a 0.2 gray), and a coloured ink must keep its own colour.
+#[test]
+fn rust_only_collapse_keeps_the_ink_colour_for_non_black_text() {
+    use crate::lcd_coverage::{identity_xform, LcdBuffer};
+    use agg_rust::path_storage::PathStorage;
+
+    let planes = |ink: Color| {
+        let mut buffer = LcdBuffer::new(32, 16);
+        let mut path = PathStorage::new();
+        path.move_to(3.4, 2.7);
+        path.line_to(24.2, 2.7);
+        path.line_to(24.2, 11.35);
+        path.line_to(3.4, 11.35);
+        path.close_polygon(0);
+        buffer.fill_path(&mut path, ink, &identity_xform(), None, FillRule::NonZero);
+        buffer
+    };
+
+    let gray = planes(Color::from_rgb8(51, 51, 51));
+    let mut edges = 0;
+    for (c, a) in gray
+        .color_plane()
+        .chunks(3)
+        .zip(gray.alpha_plane().chunks(3))
+    {
+        let px = collapse_lcd_pixel([c[0], c[1], c[2]], [a[0], a[1], a[2]]);
+        let spread = px[..3].iter().max().unwrap() - px[..3].iter().min().unwrap();
+        assert!(
+            spread <= 2,
+            "gray ink collapsed to {px:?} for planes {c:?} {a:?}"
+        );
+        if px[3] > 0 && px[3] < 255 {
+            edges += 1;
+        }
+    }
+    assert!(
+        edges > 0,
+        "the fill must have partially covered edge pixels"
+    );
+
+    // A fully covered pixel of a coloured ink is that ink.
+    let yellow = planes(Color::from_rgb8(255, 230, 40));
+    let i = (7 * 32 + 14) * 3;
+    let px = collapse_lcd_pixel(
+        [
+            yellow.color_plane()[i],
+            yellow.color_plane()[i + 1],
+            yellow.color_plane()[i + 2],
+        ],
+        [
+            yellow.alpha_plane()[i],
+            yellow.alpha_plane()[i + 1],
+            yellow.alpha_plane()[i + 2],
+        ],
+    );
+    assert_eq!(px, [255, 230, 40, 255]);
 }

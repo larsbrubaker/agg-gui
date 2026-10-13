@@ -24,6 +24,17 @@ impl Widget for TextField {
         &mut self.children
     }
     fn is_focusable(&self) -> bool {
+        self.enabled_now()
+    }
+
+    fn is_enabled(&self) -> bool {
+        self.enabled_now()
+    }
+
+    fn try_set_enabled(&mut self, enabled: bool) -> bool {
+        // The inspector pins the state: a bound cell no longer overrides it.
+        self.enabled_cell = None;
+        self.set_enabled(enabled);
         true
     }
 
@@ -203,6 +214,7 @@ impl Widget for TextField {
                 ]
             },
             frame: self.frame,
+            enabled: self.enabled_now(),
         };
         drop(st);
         if self.last_sig.as_ref() != Some(&sig) {
@@ -271,7 +283,7 @@ impl Widget for TextField {
         ctx.set_font_size(self.font_size);
 
         let m = ctx.measure_text("Ag").unwrap_or_default();
-        let baseline_y = self.text_center_y(h) - (m.ascent - m.descent) * 0.5;
+        let baseline_y = self.text_baseline(h, &m);
         let text_x = ins.left - self.scroll_x;
 
         // ── Selection highlight ───────────────────────────────────────────
@@ -298,7 +310,12 @@ impl Widget for TextField {
 
         // ── Text or placeholder ───────────────────────────────────────────
         if text.is_empty() && (!self.focused || t.show_placeholder_when_focused) {
-            ctx.set_fill_color(t.placeholder_color_for(self.focused, v.text_dim));
+            let hint = t.placeholder_color_for(self.focused, v.text_dim);
+            ctx.set_fill_color(if self.enabled_now() {
+                hint
+            } else {
+                Self::disabled_hint_color(hint)
+            });
             ctx.fill_text(&self.placeholder, text_x, baseline_y);
         } else {
             ctx.set_fill_color(t.text_color_for(self.focused, self.hovered, v.text_color));
@@ -378,7 +395,7 @@ impl Widget for TextField {
         ctx.set_font(Arc::clone(&font));
         ctx.set_font_size(self.font_size);
         let m = ctx.measure_text("Ag").unwrap_or_default();
-        let baseline_y = self.text_center_y(h) - (m.ascent - m.descent) * 0.5;
+        let baseline_y = self.text_baseline(h, &m);
         let cx = self.caret_x();
         let top = baseline_y + m.ascent;
         let bot = baseline_y - m.descent;
@@ -402,6 +419,15 @@ impl Widget for TextField {
     }
 
     fn on_event(&mut self, event: &Event) -> EventResult {
+        // A disabled field takes no input (C# `Enabled = false`); it only
+        // lets go of focus and hover.
+        if !self.enabled_now() && !matches!(event, Event::FocusLost) {
+            if matches!(event, Event::MouseMove { .. }) && self.hovered {
+                self.hovered = false;
+                crate::animation::request_draw();
+            }
+            return EventResult::Ignored;
+        }
         // While the right-click menu is open it captures events (see
         // `has_active_modal`); route them through it first.
         if let Some(result) = self.route_context_menu(event) {
@@ -654,5 +680,25 @@ impl TextField {
     pub(super) fn text_center_y(&self, h: f64) -> f64 {
         let ins = self.text_insets();
         h * 0.5 + (ins.bottom - ins.top) * 0.5
+    }
+
+    /// The baseline (widget-local, Y-up) of the text line with metrics `m`
+    /// in a field `h` tall: the line centred between the insets, on its
+    /// ascent/descent span. Under [`LineBox::EmSnapped`] the line is agg-sharp's
+    /// snapped `TextWidget` box, centred between the insets, with the baseline
+    /// where that box has it.
+    pub(super) fn text_baseline(&self, h: f64, m: &crate::text::TextMetrics) -> f64 {
+        if self.effective_line_box() != crate::font_settings::LineBox::EmSnapped {
+            return self.text_center_y(h) - (m.ascent - m.descent) * 0.5;
+        }
+        let ins = self.text_insets();
+        let b = crate::text::snapped_line_box(
+            m.ascent,
+            m.descent,
+            self.font_size,
+            crate::device_scale(),
+        );
+        let area_h = h - ins.top - ins.bottom;
+        ins.bottom + (area_h - b.height) * 0.5 + b.baseline
     }
 }

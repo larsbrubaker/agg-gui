@@ -97,6 +97,7 @@ mod lcd_backbuffer_collapse;
 mod lcd_backbuffer_opacity_gate;
 mod lcd_rounded_window;
 mod lcd_text_at_scale;
+mod line_box_snapped;
 mod logical_root_transform;
 mod mouse_down_focus_grab_tests;
 mod nested_child_transform;

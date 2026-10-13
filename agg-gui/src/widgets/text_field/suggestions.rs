@@ -111,7 +111,12 @@ impl TextField {
             + measure_advance(&font, &st.text[..i], self.font_size);
         let ascent = font.ascender_px(self.font_size);
         let descent = font.descender_px(self.font_size);
-        let baseline = self.text_center_y(self.bounds.height) - (ascent - descent) * 0.5;
+        let m = crate::text::TextMetrics {
+            ascent,
+            descent,
+            ..Default::default()
+        };
+        let baseline = self.text_baseline(self.bounds.height, &m);
         Rect::new(x, baseline - descent, 1.0, ascent + descent)
     }
 

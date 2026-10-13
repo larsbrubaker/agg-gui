@@ -600,22 +600,23 @@ struct VOut {
 // (premultiplied colour, per-channel alpha) planes into a single premultiplied
 // RGBA sample so the layer texture receives correct alpha.  Alpha is the
 // Rec.709 LUMINANCE-WEIGHTED mean of the three channel alphas; colour is the
-// premultiplied colour plane as-is.  One pass, ColorWrites::ALL, premultiplied
-// src-over.
+// ink's own STRAIGHT colour `c_i / a_i` times that alpha (the colour plane holds
+// `ink_i * a_i`, so taking it as-is kept each channel's own coverage and
+// left non-black text with a channel spread inside the layer: 29 for a 0.2-gray
+// label, where black showed none).  A channel whose alpha is under
+// CONFIDENT_ALPHA (64/255) blends toward the pixel's trust-weighted mean colour, since
+// 8-bit colour over a tiny alpha is mostly rounding.  One pass,
+// ColorWrites::ALL, premultiplied src-over.
 //
 // Software counterpart: `agg_gui::lcd_coverage::collapse_lcd_pixel`, which
 // backs both `LcdBuffer::to_rgba8_top_down_collapsed` and the default
-// `DrawCtx::draw_lcd_backbuffer_arc`.  Same weighted alpha, with ONE deliberate
-// difference: that path additionally lifts the alpha to `max(weighted,
-// max_i colour_i)`.  Do NOT port the lift here.  It exists only because the CPU
-// path hands back STRAIGHT alpha and so has to divide colour by alpha, which
-// would clamp for light text; this shader stays PREMULTIPLIED end to end and
-// never divides, so it has no clamp to avoid — and the lift would cost it a
-// `dst * (aa - weighted)` luminance error it currently does not have.
+// `DrawCtx::draw_lcd_backbuffer_arc`: the same weighted alpha and the same
+// straight colour, there handed back straight rather than premultiplied.
 //
 // Why luminance-weighted and not `max`: the per-channel composite over a uniform
 // destination `d` is `out_i = c_i + d*(1 - a_i)`, while a single-alpha flatten
-// yields `out_i = c_i + d*(1 - aa)`.  The Rec.709-weighted sum of the encoded
+// yields `out_i = s_i*aa + d*(1 - aa)` with `s_i` the ink's straight colour
+// (`c_i = s_i*a_i`).  The Rec.709-weighted sum of the encoded
 // channels is preserved exactly when `aa` is the Rec.709-weighted mean of the
 // `a_i`, so perceived luminance over any neutral background is right to first
 // order.  `max` over-weights coverage on the two channels below the max and so
@@ -655,9 +656,18 @@ struct VOut {
     let c = textureSample(u_color, u_sampler, in.v_uv).rgb;
     let a = textureSample(u_alpha, u_sampler, in.v_uv).rgb;
     let aa = dot(a, vec3<f32>(0.2126, 0.7152, 0.0722));
-    // Premultiplied: colour plane is already colour*coverage, so scaling both
-    // it and the alpha by global_alpha keeps the sample premult-correct.
-    return vec4<f32>(c * u.global_alpha, aa * u.global_alpha);
+    // A channel too faint to divide takes the trust- and Rec.709-weighted mean
+    // of the pixel's straight colours.
+    let s_own = min(c / max(a, vec3<f32>(1.0e-6)), vec3<f32>(1.0));
+    // 64 / 255: CONFIDENT_ALPHA, `LCD_COLLAPSE_CONFIDENT_ALPHA` on the CPU.
+    let t = clamp(a * (255.0 / 64.0), vec3<f32>(0.0), vec3<f32>(1.0));
+    let trust = t * t;
+    let tw = trust * vec3<f32>(0.2126, 0.7152, 0.0722);
+    let s_ref = dot(tw, s_own) / max(tw.x + tw.y + tw.z, 1.0e-6);
+    let ink = mix(vec3<f32>(s_ref), s_own, trust);
+    // Premultiplied: ink colour times the collapsed alpha, both scaled by
+    // global_alpha.
+    return vec4<f32>(ink * aa * u.global_alpha, aa * u.global_alpha);
 }
 ";
 

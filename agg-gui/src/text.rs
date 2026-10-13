@@ -28,6 +28,7 @@ mod elide;
 mod elide_tests;
 mod ellipsis;
 mod faux_style;
+mod line_box;
 mod shape_cache;
 mod vertical_metrics;
 pub use bezier_flat::{shape_and_flatten_text, shape_and_flatten_text_via_agg};
@@ -36,6 +37,7 @@ pub use elide::{elide_text, elide_to_width, EllipsisMode, ELLIPSIS};
 pub(crate) use elide::cluster_bounds;
 pub use ellipsis::{ellipsize_to_width, ellipsize_with};
 pub use faux_style::{FAUX_BOLD_WEIGHT, FAUX_ITALIC_SHEAR};
+pub use line_box::{snapped_line_box, snapped_text_width, SnappedLineBox};
 pub use shape_cache::shape_glyphs;
 pub use vertical_metrics::VerticalMetrics;
 

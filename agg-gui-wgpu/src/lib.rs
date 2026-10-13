@@ -182,6 +182,8 @@ mod lcd_arc_cache_tests;
 #[cfg(test)]
 mod lcd_gpu_composite_tests;
 #[cfg(test)]
+mod lcd_layer_tint_readback_tests;
+#[cfg(test)]
 mod lcd_text_scale_readback_tests;
 #[cfg(test)]
 mod radial_gradient_readback_tests;

@@ -23,18 +23,18 @@ const W: u32 = 160;
 const H: u32 = 40;
 
 #[derive(Clone, Copy)]
-enum State {
+pub(super) enum State {
     Normal,
     Hovered,
     Focused,
 }
 
-fn c(r: f32, g: f32, b: f32) -> Color {
+pub(super) fn c(r: f32, g: f32, b: f32) -> Color {
     Color::rgb(r, g, b)
 }
 
 /// One distinct colour per state and role, none equal to another.
-fn edit_field_colors() -> TextFieldTheme {
+pub(super) fn edit_field_colors() -> TextFieldTheme {
     TextFieldTheme {
         background: Some(c(0.1, 0.1, 0.4)),
         background_hovered: Some(c(0.1, 0.4, 0.1)),
@@ -49,7 +49,7 @@ fn edit_field_colors() -> TextFieldTheme {
     }
 }
 
-fn field(text: &str, theme: TextFieldTheme) -> TextField {
+pub(super) fn field(text: &str, theme: TextFieldTheme) -> TextField {
     let font = Arc::new(Font::from_slice(FONT_BYTES).expect("font"));
     TextField::new(font)
         .with_font_size(24.0)
@@ -58,7 +58,7 @@ fn field(text: &str, theme: TextFieldTheme) -> TextField {
 }
 
 /// Put `f` in `state`, lay it out at `W` x `H` and paint it over magenta.
-fn render(f: &mut TextField, state: State) -> Framebuffer {
+pub(super) fn render(f: &mut TextField, state: State) -> Framebuffer {
     let _profile = crate::input_profile::profile_test_lock();
     crate::device_scale::set_device_scale(1.0);
     crate::font_settings::set_lcd_enabled(false);
@@ -86,18 +86,18 @@ fn render(f: &mut TextField, state: State) -> Framebuffer {
     fb
 }
 
-fn rgb(fb: &Framebuffer, x: u32, y: u32) -> [u8; 3] {
+pub(super) fn rgb(fb: &Framebuffer, x: u32, y: u32) -> [u8; 3] {
     let i = ((y * fb.width() + x) * 4) as usize;
     let p = fb.pixels();
     [p[i], p[i + 1], p[i + 2]]
 }
 
-fn rgb_of(c: Color) -> [u8; 3] {
+pub(super) fn rgb_of(c: Color) -> [u8; 3] {
     let c = c.to_rgba8();
     [c.r, c.g, c.b]
 }
 
-fn close(a: [u8; 3], b: [u8; 3]) -> bool {
+pub(super) fn close(a: [u8; 3], b: [u8; 3]) -> bool {
     a.iter().zip(b).all(|(x, y)| x.abs_diff(y) <= 2)
 }
 
@@ -108,7 +108,7 @@ fn border_and_background(fb: &Framebuffer) -> ([u8; 3], [u8; 3]) {
 }
 
 /// The text-area pixel farthest from `background`: the core of a glyph stem.
-fn strongest_text_pixel(fb: &Framebuffer, background: [u8; 3]) -> [u8; 3] {
+pub(super) fn strongest_text_pixel(fb: &Framebuffer, background: [u8; 3]) -> [u8; 3] {
     let dist = |p: [u8; 3]| -> u32 {
         p.iter()
             .zip(background)
@@ -266,7 +266,7 @@ fn focused_hint(theme: TextFieldTheme, caret: Color) -> Framebuffer {
     render(&mut f, State::Focused)
 }
 
-fn hint_theme() -> TextFieldTheme {
+pub(super) fn hint_theme() -> TextFieldTheme {
     TextFieldTheme {
         placeholder_color: Some(c(0.0, 0.0, 1.0)),
         placeholder_color_focused: Some(c(0.0, 1.0, 0.0)),

@@ -698,8 +698,8 @@ pub trait DrawCtx {
     ///
     /// **Default:** collapses the two planes into a single straight-alpha
     /// RGBA8 image via [`crate::lcd_coverage::collapse_lcd_pixel`]
-    /// (Rec.709 luminance-weighted alpha, lifted so the unpremultiply cannot
-    /// clamp) and forwards to [`draw_image_rgba`].  Lossy of LCD chroma where
+    /// (Rec.709 luminance-weighted alpha over the ink's own straight colour)
+    /// and forwards to [`draw_image_rgba`].  Lossy of LCD chroma where
     /// the three channel alphas diverge, but luminance-preserving.  Backends
     /// that want full subpixel quality through the cache override this with a
     /// two-texture shader path.

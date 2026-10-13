@@ -251,21 +251,20 @@ fn fill_path_clips_to_every_pixel_the_clip_rect_touches() {
     assert_pixel(&buf, 7, 7, [255, 255, 255], [255, 255, 255]);
 }
 
-/// The collapse uses the Rec.709-weighted mean of the channel alphas,
-/// lifted to `max(color)` for light ink.
+/// The collapse uses the Rec.709-weighted mean of the channel alphas over
+/// the ink's own straight colour.
 #[test]
-fn collapse_weights_alpha_by_rec709_and_lifts_for_light_ink() {
+fn collapse_weights_alpha_by_rec709_over_the_inks_own_colour() {
     let mut light = LcdBuffer::new(1, 1);
     light.composite_mask(&mask1([200, 60, 150]), white(), 0, 0, None);
     assert_pixel(&light, 0, 0, [200, 60, 150], [200, 60, 150]);
 
-    // weighted 96.262; lift 200 -> straight (255, 77, 191, 200).
+    // weighted 96.262 -> alpha 96; the ink is white, so every channel's
+    // colour is c_i / a_i = 1. (Channel 1's alpha, 60, is under the 64 below
+    // which its colour blends toward the strongest channel's, which is the
+    // same white.)
     let straight = collapse_lcd_pixel([200, 60, 150], [200, 60, 150]);
-    assert_eq!(straight, [255, 77, 191, 200], "straight-alpha collapse");
-    let a = straight[3] as f64 / 255.0;
-    assert_eq!((straight[0] as f64 * a).round() as i32, 200);
-    assert_eq!((straight[1] as f64 * a).round() as i32, 60);
-    assert_eq!((straight[2] as f64 * a).round() as i32, 150);
+    assert_eq!(straight, [255, 255, 255, 96], "straight-alpha collapse");
 
     let mut dark = LcdBuffer::new(1, 1);
     dark.composite_mask(&mask1([200, 60, 150]), c8(0, 0, 0, 255), 0, 0, None);
@@ -295,7 +294,7 @@ fn collapsed_image_keeps_position_and_channel_order() {
         let i = ((1 - y_up) * 2 + x) * 4;
         [img[i], img[i + 1], img[i + 2], img[i + 3]]
     };
-    assert_eq!(read(1, 0), [255, 77, 191, 200], "collapsed (1, 0)");
+    assert_eq!(read(1, 0), [255, 255, 255, 96], "collapsed (1, 0)");
     assert_eq!(read(0, 0), [0, 0, 0, 0], "collapsed (0, 0)");
     assert_eq!(read(1, 1), [0, 0, 0, 0], "collapsed (1, 1)");
 }

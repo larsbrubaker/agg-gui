@@ -223,6 +223,15 @@ pub enum LineBox {
     /// agg-sharp's `TextWidget` (its height is the font size) and
     /// `TextEditWidget` (one em of content plus its padding on every side).
     Em,
+    /// [`Em`](Self::Em) with the box snapped to whole device pixels, as
+    /// agg-sharp's `TextWidget` is under `GuiWidget.DefaultEnforceIntegerBounds
+    /// = true` (what MatterCAD runs with): the bounds run from `Floor(bottom)`
+    /// to `Ceiling(top)` and the width is `Ceiling`'d, so a 10 pt (13.33 px)
+    /// line is 14 px tall, not 13, and its baseline sits `-Floor(bottom)` above
+    /// the box's bottom. A `TextField` is that line plus its insets. See
+    /// [`crate::text::snapped_line_box`]. Opt-in: `Em` keeps the fractional
+    /// one-em box (agg-sharp with integer bounds off, which its own tests use).
+    EmSnapped,
 }
 
 thread_local! {

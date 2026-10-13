@@ -40,4 +40,6 @@ pub(super) struct TextFieldSig {
     pub(super) insets_bits: [u64; 4],
     // Whether the background and border are painted (`with_frame`).
     pub(super) frame: bool,
+    // Whether the field is enabled: a disabled field draws its hint faded.
+    pub(super) enabled: bool,
 }

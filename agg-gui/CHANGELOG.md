@@ -10,6 +10,14 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Changed
 
+- `lcd_coverage::collapse_lcd_pixel` (and so `LcdBuffer::to_rgba8_top_down_collapsed` and the
+  default `DrawCtx::draw_lcd_backbuffer_arc`) collapses to the ink's own straight colour
+  (`c_i / a_i`) at the Rec.709-weighted alpha, instead of dividing the colour plane by that alpha.
+  Non-black text no longer keeps each channel's own coverage through the collapse (a 0.2-gray
+  label showed a channel spread of 29 inside a layer, black showed none), and the alpha lift for
+  light ink is gone. Luminance over a neutral destination is unchanged. A channel with less than
+  `LCD_COLLAPSE_CONFIDENT_ALPHA` of alpha blends toward the pixel's weighted mean colour.
+
 - `font_settings::lcd_enabled()` no longer refuses LCD subpixel text above an effective scale of
   1.25: an explicit `set_lcd_enabled(true)` is honoured at every scale (a 150% ClearType laptop
   gets subpixel text, as in agg-sharp).  The 1.25 threshold remains only as the *default* when
@@ -18,6 +26,16 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   collapse of LCD coverage over transparent pixels are unchanged.
 
 ### Added
+
+- `LineBox::EmSnapped`: agg-sharp's `TextWidget` line box under `DefaultEnforceIntegerBounds = true`.
+  A `Label` is `Floor(bottom)` to `Ceiling(top)` device pixels tall (one em, its bottom
+  `LineBoxBottomInPixels` below the baseline) with its width `Ceiling`'d, and a `TextField` is that
+  line plus its insets; the text sits on the box's baseline (`-Floor(bottom)` above its bottom).
+  The rule is public as `text::snapped_line_box` / `snapped_text_width`. Opt-in; `Em` and
+  `Standard` are unchanged.
+- `TextField::with_enabled`, `with_enabled_cell`, `set_enabled` and the `Widget` enabled hooks: a
+  disabled field takes neither focus nor input and draws its hint faded to alpha 50 of 255, as
+  agg-sharp's disabled `ThemedTextEditWidget` does.
 
 - A widget hosted in a popup-menu row shows its `tooltip_text` on hover, as a text row shows
   its `MenuItem::tooltip` (the deepest tipped widget under the pointer wins).

@@ -642,21 +642,22 @@ fn collapse_probe(text: Color) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
 ///
 /// This is the CPU twin of the `lcb_flatten` shader.  The per-channel composite
 /// over a uniform destination `d` gives `out_i = c_i + d*(1 - a_i)`; a
-/// single-alpha flatten gives `out_i = c_i + d*(1 - aa)`.  The Rec.709-weighted
-/// sum of those two agrees exactly when `aa` is the Rec.709-weighted mean of the
-/// per-channel alphas.  Collapsing with `max` instead over-weights coverage on
-/// the two channels below the max and always errs dark — that was the "text in
-/// windows is ~20% bolder when LCD is on" bug, since every glyph edge (and, for
-/// a Label with no opaque background, every text pixel) has unequal alphas.
+/// single-alpha flatten gives `out_i = s_i*aa + d*(1 - aa)` with `s_i` the ink's
+/// straight colour (`c_i = s_i*a_i`).  The Rec.709-weighted sum of those two
+/// agrees exactly when `aa` is the Rec.709-weighted mean of the per-channel
+/// alphas.  Collapsing with `max` instead over-weights coverage on the two
+/// channels below the max and always errs dark — that was the "text in windows
+/// is ~20% bolder when LCD is on" bug, since every glyph edge (and, for a Label
+/// with no opaque background, every text pixel) has unequal alphas.
 ///
 /// **Dark-on-light** pins that bug.  **Light-on-dark** pins the opposite
-/// failure: recovering straight colour divides the premultiplied colour by the
-/// collapsed alpha, and for light text a channel whose own alpha exceeds the
-/// weighted mean has `c_i > aa`, so the division overshoots 1.0 and the clamp
-/// silently eats the excess — losing ink on exactly the near-white glyph edges
-/// that matter on a dark theme.  Lifting the collapsed alpha to
-/// `max(weighted, max_i c_i)` removes the clamp entirely, which the
-/// premultiplied round-trip below asserts directly.
+/// failure: dividing the premultiplied colour by the collapsed alpha overshoots
+/// 1.0 for light text on a channel whose own alpha exceeds the weighted mean,
+/// and the clamp silently eats ink on exactly the near-white glyph edges that
+/// matter on a dark theme.  Recovering the ink as `c_i / a_i` cannot overshoot,
+/// which the straight-colour check below asserts directly: the collapsed
+/// colour is the ink colour itself, so non-black text keeps one colour (no
+/// channel spread) through the collapse.
 #[test]
 fn collapsed_backbuffer_luminance_matches_per_channel_composite() {
     // (label, text colour, destinations to composite against)
@@ -680,19 +681,20 @@ fn collapsed_backbuffer_luminance_matches_per_channel_composite() {
             let a_byte = rgba[qi + 3];
             let af = a_byte as f64 / 255.0;
 
-            // (1) No channel may clamp: the straight colour must round-trip back
-            // to the premultiplied colour it came from.  This is the property
-            // the alpha lift establishes, and it holds for any destination.
-            for c in 0..3 {
-                let round_trip = rgba[qi + c] as f64 * af;
-                assert!(
-                    (round_trip - color[pi + c] as f64).abs() <= 1.0,
-                    "{arm} pixel {x} (coverage {cov:?}) channel {c}: straight \
-                     colour lost ink to the unpremultiply clamp; round-trip \
-                     {round_trip:.2} != premultiplied {}; collapsed={:?}",
-                    color[pi + c],
-                    &rgba[qi..qi + 4],
-                );
+            // (1) The straight colour is the ink colour itself wherever the
+            // pixel carries ink: no channel clamps, and none keeps its own
+            // coverage (the premultiplied colour plane is ink * alpha_i).
+            if a_byte > 0 {
+                for c in 0..3 {
+                    let ink = text.r.max(text.g.max(text.b)) as f64 * 255.0;
+                    assert!(
+                        (rgba[qi + c] as f64 - ink).abs() <= 2.0,
+                        "{arm} pixel {x} (coverage {cov:?}) channel {c}: straight \
+                         colour {} is not the ink {ink:.1}; collapsed={:?}",
+                        rgba[qi + c],
+                        &rgba[qi..qi + 4],
+                    );
+                }
             }
 
             // (2) Perceived luminance must survive the collapse.
@@ -715,14 +717,9 @@ fn collapsed_backbuffer_luminance_matches_per_channel_composite() {
                 let exp_lum = rec709(expect[0], expect[1], expect[2]);
                 let act_lum = rec709(actual[0], actual[1], actual[2]);
 
-                // Where the lift raises alpha above the weighted mean, the
-                // destination term is weighted by `a` rather than `weighted`,
-                // leaving an inherent `dst * (a - weighted)` residual that NO
-                // single-alpha flatten can avoid.  It scales with the
-                // destination, so it vanishes on black and stays small on a
-                // dark theme — that is the trade the lift makes, and it is far
-                // cheaper than the clamp loss it replaces.
-                let inherent = dst * (a_byte as f64 - weighted).max(0.0) / 255.0;
+                // The alpha is the weighted mean to within its rounding, so
+                // the destination term differs by at most half a level of it.
+                let inherent = dst * (a_byte as f64 - weighted).abs() / 255.0;
                 let tol = 2.0 + inherent;
                 assert!(
                     (act_lum - exp_lum).abs() <= tol,

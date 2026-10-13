@@ -34,6 +34,7 @@ use crate::text::{EllipsisMode, Font};
 use crate::widget::Widget;
 
 mod ellipsis;
+mod line_box;
 mod line_spacing;
 
 /// Break `text` into lines that each fit within `max_width` pixels at the given
@@ -354,20 +355,6 @@ impl Label {
         }
     }
 
-    /// Height of one line at `size`: 1.5 em for [`LineBox::Standard`], one em
-    /// for [`LineBox::Em`] (agg-sharp's `TextWidget`, whose box is the font
-    /// size tall with the text centred on its ascent/descent span).
-    ///
-    /// [`LineBox::Standard`]: crate::font_settings::LineBox::Standard
-    /// [`LineBox::Em`]: crate::font_settings::LineBox::Em
-    fn line_height(&self, size: f64) -> f64 {
-        use crate::font_settings::{current_line_box, LineBox};
-        match self.line_box.unwrap_or_else(current_line_box) {
-            LineBox::Standard => size * 1.5,
-            LineBox::Em => size,
-        }
-    }
-
     // ── setter methods (for post-construction mutation) ───────────────────────
 
     pub fn set_font_size(&mut self, size: f64) {
@@ -444,12 +431,12 @@ impl Label {
         let (lowest, highest) = if self.wrap && !self.wrapped_lines.is_empty() {
             // Line i is centred at total_h - line_offset(i) (see `paint`), so the
             // top line's box is the top `line_h` of the text.
-            let line_h = self.line_height(size);
+            let line_h = self.line_height(&font, size);
             let total_h = self.wrapped_height(self.wrapped_lines.len(), line_h);
-            let baseline = m.centered_baseline_y(line_h);
+            let baseline = self.text_baseline(&m, line_h);
             (baseline, total_h - line_h + baseline)
         } else {
-            let baseline = m.centered_baseline_y(h);
+            let baseline = self.text_baseline(&m, h);
             (baseline, baseline)
         };
         // Y hinting snaps each baseline to the nearest whole pixel, which can
@@ -550,7 +537,7 @@ impl Widget for Label {
         // system scale is mid-transition.
         let font = self.active_font();
         let size = self.active_font_size();
-        let line_h = self.line_height(size);
+        let line_h = self.line_height(&font, size);
 
         // Drop the pre-rasterized bitmap the moment we notice a font or size
         // swap — unconditionally, before any other branching.  Without this
@@ -593,7 +580,12 @@ impl Widget for Label {
                 self.layout_font_size = size;
                 self.layout_font_ptr = Arc::as_ptr(&font);
             }
-            Size::new(self.layout_width.min(available.width), line_h)
+            let width = if self.effective_line_box() == crate::font_settings::LineBox::EmSnapped {
+                crate::text::snapped_text_width(self.layout_width, crate::device_scale())
+            } else {
+                self.layout_width
+            };
+            Size::new(width.min(available.width), line_h)
         }
     }
 
@@ -647,7 +639,7 @@ impl Widget for Label {
         // lives here.  Label is just a widget that draws text.
         ctx.set_fill_color(color);
         if is_wrapped {
-            let line_h = self.line_height(size);
+            let line_h = self.line_height(&font, size);
             let total_h = self.wrapped_height(self.wrapped_lines.len(), line_h);
             for (i, line) in self.wrapped_lines.iter().enumerate() {
                 if line.is_empty() {
@@ -655,7 +647,7 @@ impl Widget for Label {
                 }
                 if let Some(m) = ctx.measure_text(line) {
                     let line_center_y = total_h - self.line_offset(i, line_h);
-                    let ty = line_center_y - line_h * 0.5 + m.centered_baseline_y(line_h);
+                    let ty = line_center_y - line_h * 0.5 + self.text_baseline(&m, line_h);
                     let tx = match self.align {
                         LabelAlign::Left => 0.0,
                         LabelAlign::Center => (w - m.width) * 0.5,
@@ -676,7 +668,7 @@ impl Widget for Label {
                 _ => self.text.clone(),
             };
             if let Some(m) = ctx.measure_text(&text) {
-                let ty = m.centered_baseline_y(h);
+                let ty = self.text_baseline(&m, h);
                 let tx = match self.align {
                     LabelAlign::Left => 0.0,
                     LabelAlign::Center => (w - m.width) * 0.5,
@@ -737,7 +729,7 @@ impl Widget for Label {
         // to compute a content-bound for height.
         let font = self.active_font();
         let size = self.active_font_size();
-        let line_h = self.line_height(size);
+        let line_h = self.line_height(&font, size);
         if self.wrap && available_w > 0.0 {
             let lines = wrap_text(&font, &self.text, size, available_w);
             self.wrapped_height(lines.len().max(1), line_h)

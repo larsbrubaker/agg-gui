@@ -8,6 +8,13 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ## [Unreleased]
 
+### Fixed
+
+- The `lcb_flatten` pass (a two-plane LCD backbuffer blitted inside a transparent layer) emits the
+  ink's own straight colour at the weighted alpha instead of the per-channel premultiplied colour
+  plane, so non-black text collapses to one colour: a 0.2-gray label showed a channel spread of 29
+  inside the layer, black showed none.
+
 ### Added
 
 - `choose_surface_format`, the swap-chain format rule both shells share

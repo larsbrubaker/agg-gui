@@ -48,6 +48,7 @@ use crate::widget::{BackbufferCache, BackbufferMode, Widget};
 mod binding;
 mod clipboard;
 mod context_menu;
+mod enabled;
 mod filter;
 mod ime;
 mod keyboard_mode;
@@ -61,6 +62,8 @@ mod undo_ops;
 mod vertical_keys;
 mod widget_impl;
 
+#[cfg(test)]
+mod disabled_tests;
 #[cfg(test)]
 mod edit_field_state_color_tests;
 #[cfg(test)]
@@ -222,6 +225,9 @@ pub struct TextField {
     /// Per-instance line box; `None` follows
     /// [`font_settings::current_line_box`](crate::font_settings::current_line_box).
     pub(super) line_box: Option<crate::font_settings::LineBox>,
+    /// Enabled state; see `text_field/enabled.rs`.
+    enabled: bool,
+    enabled_cell: Option<Rc<Cell<bool>>>,
     /// Caret suggestions; see `text_field/suggestions.rs`.
     suggestions: Option<suggestions::AttachedSuggestions>,
 }
@@ -276,6 +282,8 @@ impl TextField {
             context_menu: TextContextMenu::new(),
             context_menu_enabled: true,
             line_box: None,
+            enabled: true,
+            enabled_cell: None,
             suggestions: None,
         }
     }

@@ -90,15 +90,34 @@ impl TextField {
     /// em of text plus the top and bottom insets — agg-sharp's
     /// `TextEditWidget` is one em tall and `ThemedTextEditWidget` pads it on
     /// every side (raise it to a field design height with `with_min_size`,
-    /// which `layout` honours).
+    /// which `layout` honours). [`LineBox::EmSnapped`]: the line is the em
+    /// rounded out to whole device pixels, plus the insets.
     pub(super) fn natural_height(&self) -> f64 {
-        match self.line_box.unwrap_or_else(current_line_box) {
+        match self.effective_line_box() {
             LineBox::Standard => (self.font_size * 2.4).max(28.0),
             LineBox::Em => {
                 let i = self.text_insets();
                 self.font_size + i.top + i.bottom
             }
+            LineBox::EmSnapped => {
+                let i = self.text_insets();
+                let font = self.active_font();
+                crate::text::snapped_line_box(
+                    font.ascender_px(self.font_size),
+                    font.descender_px(self.font_size),
+                    self.font_size,
+                    crate::device_scale(),
+                )
+                .height
+                    + i.top
+                    + i.bottom
+            }
         }
+    }
+
+    /// The line box in force: this field's own, else the app-wide one.
+    pub(super) fn effective_line_box(&self) -> LineBox {
+        self.line_box.unwrap_or_else(current_line_box)
     }
 
     pub fn with_margin(mut self, m: Insets) -> Self {
