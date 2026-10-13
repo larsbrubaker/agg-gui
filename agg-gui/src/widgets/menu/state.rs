@@ -664,7 +664,11 @@ impl PopupMenuState {
             .iter()
             .enumerate()
             .filter_map(|(idx, entry)| match entry {
-                MenuEntry::Item(item) if item.enabled && item.widget_row.is_none() => Some(idx),
+                MenuEntry::Item(item)
+                    if item.enabled && item.widget_row.is_none_or(|row| row.keyboard_focus) =>
+                {
+                    Some(idx)
+                }
                 _ => None,
             })
             .collect();

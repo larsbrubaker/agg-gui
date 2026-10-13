@@ -386,3 +386,53 @@ fn sync_root_origin_divides_out_the_effective_scale_at_ux_1_5() {
         "painted at the root anchor"
     );
 }
+
+fn key(key: Key) -> Event {
+    Event::KeyDown {
+        key,
+        modifiers: Modifiers::default(),
+    }
+}
+
+/// "A" action, a keyboard-focusable 40 px widget row, "B" action.
+fn menu_with_focusable_row() -> (PopupMenu, Rc<RefCell<Vec<Event>>>) {
+    let (widget, log) = probe();
+    let mut menu = PopupMenu::new(vec![MenuItem::action("A", "a").into()]);
+    menu.items
+        .push(MenuItem::widget_row(0, 40.0).keyboard_focusable().into());
+    menu.set_row_widget(0, widget);
+    menu.items.push(MenuItem::action("B", "b").into());
+    menu.open_at(Point::new(20.0, 300.0));
+    (menu, log)
+}
+
+#[test]
+fn a_keyboard_focusable_widget_row_is_stepped_onto_and_gets_focus_and_keys() {
+    let _guard = crate::input_profile::profile_test_lock();
+    reset_env();
+    let (mut menu, log) = menu_with_focusable_row();
+    menu.handle_event(&key(Key::ArrowDown), VIEWPORT); // A
+    assert!(log.borrow().is_empty());
+    menu.handle_event(&key(Key::ArrowDown), VIEWPORT); // the widget row
+    assert!(matches!(log.borrow().as_slice(), [Event::FocusGained]));
+    // Left, Right, Enter and Space go to the widget, which consumes them.
+    for k in [Key::ArrowLeft, Key::ArrowRight, Key::Enter, Key::Char(' ')] {
+        let (result, response) = menu.handle_event(&key(k), VIEWPORT);
+        assert!(result.is_consumed());
+        assert_eq!(response, MenuResponse::None);
+    }
+    assert_eq!(log.borrow().len(), 5);
+    menu.handle_event(&key(Key::ArrowDown), VIEWPORT); // B
+    assert!(matches!(log.borrow().last(), Some(Event::FocusLost)));
+}
+
+#[test]
+fn an_ordinary_widget_row_is_still_skipped_by_the_keyboard() {
+    let _guard = crate::input_profile::profile_test_lock();
+    reset_env();
+    let (mut menu, log) = menu_with_row();
+    menu.handle_event(&key(Key::ArrowDown), VIEWPORT);
+    menu.handle_event(&key(Key::ArrowDown), VIEWPORT);
+    menu.handle_event(&key(Key::Enter), VIEWPORT);
+    assert!(log.borrow().is_empty());
+}

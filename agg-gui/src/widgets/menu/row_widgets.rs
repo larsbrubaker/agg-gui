@@ -16,7 +16,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use crate::draw_ctx::DrawCtx;
-use crate::event::{Event, EventResult};
+use crate::event::{Event, EventResult, Key};
 use crate::geometry::{Point, Rect, Size};
 use crate::widget::{dispatch_event_dyn, hit_test_subtree, paint_subtree, Widget};
 
@@ -40,6 +40,8 @@ pub(super) struct RowWidgets {
     rows: Rc<RefCell<Vec<RowWidget>>>,
     /// Row id + hit path of the widget that took the last press.
     captured: Rc<RefCell<Option<Capture>>>,
+    /// The keyboard-focusable row that last got [`Event::FocusGained`].
+    focused: Rc<std::cell::Cell<Option<usize>>>,
 }
 
 impl RowWidgets {
@@ -112,6 +114,45 @@ impl RowWidgets {
                 ctx.restore();
             }
         }
+    }
+
+    /// Hands a key press to the keyboard-focusable row widget the highlight (`hover`) is on:
+    /// Left, Right, Enter and Space only. `Some` when the widget consumed it.
+    pub(super) fn key_down(
+        &self,
+        items: &[MenuEntry],
+        hover: Option<&[usize]>,
+        event: &Event,
+    ) -> Option<EventResult> {
+        let Event::KeyDown { key, .. } = event else {
+            return None;
+        };
+        if !matches!(
+            key,
+            Key::ArrowLeft | Key::ArrowRight | Key::Enter | Key::Char(' ')
+        ) {
+            return None;
+        }
+        let row = focusable_row(items, hover?)?;
+        let result = self.with(row, |w| w.on_event(event))?;
+        result.is_consumed().then_some(result)
+    }
+
+    /// Sends [`Event::FocusLost`] / [`Event::FocusGained`] as the highlight (`hover`) leaves and
+    /// reaches a keyboard-focusable row.
+    pub(super) fn sync_focus(&self, items: &[MenuEntry], hover: Option<&[usize]>) {
+        let now = hover.and_then(|path| focusable_row(items, path));
+        let before = self.focused.replace(now);
+        if before == now {
+            return;
+        }
+        if let Some(id) = before {
+            self.with(id, |w| w.on_event(&Event::FocusLost));
+        }
+        if let Some(id) = now {
+            self.with(id, |w| w.on_event(&Event::FocusGained));
+        }
+        crate::animation::request_draw();
     }
 
     /// The tooltip of the row widget (or the widget inside it) under `pointer`, in the menu's
@@ -242,6 +283,14 @@ fn widget_rows(items: &[MenuEntry], layouts: &[PopupLayout]) -> Vec<(usize, Rect
         }
     }
     out
+}
+
+/// The id of the keyboard-focusable widget row at `path`.
+fn focusable_row(items: &[MenuEntry], path: &[usize]) -> Option<usize> {
+    item_at_path(items, path)
+        .and_then(|item| item.widget_row)
+        .filter(|row| row.keyboard_focus)
+        .map(|row| row.id)
 }
 
 fn find<'a>(

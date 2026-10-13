@@ -121,6 +121,9 @@ impl MenuIconSlot {
 pub struct MenuWidgetRow {
     pub id: usize,
     pub height: f64,
+    /// Whether Up / Down step onto this row like onto a text row
+    /// ([`MenuItem::keyboard_focusable`]). Off by default.
+    pub keyboard_focus: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -191,12 +194,27 @@ impl MenuItem {
             widget_row: Some(MenuWidgetRow {
                 id,
                 height: height.max(0.0),
+                keyboard_focus: false,
             }),
             tooltip: None,
             row_height: None,
             icon_slot: None,
             automation_name: None,
         }
+    }
+
+    /// Lets the keyboard reach a [`MenuItem::widget_row`] row: Up / Down step
+    /// onto it, the widget gets [`Event::FocusGained`] / [`Event::FocusLost`]
+    /// as the highlight arrives and leaves (it draws its own focus look; the
+    /// menu paints none), and while it is highlighted Left, Right, Enter and
+    /// Space go to its `on_event` first. A widget that consumes a key keeps
+    /// it from the menu (Right would otherwise open a submenu, Enter
+    /// activate a row). No effect on other rows.
+    pub fn keyboard_focusable(mut self) -> Self {
+        if let Some(row) = self.widget_row.as_mut() {
+            row.keyboard_focus = true;
+        }
+        self
     }
 
     pub fn disabled(mut self) -> Self {

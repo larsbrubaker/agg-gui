@@ -164,7 +164,21 @@ impl PopupMenu {
                 return (result, MenuResponse::None);
             }
         }
-        self.state.handle_event(&mut self.items, event, viewport)
+        if self.state.open && !self.row_widgets.is_empty() {
+            let hover = self.state.hover_path.clone();
+            if let Some(result) = self
+                .row_widgets
+                .key_down(&self.items, hover.as_deref(), event)
+            {
+                return (result, MenuResponse::None);
+            }
+        }
+        let result = self.state.handle_event(&mut self.items, event, viewport);
+        if !self.row_widgets.is_empty() {
+            let hover = self.state.hover_path.clone().filter(|_| self.state.open);
+            self.row_widgets.sync_focus(&self.items, hover.as_deref());
+        }
+        result
     }
 
     /// Return `true` if `pos` falls inside any of the popup's currently

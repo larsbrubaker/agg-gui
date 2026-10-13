@@ -13,6 +13,10 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 - A widget hosted in a popup-menu row shows its `tooltip_text` on hover, as a text row shows
   its `MenuItem::tooltip` (the deepest tipped widget under the pointer wins).
 
+- `MenuItem::keyboard_focusable` lets Up / Down reach a `widget_row`: the widget gets
+  `Event::FocusGained` / `FocusLost` as the highlight arrives and leaves, and Left, Right, Enter
+  and Space go to its `on_event` first (`MenuWidgetRow::keyboard_focus`).
+
 - `MenuStyle` covers the rest of agg-sharp's `PopupMenu` chrome, all
   defaulting to the existing look: `separator: MenuSeparatorStyle`
   (`line_height`, `margin_y`, `inset_x`, `color`; agg-sharp's
