@@ -243,9 +243,8 @@ fn rust_only_toolbar_snapshots() {
 
 /// The outline, the dividers and the icon bars are whole device pixels: a column and a row cut
 /// through a group hold only the background and the stroke colour, and the align icon's centre
-/// column holds only solid ink and background, with no half-covered pixel between. The outline is
-/// checked at 1x, 1.5x and 2x; the glyph bars at 1x and 2x, where Font Awesome's bar heights are
-/// whole pixels (at 1.5x a bar is 1.5 pixels thick in the font itself).
+/// column holds only solid ink and background, with no half-covered pixel between. All of it is
+/// checked at 1x, 1.5x and 2x: the icons are drawn, so their bars are whole pixels at any scale.
 #[test]
 fn rust_only_strokes_fill_whole_device_pixels() {
     for scale in SCALES {
@@ -292,7 +291,7 @@ fn rust_only_strokes_fill_whole_device_pixels() {
             );
         });
     }
-    for scale in [1.0, 2.0] {
+    for scale in SCALES {
         at_scale(scale, || {
             let mut app = editor_app("Hello\n", None);
             let fb = paint(&mut app, scale);
@@ -305,6 +304,135 @@ fn rust_only_strokes_fill_whole_device_pixels() {
                     l <= 80 || l >= 250,
                     "a half-covered pixel ({l}) in the icon at {scale}x, row {y}"
                 );
+            }
+        });
+    }
+}
+
+/// Which straight edge of an icon is probed for crispness.
+#[derive(Clone, Copy)]
+enum Edge {
+    Top,
+    Left,
+    Right,
+}
+
+/// The ink coverage of the square of the cell where its icon is drawn (the icon's box and a
+/// pixel more around it), row by row from the bottom: 0 is the cell's background, 1 its darkest
+/// pixel. The group's outline and dividers, and the outline's rounded corner, lie outside it.
+fn cell_coverage(fb: &Framebuffer, cell: Rect, scale: f64) -> Vec<Vec<f64>> {
+    let half =
+        (agg_gui::widgets::markdown_editing::ICON_DESIGN_SIZE * scale / 2.0).ceil() as i64 + 2;
+    let (cx, cy) = (
+        ((cell.x + cell.width * 0.5) * scale).round() as i64,
+        ((cell.y + cell.height * 0.5) * scale).round() as i64,
+    );
+    let (x0, x1, y0, y1) = (cx - half, cx + half, cy - half, cy + half);
+    let background = luma(rgb(fb, x0, y0)) as f64;
+    let darkest = (y0..y1)
+        .flat_map(|y| (x0..x1).map(move |x| (x, y)))
+        .map(|(x, y)| luma(rgb(fb, x, y)) as f64)
+        .fold(background, f64::min);
+    assert!(
+        background - darkest > 60.0,
+        "the icon is drawn at {scale}x (background {background}, darkest {darkest})"
+    );
+    (y0..y1)
+        .map(|y| {
+            (x0..x1)
+                .map(|x| (background - luma(rgb(fb, x, y)) as f64) / (background - darkest))
+                .collect()
+        })
+        .collect()
+}
+
+/// True when the outermost row or column of ink on `edge` holds solid pixels: a
+/// straight edge on a pixel boundary has its extreme line fully inked, while one that straddles
+/// two lines leaves a partly covered extreme line.
+fn edge_is_crisp(rows: &[Vec<f64>], edge: Edge) -> bool {
+    let inked = |c: f64| c > 0.08;
+    let solid = |c: f64| c >= 0.95;
+    let line: Vec<f64> = match edge {
+        Edge::Top => match rows.iter().rposition(|r| r.iter().any(|c| inked(*c))) {
+            Some(y) => rows[y].clone(),
+            None => return false,
+        },
+        Edge::Left | Edge::Right => {
+            let width = rows[0].len();
+            let column = |x: usize| rows.iter().map(|r| r[x]).collect::<Vec<f64>>();
+            let found = match edge {
+                Edge::Left => (0..width).find(|x| column(*x).iter().any(|c| inked(*c))),
+                _ => (0..width)
+                    .rev()
+                    .find(|x| column(*x).iter().any(|c| inked(*c))),
+            };
+            match found {
+                Some(x) => column(x),
+                None => return false,
+            }
+        }
+    };
+    line.iter().filter(|c| solid(**c)).count() >= 2
+}
+
+/// Every icon is drawn at every scale, and the ones with straight edges have those edges on
+/// whole device pixels: the extreme row or column of ink is fully inked, with no half-covered
+/// line beside it. The icons made only of bars (align, numbered list, quote) hold no
+/// half-covered pixel anywhere.
+#[test]
+fn rust_only_every_icon_is_drawn_and_crisp_at_every_scale() {
+    use Edge::{Left, Right, Top};
+    let probes: [(K, &[Edge]); 13] = [
+        (K::Bold, &[Left]),
+        (K::Italic, &[Top]),
+        (K::Strike, &[Left, Right]),
+        (K::Code, &[]),
+        (K::AlignLeft, &[Top, Left]),
+        (K::AlignCenter, &[Top, Left, Right]),
+        (K::AlignRight, &[Top, Right]),
+        (K::BulletList, &[Right]),
+        (K::NumberedList, &[Right]),
+        (K::Quote, &[Left]),
+        (K::Link, &[]),
+        (K::CodeBlock, &[Top, Left]),
+        (K::Table, &[Top, Left]),
+    ];
+    let bars_only = [
+        K::AlignLeft,
+        K::AlignCenter,
+        K::AlignRight,
+        K::NumberedList,
+        K::Quote,
+    ];
+    for scale in SCALES {
+        at_scale(scale, || {
+            let mut app = editor_app("Hello\n", None);
+            let fb = paint(&mut app, scale);
+            let cells = rects(&app, "MarkdownFormatButton");
+            for (kind, edges) in probes {
+                let rows = cell_coverage(&fb, cells[cell_index(kind)], scale);
+                for edge in edges {
+                    assert!(
+                        edge_is_crisp(&rows, *edge),
+                        "{kind:?}: a soft {} edge at {scale}x",
+                        match edge {
+                            Edge::Top => "top",
+                            Edge::Left => "left",
+                            Edge::Right => "right",
+                        }
+                    );
+                }
+                if bars_only.contains(&kind) {
+                    let soft = rows
+                        .iter()
+                        .flatten()
+                        .filter(|c| **c > 0.06 && **c < 0.94)
+                        .count();
+                    assert_eq!(
+                        soft, 0,
+                        "{kind:?} has {soft} half-covered pixels at {scale}x"
+                    );
+                }
             }
         });
     }

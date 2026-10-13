@@ -34,7 +34,7 @@ use crate::color::Color;
 use crate::curve_flattening::curve_approximation_scale;
 use crate::draw_ctx::{FillRule, LinearGradientPaint, PatternPaint, RadialGradientPaint};
 use crate::framebuffer::Framebuffer;
-use crate::text::{measure_advance, shape_text, Font, TextMetrics};
+use crate::text::{measure_advance, shape_text_snapped, Font, TextMetrics};
 
 // ---------------------------------------------------------------------------
 // Layer stack entry
@@ -574,7 +574,12 @@ impl<'a> GfxCtx<'a> {
         let transform = self.state.transform;
 
         // Shape text and collect per-glyph outline paths.
-        let (glyph_paths, _) = shape_text(&font, text, font_size, x, y);
+        // The baseline snaps to a device pixel row, not a logical one: under a
+        // scale the two differ, and a buffered label must land on the row a
+        // direct coverage-mask composite does.
+        let (glyph_paths, _) = shape_text_snapped(&font, text, font_size, x, y, |gy| {
+            crate::text::device_baseline_snap(&transform, gy)
+        });
         let fb = active_fb(self.base_fb, &mut self.layer_stack);
         for mut path in glyph_paths {
             rasterize_fill(

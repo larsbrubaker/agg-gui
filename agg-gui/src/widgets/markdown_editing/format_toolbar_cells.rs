@@ -106,7 +106,7 @@ pub(super) fn paint_group(
     shared: &Rc<ToolbarShared>,
 ) {
     let v = ctx.visuals();
-    let scale = crate::device_scale::device_scale().max(f64::MIN_POSITIVE);
+    let scale = crate::ux_scale::effective_scale().max(f64::MIN_POSITIVE);
     // Everything below is in device pixels, divided back to logical units for the context.
     ctx.save();
     ctx.snap_to_pixel();

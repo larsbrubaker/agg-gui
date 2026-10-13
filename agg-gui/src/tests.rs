@@ -147,6 +147,7 @@ mod scrolling_area_device_scale;
 mod shared_column_width_tests;
 mod shared_size_group_tests;
 mod shell_input;
+mod snap_effective_scale;
 mod stack_aligned;
 mod stroke_defaults;
 mod svg_icon_lcd_tests;

@@ -512,7 +512,9 @@ fn paint_inks(widget: &mut dyn Widget, scale: f64, out: &mut Vec<Option<Rect>>) 
 }
 
 /// Every icon is drawn in an em box of one height on one baseline across
-/// the whole toolbar, the ink each button draws lands inside its box, and
+/// the whole toolbar, the ink each button draws lands inside its box (the
+/// drawn icons' square box, centred in the button, in place of the glyph's em
+/// box), and
 /// the groups and the size list share one centre line and one height.
 /// Checked at 1x and 2x.  Sizes are logical units (C#'s `* scale` falls
 /// away); the ink is read in device pixels and compared with the em box
@@ -543,17 +545,22 @@ fn every_icon_is_drawn_at_one_size_on_one_baseline() {
             .collect();
         assert_eq!(buttons.len(), 13);
         let mut inks = inks.into_iter();
+        // The icons are drawn in a square box centred in the button.
+        let icon_box = |button: &Button| {
+            let b = button.bounds();
+            Rect::new(
+                ((b.width - ICON_DESIGN_SIZE) / 2.0).floor(),
+                ((b.height - ICON_DESIGN_SIZE) / 2.0).floor(),
+                ICON_DESIGN_SIZE,
+                ICON_DESIGN_SIZE,
+            )
+        };
         let in_toolbar = |button: &Button, at: Rect| {
-            let local = button.icon_em_box().expect("a glyph icon");
+            let local = icon_box(button);
             Rect::new(local.x + at.x, local.y + at.y, local.width, local.height)
         };
         let first = in_toolbar(buttons[0].0, buttons[0].1);
-        // The box is the face's ascent to descent, which Font Awesome sets a little taller than its em.
-        assert!(
-            (first.height - ICON_DESIGN_SIZE).abs() <= 0.1 * ICON_DESIGN_SIZE,
-            "{}",
-            first.height
-        );
+        assert_eq!(first.height, ICON_DESIGN_SIZE);
         for (button, at, tip) in &buttons {
             let em = in_toolbar(button, *at);
             assert_eq!(em.height, first.height, "{tip}");
@@ -561,7 +568,7 @@ fn every_icon_is_drawn_at_one_size_on_one_baseline() {
             assert_eq!(button.bounds().width, BUTTON_DESIGN_WIDTH, "{tip}");
             assert_eq!(button.bounds().height, group_height() - 2.0, "{tip}");
 
-            let local = button.icon_em_box().unwrap();
+            let local = icon_box(button);
             let ink = inks.next().flatten();
             let ink = ink.unwrap_or_else(|| panic!("{tip} draws its icon"));
             assert!(ink.width > 0.0, "{tip} draws its icon");

@@ -158,6 +158,7 @@ pub mod selection;
 pub mod style_operations;
 pub mod table_code_operations;
 pub mod table_layout;
+mod toolbar_icons;
 
 pub use block::{
     RichAlignment, RichBlock, RichBlockId, RichBlockKind, RichListInfo, RichTableCell,

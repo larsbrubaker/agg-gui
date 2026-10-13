@@ -102,6 +102,9 @@ pub struct Button {
     /// The glyph icon's colour, asked each paint (see
     /// [`with_icon_color_fn`](Self::with_icon_color_fn)).
     icon_color_fn: Option<IconColorFn>,
+    /// A drawn icon that replaces the glyph (see
+    /// [`with_icon_painter`](Self::with_icon_painter)).
+    icon_painter: Option<IconPainter>,
     /// When true the button paints only its icon (see
     /// [`with_flat`](Self::with_flat)).
     flat: bool,
@@ -119,6 +122,8 @@ pub struct Button {
 
 /// Colour of a glyph icon for the current visuals; `None` keeps the default.
 type IconColorFn = Rc<dyn Fn(&Visuals) -> Option<Color>>;
+/// Draws a button's icon: the context in the button's local space, the button's size, the colour.
+type IconPainter = Rc<dyn Fn(&mut dyn DrawCtx, Size, Color)>;
 
 impl Button {
     /// Create a button with the given label.
@@ -147,6 +152,7 @@ impl Button {
             icon_image: None,
             icon_em_box: false,
             icon_color_fn: None,
+            icon_painter: None,
             flat: false,
             compact: false,
             hovered: false,
@@ -678,7 +684,7 @@ impl Widget for Button {
 
         // Enabled state — only paint the icon (label has already been
         // drawn by the framework via the child Label's paint).
-        if self.icon.is_some() || self.icon_image.is_some() {
+        if self.icon.is_some() || self.icon_image.is_some() || self.icon_painter.is_some() {
             let active = self.is_active();
             let muted = self.subtle && !active;
             let label_color = if muted {

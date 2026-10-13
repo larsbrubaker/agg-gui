@@ -12,8 +12,9 @@
 //! checks every one against the face's cmap.
 //!
 //! The markdown format toolbar (`widgets/markdown_editing/format_toolbar.rs`)
-//! draws its buttons from these constants, as agg-sharp's does from
-//! `IconFont`.
+//! names its buttons' glyphs from these constants, as agg-sharp's does from
+//! `IconFont`, but draws vector icons of its own (`toolbar_icons`), whose
+//! bars sit on whole device pixels at any scale.
 
 use std::sync::{Arc, OnceLock};
 

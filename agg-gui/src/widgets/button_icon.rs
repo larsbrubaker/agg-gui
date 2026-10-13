@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use crate::color::Color;
 use crate::draw_ctx::DrawCtx;
-use crate::geometry::Rect;
+use crate::geometry::{Rect, Size};
 use crate::icon_image::IconImage;
 use crate::text::{measure_advance, measure_text_metrics, Font};
 
@@ -85,6 +85,19 @@ impl Button {
     /// Meant for icon-only buttons; image icons are unaffected.
     pub fn with_icon_em_box(mut self) -> Self {
         self.icon_em_box = true;
+        self
+    }
+
+    /// Draws the icon with `paint` instead of a glyph or an image: it gets the
+    /// context in the button's local space, the button's size and the icon
+    /// colour, and places the icon itself (so it can snap to the device grid
+    /// at any scale).  Meant for icon-only buttons, where it takes the whole
+    /// button; the painter takes precedence over every other icon.
+    pub fn with_icon_painter(
+        mut self,
+        paint: impl Fn(&mut dyn DrawCtx, Size, Color) + 'static,
+    ) -> Self {
+        self.icon_painter = Some(Rc::new(paint));
         self
     }
 
@@ -180,7 +193,7 @@ impl Button {
         let advance = measure_advance(&icon.font, &icon.glyph.to_string(), icon.font_size);
         let descent = -metrics.descent;
         let height = metrics.ascent + metrics.descent;
-        let scale = crate::device_scale::device_scale().max(f64::MIN_POSITIVE);
+        let scale = crate::ux_scale::effective_scale().max(f64::MIN_POSITIVE);
         let snap = |v: f64| round_half_even(v * scale) / scale;
         (
             snap(w * 0.5 - advance / 2.0),
@@ -203,6 +216,9 @@ impl Button {
     /// Horizontal space the leading icon reserves (icon width + gap).
     /// Zero when no icon is configured.
     pub(super) fn icon_block_w(&self) -> f64 {
+        if self.icon_painter.is_some() {
+            return 0.0;
+        }
         if let Some(image) = &self.icon_image {
             return image.size().width + self.icon_gap();
         }
@@ -223,6 +239,18 @@ impl Button {
         color: Color,
         enabled: bool,
     ) {
+        if let Some(paint) = &self.icon_painter {
+            let size = Size::new(self.bounds.width, button_h);
+            if enabled {
+                paint(ctx, size, color);
+            } else {
+                ctx.save();
+                ctx.set_global_alpha(DISABLED_IMAGE_ALPHA);
+                paint(ctx, size, color);
+                ctx.restore();
+            }
+            return;
+        }
         if let Some(image) = &self.icon_image {
             let y = ((button_h - image.size().height) * 0.5).max(0.0);
             if !enabled {

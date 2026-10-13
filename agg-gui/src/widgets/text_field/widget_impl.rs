@@ -696,7 +696,7 @@ impl TextField {
             m.ascent,
             m.descent,
             self.font_size,
-            crate::device_scale(),
+            crate::ux_scale::effective_scale(),
         );
         let area_h = h - ins.top - ins.bottom;
         ins.bottom + (area_h - b.height) * 0.5 + b.baseline

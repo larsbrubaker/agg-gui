@@ -20,7 +20,7 @@ use crate::{Rect, Size, Widget};
 const FONT_BYTES: &[u8] = include_bytes!("../../../demo/assets/CascadiaCode.ttf");
 
 /// (pt, device height, device baseline) at scale 1.
-const AT_1X: [(f64, f64, f64); 7] = [
+pub(super) const AT_1X: [(f64, f64, f64); 7] = [
     (7.0, 10.0, 2.0),
     (8.0, 12.0, 3.0),
     (9.0, 13.0, 3.0),
@@ -31,7 +31,7 @@ const AT_1X: [(f64, f64, f64); 7] = [
 ];
 
 /// The same at scale 1.25.
-const AT_1_25X: [(f64, f64, f64); 7] = [
+pub(super) const AT_1_25X: [(f64, f64, f64); 7] = [
     (7.0, 13.0, 3.0),
     (8.0, 14.0, 3.0),
     (9.0, 16.0, 4.0),
@@ -43,7 +43,7 @@ const AT_1_25X: [(f64, f64, f64); 7] = [
 
 /// A face with agg-sharp's Liberation Sans 1.07 vertical metrics (ascent 1638,
 /// descent -410 of 2048), scaled to the test font's em.
-fn liberation_metrics() -> Arc<Font> {
+pub(super) fn liberation_metrics() -> Arc<Font> {
     let font = Font::from_slice(FONT_BYTES).expect("font");
     let upem = font.units_per_em() as i32;
     Arc::new(font.with_vertical_metrics(VerticalMetrics {
@@ -65,7 +65,7 @@ fn label(font: &Arc<Font>, pt: f64, line_box: LineBox) -> Label {
 }
 
 /// The label's laid-out size and the baseline it paints at.
-fn label_box(font: &Arc<Font>, pt: f64, line_box: LineBox) -> (Size, f64) {
+pub(super) fn label_box(font: &Arc<Font>, pt: f64, line_box: LineBox) -> (Size, f64) {
     let mut l = label(font, pt, line_box);
     let size = l.layout(Size::new(1000.0, 1000.0));
     l.set_bounds(Rect::new(0.0, 0.0, size.width, size.height));
@@ -143,7 +143,7 @@ fn rust_only_a_taller_snapped_label_centres_the_box() {
 }
 
 /// The field's height and the baseline it paints "Ag" at, with padding 3.
-fn field_box(font: &Arc<Font>, pt: f64, scale: f64) -> (f64, f64) {
+pub(super) fn field_box(font: &Arc<Font>, pt: f64, scale: f64) -> (f64, f64) {
     crate::device_scale::set_device_scale(scale);
     let mut f = TextField::new(Arc::clone(font))
         .with_font_size(px(pt))

@@ -581,7 +581,10 @@ impl Widget for Label {
                 self.layout_font_ptr = Arc::as_ptr(&font);
             }
             let width = if self.effective_line_box() == crate::font_settings::LineBox::EmSnapped {
-                crate::text::snapped_text_width(self.layout_width, crate::device_scale())
+                crate::text::snapped_text_width(
+                    self.layout_width,
+                    crate::ux_scale::effective_scale(),
+                )
             } else {
                 self.layout_width
             };

@@ -5,9 +5,9 @@
 //! implementation (the strip over the link row).  The toolbar's logic is in
 //! `format_toolbar`.
 //!
-//! A button is agg-gui's [`Button`] in its flat mode (`with_flat`) with a Font
-//! Awesome icon in its em box (`with_icon_em_box`, so every icon shares one
-//! baseline), taking the clicks and the tooltip; the *group* paints the
+//! A button is agg-gui's [`Button`] in its flat mode (`with_flat`) with a drawn
+//! vector icon (`toolbar_icons`, whose bars sit on whole device pixels at any
+//! scale), taking the clicks and the tooltip; the *group* paints the
 //! cells (the accent tint of a pressed style, the faint shade of a mixed one,
 //! hover and press) with the outline and dividers, in one device-pixel grid
 //! (`format_toolbar_cells`), so the strokes are crisp at any scale and the end
@@ -34,13 +34,14 @@ use super::format_toolbar::{
     DESIGN_EDGE_SPACE, ROW_DESIGN_PADDING,
 };
 use super::format_toolbar_cells::{icon_color, paint_group};
+use super::toolbar_icons::paint_icon;
 
 /// The button's width in design units.
 pub const BUTTON_DESIGN_WIDTH: f64 = 30.0;
 /// The button's height in design units.
 pub const BUTTON_DESIGN_HEIGHT: f64 = 28.0;
-/// The icon font's em, in design units.
-pub const ICON_DESIGN_SIZE: f64 = 14.0;
+/// The icon box's side, in design units.
+pub const ICON_DESIGN_SIZE: f64 = 16.0;
 /// The group outline's corner radius, in design units.
 pub const GROUP_DESIGN_RADIUS: f64 = 7.0;
 /// The room between two groups, in design units (half on each side).
@@ -99,7 +100,7 @@ impl MarkdownFormatButton {
     fn new(
         shared: &Rc<ToolbarShared>,
         kind: MarkdownFormatButtonKind,
-        icon_font: &Arc<Font>,
+        _icon_font: &Arc<Font>,
         font: &Arc<Font>,
         mac: bool,
     ) -> Self {
@@ -107,8 +108,8 @@ impl MarkdownFormatButton {
         let index = kind.index();
         let colors = Rc::clone(shared);
         let button = Button::new("", Arc::clone(font))
-            .with_icon_sized(kind.icon(), Arc::clone(icon_font), ICON_DESIGN_SIZE)
-            .with_icon_em_box()
+            // Drawn vector icons, snapped to the device grid (`toolbar_icons`).
+            .with_icon_painter(move |ctx, size, color| paint_icon(ctx, kind, size, color))
             // The group paints the cells (tint, hover, press) so the end cells take its rounded
             // corners; the button draws the icon and takes the clicks.
             .with_flat()

@@ -10,6 +10,20 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Changed
 
+- The rich editor's formatting toolbar draws vector icons (`toolbar_icons`) instead of Font Awesome
+  glyphs: one stroke thickness for the whole set, every straight edge on a whole device pixel at
+  1x, 1.5x and 2x.  `MarkdownFormatButtonKind::icon` still names the Font Awesome glyph, for
+  callers that want it, but the toolbar no longer draws it; `ICON_DESIGN_SIZE` is now the icon
+  box (16).  New `Button::with_icon_painter` draws an icon with a closure.
+
+- `LineBox::EmSnapped` (`Label`, `TextField`) snaps on the effective scale (device scale times the
+  Text Size multiplier) instead of the device scale alone.  The toolbar's pixel grid and em-box
+  icons do the same.
+
+- The software `GfxCtx::fill_text` outline path snaps a hinted baseline to a device pixel row, not
+  a logical unit: at 2x a baseline of 3.5 units is device row 7 (as a coverage-mask composite
+  puts it), no longer row 8.  A backbuffered `Label` now lands on the same row as direct text.
+
 - `lcd_coverage::collapse_lcd_pixel` (and so `LcdBuffer::to_rgba8_top_down_collapsed` and the
   default `DrawCtx::draw_lcd_backbuffer_arc`) collapses to the ink's own straight colour
   (`c_i / a_i`) at the Rec.709-weighted alpha, instead of dividing the colour plane by that alpha.

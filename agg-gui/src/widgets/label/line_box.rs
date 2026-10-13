@@ -30,7 +30,7 @@ impl Label {
                     font.ascender_px(size),
                     font.descender_px(size),
                     size,
-                    crate::device_scale(),
+                    crate::ux_scale::effective_scale(),
                 )
                 .height
             }
@@ -49,7 +49,7 @@ impl Label {
                 m.ascent,
                 m.descent,
                 self.active_font_size(),
-                crate::device_scale(),
+                crate::ux_scale::effective_scale(),
             );
             (box_h - b.height) * 0.5 + b.baseline
         } else {

@@ -515,6 +515,33 @@ pub(crate) fn shape_text(
     x: f64,
     y: f64,
 ) -> (Vec<PathStorage>, f64) {
+    shape_text_snapped(font, text, size, x, y, |gy| (gy + 0.5).floor())
+}
+
+/// The baseline [`shape_text_snapped`] places a glyph on when Y hinting is
+/// on, for a context whose transform is `t`: the device pixel row nearest the
+/// baseline, as a coordinate in the context's own units.  Under a scale the
+/// row is found in device pixels (a baseline at 3.5 logical units is row 7 at
+/// 2x, not the row of logical 4), which is where a coverage-mask composite
+/// puts it too.  A rotated or sheared transform has no pixel rows, so the
+/// logical-unit snap is kept.
+pub(crate) fn device_baseline_snap(t: &TransAffine, y: f64) -> f64 {
+    if t.shx != 0.0 || t.shy != 0.0 || t.sy.abs() < 1e-9 {
+        return (y + 0.5).floor();
+    }
+    ((y * t.sy + t.ty + 0.5).floor() - t.ty) / t.sy
+}
+
+/// [`shape_text`] with the glyph baseline snapped by `snap` (given the
+/// unsnapped baseline) when Y hinting is on.
+pub(crate) fn shape_text_snapped(
+    font: &Font,
+    text: &str,
+    size: f64,
+    x: f64,
+    y: f64,
+    snap: impl Fn(f64) -> f64,
+) -> (Vec<PathStorage>, f64) {
     let shaped = shape_glyphs(font, text, size);
 
     // Pull the current typography-style globals ONCE per call.  The
@@ -559,7 +586,7 @@ pub(crate) fn shape_text(
         // `(y + 0.5).floor()` convention — simple, cheap, preserves
         // horizontal subpixel positioning.
         let gy = if hint_y {
-            (gy_unsnapped + 0.5).floor()
+            snap(gy_unsnapped)
         } else {
             gy_unsnapped
         };

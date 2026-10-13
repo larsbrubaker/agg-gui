@@ -111,7 +111,8 @@ impl MarkdownFormatButtonKind {
         Self::ALL.iter().position(|k| *k == self).unwrap_or(0)
     }
 
-    /// The Font Awesome glyph the button shows (`crate::icon_font`).
+    /// The Font Awesome glyph that names the button (`crate::icon_font`); the toolbar draws its own
+    /// vector icon instead (`toolbar_icons`).
     pub fn icon(self) -> char {
         match self {
             Self::Bold => icon_font::BOLD,

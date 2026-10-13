@@ -106,7 +106,7 @@ impl TextField {
                     font.ascender_px(self.font_size),
                     font.descender_px(self.font_size),
                     self.font_size,
-                    crate::device_scale(),
+                    crate::ux_scale::effective_scale(),
                 )
                 .height
                     + i.top
