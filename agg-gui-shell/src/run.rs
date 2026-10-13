@@ -25,7 +25,8 @@ use crate::paint::{PaintRequest, Painter};
 use crate::position::{
     clamp_restored_position, MonitorRect, SavedPosition, WindowedPositionTracker,
 };
-use crate::shell_loop::{ShellInit, ShellLoop};
+use crate::shell_init::ShellInit;
+use crate::shell_loop::ShellLoop;
 use crate::waker::HostWakerGuard;
 use crate::ShellError;
 

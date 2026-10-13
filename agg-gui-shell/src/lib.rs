@@ -98,6 +98,7 @@ mod position;
 mod redraw_schedule;
 mod run;
 mod screenshot;
+mod shell_init;
 mod shell_loop;
 mod tooltip;
 mod waker;
@@ -109,7 +110,7 @@ pub use host::{default_paint, Frame, NoHost, ShellControl, ShellHost, WindowGeom
 pub use lcd_display::WindowsLcdDisplayEnvironmentProvider;
 pub use position::SavedPosition;
 pub use run::run;
-pub use shell_loop::ShellInit;
+pub use shell_init::ShellInit;
 
 // Re-exported so a consumer can build a `ShellHost` without naming the
 // renderer crate, and so the versions can never disagree.
