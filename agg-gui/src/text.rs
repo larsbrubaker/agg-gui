@@ -39,6 +39,7 @@ pub use ellipsis::{ellipsize_to_width, ellipsize_with};
 pub use faux_style::{FAUX_BOLD_WEIGHT, FAUX_ITALIC_SHEAR};
 pub use line_box::{snapped_line_box, snapped_text_width, SnappedLineBox};
 pub use shape_cache::shape_glyphs;
+pub(crate) use shape_cache::with_shaped_glyphs;
 pub use vertical_metrics::VerticalMetrics;
 
 use std::collections::BTreeSet;
@@ -739,8 +740,10 @@ pub fn measure_text_metrics(font: &Font, text: &str, size: f64) -> TextMetrics {
 
 /// Measure text advance width without rasterizing.
 ///
-/// Delegates to [`shape_glyphs`] so that fallback-font advances are included
-/// in the measurement.  Results are cached via the shared shape cache.
+/// Reads the same shaped glyphs as [`shape_glyphs`] so that fallback-font
+/// advances are included in the measurement.  Results are cached via the
+/// shared shape cache, and a cache hit borrows the glyphs rather than
+/// cloning them, so measuring unchanged text allocates nothing.
 ///
 /// The measurement matches what `shape_text` will actually pen at paint
 /// time — so `interval` (extra letter-spacing) is added here too.  Width
@@ -748,9 +751,17 @@ pub fn measure_text_metrics(font: &Font, text: &str, size: f64) -> TextMetrics {
 /// not advances, and italic shears the outline which doesn't change the
 /// horizontal extent of the pen walk.
 pub fn measure_advance(font: &Font, text: &str, size: f64) -> f64 {
-    let shaped = shape_glyphs(font, text, size);
+    // Empty text shapes to no glyphs. Callers that want only the vertical
+    // metrics (`measure_text_metrics(font, "", size)`, e.g. every label's
+    // ink overhang each paint) skip the cache lookup; summing an empty run
+    // keeps the exact value (and sign of zero) the shaped path returns.
+    if text.is_empty() {
+        return std::iter::empty::<f64>().sum();
+    }
     let interval_px = crate::font_settings::current_interval() * size;
-    shaped.iter().map(|g| g.x_advance + interval_px).sum()
+    with_shaped_glyphs(font, text, size, |shaped| {
+        shaped.iter().map(|g| g.x_advance + interval_px).sum()
+    })
 }
 
 #[cfg(test)]

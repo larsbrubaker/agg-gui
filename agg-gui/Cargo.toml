@@ -43,6 +43,10 @@ qrcodegen = "1.8"
 usvg = "0.48.1"
 image = "0.24"
 base64 = "0.22.1"
+# Fast deterministic hasher for the per-frame text shape cache
+# (`text/shape_cache.rs`). Zlib; already in the tree through bevy_reflect
+# (bevy_platform) and wgpu (hashbrown), so it adds no new crate there.
+foldhash = { version = "0.2", default-features = false }
 
 [features]
 default        = ["reflect"]
