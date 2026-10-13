@@ -26,6 +26,10 @@ use agg_rust::comp_op::CompOp;
 use agg_rust::math_stroke::{LineCap, LineJoin};
 use agg_rust::trans_affine::TransAffine;
 
+// The long method docs of `DrawCtx` live in `draw_ctx/docs/<method>.md`, pulled in with
+// `#[doc = include_str!(..)]`, so the trait stays under the file-size limit without splitting
+// it (a supertrait split would break every `impl DrawCtx`).
+
 // The GL paint hook (`draw_ctx/gl_paint.rs`) and the paint definitions are
 // re-exported from `draw_ctx/reexports.rs` under their old paths.
 mod gl_paint;
@@ -103,18 +107,7 @@ pub trait DrawCtx {
     fn clip_rect(&mut self, x: f64, y: f64, w: f64, h: f64);
     fn reset_clip(&mut self);
 
-    /// Intersect the clip with the current path (canvas-2D `clip()`), using
-    /// the current fill rule.
-    ///
-    /// Everything drawn afterwards is masked by the path, with anti-aliased
-    /// edges, until the [`DrawCtx::restore`] that matches the
-    /// [`DrawCtx::save`] preceding this call.  Nests: a `clip_path` inside an
-    /// already-clipped region intersects with it.
-    ///
-    /// **The default is a no-op: drawing is NOT clipped at all.**  There is no
-    /// bounding-box fallback — a backend that has not implemented path
-    /// clipping simply ignores the call, so callers that need to know must ask
-    /// [`DrawCtx::supports_clip_path`] and choose their own fallback.
+    #[doc = include_str!("draw_ctx/docs/clip_path.md")]
     fn clip_path(&mut self) {}
 
     /// True when [`DrawCtx::clip_path`] actually masks by the current path.
@@ -128,15 +121,7 @@ pub trait DrawCtx {
     /// Fill the entire render target with `color`, ignoring the current clip.
     fn clear(&mut self, color: Color);
 
-    /// Replace every pixel inside the current clip with `color`, whatever
-    /// the transform (agg-sharp's `Graphics2D.Clear`, which fills the
-    /// clipping rect). With no clip set it fills the whole target. The
-    /// current path is discarded; every other piece of state is kept.
-    ///
-    /// Implemented with drawing calls every backend has: under an identity
-    /// transform, a rectangle far larger than any target is filled in
-    /// `CompOp::Src` (copy) at full alpha, which the clip then trims to
-    /// exactly its own pixels.
+    #[doc = include_str!("draw_ctx/docs/clear_clip.md")]
     fn clear_clip(&mut self, color: Color) {
         defaults::clear_clip(self, color);
     }
@@ -161,16 +146,7 @@ pub trait DrawCtx {
     fn cubic_to(&mut self, cx1: f64, cy1: f64, cx2: f64, cy2: f64, x: f64, y: f64);
     fn quad_to(&mut self, cx: f64, cy: f64, x: f64, y: f64);
 
-    /// Append a circular arc with the pen down, like HTML canvas `arc()`.
-    ///
-    /// After an open subpath (a `move_to` or any later segment) the arc
-    /// continues it: a straight line runs from the current point to the arc's
-    /// start, then the arc follows, so `move_to` / `line_to` / `arc_to` /
-    /// `close_path` builds one contour (a rounded corner fills and strokes as
-    /// part of its outline).  On an empty path or right after `close_path` the
-    /// arc starts a new subpath at its start point.  Angles are radians from
-    /// +x; `ccw == true` sweeps towards increasing angle (counter-clockwise in
-    /// Y-up space).
+    #[doc = include_str!("draw_ctx/docs/arc_to.md")]
     fn arc_to(&mut self, cx: f64, cy: f64, r: f64, start_angle: f64, end_angle: f64, ccw: bool);
 
     /// Add a full circle contour to the current path.  It is always its own
@@ -178,27 +154,7 @@ pub trait DrawCtx {
     /// subpath that precedes it.
     fn circle(&mut self, cx: f64, cy: f64, r: f64);
 
-    /// Append an elliptical arc to the current path, mirroring canvas-2D
-    /// `ellipse(cx, cy, rx, ry, rotation, start_angle, end_angle, ccw)`.
-    ///
-    /// The arc starts with a `move_to` at the start point (callers place it
-    /// after `begin_path`, as with [`DrawCtx::circle`]).  Angles are measured
-    /// from the +x axis of the ellipse's own — i.e. `rotation`-rotated —
-    /// frame.  With `ccw == false` the arc sweeps towards increasing angle,
-    /// with `ccw == true` towards decreasing angle.
-    ///
-    /// A **full turn** — the whole ellipse, with the contour closed — is drawn
-    /// only when the sweep covers a revolution *in the requested direction*:
-    /// `!ccw && end_angle - start_angle >= 2π`, or
-    /// `ccw && start_angle - end_angle >= 2π`.  Any other sweep is normalised
-    /// into `[0, 2π)` (`!ccw`) or `(-2π, 0]` (`ccw`), matching the canvas-2D
-    /// spec: `ellipse(.., 0.0, -2π, false)` is an empty arc, not a full
-    /// ellipse.
-    ///
-    /// Implemented on top of [`DrawCtx::cubic_to`] with at most one Bézier
-    /// segment per quarter turn (see [`defaults::ellipse_ops`]), so every
-    /// backend gets it for free; backends with a native primitive may
-    /// override it.
+    #[doc = include_str!("draw_ctx/docs/ellipse.md")]
     #[allow(clippy::too_many_arguments)]
     fn ellipse(
         &mut self,
@@ -237,26 +193,7 @@ pub trait DrawCtx {
     fn stroke(&mut self);
     fn fill_and_stroke(&mut self);
 
-    /// Submit **pre-tessellated** AA triangles with per-vertex coverage
-    /// (`x`, `y`, `alpha`) and triangle indices.
-    ///
-    /// This is the fast path for callers that tessellate their geometry
-    /// ONCE at load time (e.g. the Lion demo, SVG icons): they do the
-    /// `tessellate_path_aa` pass themselves, cache the vertex+index
-    /// buffers, then submit them every frame with only a cheap CPU
-    /// transform applied to the x/y components.  Compared to issuing
-    /// `move_to` / `line_to` / `fill` every frame, this keeps the polygon
-    /// set deterministic (no tess2 re-running on subtly-different
-    /// coordinates), avoids thousands of re-tessellations per frame, and
-    /// produces identical output regardless of the widget's transform.
-    ///
-    /// Vertices are `(x_logical_pixels, y_logical_pixels, alpha_0_to_1)`.
-    /// `alpha` is multiplied into the supplied `color.a` in the AA shader
-    /// so halo-strip edge AA survives this fast path.
-    ///
-    /// The software `GfxCtx` ignores the alpha attribute and rasterises
-    /// each triangle as a solid fill — correct but without edge AA, which
-    /// matches the software path's existing stroke/fill behaviour.
+    #[doc = include_str!("draw_ctx/docs/draw_triangles_aa.md")]
     fn draw_triangles_aa(
         &mut self,
         vertices: &[[f32; 3]],
@@ -269,38 +206,7 @@ pub trait DrawCtx {
     /// Draw `text` with the bottom of the baseline at `(x, y)`.
     fn fill_text(&mut self, text: &str, x: f64, y: f64);
 
-    /// **Do not call this from application code, ever.**
-    ///
-    /// This is the built-in AGG Glyph-Stroke-Vector fallback font — a
-    /// stroked vector typeface that pre-dates AGG's real text stack. It
-    /// **bypasses every text-rendering facility this framework offers**:
-    ///
-    /// - no font shaping (no kerning, no proper metrics, no UTF-8 fallback),
-    /// - no backbuffer caching (rasterised every frame from scratch),
-    /// - no LCD subpixel rendering (always grayscale outlines),
-    /// - no theme integration (ignores `Visuals::text_color`),
-    /// - no integration with [`crate::font_settings`] (system font,
-    ///   font-size scale, hinting, gamma, etc. all ignored).
-    ///
-    /// It exists only as an internal bootstrap path so the framework can
-    /// draw the very first frame before a real [`crate::text::Font`] has
-    /// loaded, and so a handful of `agg-rust` reference demos that
-    /// specifically test the GSV path stay reproducible. Outside those
-    /// two contexts there is **no situation where calling this is
-    /// correct** — including for "quick debug text," diagnostics
-    /// overlays, perf labels, FPS counters, watermarks, anything.
-    ///
-    /// Use a [`crate::widgets::Label`] widget instead. `Label` is
-    /// backbuffer-cached by default and uses LCD subpixel rendering
-    /// when the global toggle is on (which itself defaults to "on at
-    /// standard DPI, off at HiDPI" via [`crate::font_settings::lcd_enabled`]).
-    /// If you genuinely need imperative text inside a custom widget's
-    /// `paint`, call [`set_font`](Self::set_font) + [`fill_text`](Self::fill_text)
-    /// — that goes through the real text stack.
-    ///
-    /// If you find yourself reaching for `fill_text_gsv`, you are
-    /// almost certainly looking at a bug in the calling code; do not
-    /// add it as a workaround. File an issue against agg-gui.
+    #[doc = include_str!("draw_ctx/docs/fill_text_gsv.md")]
     fn fill_text_gsv(&mut self, text: &str, x: f64, y: f64, size: f64);
 
     /// Measure `text` with the current font and font-size settings.
@@ -311,29 +217,7 @@ pub trait DrawCtx {
     /// Current accumulated transform (CTM).
     fn transform(&self) -> TransAffine;
 
-    /// Map from the current local coordinates to the ROOT render target's
-    /// **device pixels** (Y-up), even while drawing inside offscreen layers
-    /// (compositing layers, clip-path layers) whose local CTM was reset or
-    /// shifted.
-    ///
-    /// The result applies the current in-layer CTM first, then adds every
-    /// enclosing layer's origin (each recorded in its parent's device
-    /// pixels), so it includes the App's effective scale (device × UX, see
-    /// [`crate::ux_scale::effective_scale`]), the on-screen keyboard's lift
-    /// translate and every layer offset — it is the ON-SCREEN position.
-    /// Callers that want root logical coordinates (the unlifted layout space
-    /// of events and the overlay queues) use
-    /// [`crate::widget::logical_root_transform`] rather than dividing by hand
-    /// (dividing by the device scale alone breaks whenever UX scale ≠ 1).
-    /// Global overlays and the paint clip stack
-    /// (`crate::widget::is_local_rect_in_paint_clip`) use this to reason
-    /// about app-level bounds.
-    ///
-    /// "Root" is only the true root while painting through the frame's own
-    /// context. Inside a CPU-backbuffered subtree (`paint_subtree_backbuffered`
-    /// paints into a fresh `GfxCtx` / `LcdGfxCtx`) it is relative to the
-    /// backbuffer bitmap, and `LcdGfxCtx::push_layer` resets the CTM to
-    /// identity, so inside an LCD layer the effective scale is not included.
+    #[doc = include_str!("draw_ctx/docs/root_transform.md")]
     fn root_transform(&self) -> TransAffine {
         self.transform()
     }
@@ -346,29 +230,7 @@ pub trait DrawCtx {
     fn set_transform(&mut self, m: TransAffine);
     fn reset_transform(&mut self);
 
-    /// **Opt-in** pixel snapping.  Strips the fractional part of the current
-    /// CTM translation so subsequent integer-coordinate `rect` / `fill` /
-    /// `stroke` / `draw_image_rgba*` calls land exactly on the physical pixel
-    /// grid — no AA fringe on edges, no LINEAR-filter blur on 1:1 texture
-    /// blits.
-    ///
-    /// Call this ONLY when the widget genuinely wants pixel-aligned drawing
-    /// (text backbuffers, pixel-alignment diagnostics, crisp UI strokes).
-    /// Sub-pixel positioning remains the default — e.g. a smooth-scrolling
-    /// panel or an animated marker may legitimately want a fractional offset.
-    /// Typical usage:
-    /// ```ignore
-    /// ctx.save();
-    /// ctx.snap_to_pixel();
-    /// ctx.rect(0.0, 0.0, 10.0, 10.0);
-    /// ctx.fill();
-    /// ctx.restore();
-    /// ```
-    ///
-    /// Only the translation component is affected; rotations and non-uniform
-    /// scales pass through untouched (pixel alignment under those transforms
-    /// isn't well defined, and forcing a snap would visibly jitter rotated
-    /// content).
+    #[doc = include_str!("draw_ctx/docs/snap_to_pixel.md")]
     fn snap_to_pixel(&mut self) {
         if let Some((dx, dy)) = defaults::pixel_snap_step(&self.transform()) {
             self.translate(dx, dy);
@@ -377,17 +239,7 @@ pub trait DrawCtx {
 
     // ── Compositing layers ────────────────────────────────────────────────────
 
-    /// Begin a new transparent compositing layer of the given pixel dimensions.
-    ///
-    /// All subsequent drawing (by this widget and its descendants) is redirected
-    /// into the new layer until [`pop_layer`] is called.  Layers nest: each
-    /// `push_layer` must be matched by exactly one `pop_layer`.
-    ///
-    /// The current accumulated transform records the layer's screen-space origin;
-    /// drawing inside the layer uses a fresh local-space transform (origin 0,0).
-    ///
-    /// Implementations that do not support layers (e.g. the GL path) may leave
-    /// this as a no-op — the widget renders pass-through into the parent target.
+    #[doc = include_str!("draw_ctx/docs/push_layer.md")]
     fn push_layer(&mut self, _width: f64, _height: f64) {}
 
     /// Whether this backend implements real offscreen compositing layers.
@@ -424,23 +276,7 @@ pub trait DrawCtx {
     /// caller's normal alpha coverage can feather corners and edges.
     fn set_layer_rounded_clip(&mut self, _x: f64, _y: f64, _w: f64, _h: f64, _r: f64) {}
 
-    /// Declare that the current layer is now covered by opaque content, so
-    /// text drawn into it lands on destination alpha 1.
-    ///
-    /// This re-enables LCD subpixel text inside the layer. Subpixel
-    /// coverage is only meaningful against an opaque destination: a fresh
-    /// layer texture is cleared to alpha 0, and the per-channel composite
-    /// writes colour without alpha, so glyphs over a transparent layer
-    /// would stay at alpha 0 and blend additively toward white on pop.
-    /// Once an opaque body has been painted, that hazard is gone and
-    /// subpixel rendering is as correct as it is on the backbuffer.
-    ///
-    /// Call it *after* filling the layer, not at push time. Widgets that
-    /// composite genuinely translucent content (an opacity fade) must not
-    /// call it; they keep the grayscale, alpha-writing text path.
-    ///
-    /// No-op by default and at the top level, where the target is already
-    /// opaque.
+    #[doc = include_str!("draw_ctx/docs/set_layer_opaque_backdrop.md")]
     fn set_layer_opaque_backdrop(&mut self, _opaque: bool) {}
 
     /// Composite a previously retained backend layer. Returns `true` when
@@ -469,46 +305,12 @@ pub trait DrawCtx {
 
     // ── GL / GPU content ──────────────────────────────────────────────────────
 
-    /// Render GPU content (3-D scene, video frame, etc.) inline at the correct
-    /// painter-order position.
-    ///
-    /// `screen_rect` is the widget's screen-space rect in Y-up coordinates
-    /// (i.e. `ctx.transform()` origin + `widget.bounds().size`).
-    ///
-    /// The GL implementation executes `painter.gl_paint()` immediately so that
-    /// any 2-D widgets painted after this call naturally overdraw the GPU
-    /// content — correct back-to-front ordering with no post-frame fixup.
-    ///
-    /// The **software (`GfxCtx`) path is a no-op**: widgets should draw a 2-D
-    /// placeholder before calling this method so the software render has
-    /// something visible.
+    #[doc = include_str!("draw_ctx/docs/gl_paint.md")]
     fn gl_paint(&mut self, _screen_rect: Rect, _painter: &mut dyn GlPaint) {}
 
     // ── LCD mask compositing ──────────────────────────────────────────────────
 
-    /// Composite a pre-rasterized LCD subpixel mask onto the current
-    /// render target, mixing `src_color` into the destination through
-    /// per-channel coverage.
-    ///
-    /// `mask` is three bytes per pixel (`cov_r`, `cov_g`, `cov_b`) as
-    /// produced by [`crate::text_lcd::rasterize_lcd_mask`].  The caller
-    /// specifies `(dst_x, dst_y)` in local coordinates (Y-up in our
-    /// convention) and `mask_w × mask_h` to tell the backend the mask's
-    /// dimensions.
-    ///
-    /// Per-channel source-over blend:
-    /// ```text
-    /// dst.r = src.r * mask.r + dst.r * (1 - mask.r)
-    /// dst.g = src.g * mask.g + dst.g * (1 - mask.g)
-    /// dst.b = src.b * mask.b + dst.b * (1 - mask.b)
-    /// ```
-    ///
-    /// **This is the universal "composite LCD text onto arbitrary bg"
-    /// primitive** — it replaces the prior walk / sample / pre-fill
-    /// approach.  Software ctx implements it as an inner-loop blend; the
-    /// GL ctx implements it via a dual-source-blend fragment shader.
-    /// Backends that haven't wired it yet use the default no-op, which
-    /// makes callers fall back to grayscale AA.
+    #[doc = include_str!("draw_ctx/docs/draw_lcd_mask.md")]
     fn draw_lcd_mask(
         &mut self,
         _mask: &[u8],
@@ -569,32 +371,7 @@ pub trait DrawCtx {
         false
     }
 
-    /// Draw raw RGBA pixel data into `dst_rect` (Y-up local coordinates).
-    ///
-    /// `data` must be `img_w * img_h * 4` bytes of tightly-packed RGBA8 data
-    /// in row-major order, **top-row first** (Y-down image storage convention).
-    /// The image is scaled to fit `(dst_x, dst_y, dst_w, dst_h)`, a rect in
-    /// LOCAL (logical) units that every backend maps through the current
-    /// transform: under a HiDPI `scale(2, 2)` a logical 10×10 rect covers 20×20
-    /// device pixels, so a 20×20 image (e.g. a CPU backbuffer rasterised at
-    /// physical resolution) blits texel-for-pixel.
-    ///
-    /// **Alpha convention: straight (non-premultiplied).**  Every backend
-    /// treats `data` as straight alpha: the software [`crate::GfxCtx`]
-    /// premultiplies each sample before its premultiplied src-over
-    /// composite, and the wgpu backend uploads the texels premultiplied and
-    /// blends them with `One / OneMinusSrcAlpha`.  Render targets themselves
-    /// ([`crate::Framebuffer`], layers) store **premultiplied** RGBA, so a
-    /// buffer rendered by agg-gui goes through
-    /// [`crate::framebuffer::unpremultiply_rgba_inplace`] (after
-    /// [`crate::Framebuffer::pixels_flipped`]) before it is passed here.
-    /// Colour operations defined on straight alpha (tinting, lightness
-    /// inversion) can therefore be applied directly to `data`.  The same
-    /// convention holds for `draw_image_rgba_arc` and
-    /// `draw_image_rgba_corners`.
-    ///
-    /// Default implementation: no-op (GL path or software paths that do not
-    /// implement blitting can leave this as a placeholder).
+    #[doc = include_str!("draw_ctx/docs/draw_image_rgba.md")]
     // Public API: the signature is shared with downstream callers.
     #[allow(clippy::too_many_arguments)]
     fn draw_image_rgba(
@@ -610,18 +387,7 @@ pub trait DrawCtx {
         let _ = (data, img_w, img_h, dst_x, dst_y, dst_w, dst_h);
     }
 
-    /// Same as [`draw_image_rgba`] but accepts an `Arc<Vec<u8>>` so the GL
-    /// backend can key its texture cache on the `Arc`'s pointer identity and
-    /// hold a `Weak` ref for automatic cleanup when the underlying buffer is
-    /// dropped — the pattern MatterCAD implements with C# `ConditionalWeakTable`.
-    ///
-    /// Used by `Label` (and future glyph-atlas consumers) in tandem with the
-    /// crate-level [`image_cache`](crate::image_cache) so that rebuilt widget
-    /// trees with unchanged content never re-rasterize OR re-upload.
-    ///
-    /// Default implementation: forward to [`draw_image_rgba`] via slice
-    /// borrow.  Software backends don't benefit from GPU texture caching so
-    /// the default is usually fine; the GL backend overrides.
+    #[doc = include_str!("draw_ctx/docs/draw_image_rgba_arc.md")]
     // Public API: the signature is shared with downstream callers.
     #[allow(clippy::too_many_arguments)]
     fn draw_image_rgba_arc(
@@ -637,24 +403,7 @@ pub trait DrawCtx {
         self.draw_image_rgba(data.as_slice(), img_w, img_h, dst_x, dst_y, dst_w, dst_h);
     }
 
-    /// Blit `data` as a textured quad whose four destination corners
-    /// are supplied explicitly. Caller is responsible for choosing the
-    /// corners (typically the projection of a 3-D rotated card onto
-    /// the 2-D viewport). `corners` is ordered **bottom-left,
-    /// bottom-right, top-right, top-left** in agg-gui's Y-up local
-    /// coordinate space, and is fed through the current CTM the same
-    /// way axis-aligned blits are.
-    ///
-    /// Corner quads are always sampled with **linear** filtering,
-    /// whatever the image size, so callers drawing rotated or scaled
-    /// sprites get smooth edges instead of the jagged, shimmering ones
-    /// point sampling would give. (The axis-aligned
-    /// [`DrawCtx::draw_image_rgba_arc`] path keeps its crisp 1:1
-    /// sampling.)
-    ///
-    /// Backends that can't render a perspective-distorted quad
-    /// (software fallback) fall back on the axis-aligned bounding
-    /// rect of the four corners.
+    #[doc = include_str!("draw_ctx/docs/draw_image_rgba_corners.md")]
     fn draw_image_rgba_corners(
         &mut self,
         data: &std::sync::Arc<Vec<u8>>,
@@ -670,43 +419,7 @@ pub trait DrawCtx {
 
     // ── LCD backbuffer blit ───────────────────────────────────────────────────
 
-    /// Composite a two-plane `LcdCoverage`-mode backbuffer onto the active
-    /// render target at `(dst_x, dst_y)` with size `(dst_w, dst_h)` (in
-    /// local coords).  Inputs are two `Arc<Vec<u8>>`, each 3 bytes per
-    /// pixel, **top-row-first**:
-    ///
-    /// - `color`: premultiplied per-channel RGB.
-    /// - `alpha`: per-channel alpha (coverage).
-    ///
-    /// The compositor applies per-channel premultiplied src-over:
-    ///
-    /// ```text
-    /// dst.ch := src.color_ch + dst.ch * (1 - src.alpha_ch)
-    /// ```
-    ///
-    /// which preserves LCD subpixel chroma through the cache round-trip.
-    /// Used by [`crate::widget::paint_subtree_backbuffered`] when a widget's
-    /// [`crate::widget::BackbufferMode::LcdCoverage`] cache is ready to
-    /// composite onto its parent.
-    ///
-    /// `content_version` is a monotone, process-globally-unique content
-    /// revision (see `crate::widget::next_content_version`) stamped whenever
-    /// the published planes change. Backends that key a GPU texture cache on the
-    /// `Arc` buffer *identity* pair it with the pointer so an in-place strip edit
-    /// (which keeps the buffer address stable through `Arc::make_mut`) still
-    /// forces a re-upload. CPU backends ignore it.
-    ///
-    /// **Default:** collapses the two planes into a single straight-alpha
-    /// RGBA8 image via [`crate::lcd_coverage::collapse_lcd_pixel`]
-    /// (Rec.709 luminance-weighted alpha over the ink's own straight colour)
-    /// and forwards to [`draw_image_rgba`].  Lossy of LCD chroma where
-    /// the three channel alphas diverge, but luminance-preserving.  Backends
-    /// that want full subpixel quality through the cache override this with a
-    /// two-texture shader path.
-    ///
-    /// This default is live code, not a stub: any backend without its own
-    /// override (`GfxCtx`, `LcdGfxCtx` and wgpu have one) blits through it,
-    /// so an LCD backbuffer still lands there, chroma-free.
+    #[doc = include_str!("draw_ctx/docs/draw_lcd_backbuffer_arc.md")]
     // Public API: the signature is shared with downstream callers.
     #[allow(clippy::too_many_arguments)]
     fn draw_lcd_backbuffer_arc(
