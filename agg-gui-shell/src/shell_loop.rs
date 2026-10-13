@@ -164,7 +164,7 @@ impl<H: ShellHost> ShellLoop<H> {
                 // reconfiguring the surface between acquire and present is a
                 // validation error.
                 self.pending_resize = Some((size.width, size.height));
-                self.maximized = self.window.is_maximized();
+                self.maximized = crate::maximized::is_maximized(&self.window);
                 // winit's `Resized` reports PHYSICAL px. That is the canonical
                 // stored unit — it must round-trip through `PhysicalSize` on
                 // restore, never `LogicalSize`, or the size ratchets up by the
@@ -184,7 +184,7 @@ impl<H: ShellHost> ShellLoop<H> {
                         x: position.x,
                         y: position.y,
                     },
-                    self.window.is_maximized(),
+                    crate::maximized::is_maximized(&self.window),
                     self.window.fullscreen().is_some(),
                     self.window.is_minimized().unwrap_or(false),
                 );

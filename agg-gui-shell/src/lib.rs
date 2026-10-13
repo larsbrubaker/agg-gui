@@ -90,6 +90,7 @@ mod host;
 mod ime;
 mod input;
 mod lcd_display;
+mod maximized;
 pub mod menu_bar;
 mod open_files;
 mod out_of_view_capture;

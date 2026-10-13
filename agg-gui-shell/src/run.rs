@@ -129,7 +129,7 @@ where
     let waker_guard = HostWakerGuard::install(event_loop.create_proxy());
 
     let painter = Painter::new(&gpu);
-    let maximized = window.is_maximized();
+    let maximized = crate::maximized::is_maximized(&window);
     // Seeded from the restored size, NOT from the live surface: a window
     // created maximized reports the work-area rect, which must never become
     // the persisted windowed size. See `WindowedSizeTracker::new`.
