@@ -236,11 +236,14 @@ fn focal_cone_t(p: vec2<f32>) -> vec2<f32> {
     var p = aff(u.screen_inv_a, u.screen_inv_b, in.v_pos);
     p = aff(u.gradient_inv_a, u.gradient_inv_b, p);
     var t: f32;
+    var reached = true;
     if u.kind == 1u {
         if u.cone.y > 0.5 {
             let solved = focal_cone_t(p);
-            // No circle of the cone reaches this point: leave it unpainted.
-            if solved.y < 0.5 { return vec4<f32>(0.0, 0.0, 0.0, 0.0); }
+            // No circle of the cone reaches this point: it stays unpainted. Not an early
+            // return: the browser's WGSL requires `textureSample` in uniform control flow,
+            // which a return that depends on the fragment would break.
+            reached = solved.y >= 0.5;
             t = solved.x;
         } else {
             t = radial_t(p);
@@ -250,6 +253,7 @@ fn focal_cone_t(p: vec2<f32>) -> vec2<f32> {
     }
     let tc = apply_spread(t);
     let c = textureSample(u_ramp, u_sampler, vec2<f32>(tc, 0.5));
+    if !reached { return vec4<f32>(0.0, 0.0, 0.0, 0.0); }
     return vec4<f32>(c.rgb, c.a * in.v_alpha * u.global_alpha);
 }
 ";
