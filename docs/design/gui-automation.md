@@ -310,7 +310,6 @@ Rules 3 and 4 are the runner's behaviour for every consumer, not a hook: both ma
 | # | Gap | Slice |
 |---|---|---|
 | G12 | Flex reverse directions (RightToLeft, BottomToTop) | 25 |
-| G13 | `NumberField` (number-only edit, text-parser hook, `=`-expression flag) | 20 |
 | G15 | Paint panic containment in `App::paint` (reported through `report_unhandled` with a new `UnhandledOrigin::Paint`), `DrawCtx` state rebalance | 27 |
 | G17 | `ShellSession` / pump API, input and deactivation gates | 31 |
 | G18 | wgpu present-failure frame reset | 33 |
@@ -327,7 +326,7 @@ Rules 3 and 4 are the runner's behaviour for every consumer, not a hook: both ma
 | PaintExceptionContainmentTests (2) | `paint_exception_containment_tests.rs` | headless; live variant when `live` is on |
 | PresentFailureContainmentTests (1) | `live/present_failure_containment_tests.rs` | skipped on a CPU host, as in C# |
 | TextEditFocusTests (3) | `text_edit_focus_tests.rs` | all ported |
-| TextEditTests (13) | `text_edit_tests.rs` (+ `text_edit/*.rs`) | TextEditWidget → TextField/TextArea; NumEdit → NumberField; 8 ported (ScrollingToEndShowsEnd lands with slice 23) |
+| TextEditTests (13) | `text_edit_tests.rs` (+ `text_edit/*.rs`) | TextEditWidget → TextField/TextArea; NumEdit → NumberEdit; all ported |
 | ThreadStackDumpTests (10) | `thread_stack_dump_tests.rs` | `stack-dump` feature |
 | ToolTipTests (7) | `tool_tip_tests.rs` (+ `tool_tip/*.rs`) | all ported |
 
@@ -335,8 +334,6 @@ Rules 3 and 4 are the runner's behaviour for every consumer, not a hook: both ma
 
 | # | Slice | Tests that land |
 |---|---|---|
-| 20 | G13 NumberField | NumEditHandlesNonNumberChars, NumEditWithTextParserAcceptsLettersAndCommitsTheParsedValue, NumEditRefusesKeysItCannotRead, NumEditTakesLeadingEqualsOnlyWhenExpressionEntryIsAllowed |
-| 23 | ScrollingToEndShowsEnd (a TextField render compared with `image_match`; needs no gesture) | ScrollingToEndShowsEnd |
 | 25 | G12, then Flow, part 1 | TopToBottomContainerAppliesExpectedMargin, SpacingClearedAfterLoadPositionsCorrectly, NestedLayoutTopToBottomTests, ChangingChildVisiblityUpdatesFlow, ChangingChildFlowWidgetVisiblityUpdatesParentFlow, NestedLayoutTopToBottomWithResizeTests, LeftToRightTests, RightToLeftTests |
 | 26 | Flow, part 2 | NestedMaxFitOrStretchToChildrenParentWidth, NestedMinFitOrStretchToChildrenParentWidth, LeftToRightAnchorLeftBottomTests, AnchorLeftRightTests, NestedFlowWidgetsTopToBottomTests, NestedFlowWidgetsRightToLeftTests, NestedFlowWidgetsLeftToRightTests, FlowWithMaxSizeChildAllocatesToOthers |
 | 26b | Flow, part 3 | LeftRightWithAnchorLeftRightChildTests, RightLeftWithAnchorLeftRightChildTests, BottomTopWithAnchorBottomTopChildTests, TopBottomWithAnchorBottomTopChildTests, ChildVisibilityChangeCauseResize, EnsureCorrectSizeOnChildrenVisibleChange, ChildHAnchorPriority, TestVAnchorCenter |
@@ -348,7 +345,7 @@ Rules 3 and 4 are the runner's behaviour for every consumer, not a hook: both ma
 | 32 | Live pump robustness | IdlePumpSurvivesAnotherWindowsTeardown, ShowFromNonPumpThreadReturnsToItsCaller |
 | 33 | G18 present-failure reset (agg-gui-wgpu) | APresentThatFailsEveryFrameStillStartsEachNextFrameWhole |
 
-**Tally** (46 still to port): AutomationRunnerTests 11 (10 ported), Winforms 3, Flow 24, Mac 12 (12 ported), Menu 1 (1 ported), Mouse 13 (13 ported), Paint 2, Present 1, TextEditFocus 3 (3 ported), TextEdit 13 (8 ported), ThreadStackDump 10, ToolTip 7 (7 ported), WidgetClick 3 (3 ported): **103**.
+**Tally** (41 still to port): AutomationRunnerTests 11 (10 ported), Winforms 3, Flow 24, Mac 12 (12 ported), Menu 1 (1 ported), Mouse 13 (13 ported), Paint 2, Present 1, TextEditFocus 3 (3 ported), TextEdit 13 (13 ported), ThreadStackDump 10, ToolTip 7 (7 ported), WidgetClick 3 (3 ported): **103**.
 
 **Moving `mattercad-app-test` onto the runner**
 
