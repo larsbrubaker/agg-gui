@@ -52,6 +52,11 @@ pollster = "0.3"
 version = "29"
 features = ["webgl"]
 
+[dev-dependencies]
+# The WGSL front end and validator wgpu already uses (same version in the lockfile), for the
+# browser-validation test over every shader the crate ships.
+naga = { version = "29", default-features = false, features = ["wgsl-in"] }
+
 # as_chunks (stable 1.88) became suggestable when rust-version reached 1.88;
 # adopting it is left to the same crate-wide sweep as agg-gui's (see its
 # [lints.clippy]).

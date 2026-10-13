@@ -193,6 +193,10 @@ mod root_transform_readback_tests;
 mod save_restore_readback_tests;
 #[cfg(test)]
 mod screenshot_scaled_tests;
+#[cfg(test)]
+mod wgsl_browser_validation_tests;
+#[cfg(test)]
+mod wgsl_uniformity;
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Weak};

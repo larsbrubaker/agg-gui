@@ -41,6 +41,9 @@ use wgpu::util::DeviceExt;
 use crate::end_frame::{Prepared, PreparedSlice};
 use crate::{DrawCommand, WgpuGfxCtx};
 
+/// The composite shader (`comp_op.wgsl`).
+pub(crate) const COMP_OP_WGSL: &str = include_str!("comp_op.wgsl");
+
 /// The composite pass's uniform block — `CompOpUniforms` in `comp_op.wgsl`.
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -94,7 +97,7 @@ impl CompOpGpu {
         });
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("comp_op"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("comp_op.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(COMP_OP_WGSL.into()),
         });
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("comp_op"),
