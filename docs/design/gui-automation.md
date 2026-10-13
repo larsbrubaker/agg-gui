@@ -13,7 +13,7 @@
   - Virtual time: `Delay`, `WaitFor`, timeouts and pointer pacing.
   - Wall time: the hang watchdogs (test budget, bring-up, close).
 - **One thread per test:** `show_window_and_execute_tests` runs each test on a fresh thread. That isolates agg-gui's thread-local state and lets the caller time out a stuck body, which is what C#'s `Task.WhenAny` does.
-- **Order of work:** the remaining slices fill agg-gui's gaps test-first, port the 46 remaining Agg Automation Tests 1:1, then move `mattercad-app-test` onto the runner (section 9).
+- **Order of work:** the remaining slices fill agg-gui's gaps test-first, port the 45 remaining Agg Automation Tests 1:1, then move `mattercad-app-test` onto the runner (section 9).
 
 ## 1. What exists today
 
@@ -312,7 +312,6 @@ Rules 3 and 4 are the runner's behaviour for every consumer, not a hook: both ma
 | G12 | Flex reverse directions (RightToLeft, BottomToTop) | 25 |
 | G15 | Paint panic containment in `App::paint` (reported through `report_unhandled` with a new `UnhandledOrigin::Paint`), `DrawCtx` state rebalance | 27 |
 | G17 | `ShellSession` / pump API, input and deactivation gates | 31 |
-| G18 | wgpu present-failure frame reset | 33 |
 
 **C# class → Rust file** (`agg-gui-automation/tests/`; tests keep their names in snake_case):
 
@@ -324,7 +323,7 @@ Rules 3 and 4 are the runner's behaviour for every consumer, not a hook: both ma
 | MenuTests (1) | `menu_tests.rs` | DropDownList → ComboBox; ported |
 | MouseInteractionTests (13) | `mouse_interaction_tests.rs` (+ `mouse_interaction/*.rs`) | all ported |
 | PaintExceptionContainmentTests (2) | `paint_exception_containment_tests.rs` | headless; live variant when `live` is on |
-| PresentFailureContainmentTests (1) | `live/present_failure_containment_tests.rs` | skipped on a CPU host, as in C# |
+| PresentFailureContainmentTests (1) | `agg-gui-wgpu/tests/present_failure_containment_tests.rs` | headless wgpu device and a custom pass recording an invalid copy into the frame's own encoder; ported (passes trivially without a GPU adapter, as C# skips on a CPU host) |
 | TextEditFocusTests (3) | `text_edit_focus_tests.rs` | all ported |
 | TextEditTests (13) | `text_edit_tests.rs` (+ `text_edit/*.rs`) | TextEditWidget → TextField/TextArea; NumEdit → NumberEdit; all ported |
 | ThreadStackDumpTests (10) | `thread_stack_dump_tests.rs` | `stack-dump` feature |
@@ -343,9 +342,8 @@ Rules 3 and 4 are the runner's behaviour for every consumer, not a hook: both ma
 | 30c | Load and close watchdogs write dumps to `TestResults/` | AnExpectedTimeoutLeavesNoThreadDump |
 | 31 | G17 `ShellSession` plus `LiveDriver`, with the simulated-mouse overlay (`RunOptions.draw_simulated_mouse`, `overlay::render_mouse`) | RealMouseInputDoesNotReachAWindowUnderAutomation |
 | 32 | Live pump robustness | IdlePumpSurvivesAnotherWindowsTeardown, ShowFromNonPumpThreadReturnsToItsCaller |
-| 33 | G18 present-failure reset (agg-gui-wgpu) | APresentThatFailsEveryFrameStillStartsEachNextFrameWhole |
 
-**Tally** (41 still to port): AutomationRunnerTests 11 (10 ported), Winforms 3, Flow 24, Mac 12 (12 ported), Menu 1 (1 ported), Mouse 13 (13 ported), Paint 2, Present 1, TextEditFocus 3 (3 ported), TextEdit 13 (13 ported), ThreadStackDump 10, ToolTip 7 (7 ported), WidgetClick 3 (3 ported): **103**.
+**Tally** (40 still to port): AutomationRunnerTests 11 (10 ported), Winforms 3, Flow 24, Mac 12 (12 ported), Menu 1 (1 ported), Mouse 13 (13 ported), Paint 2, Present 1 (1 ported), TextEditFocus 3 (3 ported), TextEdit 13 (13 ported), ThreadStackDump 10, ToolTip 7 (7 ported), WidgetClick 3 (3 ported): **103**.
 
 **Moving `mattercad-app-test` onto the runner**
 
