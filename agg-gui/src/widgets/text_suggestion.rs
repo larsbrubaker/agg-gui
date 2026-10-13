@@ -5,8 +5,9 @@
 //! `TextSuggestionController.cs` and `TextSuggestionPopup.cs`. The data types
 //! ([`TextSuggestion`], [`TextSuggestionList`], [`TextSuggestionProvider`])
 //! and the controller's state live here; the field side (key preview, accept,
-//! hit testing) is `text_field/suggestions.rs`, and the list's drawing is
-//! `text_suggestion/paint.rs`.
+//! hit testing) is `text_field/suggestions.rs`, the list's drawing is
+//! `text_suggestion/paint.rs`, and the names automation finds the list and
+//! its rows by are `text_suggestion/names.rs`.
 //!
 //! Unlike a popup menu, where the highlighted row is the focused one, the
 //! keyboard focus never leaves the field: the user keeps typing and each edit
@@ -38,6 +39,7 @@ use crate::geometry::{Point, Rect, Size};
 use crate::text::{measure_advance, Font};
 use crate::widgets::popup::Popup;
 
+mod names;
 mod paint;
 
 #[cfg(test)]

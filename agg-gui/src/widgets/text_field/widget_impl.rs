@@ -1,8 +1,9 @@
 //! The `Widget` impl for [`TextField`]: layout (with the backbuffer cache
 //! signature), the cached body paint, the blinking caret overlay, the
-//! app-level overlays (context menu, caret suggestion list) and event
-//! routing. Key handling proper is `text_field.rs::handle_key`; pointer
-//! helpers are `pointer.rs`, suggestions `suggestions.rs`.
+//! app-level overlays (context menu, caret suggestion list), the named
+//! targets automation finds in them, and event routing. Key handling proper
+//! is `text_field.rs::handle_key`; pointer helpers are `pointer.rs`,
+//! suggestions `suggestions.rs`.
 
 use super::*;
 
@@ -120,10 +121,14 @@ impl Widget for TextField {
         self.context_menu.is_open()
     }
 
-    /// The open right-click menu's rows ("Cut Menu Item", ...) for GUI
-    /// automation.
+    /// The open right-click menu's rows ("Cut Menu Item", ...) and the open
+    /// suggestion list ("Text Suggestions") with its rows in view ("[red]
+    /// Suggestion", `text_suggestion/names.rs`) for GUI automation.
     fn find_named_targets(&self, name: &str, out: &mut Vec<crate::NamedTarget>) {
         self.context_menu.named_row_targets(name, out);
+        if let Some(ctrl) = self.text_suggestions() {
+            ctrl.named_targets(name, out);
+        }
     }
 
     /// The context menu paints at app level so it can overflow the field bounds
