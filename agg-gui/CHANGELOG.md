@@ -370,6 +370,9 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Fixed
 
+- A `TextArea` laid out twice before it paints (a host that measures its field, then sizes it)
+  keeps the invalidation the first layout made: the second layout used to clear it, so the cached
+  bitmap kept showing the hint and typed text never drew.
 - Removing the focused, hovered or pointer-captured widget (or an ancestor of
   it) from the tree no longer panics. `App` drops a stored focus, hover or
   capture path that no longer names a widget when it re-resolves its paths

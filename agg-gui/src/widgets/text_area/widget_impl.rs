@@ -184,8 +184,12 @@ impl Widget for TextArea {
         let sig = self.cache_sig();
         if self.last_sig.as_ref() != Some(&sig) {
             self.last_sig = Some(sig);
+            self.sig_unrastered = true;
             self.cache.invalidate();
-        } else {
+        } else if !self.sig_unrastered {
+            // Only a dirty mark with no signature change behind it is cleared: a second layout
+            // before the paint finds the same signature as the first, whose change the bitmap
+            // still has to show.
             self.cache.dirty = false;
         }
         Size::new(w, h)
@@ -205,6 +209,7 @@ impl Widget for TextArea {
         // counts real re-rasters. The band tests assert in-band scrolling never
         // reaches here.
         self.raster_count.set(self.raster_count.get() + 1);
+        self.sig_unrastered = false;
 
         // Band mode: raster at the band's fixed anchor (not the live offset) so
         // the bitmap is scroll-stable, and paint over-scan content above/below.

@@ -293,6 +293,9 @@ pub struct TextArea {
     cache: BackbufferCache,
     /// Last painted signature; a change invalidates [`Self::cache`] in `layout`.
     last_sig: Option<TextAreaSig>,
+    /// A signature change [`Self::cache`] has not re-rastered for yet: another `layout` before
+    /// the paint finds the same signature and must not clear the invalidation.
+    sig_unrastered: bool,
 
     /// Over-scan band state (anchor + margins) so scrolling within the band is a
     /// pure blit offset instead of a re-raster. Recomputed each `layout`; see
@@ -389,6 +392,7 @@ impl TextArea {
             select_pivot: (0, 0),
             cache: BackbufferCache::default(),
             last_sig: None,
+            sig_unrastered: false,
             band: band::BandState::default(),
             render_band_offset: Cell::new(None),
             raster_count: Cell::new(0),
@@ -754,6 +758,8 @@ mod frame_tests;
 mod no_wrap_tests;
 #[cfg(test)]
 mod redraw_tests;
+#[cfg(test)]
+mod repeated_layout_tests;
 #[cfg(test)]
 mod scroll_watch_tests;
 #[cfg(test)]
