@@ -266,7 +266,7 @@ impl MarkdownView {
             else {
                 continue;
             };
-            let visuals = crate::theme::current_visuals();
+            let text_color = self.resolved_colors(&crate::theme::current_visuals()).text;
             let scroll_x = self.block_scroll_offset(*block_idx);
             let grid = super::table_grid::TableGrid {
                 col_widths,
@@ -299,7 +299,7 @@ impl MarkdownView {
                         align,
                         content_x: cell_content_x(*width, content_width, align),
                         content_width,
-                        stripe: table_style::stripe_color(&visuals, ri, *header),
+                        stripe: table_style::stripe_color(text_color, ri, *header),
                         links: super::cell_links::cell_link_urls(spans),
                         bounds: crate::geometry::Rect::new(
                             self.padding + x,
@@ -395,7 +395,7 @@ impl MarkdownView {
     /// The colour the tables' grid lines draw in, in the current theme
     /// (C#'s `AggTable.GridColor`).
     pub fn table_grid_color(&self) -> Color {
-        table_style::grid_color(&crate::theme::current_visuals())
+        table_style::grid_color(self.resolved_colors(&crate::theme::current_visuals()).text)
     }
 
     /// The laid-out width of every image of the last layout, in document

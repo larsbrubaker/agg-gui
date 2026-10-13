@@ -50,6 +50,13 @@
 //!   plain text plus their styled HTML (`rich_html.rs`, styled with
 //!   [`MarkdownView::with_html_theme`])
 //!
+//! # Colours
+//!
+//! A view draws in the app's visuals (`DrawCtx::visuals`).  An owner themed
+//! apart from the app hands it a [`MarkdownColors`]
+//! ([`MarkdownView::with_colors`], `colors.rs`): the rich editor does so for
+//! its Raw block hosts, so a dark editor's raw blocks follow its theme.
+//!
 //! # Updating in place
 //!
 //! [`MarkdownView::set_markdown`] replaces the text of a live view, e.g. while
@@ -78,6 +85,7 @@ mod cell_images;
 mod cell_links;
 #[cfg(test)]
 mod clipboard_selection_tests;
+mod colors;
 mod emphasis;
 mod event;
 #[cfg(test)]
@@ -130,6 +138,7 @@ pub use alignment::MarkdownAlign;
 use block_scroll::{
     clamp_block_offset, scrollbar_rect, scrollbar_thumb, BLOCK_SCROLLBAR_GAP, BLOCK_SCROLLBAR_H,
 };
+pub use colors::MarkdownColors;
 pub use emphasis::MarkdownRunStyle;
 pub use html_form::{markdown_html, markdown_html_collapsed};
 pub use image_loader::{
@@ -405,6 +414,8 @@ pub struct MarkdownView {
     matching_text: Option<String>,
     /// The look copied HTML carries (C#'s `MarkdownWidget.Theme`).
     html_theme: HtmlStyleTheme,
+    /// The view's own theme colours; `None` draws in the app's visuals.
+    colors: Option<MarkdownColors>,
     /// The icon image placeholders show (`placeholder_icon.rs`).
     link_placeholder_icon: Option<crate::icon_image::IconImage>,
 }
@@ -445,6 +456,7 @@ impl MarkdownView {
             suppress_next_left_mouse_up: false,
             matching_text: None,
             html_theme: HtmlStyleTheme::default(),
+            colors: None,
             link_placeholder_icon: None,
         }
     }

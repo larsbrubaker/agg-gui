@@ -66,6 +66,8 @@ mod rust_only_image_loader_tests;
 mod rust_only_parser_inline_tests;
 #[path = "markdown_editing/rust_only_pipe_table_tests.rs"]
 mod rust_only_pipe_table_tests;
+#[path = "markdown_editing/rust_only_raw_host_theme_tests.rs"]
+mod rust_only_raw_host_theme_tests;
 #[path = "markdown_editing/rust_only_rich_editor_auto_scroll_tests.rs"]
 mod rust_only_rich_editor_auto_scroll_tests;
 #[path = "markdown_editing/rust_only_toolbar_look_tests.rs"]

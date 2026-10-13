@@ -204,7 +204,7 @@ impl MarkdownView {
                 }
                 _ => None,
             });
-        let v = ctx.visuals();
+        let colors = self.resolved_colors(&ctx.visuals());
         if let Some(image) = ready {
             // An animated image draws the frame its playback clock is on
             // (`animated_image.rs`), starting the clock on this first paint.
@@ -226,13 +226,13 @@ impl MarkdownView {
             ctx.begin_path();
             ctx.rounded_rect(x, y, width, height, 3.0);
             ctx.fill();
-            let icon_room = self.paint_placeholder_icon(ctx, x, y, height, v.text_color);
-            ctx.set_fill_color(v.text_dim);
+            let icon_room = self.paint_placeholder_icon(ctx, x, y, height, colors.text);
+            ctx.set_fill_color(colors.dim_text);
             ctx.set_font_size(self.font_size * 0.85);
             let label = if alt.is_empty() { "image" } else { alt };
             ctx.fill_text(label, x + 8.0 + icon_room, y + height * 0.5);
             ctx.set_font_size(restore_font_size);
-            ctx.set_fill_color(v.text_color);
+            ctx.set_fill_color(colors.text);
         }
     }
 }

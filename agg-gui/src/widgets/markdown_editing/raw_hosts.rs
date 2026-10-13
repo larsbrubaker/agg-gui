@@ -4,7 +4,10 @@
 //! (`rawHosts`, `RawBlockSize`, `CloseRawHosts` and the host placement in
 //! `Restack`).
 //!
-//! A host is a [`MarkdownView`] of the block's source.  The layout style's
+//! A host is a [`MarkdownView`] of the block's source, drawn in the editor's
+//! theme colours ([`host_colors`]) rather than the app's visuals, so a dark
+//! editor in a light app (or the reverse) shows its raw blocks in its own
+//! theme.  The layout style's
 //! Raw block sizing callback creates and measures hosts while the view lays
 //! out, so the hosts live in a shared [`RichRawHosts`] the style and the edit
 //! widget (`edit_widget`) both reach; the widget places the live ones as its
@@ -21,9 +24,10 @@ use crate::event::{Event, EventResult};
 use crate::geometry::{Point, Rect, Size};
 use crate::text::Font;
 use crate::widget::Widget;
-use crate::widgets::markdown::MarkdownView;
+use crate::widgets::markdown::{MarkdownColors, MarkdownView};
 
 use super::block::{RichBlock, RichBlockId};
+use super::layout_style::{RichLayoutStyle, RichThemeColors};
 
 struct HostInner {
     view: MarkdownView,
@@ -71,6 +75,27 @@ impl RichRawHost {
     }
 }
 
+/// The colours a host draws in for the editor's `theme`: the style's own text
+/// and link colours, the code shading ([`RichLayoutStyle::SHADE_ALPHA`] of the
+/// text, as the editor shades its code blocks) and the quote bar's alpha for
+/// rules.  `None` (C#'s default theme) gives `None`: the host keeps the
+/// viewer's default look.  No background is passed: the editor paints its
+/// selection beneath a host, which a fill would cover.
+pub(super) fn host_colors(
+    style: &RichLayoutStyle,
+    theme: Option<&RichThemeColors>,
+) -> Option<MarkdownColors> {
+    let theme = theme?;
+    let alpha = |a: u8| f32::from(a) / 255.0;
+    Some(MarkdownColors {
+        text: style.text_color,
+        link: style.link_color,
+        code_background: style.code_background_color(),
+        rule: theme.text.with_alpha(alpha(90)),
+        background: None,
+    })
+}
+
 /// The Raw block hosts of one editor, keyed by block.
 #[derive(Default)]
 pub struct RichRawHosts {
@@ -89,6 +114,7 @@ impl RichRawHosts {
         font: &Arc<Font>,
         bold: Option<&Arc<Font>>,
         font_size: f64,
+        colors: Option<MarkdownColors>,
     ) -> Size {
         let id = block.id();
         let host = match self.hosts.iter().find(|(b, _)| *b == id) {
@@ -99,6 +125,9 @@ impl RichRawHosts {
                     .with_padding(0.0);
                 if let Some(bold) = bold {
                     view = view.with_bold_font(Arc::clone(bold));
+                }
+                if let Some(colors) = colors {
+                    view = view.with_colors(colors);
                 }
                 let host = RichRawHost(Rc::new(RefCell::new(HostInner {
                     view,

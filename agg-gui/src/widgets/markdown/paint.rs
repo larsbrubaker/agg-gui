@@ -25,10 +25,17 @@ type CellContent<'a> = (&'a str, &'a [emphasis::CellSpan], &'a [LaidCellImage]);
 impl MarkdownView {
     pub(super) fn paint_markdown(&mut self, ctx: &mut dyn DrawCtx) {
         let v = ctx.visuals();
+        let colors = self.resolved_colors(&v);
         let pad = self.padding;
         let w = self.bounds.width;
         let font = self.active_font();
         ctx.set_font(Arc::clone(&font));
+        if let Some(background) = colors.background {
+            ctx.set_fill_color(background);
+            ctx.begin_path();
+            ctx.rect(0.0, 0.0, w, self.bounds.height);
+            ctx.fill();
+        }
         self.paint_selection(ctx);
 
         for item in &self.items {
@@ -50,7 +57,7 @@ impl MarkdownView {
                     let metrics = measure_text_metrics(&font, "", fs);
                     let text_y = ty - (metrics.ascent - metrics.descent) * 0.5;
                     if *quote {
-                        ctx.set_fill_color(v.separator);
+                        ctx.set_fill_color(colors.rule);
                         ctx.begin_path();
                         ctx.rect(pad + indent - 12.0, *y, 3.0, *height);
                         ctx.fill();
@@ -58,17 +65,27 @@ impl MarkdownView {
 
                     match style {
                         LineStyle::Rule => {
-                            ctx.set_fill_color(v.separator);
+                            ctx.set_fill_color(colors.rule);
                             ctx.begin_path();
                             ctx.rect(pad, ty, w - pad * 2.0, 1.0);
                             ctx.fill();
                         }
                         LineStyle::Code => {
-                            ctx.set_fill_color(Color::rgba(0.0, 0.0, 0.0, 0.15));
+                            ctx.set_fill_color(
+                                colors
+                                    .code_background
+                                    .unwrap_or(Color::rgba(0.0, 0.0, 0.0, 0.15)),
+                            );
                             ctx.begin_path();
                             ctx.rounded_rect(pad, *y, w - pad * 2.0, *height, 3.0);
                             ctx.fill();
-                            ctx.set_fill_color(v.accent);
+                            // The visuals' look draws these rows in the accent; a view
+                            // with its own colours draws them in its text colour.
+                            ctx.set_fill_color(if colors.code_background.is_some() {
+                                colors.text
+                            } else {
+                                v.accent
+                            });
                             for run in runs {
                                 if let LineRun::Text { text, x, .. } = run {
                                     ctx.fill_text(text, tx + x + 4.0, text_y);
@@ -76,7 +93,7 @@ impl MarkdownView {
                             }
                         }
                         _ => {
-                            ctx.set_fill_color(v.text_color);
+                            ctx.set_fill_color(colors.text);
                             for run in runs {
                                 match run {
                                     LineRun::Text {
@@ -97,7 +114,11 @@ impl MarkdownView {
                                             ctx.fill();
                                         }
                                         if *code {
-                                            ctx.set_fill_color(Color::rgba(0.5, 0.5, 0.5, 0.14));
+                                            ctx.set_fill_color(
+                                                colors
+                                                    .code_background
+                                                    .unwrap_or(Color::rgba(0.5, 0.5, 0.5, 0.14)),
+                                            );
                                             ctx.begin_path();
                                             ctx.rounded_rect(
                                                 tx + x,
@@ -109,9 +130,9 @@ impl MarkdownView {
                                             ctx.fill();
                                         }
                                         ctx.set_fill_color(if link.is_some() {
-                                            v.accent
+                                            colors.link
                                         } else {
-                                            v.text_color
+                                            colors.text
                                         });
                                         let text_x = if *code {
                                             tx + x + self.font_size * 0.35
@@ -171,7 +192,7 @@ impl MarkdownView {
                     }
 
                     if matches!(style, LineStyle::H1 | LineStyle::H2) && !runs.is_empty() {
-                        ctx.set_fill_color(v.separator);
+                        ctx.set_fill_color(colors.rule);
                         ctx.begin_path();
                         ctx.rect(pad, *y, w - pad * 2.0, 1.0);
                         ctx.fill();
@@ -217,7 +238,9 @@ impl MarkdownView {
                         crate::device_scale(),
                     );
                     if let Some(snapped) = &snapped {
-                        snapped.paint_stripes(ctx, |ri| table_style::stripe_color(&v, ri, *header));
+                        snapped.paint_stripes(ctx, |ri| {
+                            table_style::stripe_color(colors.text, ri, *header)
+                        });
                     }
                     ctx.set_font_size(self.font_size);
                     for (ri, row) in rows.iter().enumerate() {
@@ -241,7 +264,7 @@ impl MarkdownView {
                                     row_h,
                                     v.accent,
                                 );
-                                ctx.set_fill_color(v.text_color);
+                                ctx.set_fill_color(colors.text);
                                 self.paint_cell_text(
                                     ctx,
                                     (text, spans, images),
@@ -267,7 +290,7 @@ impl MarkdownView {
                         }
                     }
                     if let Some(snapped) = &snapped {
-                        snapped.paint_lines(ctx, table_style::grid_color(&v));
+                        snapped.paint_lines(ctx, table_style::grid_color(colors.text));
                     }
                     ctx.restore();
 
@@ -302,11 +325,15 @@ impl MarkdownView {
                     let content_y = y + scrollbar_h;
                     let content_h = height - scrollbar_h;
                     ctx.set_font_size(fs);
-                    ctx.set_fill_color(Color::rgba(0.5, 0.5, 0.5, 0.12));
+                    ctx.set_fill_color(
+                        colors
+                            .code_background
+                            .unwrap_or(Color::rgba(0.5, 0.5, 0.5, 0.12)),
+                    );
                     ctx.begin_path();
                     ctx.rounded_rect(pad, *y, *viewport_width, *height, 4.0);
                     ctx.fill();
-                    ctx.set_fill_color(v.text_color);
+                    ctx.set_fill_color(colors.text);
 
                     ctx.save();
                     ctx.clip_rect(pad, content_y, *viewport_width, content_h);
@@ -381,7 +408,7 @@ impl MarkdownView {
         x: f64,
         y: f64,
     ) {
-        let v = ctx.visuals();
+        let colors = self.resolved_colors(&ctx.visuals());
         for between in MarkdownView::cell_text_pieces(text, images) {
             for (range, style) in emphasis::cell_pieces(text, spans) {
                 let start = range.start.max(between.start);
@@ -392,7 +419,7 @@ impl MarkdownView {
                 let piece = &text[start..end];
                 let pen = x + self.cell_text_x(text, spans, images, start);
                 let linked = emphasis::link_at(spans, start).is_some();
-                ctx.set_fill_color(if linked { v.accent } else { v.text_color });
+                ctx.set_fill_color(if linked { colors.link } else { colors.text });
                 ctx.set_font(self.run_font(style));
                 ctx.fill_text(piece, pen, y);
                 if linked {

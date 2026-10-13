@@ -9,7 +9,6 @@
 //! text with them, and `introspect.rs` reports them.
 
 use crate::color::Color;
-use crate::theme::Visuals;
 
 use super::{emphasis, MarkdownAlign, MarkdownRunStyle};
 
@@ -19,16 +18,16 @@ const TABLE_BORDER_ALPHA: f32 = 150.0 / 255.0;
 const ZEBRA_STRIPE_ALPHA: f32 = 24.0 / 255.0;
 
 /// The colour the table grid's lines draw in (C# `AggTable.GridColor`).
-pub(super) fn grid_color(visuals: &Visuals) -> Color {
-    visuals.text_color.with_alpha(TABLE_BORDER_ALPHA)
+pub(super) fn grid_color(text: Color) -> Color {
+    text.with_alpha(TABLE_BORDER_ALPHA)
 }
 
 /// The stripe behind row `row` (C# `AggTableRow.StripeColor`), transparent
 /// for the header row and every odd-indexed row.
-pub(super) fn stripe_color(visuals: &Visuals, row: usize, header: bool) -> Color {
+pub(super) fn stripe_color(text: Color, row: usize, header: bool) -> Color {
     let is_header = header && row == 0;
     if !is_header && row % 2 == 0 {
-        visuals.text_color.with_alpha(ZEBRA_STRIPE_ALPHA)
+        text.with_alpha(ZEBRA_STRIPE_ALPHA)
     } else {
         Color::transparent()
     }

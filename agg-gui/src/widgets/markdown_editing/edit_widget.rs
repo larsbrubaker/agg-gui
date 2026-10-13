@@ -44,7 +44,7 @@ use super::edit_error::RichEditError;
 use super::editor_state::{RichEditorState, SCROLL_BAR_ROOM};
 use super::image_cache::{RichImageCache, RichImageProvider, RichResolveUrl};
 use super::layout_style::{RichLayoutFonts, RichLayoutStyle, RichThemeColors};
-use super::raw_hosts::{RawHostWidget, RichRawHost, RichRawHosts};
+use super::raw_hosts::{host_colors, RawHostWidget, RichRawHost, RichRawHosts};
 use super::selection::RichSelection;
 
 /// What the widget, its layout style's callbacks and its link lookup share.
@@ -515,6 +515,7 @@ fn style_builder(shared: Rc<Shared>) -> Box<dyn FnMut() -> RichLayoutStyle> {
             )
         }));
         let hosts = Rc::clone(&shared);
+        let host_colors = host_colors(&style, theme.as_ref());
         style.raw_block_size = Some(Box::new(move |block, available| {
             hosts.hosts.borrow_mut().size(
                 block,
@@ -522,6 +523,7 @@ fn style_builder(shared: Rc<Shared>) -> Box<dyn FnMut() -> RichLayoutStyle> {
                 &hosts.fonts.regular,
                 hosts.fonts.bold.as_ref(),
                 body_px,
+                host_colors,
             )
         }));
         style
