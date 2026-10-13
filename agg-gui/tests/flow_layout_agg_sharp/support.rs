@@ -67,6 +67,16 @@ pub fn left_to_right() -> FlexRow {
     FlexRow::new().with_gap(0.0).with_fit_width(true)
 }
 
+/// C# `new FlowLayoutWidget(FlowDirection.RightToLeft)`: no gap, FIT width.
+pub fn right_to_left() -> FlexRow {
+    left_to_right().with_right_to_left(true)
+}
+
+/// C# `new FlowLayoutWidget(FlowDirection.BottomToTop)`: no gap, FIT width.
+pub fn bottom_to_top() -> FlexColumn {
+    top_to_bottom().with_bottom_to_top(true)
+}
+
 /// C# `flow.AnchorAll()` on a top-to-bottom flow.
 pub fn anchor_all_column(c: FlexColumn) -> FlexColumn {
     c.with_fit_width(false)

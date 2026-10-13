@@ -1,4 +1,5 @@
-//! `FlexRow`: horizontal flex layout (children left-to-right).
+//! `FlexRow`: horizontal flex layout (children left-to-right, or right-to-left
+//! with [`FlexRow::right_to_left`]).
 //!
 //! Split out of `flex.rs` to keep both files under the workspace 800-line
 //! guardrail. Shares the flex algorithm and Y-up conventions documented on
@@ -129,6 +130,11 @@ pub struct FlexRow {
     /// `true`), so a child that draws past its box can't paint over the
     /// sibling beside it. See [`Widget::child_paint_clip`].
     pub clip_children_to_slots: bool,
+    /// Lay the children out from the right edge inward, the first added
+    /// rightmost (agg-sharp's `FlowDirection.RightToLeft`). Only the order
+    /// along the row changes: margins keep their sides, so each child still
+    /// has its own `margin.left` on its left. Off by default.
+    pub right_to_left: bool,
 }
 
 impl FlexRow {
@@ -143,7 +149,15 @@ impl FlexRow {
             background: Color::rgba(0.0, 0.0, 0.0, 0.0),
             fit_width: false,
             clip_children_to_slots: true,
+            right_to_left: false,
         }
+    }
+
+    /// Place the children from the right edge inward (see
+    /// [`FlexRow::right_to_left`]).
+    pub fn with_right_to_left(mut self, right_to_left: bool) -> Self {
+        self.right_to_left = right_to_left;
+        self
     }
 
     /// Opt out of clipping each child to its own column (see
@@ -423,9 +437,24 @@ impl Widget for FlexRow {
         share_flex_space(&items, &mut content_widths, remaining);
 
         // -------------------------------------------------------------------
-        // Step 3: place children left-to-right with cross-axis anchoring.
+        // Step 3: place children left-to-right (right-to-left when
+        // `right_to_left`) with cross-axis anchoring.
         // -------------------------------------------------------------------
-        let mut cursor_x = pad_l;
+        // A right-to-left row's cursor is the right edge of the next slot.
+        // Measuring natural width (an unbounded `available`, as a fit-width
+        // parent passes) has no right edge, so it starts at the content's
+        // extent, as a column does for its height.
+        let mut cursor_x = if !self.right_to_left {
+            pad_l
+        } else if available.width > 1.0e9 {
+            let used: f64 = (0..n)
+                .filter(|&i| visible[i])
+                .map(|i| content_widths[i] + margins[i].horizontal())
+                .sum();
+            pad_l + used + total_gap
+        } else {
+            available.width - pad_r
+        };
         let mut max_slot_h = 0.0f64; // tallest slot (content + margins)
 
         for i in 0..n {
@@ -440,8 +469,13 @@ impl Widget for FlexRow {
                 continue;
             }
 
-            // Advance past left margin.
-            cursor_x += m.left;
+            // Advance past the margin on the side the flow arrives from; a
+            // right-to-left child's box starts one width and margin back.
+            let child_x = if self.right_to_left {
+                cursor_x - m.right - content_w
+            } else {
+                cursor_x + m.left
+            };
 
             // Layout child to get natural height for cross-axis placement.
             let desired = self.children[i].layout(Size::new(content_w, slot_h));
@@ -469,7 +503,7 @@ impl Widget for FlexRow {
                 self.children[i].layout(Size::new(final_w, final_h));
             }
             self.children[i].set_bounds(Rect::new(
-                snap_extent(snap, cursor_x),
+                snap_extent(snap, child_x),
                 snap_extent(snap, child_y),
                 final_w,
                 final_h,
@@ -478,8 +512,12 @@ impl Widget for FlexRow {
             // 22.67 px child placed at 23 would lose a third of a pixel.
             max_slot_h = max_slot_h.max(final_h + m.vertical());
 
-            // Advance past content width, right margin, and inter-child gap.
-            cursor_x += content_w + m.right + gap;
+            // Advance past content width, far margin, and inter-child gap.
+            if self.right_to_left {
+                cursor_x = child_x - m.left - gap;
+            } else {
+                cursor_x = child_x + content_w + m.right + gap;
+            }
         }
 
         // Return the natural (intrinsic) height to avoid propagating huge

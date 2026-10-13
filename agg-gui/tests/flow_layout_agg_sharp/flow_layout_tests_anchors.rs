@@ -5,20 +5,18 @@
 //! `GuiWidget(w, h)` keeping its construction size as its minimum) are listed
 //! in `flow_layout_tests.rs`, the other half of the class.
 //!
-//! `LeftRightWithAnchorLeftRightChildTest` and
-//! `TopBottomWithAnchorBottomTopChildTest` compare boxes exactly, as C#
+//! `LeftRightWithAnchorLeftRightChildTest`, `RightLeftWithAnchorLeftRightChildTest`,
+//! `TopBottomWithAnchorBottomTopChildTest` and `BottomTopWithAnchorBottomTopChildTest` compare boxes exactly, as C#
 //! does.  Their unaligned first and last children differ from C#'s control
-//! as described in `flow_layout_tests.rs`: the row's sit at y =
+//! as described in `flow_layout_tests.rs`: the rows' sit at y =
 //! padding.Bottom + margin.Bottom (C#'s horizontal flows leave them at 0),
-//! the column's at x = padding.Left + margin.Left (what C#'s own
+//! the columns' at x = padding.Left + margin.Left (what C#'s own
 //! `HoldUnalignedChildOnePaddingIn` does; the control's x = 0 was never
 //! checked, the C# driver doesn't await its helper).
 //!
 //! `NestedMinFitOrStretchToChildrenParentWidth`'s fourth block follows a
 //! `return;` in C# ("this last test does not work yet") and never runs; it is
-//! not ported.  Not ported: `RightLeftWithAnchorLeftRightChildTests` and
-//! `BottomTopWithAnchorBottomTopChildTests` (MatterCAD never builds a
-//! `RightToLeft` or `BottomToTop` flow).
+//! not ported.
 //!
 //! `TestVAnchorCenter` uses a 24-unit button beside an 18-unit text box (C#'s
 //! real `Button`/`TextEditWidget` heights are font-dependent): agg-gui snaps a
@@ -307,6 +305,198 @@ fn top_bottom_with_anchor_bottom_top_child_test(control_padding: Insets, button_
 fn top_bottom_with_anchor_bottom_top_child_tests() {
     for (padding, margin) in standard_pairs(uneven_pair()) {
         top_bottom_with_anchor_bottom_top_child_test(padding, margin);
+    }
+}
+
+/// The six boxes of `RightLeftWithAnchorLeftRightChildTest`'s control.
+fn right_left_control(padding: Insets, margin: Insets, button_size: f64) -> [Edges; 6] {
+    let (w, h) = (button_size * 6.0, button_size * 3.0);
+    let mut current_left = w - padding.right - margin.right - button_size;
+    let button_height_with_margin = button_size + margin.vertical();
+    let scaled_width =
+        (w - padding.horizontal() - margin.horizontal() * 6.0 - button_size * 2.0) / 4.0;
+    let bottom_anchor_y = padding.bottom + margin.bottom;
+    // The right unsized rect (y: see the module header).
+    let r0 = (
+        current_left,
+        bottom_anchor_y,
+        current_left + button_size,
+        bottom_anchor_y + button_size,
+    );
+    // A bottom anchor.
+    current_left -= scaled_width + margin.horizontal();
+    let r1 = (
+        current_left,
+        bottom_anchor_y,
+        current_left + scaled_width,
+        bottom_anchor_y + button_size,
+    );
+    // Center anchor.
+    let center_y = padding.bottom + (h - padding.vertical()) / 2.0;
+    current_left -= scaled_width + margin.horizontal();
+    let r2 = (
+        current_left,
+        center_y - button_height_with_margin / 2.0 + margin.bottom,
+        current_left + scaled_width,
+        center_y + button_height_with_margin / 2.0 - margin.top,
+    );
+    // Top anchor.
+    let top_anchor_y = h - padding.top - margin.top;
+    current_left -= scaled_width + margin.horizontal();
+    let r3 = (
+        current_left,
+        top_anchor_y - button_size,
+        current_left + scaled_width,
+        top_anchor_y,
+    );
+    // Bottom top anchor.
+    current_left -= scaled_width + margin.horizontal();
+    let r4 = (
+        current_left,
+        bottom_anchor_y,
+        current_left + scaled_width,
+        top_anchor_y,
+    );
+    // The left unsized rect.
+    current_left -= button_size + margin.horizontal();
+    let r5 = (
+        current_left,
+        bottom_anchor_y,
+        current_left + button_size,
+        bottom_anchor_y + button_size,
+    );
+    [r0, r1, r2, r3, r4, r5]
+}
+
+/// C# `RightLeftWithAnchorLeftRightChildTest`: the left-to-right test's
+/// children in a right-to-left flow, so the first added sits at the right.
+fn right_left_with_anchor_left_right_child_test(control_padding: Insets, button_margin: Insets) {
+    let button_size = 40.0;
+    let expected = right_left_control(control_padding, button_margin, button_size);
+    let middle = |v: VAnchor| {
+        gui_widget(button_size / 2.0, button_size)
+            .with_margin(button_margin)
+            .with_h_anchor(HAnchor::STRETCH)
+            .with_v_anchor(v)
+    };
+    let flow = anchor_all_row(right_to_left())
+        .with_inner_padding(control_padding)
+        .add(Box::new(
+            gui_widget(button_size, button_size).with_margin(button_margin),
+        ))
+        .add(Box::new(middle(VAnchor::BOTTOM)))
+        .add(Box::new(middle(VAnchor::CENTER)))
+        .add(Box::new(middle(VAnchor::TOP)))
+        .add(Box::new(middle(VAnchor::STRETCH)))
+        .add(Box::new(
+            gui_widget(button_size, button_size).with_margin(button_margin),
+        ));
+    let mut test = container().add(Box::new(flow));
+    lay(&mut test, button_size * 6.0, button_size * 3.0);
+    let what = format!("padding {control_padding:?} margin {button_margin:?}");
+    assert_children_match(at(&test, &[0]), &expected, &what);
+}
+
+#[test]
+fn right_left_with_anchor_left_right_child_tests() {
+    for (padding, margin) in standard_pairs(uneven_pair()) {
+        right_left_with_anchor_left_right_child_test(padding, margin);
+    }
+}
+
+/// The six boxes of `BottomTopWithAnchorBottomTopChildTest`'s control.
+fn bottom_top_control(padding: Insets, margin: Insets, button_size: f64) -> [Edges; 6] {
+    let (w, h) = (button_size * 3.0, button_size * 6.0);
+    let mut current_bottom = padding.bottom + margin.bottom;
+    let button_width_with_margin = button_size + margin.horizontal();
+    let scaled_height =
+        (h - padding.vertical() - margin.vertical() * 6.0 - button_size * 2.0) / 4.0;
+    let left_anchor_x = padding.left + margin.left;
+    // The bottom unsized rect (x: see the module header).
+    let r0 = (
+        left_anchor_x,
+        current_bottom,
+        left_anchor_x + button_size,
+        current_bottom + button_size,
+    );
+    // Left anchor.
+    current_bottom += button_size + margin.vertical();
+    let r1 = (
+        left_anchor_x,
+        current_bottom,
+        left_anchor_x + button_size,
+        current_bottom + scaled_height,
+    );
+    // Center anchor.
+    let center_x = padding.left + (w - padding.horizontal()) / 2.0;
+    current_bottom += scaled_height + margin.vertical();
+    let r2 = (
+        center_x - button_width_with_margin / 2.0 + margin.left,
+        current_bottom,
+        center_x + button_width_with_margin / 2.0 - margin.right,
+        current_bottom + scaled_height,
+    );
+    // Right anchor.
+    let right_anchor_x = w - padding.right - margin.right;
+    current_bottom += scaled_height + margin.vertical();
+    let r3 = (
+        right_anchor_x - button_size,
+        current_bottom,
+        right_anchor_x,
+        current_bottom + scaled_height,
+    );
+    // Left right anchor.
+    current_bottom += scaled_height + margin.vertical();
+    let r4 = (
+        left_anchor_x,
+        current_bottom,
+        right_anchor_x,
+        current_bottom + scaled_height,
+    );
+    // The top unsized rect.
+    current_bottom += scaled_height + margin.vertical();
+    let r5 = (
+        left_anchor_x,
+        current_bottom,
+        left_anchor_x + button_size,
+        current_bottom + button_size,
+    );
+    [r0, r1, r2, r3, r4, r5]
+}
+
+/// C# `BottomTopWithAnchorBottomTopChildTest`: the top-to-bottom test's
+/// children in a bottom-to-top flow, so the first added sits at the bottom.
+fn bottom_top_with_anchor_bottom_top_child_test(control_padding: Insets, button_margin: Insets) {
+    let button_size = 40.0;
+    let expected = bottom_top_control(control_padding, button_margin, button_size);
+    let middle = |h: HAnchor| {
+        gui_widget(button_size, button_size / 2.0)
+            .with_margin(button_margin)
+            .with_v_anchor(VAnchor::STRETCH)
+            .with_h_anchor(h)
+    };
+    let flow = anchor_all_column(bottom_to_top())
+        .with_inner_padding(control_padding)
+        .add(Box::new(
+            gui_widget(button_size, button_size).with_margin(button_margin),
+        ))
+        .add(Box::new(middle(HAnchor::LEFT)))
+        .add(Box::new(middle(HAnchor::CENTER)))
+        .add(Box::new(middle(HAnchor::RIGHT)))
+        .add(Box::new(middle(HAnchor::STRETCH)))
+        .add(Box::new(
+            gui_widget(button_size, button_size).with_margin(button_margin),
+        ));
+    let mut test = container().add(Box::new(flow));
+    lay(&mut test, button_size * 3.0, button_size * 6.0);
+    let what = format!("padding {control_padding:?} margin {button_margin:?}");
+    assert_children_match(at(&test, &[0]), &expected, &what);
+}
+
+#[test]
+fn bottom_top_with_anchor_bottom_top_child_tests() {
+    for (padding, margin) in standard_pairs(uneven_pair()) {
+        bottom_top_with_anchor_bottom_top_child_test(padding, margin);
     }
 }
 

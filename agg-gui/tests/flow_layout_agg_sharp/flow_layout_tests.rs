@@ -31,26 +31,23 @@
 //!   `LayoutEngineSimpleAlign`) leaves a child without a vertical anchor at
 //!   y = 0, inside the flow's padding and ignoring its own margin; C# fixed
 //!   the same fault for vertical flows (`HoldUnalignedChildOnePaddingIn`) but
-//!   not for horizontal ones.  `LeftToRightTests` and
-//!   `NestedFlowWidgetsLeftToRightTests` therefore expect y = padding.Bottom +
+//!   not for horizontal ones.  `LeftToRightTests`, `RightToLeftTests`,
+//!   `NestedFlowWidgetsLeftToRightTests` and
+//!   `NestedFlowWidgetsRightToLeftTests` therefore expect y = padding.Bottom +
 //!   margin.Bottom where C#'s control says 0
 //!   (`rust_only_an_unaligned_child_of_a_row_keeps_the_padding_below_it`).
 //! - The vertical-flow controls that put a child at x = 0 inside the flow's
 //!   padding (`NestedLayoutTopToBottomTest`, `NestedFlowWidgetsTopToBottomTest`)
 //!   contradict C#'s own `HoldUnalignedChildOnePaddingIn`; their C# drivers
 //!   call the async helper without `await`, so the C# assertions never ran.
-//!   They expect x = padding.Left + margin.Left here.
+//!   They expect x = padding.Left + margin.Left here.  The C# driver of
+//!   `NestedFlowWidgetsRightToLeftTests` doesn't await its helper either;
+//!   its assertions hold here.
 //!
 //! Driven by direct layout passes, not an automation runner:
 //! `SpacingClearedAfterLoadPositionsCorrectly` used `AutomationRunner` only to
 //! show its window, and C#'s `Load` handler is the code that runs before the
 //! first layout here.
-//!
-//! Not ported: `RightToLeftTests`, `NestedFlowWidgetsRightToLeftTests`,
-//! `RightLeftWithAnchorLeftRightChildTests` and
-//! `BottomTopWithAnchorBottomTopChildTests` (MatterCAD never builds a
-//! `RightToLeft` or `BottomToTop` flow; agg-gui has no reversed row or
-//! column).
 
 use agg_gui::{FlexColumn, FlexRow, HAnchor, Insets, Rect, SizedBox, VAnchor, Widget};
 
@@ -344,6 +341,60 @@ fn left_to_right_anchor_left_bottom_tests() {
     }
 }
 
+/// C# `RightToLeftTest`: `buttonRight` is added first and sits at the flow's
+/// right edge, `buttonLeft` to its left; y as in `check_two_button_row`.
+fn right_to_left_test(control_padding: Insets, button_margin: Insets) {
+    let flow = anchor_all_row(right_to_left())
+        .with_inner_padding(control_padding)
+        .add(Box::new(
+            button(RIGHT_W, BUTTON_H).with_margin(button_margin),
+        ))
+        .add(Box::new(
+            button(LEFT_W, BUTTON_H).with_margin(button_margin),
+        ));
+    let mut test = container().add(Box::new(flow));
+    lay(&mut test, 300.0, 200.0);
+
+    let y = control_padding.bottom + button_margin.bottom;
+    let right_x = 300.0 - control_padding.right - button_margin.right - RIGHT_W;
+    let left_x = right_x - button_margin.horizontal() - LEFT_W;
+    let what = format!("padding {control_padding:?} margin {button_margin:?}");
+    assert_rect_near(
+        rect_in_root(&test, &[0, 0]),
+        rect(right_x, y, RIGHT_W, BUTTON_H),
+        0.5,
+        &format!("buttonRight, {what}"),
+    );
+    assert_rect_near(
+        rect_in_root(&test, &[0, 1]),
+        rect(left_x, y, LEFT_W, BUTTON_H),
+        0.5,
+        &format!("buttonLeft, {what}"),
+    );
+
+    // Make sure it can resize without breaking.
+    let control = snapshot(&test);
+    lay(&mut test, 310.0, 200.0);
+    assert_ne!(
+        snapshot(&test),
+        control,
+        "The Anchored widget should not be the same size."
+    );
+    lay(&mut test, 300.0, 200.0);
+    assert_eq!(
+        snapshot(&test),
+        control,
+        "The Anchored widget should be in the correct place."
+    );
+}
+
+#[test]
+fn right_to_left_tests() {
+    for (padding, margin) in standard_pairs(fractional_pair()) {
+        right_to_left_test(padding, margin);
+    }
+}
+
 #[test]
 fn rust_only_an_unaligned_child_of_a_row_keeps_the_padding_below_it() {
     for v in [VAnchor::FIT, VAnchor::ABSOLUTE] {
@@ -498,6 +549,84 @@ fn nested_flow_widgets_left_to_right_tests() {
     for (padding, margin) in standard_pairs(fractional_pair()) {
         nested_flow_widgets_left_to_right_test(padding, margin);
     }
+}
+
+/// C# `NestedFlowWidgetsRightToLeftTest`: two one-button right-to-left flows
+/// anchored to the bottom inside a right-to-left flow; the first added
+/// (`buttonRight`) is the rightmost.  The C# driver doesn't await this helper,
+/// so its assertions never ran; they hold here.
+fn nested_flow_widgets_right_to_left_test(control_padding: Insets, button_margin: Insets) {
+    let inner = |w: f64| {
+        right_to_left()
+            .with_v_anchor(VAnchor::BOTTOM)
+            .add(Box::new(button(w, BUTTON_H).with_margin(button_margin)))
+    };
+    let all = anchor_all_row(right_to_left())
+        .with_inner_padding(control_padding)
+        .add(Box::new(inner(RIGHT_W)))
+        .add(Box::new(inner(LEFT_W)));
+    let mut test = container().add(Box::new(all));
+    lay(&mut test, 500.0, 300.0);
+
+    let y = control_padding.bottom + button_margin.bottom;
+    let right_x = 500.0 - control_padding.right - button_margin.right - RIGHT_W;
+    let left_x = right_x - button_margin.horizontal() - LEFT_W;
+    let what = format!("padding {control_padding:?} margin {button_margin:?}");
+    assert_rect_near(
+        rect_in_root(&test, &[0, 0, 0]),
+        rect(right_x, y, RIGHT_W, BUTTON_H),
+        1.0,
+        &format!("buttonRight, {what}"),
+    );
+    assert_rect_near(
+        rect_in_root(&test, &[0, 1, 0]),
+        rect(left_x, y, LEFT_W, BUTTON_H),
+        1.0,
+        &format!("buttonLeft, {what}"),
+    );
+}
+
+#[test]
+fn nested_flow_widgets_right_to_left_tests() {
+    for (padding, margin) in standard_pairs(fractional_pair()) {
+        nested_flow_widgets_right_to_left_test(padding, margin);
+    }
+}
+
+/// Not in C#: the order, gaps and hidden slots of reversed flows, and a
+/// right-to-left row measured for its natural width (a fit-width parent's
+/// unbounded pass), which has no right edge to start from.
+#[test]
+fn rust_only_reversed_flows_skip_hidden_children_and_gap_the_rest() {
+    let (visible, hidden) = hideable(Box::new(button(40.0, 10.0)));
+    visible.set(false);
+    let mut row = left_to_right()
+        .with_right_to_left(true)
+        .with_gap(5.0)
+        .add(Box::new(button(20.0, 10.0)))
+        .add(hidden)
+        .add(Box::new(button(30.0, 10.0)));
+    row.layout(agg_gui::Size::new(100.0, 10.0));
+    assert_eq!(row.children()[0].bounds().x, 80.0);
+    assert_eq!(row.children()[2].bounds().x, 45.0);
+
+    // Natural width: 20 + 5 + 30, children packed from x = 0.
+    let size = row.layout(agg_gui::Size::new(1.0e10, 10.0));
+    assert_eq!(size.width, 55.0);
+    assert_eq!(row.children()[0].bounds().x, 35.0);
+    assert_eq!(row.children()[2].bounds().x, 0.0);
+
+    let (visible, hidden) = hideable(Box::new(button(10.0, 40.0)));
+    visible.set(false);
+    let mut column = top_to_bottom()
+        .with_bottom_to_top(true)
+        .with_gap(5.0)
+        .add(Box::new(button(10.0, 20.0)))
+        .add(hidden)
+        .add(Box::new(button(10.0, 30.0)));
+    column.layout(agg_gui::Size::new(10.0, 100.0));
+    assert_eq!(column.children()[0].bounds().y, 0.0);
+    assert_eq!(column.children()[2].bounds().y, 25.0);
 }
 
 #[test]

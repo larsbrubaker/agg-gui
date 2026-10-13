@@ -13,7 +13,7 @@
   - Virtual time: `Delay`, `WaitFor`, timeouts and pointer pacing.
   - Wall time: the hang watchdogs (test budget, bring-up, close).
 - **One thread per test:** `show_window_and_execute_tests` runs each test on a fresh thread. That isolates agg-gui's thread-local state and lets the caller time out a stuck body, which is what C#'s `Task.WhenAny` does.
-- **Order of work:** the remaining slices fill agg-gui's gaps test-first, port the 18 remaining Agg Automation Tests 1:1, then finish moving `mattercad-app-test` onto the runner (section 9).
+- **Order of work:** the remaining slices fill agg-gui's gaps test-first, port the 14 remaining Agg Automation Tests 1:1, then finish moving `mattercad-app-test` onto the runner (section 9).
 
 ## 1. What exists today
 
@@ -301,11 +301,10 @@ Rules 3 and 4 are the runner's behaviour for every consumer, not a hook: both ma
 
 ## 8. Gaps to fill first, and the test port map
 
-**agg-gui gaps** (each lands test-first in the slice listed in section 9):
+**agg-gui gap** (lands test-first in the slice listed in section 9):
 
 | # | Gap | Slice |
 |---|---|---|
-| G12 | Flex reverse directions (`FlexRow`/`FlexColumn` lay children out right-to-left / bottom-to-top, as `FlowDirection.RightToLeft`/`BottomToTop`); neither widget has a reverse mode | 25 |
 | G17 | `ShellSession` / pump API, input and deactivation gates | 31 |
 
 **C# class → Rust file** (`agg-gui-automation/tests/`; tests keep their names in snake_case):
@@ -314,7 +313,7 @@ Rules 3 and 4 are the runner's behaviour for every consumer, not a hook: both ma
 |---|---|---|
 | AutomationRunnerTests (11) | `automation_runner_tests.rs` | via `show_window_and_execute_tests`; 1 to go (AnExpectedTimeoutLeavesNoThreadDump, slice 30c; ImageWaitsSearchTheGivenRegion, VetoedCloseIsForcedAndReportedAsFailure, StaticDelayExpires…, ZeroSecondWaitsReportWhatIsThereNow, WindowLoadTimeIsNotChargedToTheTestBudget, AutomationRunnerTimeoutTest, GetWidgetByNameTestNoRegionSingleWindow, GetWidgetByNameTestRegionSingleWindow, DoubleClickByNameSendsTwoFullClickPairsWithProductionClickCounts and TypeDeliversPunctuationIntoAMultiLineField are ported) |
 | AutomationRunnerTests.Winforms (3) | `live/automation_runner_live_tests.rs` | `harness = false`, all desktop OSes |
-| FlowLayoutTests (24) | agg-gui's `tests/flow_layout_agg_sharp/flow_layout_tests.rs` and `flow_layout_tests_anchors.rs` | FlowLayoutWidget → FlexColumn/FlexRow; image compares become box compares. 20 ported; the 4 reverse-direction tests (RightToLeftTests, NestedFlowWidgetsRightToLeftTests, RightLeftWithAnchorLeftRightChildTests, BottomTopWithAnchorBottomTopChildTests) wait on G12. `EnsureFlowLayoutMinSizeFitsChildrenMinSize` has no `[Test]` attribute in C# and is not counted. |
+| FlowLayoutTests (24) | agg-gui's `tests/flow_layout_agg_sharp/flow_layout_tests.rs` and `flow_layout_tests_anchors.rs` | FlowLayoutWidget → FlexColumn/FlexRow (`with_right_to_left`, `with_bottom_to_top` for the reversed directions); image compares become box compares; all ported. `EnsureFlowLayoutMinSizeFitsChildrenMinSize` has no `[Test]` attribute in C# and is not counted. |
 | MacTextEditKeyBindings (12) | `mac_text_edit_key_binding_tests.rs` | all ported |
 | WidgetClickTests (3) | `widget_click_tests.rs` | all ported |
 | MenuTests (1) | `menu_tests.rs` | DropDownList → ComboBox; ported |
@@ -330,14 +329,13 @@ Rules 3 and 4 are the runner's behaviour for every consumer, not a hook: both ma
 
 | # | Slice | Tests that land |
 |---|---|---|
-| 25 | G12 (reverse flex directions), then the four reverse-direction Flow tests | RightToLeftTests, NestedFlowWidgetsRightToLeftTests, RightLeftWithAnchorLeftRightChildTests, BottomTopWithAnchorBottomTopChildTests |
 | 30 | ThreadStackDump, part 1 (retry and dump-writer subprocess) | ACaptureThatLosesTheDumpRaceIsRetakenNotReparsed, ACaptureThatNeverSucceedsGivesUpAndReportsEveryAttempt, WritingADumpCapturesTheDumpWritersLogInsteadOfPrintingIt, ADumpWriterWithMoreOutputThanAPipeHoldsStillFinishes, ADumpWriterThatNeverExitsIsKilledAtTheTimeout |
 | 30b | ThreadStackDump, part 2 (minidump capture and walk) | CaptureNamesTheCallingThreadsOwnFrames, ADumpThatCannotWalkItsCapturingThreadIsRejected, RegisteredThreadsAreLabelledInTheDump, ATruncatedThreadCommandIsNotRead, ADumpWithTwoThreadsOnOneStackPointerStillReports |
 | 30c | Load and close watchdogs write dumps to `TestResults/` | AnExpectedTimeoutLeavesNoThreadDump |
 | 31 | G17 `ShellSession` plus `LiveDriver`, with the simulated-mouse overlay (`RunOptions.draw_simulated_mouse`, `overlay::render_mouse`) | RealMouseInputDoesNotReachAWindowUnderAutomation |
 | 32 | Live pump robustness | IdlePumpSurvivesAnotherWindowsTeardown, ShowFromNonPumpThreadReturnsToItsCaller |
 
-**Tally** (18 still to port): AutomationRunnerTests 11 (10 ported; AnExpectedTimeoutLeavesNoThreadDump to go), Winforms 3, Flow 24 (20 ported), Mac 12 (12 ported), Menu 1 (1 ported), Mouse 13 (13 ported), Paint 2 (2 ported), Present 1 (1 ported), TextEditFocus 3 (3 ported), TextEdit 13 (13 ported), ThreadStackDump 10, ToolTip 7 (7 ported), WidgetClick 3 (3 ported): **103**.
+**Tally** (14 still to port): AutomationRunnerTests 11 (10 ported; AnExpectedTimeoutLeavesNoThreadDump to go), Winforms 3, Flow 24 (24 ported), Mac 12 (12 ported), Menu 1 (1 ported), Mouse 13 (13 ported), Paint 2 (2 ported), Present 1 (1 ported), TextEditFocus 3 (3 ported), TextEdit 13 (13 ported), ThreadStackDump 10, ToolTip 7 (7 ported), WidgetClick 3 (3 ported): **103**.
 
 **Moving `mattercad-app-test` onto the runner** (the harness, `run_test`, the file dialog and the name lookups are done: section 1)
 

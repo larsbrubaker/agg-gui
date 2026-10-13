@@ -8,6 +8,10 @@
 //!
 //! `FlexRow` stacks children **left to right**, as expected.
 //!
+//! Either can run the other way (`FlexColumn::bottom_to_top`, `FlexRow::right_to_left`,
+//! agg-sharp's `FlowDirection.BottomToTop` / `RightToLeft`): the first child then sits at
+//! the bottom / right edge, and the rest follow inward. Margins and anchors keep their sides.
+//!
 //! # Flex algorithm
 //!
 //! Each child has a `flex` factor (stored in a parallel `Vec<f64>`):
@@ -157,6 +161,10 @@ pub struct FlexColumn {
     /// content) rely on the natural-anchored layout where children
     /// occupy the BOTTOM of their slot when oversized.
     pub top_anchor: bool,
+    /// Stack the children upward from the bottom edge, the first added
+    /// lowest (agg-sharp's `FlowDirection.BottomToTop`). Only the order
+    /// along the column changes: margins keep their sides. Off by default.
+    pub bottom_to_top: bool,
 }
 
 impl FlexColumn {
@@ -172,7 +180,15 @@ impl FlexColumn {
             use_panel_bg: false,
             fit_width: false,
             top_anchor: false,
+            bottom_to_top: false,
         }
+    }
+
+    /// Stack the children upward from the bottom edge (see
+    /// [`FlexColumn::bottom_to_top`]).
+    pub fn with_bottom_to_top(mut self, bottom_to_top: bool) -> Self {
+        self.bottom_to_top = bottom_to_top;
+        self
     }
 
     pub fn with_gap(mut self, gap: f64) -> Self {
@@ -492,7 +508,8 @@ impl Widget for FlexColumn {
         };
 
         // -------------------------------------------------------------------
-        // Step 3: place children top-to-bottom.
+        // Step 3: place children top-to-bottom (bottom-to-top when
+        // `bottom_to_top`, from the bottom padding up).
         //
         // In Y-up coordinates "top" = high Y.  Two cursor seeds:
         //
@@ -505,7 +522,9 @@ impl Widget for FlexColumn {
         //   - **`top_anchor=true`**: always start at the top of the inner
         //     area, even for very tall measurement slots.
         let measuring_natural_height = available.height > 1.0e9;
-        let mut cursor_y = if self.top_anchor || !measuring_natural_height {
+        let mut cursor_y = if self.bottom_to_top {
+            pad_b
+        } else if self.top_anchor || !measuring_natural_height {
             available.height - pad_t
         } else {
             pad_b + effective_h
@@ -523,9 +542,14 @@ impl Widget for FlexColumn {
                 continue;
             }
 
-            // Subtract top margin first (moves cursor toward lower Y = downward).
-            cursor_y -= m.top;
-            let child_bottom = cursor_y - content_h;
+            // Subtract top margin first (moves cursor toward lower Y = downward);
+            // bottom-to-top clears the bottom margin and climbs instead.
+            let child_bottom = if self.bottom_to_top {
+                cursor_y + m.bottom
+            } else {
+                cursor_y -= m.top;
+                cursor_y - content_h
+            };
 
             // Layout child to obtain its natural width for cross-axis placement.
             let desired = self.children[i].layout(Size::new(slot_w, content_h));
@@ -559,8 +583,12 @@ impl Widget for FlexColumn {
                 snap_extent(snap, content_h),
             ));
 
-            // Advance cursor past bottom margin and inter-child gap.
-            cursor_y = child_bottom - m.bottom - gap;
+            // Advance cursor past the far margin and inter-child gap.
+            cursor_y = if self.bottom_to_top {
+                child_bottom + content_h + m.top + gap
+            } else {
+                child_bottom - m.bottom - gap
+            };
         }
 
         // Return natural size for all-fixed layouts so ScrollView can read
