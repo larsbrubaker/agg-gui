@@ -56,7 +56,7 @@ impl WgpuGfxCtx {
         // The tessellated-outline path below serves backends that can't
         // composite a coverage mask, and any transform with rotation or
         // shear, which a bitmap blit cannot follow.
-        if self.has_lcd_mask_composite() && !ctm_needs_outline_text(&ctm) {
+        if self.has_lcd_mask_composite() && !agg_gui::text::ctm_needs_outline_text(&ctm) {
             let phys_size = self.font_size * ctm_scale;
             // LCD subpixel geometry is valid wherever the destination is
             // opaque: the backbuffer, and equally a layer whose caller has
@@ -486,17 +486,6 @@ impl WgpuGfxCtx {
 
         result
     }
-}
-
-/// Whether `ctm` turns or shears text, so only the outline path can draw it.
-/// A coverage mask is blitted axis-aligned at the transformed origin; under a
-/// pure translate and scale (any positive or negative scale on either axis)
-/// that is exactly the glyph run, and any off-diagonal term breaks it.  The
-/// tolerance absorbs float noise from composing rotations (`rotate(2 * PI)`
-/// leaves terms near 1e-16) without a visible turn of the glyphs.
-pub(crate) fn ctm_needs_outline_text(ctm: &agg_gui::TransAffine) -> bool {
-    const EPS: f64 = 1e-9;
-    ctm.shx.abs() > EPS || ctm.shy.abs() > EPS
 }
 
 /// Where the outline path puts a glyph's baseline, in the context's own

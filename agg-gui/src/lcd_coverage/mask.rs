@@ -455,6 +455,33 @@ pub fn build_bounded_mask(
     clip: Option<(f64, f64, f64, f64)>,
     fill_rule: FillRule,
 ) -> Option<(LcdMask, i32, i32)> {
+    build_bounded_mask_impl(buffer_w, buffer_h, path, transform, clip, fill_rule, false)
+}
+
+/// [`build_bounded_mask`] with a grayscale mask: each pixel's three subpixels
+/// are box-averaged and replicated across R/G/B, so the mask composites with
+/// no chroma fringing.  Used for text an LCD mask cannot draw (rotated or
+/// sheared), which is rendered as plain antialiased outlines.
+pub fn build_bounded_gray_mask(
+    buffer_w: u32,
+    buffer_h: u32,
+    path: &mut PathStorage,
+    transform: &TransAffine,
+    clip: Option<(f64, f64, f64, f64)>,
+    fill_rule: FillRule,
+) -> Option<(LcdMask, i32, i32)> {
+    build_bounded_mask_impl(buffer_w, buffer_h, path, transform, clip, fill_rule, true)
+}
+
+fn build_bounded_mask_impl(
+    buffer_w: u32,
+    buffer_h: u32,
+    path: &mut PathStorage,
+    transform: &TransAffine,
+    clip: Option<(f64, f64, f64, f64)>,
+    fill_rule: FillRule,
+    gray: bool,
+) -> Option<(LcdMask, i32, i32)> {
     if buffer_w == 0 || buffer_h == 0 {
         return None;
     }
@@ -509,7 +536,12 @@ pub fn build_bounded_mask(
     builder.with_paths(&local, |add| {
         add(path);
     });
-    Some((builder.finalize(), bbox_x, bbox_y))
+    let mask = if gray {
+        builder.finalize_gray()
+    } else {
+        builder.finalize()
+    };
+    Some((mask, bbox_x, bbox_y))
 }
 
 /// Composite an [`LcdMask`] onto `dst_rgba` using per-channel Porter-Duff

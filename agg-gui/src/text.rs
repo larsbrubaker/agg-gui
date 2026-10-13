@@ -518,6 +518,19 @@ pub(crate) fn shape_text(
     shape_text_snapped(font, text, size, x, y, |gy| (gy + 0.5).floor())
 }
 
+/// Whether `t` turns or shears text, so only an outline fill can draw it.
+/// A coverage mask (LCD or grayscale) is an axis-aligned bitmap blitted at the
+/// transformed origin; under a pure translate and scale (any positive or
+/// negative scale on either axis) that is exactly the glyph run, and any
+/// off-diagonal term breaks it.  Every backend sends such text to its outline
+/// path (grayscale, glyph vertices through the transform).  The tolerance
+/// absorbs float noise from composing rotations (`rotate(2 * PI)` leaves terms
+/// near 1e-16) without a visible turn of the glyphs.
+pub fn ctm_needs_outline_text(t: &TransAffine) -> bool {
+    const EPS: f64 = 1e-9;
+    t.shx.abs() > EPS || t.shy.abs() > EPS
+}
+
 /// The baseline [`shape_text_snapped`] places a glyph on when Y hinting is
 /// on, for a context whose transform is `t`: the device pixel row nearest the
 /// baseline, as a coordinate in the context's own units.  Under a scale the

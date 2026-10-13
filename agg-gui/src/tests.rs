@@ -127,6 +127,7 @@ mod rich_toolbar_color_overlay;
 mod root_transform_layers;
 mod root_transform_paint_clip;
 mod rotated_image_blit;
+mod rotated_lcd_text;
 mod row_overflow;
 mod scene_focus;
 mod scroll_bar_appearance_tests;

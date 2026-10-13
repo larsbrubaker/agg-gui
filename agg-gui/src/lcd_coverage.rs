@@ -702,8 +702,8 @@ mod tests;
 
 pub use icon_coverage::{IconLcdCoverage, IconLcdPlanes};
 pub use mask::{
-    build_bounded_mask, composite_lcd_mask, identity_xform, rasterize_gray_mask,
-    rasterize_lcd_mask, rasterize_lcd_mask_multi, rasterize_text_gray_cached,
+    build_bounded_gray_mask, build_bounded_mask, composite_lcd_mask, identity_xform,
+    rasterize_gray_mask, rasterize_lcd_mask, rasterize_lcd_mask_multi, rasterize_text_gray_cached,
     rasterize_text_gray_cached_at_phase, rasterize_text_lcd_cached, rect_to_pixel_clip,
     CachedLcdText, LcdMask,
 };

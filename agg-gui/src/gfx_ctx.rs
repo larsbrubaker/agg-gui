@@ -546,7 +546,11 @@ impl<'a> GfxCtx<'a> {
         // — a subpixel residual that's impossible to remove without
         // breaking LCD chroma.  This is a deliberate trade-off matching
         // the user's "snap should be a checkbox, not always on".
-        if self.lcd_mode {
+        //
+        // A rotated or sheared transform skips it: the mask is an axis-aligned
+        // bitmap, so that text takes the grayscale outline fill below, as it
+        // does with `lcd_mode` off.
+        if self.lcd_mode && !crate::text::ctm_needs_outline_text(&self.state.transform) {
             let t = &self.state.transform;
             let ctm_scale = (t.sx * t.sx + t.shy * t.shy).sqrt().max(1e-6);
             let phys_size = font_size * ctm_scale;

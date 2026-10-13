@@ -270,7 +270,7 @@ fn axis_aligned_text_keeps_the_mask_path_pixel_for_pixel() {
 
 #[test]
 fn only_a_rotated_or_sheared_transform_leaves_the_mask_path() {
-    use crate::text_render::ctm_needs_outline_text;
+    use agg_gui::text::ctm_needs_outline_text;
     use agg_gui::TransAffine;
     let mut scaled = TransAffine::new();
     scaled.sx = 1.5;

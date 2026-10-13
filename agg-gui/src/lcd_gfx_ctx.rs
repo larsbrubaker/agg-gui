@@ -53,6 +53,7 @@ mod gradient;
 mod image;
 mod layers;
 mod stroke;
+mod text_outline;
 
 // ── State ──────────────────────────────────────────────────────────────────
 //
@@ -456,6 +457,13 @@ impl<'a> DrawCtx for LcdGfxCtx<'a> {
         };
         let mut color = self.state.fill_color;
         color.a *= self.state.global_alpha as f32;
+
+        // A mask is an axis-aligned bitmap: rotated or sheared text is drawn
+        // as grayscale outlines instead (`text_outline.rs`).
+        if crate::text::ctm_needs_outline_text(&self.state.transform) {
+            text_outline::fill_text_outline(self, &font, text, x, y, color);
+            return;
+        }
 
         // HiDPI: rasterise at the **physical** font size (logical × CTM
         // scale).  See `gfx_ctx::fill_text` for the long version; short
