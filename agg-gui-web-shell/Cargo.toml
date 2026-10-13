@@ -62,6 +62,11 @@ web-sys = { version = "0.3.82", features = [
     "PointerEvent",
     "MouseEvent",
     "WheelEvent",
+    # Browser input methods (web/ime.rs)
+    "HtmlInputElement",
+    "InputEvent",
+    "CompositionEvent",
+    "FocusOptions",
     # File drag-and-drop (web/file_drop.rs)
     "DragEvent",
     "DataTransfer",

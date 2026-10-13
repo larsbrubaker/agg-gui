@@ -50,6 +50,14 @@ impl Widget for TextArea {
         true
     }
 
+    fn ime_cursor_area(&self) -> Option<Rect> {
+        let st = self.edit.borrow();
+        let cursor = st.cursor;
+        drop(st);
+        let p = self.pos_for_cursor(cursor);
+        Some(Rect::new(p.x, p.y, 1.0, self.cached_line_h.max(1.0)))
+    }
+
     fn text_input_value(&self) -> Option<String> {
         Some(self.text())
     }
@@ -393,6 +401,7 @@ impl Widget for TextArea {
         if !self.focused {
             return;
         }
+        self.paint_preedit_underline(ctx);
         if let Some(t) = self.focus_time {
             let phase = (crate::clock::since(t).as_millis() / 500) as u64;
             self.blink_last_phase.set(phase);
@@ -520,7 +529,11 @@ impl Widget for TextArea {
                 crate::animation::request_draw();
                 EventResult::Ignored
             }
+            Event::TextInput { .. } | Event::ImePreedit { .. } if self.focused => {
+                self.handle_ime_event(event).unwrap_or(EventResult::Ignored)
+            }
             Event::FocusLost => {
+                self.end_composition(true);
                 self.focused = false;
                 self.selecting_drag = false;
                 self.notify_edit_complete_if_changed();

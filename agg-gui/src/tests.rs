@@ -103,6 +103,7 @@ mod stale_path_removed_widget;
 mod try_set_hooks;
 // Loopback HTTP server: native only.
 mod container_fit_in_row;
+mod ime_input;
 #[cfg(not(target_arch = "wasm32"))]
 mod markdown_image_visibility;
 mod menu_hidpi_scale;

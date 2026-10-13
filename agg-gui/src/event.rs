@@ -64,9 +64,34 @@ pub enum Key {
     Tab,
     Enter,
     Escape,
+    /// A function key, `F(1)` ... `F(24)` (the number printed on the key).
+    /// The shells map winit's `NamedKey::F1`.. and the browser's
+    /// `KeyboardEvent.key == "F5"` here, so apps bind `Key::F(5)` rather than
+    /// matching a `Key::Other` name string.
+    F(u8),
     /// Any key not in the above set — not usually handled, included for
     /// completeness.
     Other(String),
+}
+
+impl Key {
+    /// The function key a platform key name denotes: `"F1"` ... `"F24"` give
+    /// `Key::F(1)` ... `Key::F(24)`; anything else (`"F0"`, `"F25"`, `"Fn"`,
+    /// `"f5"`, `"F05"`) gives `None`. winit's `NamedKey` Debug names and the
+    /// DOM's `KeyboardEvent.key` agree on this spelling.
+    pub fn function_key_from_name(name: &str) -> Option<Key> {
+        let digits = name.strip_prefix('F')?;
+        if digits.is_empty()
+            || digits.starts_with('0')
+            || !digits.bytes().all(|b| b.is_ascii_digit())
+        {
+            return None;
+        }
+        match digits.parse::<u8>() {
+            Ok(n) if (1..=24).contains(&n) => Some(Key::F(n)),
+            _ => None,
+        }
+    }
 }
 
 /// A GUI event delivered to a widget.
@@ -95,6 +120,32 @@ pub enum Event {
     KeyDown { key: Key, modifiers: Modifiers },
     /// A key was released.
     KeyUp { key: Key, modifiers: Modifiers },
+    /// Text the platform committed for the focused widget: an input method
+    /// (IME) finished a composition (`"日本語"`), or the OS delivered text
+    /// that has no key press behind it (dictation, an emoji picker, a
+    /// browser soft keyboard). Insert it at the caret, replacing the
+    /// selection and any [`Event::ImePreedit`] being shown.
+    ///
+    /// Plain typing keeps arriving as [`Event::KeyDown`] with
+    /// [`Key::Char`]; the shells send `TextInput` only for text that did not
+    /// come through a key event, so a widget never inserts a character
+    /// twice. Delivered along the focus path like a key (modal first), and
+    /// never offered to accelerators.
+    TextInput { text: String },
+    /// An input method's composition (preedit) text changed.
+    ///
+    /// `text` is the whole composition so far, to be shown inline at the
+    /// caret and underlined; an empty `text` ends the composition (it was
+    /// committed with [`Event::TextInput`] or cancelled) and clears what was
+    /// shown. `cursor` is the caret inside `text` as a byte range
+    /// `(start, end)` on char boundaries (winit's convention), or `None`
+    /// when the input method wants no caret drawn. The composition is not
+    /// part of the widget's text: it is not undoable and does not raise
+    /// change callbacks until committed.
+    ImePreedit {
+        text: String,
+        cursor: Option<(usize, usize)>,
+    },
     /// Sent by the framework when this widget gains keyboard focus.
     FocusGained,
     /// Sent by the framework when this widget loses keyboard focus.

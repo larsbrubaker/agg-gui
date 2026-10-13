@@ -150,6 +150,7 @@ where
             .os_click_policy
             .then_some(crate::click_policy::read_os_double_click as _),
         hovered_files: Vec::new(),
+        ime: crate::ime::ImeSync::default(),
         input_since_frame: false,
         pending_resize: None,
         surface_retry_at: None,

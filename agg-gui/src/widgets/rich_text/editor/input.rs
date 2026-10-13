@@ -111,6 +111,16 @@ impl RichTextEdit {
                 EventResult::Ignored
             }
             Event::KeyDown { key, modifiers } => self.handle_key(key, modifiers),
+            // Committed input-method text; the composition itself
+            // (`Event::ImePreedit`) is not drawn inline here.
+            Event::TextInput { text } if self.focused => {
+                self.core.borrow_mut().insert(text);
+                let caret = self.core.borrow().caret();
+                self.ensure_pos_visible(caret);
+                self.focus_time = Some(crate::clock::now());
+                crate::animation::request_draw();
+                EventResult::Consumed
+            }
             _ => EventResult::Ignored,
         }
     }

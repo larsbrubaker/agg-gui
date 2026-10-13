@@ -84,6 +84,8 @@ pub fn key(k: &WinitKey) -> Option<Key> {
         WinitKey::Named(NamedKey::PageUp) => Key::PageUp,
         WinitKey::Named(NamedKey::PageDown) => Key::PageDown,
         WinitKey::Character(s) => Key::Char(s.chars().next()?),
+        // F1..F24 become `Key::F(n)`; winit's Debug name for them is "F5".
+        WinitKey::Named(named) if function_key(*named).is_some() => function_key(*named)?,
         // Parity with `web_adapter::key`: any other named key round-trips
         // as `Key::Other(name)` (the Debug name matches the browser's
         // `KeyboardEvent.key` for these — "Shift", "Control", "F5", …) so
@@ -91,6 +93,12 @@ pub fn key(k: &WinitKey) -> Option<Key> {
         WinitKey::Named(other) => Key::Other(format!("{other:?}")),
         _ => return None,
     })
+}
+
+/// The function key a winit [`NamedKey`] is (`F1` ... `F24`), as `Key::F(n)`.
+/// Winit names F1..F35; F25 and above stay `Key::Other`.
+fn function_key(named: NamedKey) -> Option<Key> {
+    Key::function_key_from_name(&format!("{named:?}"))
 }
 
 /// Map a full winit key event to this crate's [`Key`].
@@ -240,6 +248,28 @@ mod tests {
                 mods,
             ),
             Key::Char('v')
+        );
+    }
+
+    #[test]
+    fn function_keys_map_to_named_variants() {
+        for (named, n) in [
+            (NamedKey::F1, 1),
+            (NamedKey::F5, 5),
+            (NamedKey::F10, 10),
+            (NamedKey::F12, 12),
+            (NamedKey::F24, 24),
+        ] {
+            assert_eq!(key(&WinitKey::Named(named)), Some(Key::F(n)));
+        }
+        // Beyond F24 and non-F keys keep their `Other` name.
+        assert_eq!(
+            key(&WinitKey::Named(NamedKey::F25)),
+            Some(Key::Other("F25".into()))
+        );
+        assert_eq!(
+            key(&WinitKey::Named(NamedKey::Shift)),
+            Some(Key::Other("Shift".into()))
         );
     }
 

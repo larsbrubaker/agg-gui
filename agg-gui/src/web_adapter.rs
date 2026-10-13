@@ -20,12 +20,18 @@ use wasm_bindgen::JsCast;
 use crate::cursor::CursorIcon;
 use crate::event::{Key, Modifiers};
 
+/// Attribute that marks the web shell's hidden input element (the one the
+/// browser's input method composes into while a canvas text widget has
+/// focus). Keyboard and clipboard listeners treat events from it as the app's
+/// own, not as a DOM editor's.
+pub const IME_INPUT_ATTRIBUTE: &str = "data-agg-gui-ime";
+
 /// Parse a DOM `KeyboardEvent.key` string into this crate's [`Key`].
 ///
 /// Named keys (`"Enter"`, `"ArrowLeft"`, …) map to their enum variant.
-/// A single character becomes `Key::Char(c)`.  Anything else — e.g.
-/// `"F5"`, `"MediaPlayPause"` — round-trips as `Key::Other(name)` so
-/// hosts can still inspect it.
+/// A single character becomes `Key::Char(c)`, `"F1"` … `"F24"` become
+/// `Key::F(n)`.  Anything else — e.g. `"MediaPlayPause"` — round-trips as
+/// `Key::Other(name)` so hosts can still inspect it.
 pub fn key(name: &str) -> Option<Key> {
     Some(match name {
         "Backspace" => Key::Backspace,
@@ -44,6 +50,7 @@ pub fn key(name: &str) -> Option<Key> {
         "Escape" => Key::Escape,
         " " => Key::Char(' '),
         s if s.chars().count() == 1 => Key::Char(s.chars().next()?),
+        s if Key::function_key_from_name(s).is_some() => Key::function_key_from_name(s)?,
         s => Key::Other(s.to_string()),
     })
 }
@@ -65,6 +72,11 @@ pub(crate) fn targets_dom_editor(event: &web_sys::Event) -> bool {
         return false;
     };
     if let Some(el) = target.dyn_ref::<web_sys::Element>() {
+        // The shell's own hidden IME input holds focus while a canvas text
+        // widget is being edited; its keys belong to the app.
+        if el.has_attribute(IME_INPUT_ATTRIBUTE) {
+            return false;
+        }
         let tag = el.tag_name();
         if tag.eq_ignore_ascii_case("input")
             || tag.eq_ignore_ascii_case("textarea")
@@ -128,7 +140,10 @@ pub fn install_keyboard_listeners(on_key: impl FnMut(Key, Modifiers, bool) + 'st
     let down_cb = {
         let on_key = Rc::clone(&on_key);
         Closure::<dyn FnMut(web_sys::KeyboardEvent)>::new(move |e: web_sys::KeyboardEvent| {
-            if targets_dom_editor(&e) || e.is_composing() {
+            // Mid-composition keys (`isComposing`, or keyCode 229 "Process" on
+            // the browsers that report the key before the composition) belong
+            // to the input method; its result arrives as composition events.
+            if targets_dom_editor(&e) || e.is_composing() || e.key_code() == 229 {
                 return;
             }
             let mods = modifiers_of(&e);

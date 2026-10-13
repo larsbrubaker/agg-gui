@@ -83,6 +83,7 @@ mod close_request;
 mod config;
 mod display_metrics;
 mod host;
+mod ime;
 mod input;
 mod lcd_display;
 pub mod menu_bar;

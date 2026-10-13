@@ -322,6 +322,22 @@ impl Widget for RichMarkdownEditWidget {
                 }
             }
             Event::KeyDown { key, modifiers } => self.key_down(key, *modifiers),
+            // Committed input-method text types like a pasted run of
+            // characters. The composition itself (`Event::ImePreedit`) is not
+            // drawn inline here; the OS candidate window shows it.
+            Event::TextInput { text } => {
+                let result = self.state.type_text(text);
+                let handled = result.is_ok();
+                if handled {
+                    let _ = self.state.scroll_caret_into_view();
+                }
+                self.after_input();
+                if handled {
+                    EventResult::Consumed
+                } else {
+                    EventResult::Ignored
+                }
+            }
             Event::FocusGained => {
                 self.set_focus(true);
                 EventResult::Consumed

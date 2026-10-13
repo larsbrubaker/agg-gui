@@ -4,6 +4,7 @@ mod activation;
 mod file_drop;
 mod gesture;
 mod hover_chain;
+mod ime;
 mod keyboard;
 mod path_anchor;
 mod pinch;

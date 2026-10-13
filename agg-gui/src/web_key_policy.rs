@@ -34,7 +34,7 @@ pub(crate) fn should_prevent_default(k: &Key, mods: Modifiers) -> bool {
         return false;
     }
     match k {
-        Key::Other(name) => name == "F1",
+        Key::F(n) => *n == 1,
         _ => matches!(
             k,
             Key::Char(_)
@@ -61,24 +61,24 @@ mod tests {
         Modifiers::default()
     }
 
-    fn other(name: &str) -> Key {
-        Key::Other(name.to_string())
+    fn f(n: u8) -> Key {
+        Key::F(n)
     }
 
     #[test]
     fn f1_is_claimed_for_the_app() {
-        assert!(should_prevent_default(&other("F1"), plain()));
+        assert!(should_prevent_default(&f(1), plain()));
         let shift = Modifiers {
             shift: true,
             ..plain()
         };
-        assert!(should_prevent_default(&other("F1"), shift));
+        assert!(should_prevent_default(&f(1), shift));
     }
 
     #[test]
     fn other_f_keys_stay_with_the_browser() {
-        for name in ["F3", "F5", "F6", "F7", "F11", "F12"] {
-            assert!(!should_prevent_default(&other(name), plain()), "{name}");
+        for n in [3, 5, 6, 7, 11, 12] {
+            assert!(!should_prevent_default(&f(n), plain()), "F{n}");
         }
     }
 
@@ -92,8 +92,8 @@ mod tests {
             alt: true,
             ..plain()
         };
-        assert!(!should_prevent_default(&other("F1"), ctrl));
-        assert!(!should_prevent_default(&other("F1"), alt));
+        assert!(!should_prevent_default(&f(1), ctrl));
+        assert!(!should_prevent_default(&f(1), alt));
     }
 
     #[test]

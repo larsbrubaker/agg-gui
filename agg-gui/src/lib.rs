@@ -86,6 +86,7 @@ mod http_fetch;
 pub mod icon_font;
 pub mod icon_image;
 pub mod image_sequence;
+pub mod ime;
 pub mod input_profile;
 pub mod layout_props;
 pub mod lcd_coverage;

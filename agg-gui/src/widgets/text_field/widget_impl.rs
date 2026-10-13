@@ -35,6 +35,19 @@ impl Widget for TextField {
         !self.read_only
     }
 
+    fn ime_cursor_area(&self) -> Option<Rect> {
+        // The caret line, text-height tall, so the candidate window sits
+        // just under the line being composed.
+        let ins = self.text_insets();
+        let h = self.bounds.height;
+        Some(Rect::new(
+            self.caret_x(),
+            ins.bottom.min(h),
+            1.0,
+            (h - ins.top - ins.bottom).max(1.0),
+        ))
+    }
+
     fn text_input_value(&self) -> Option<String> {
         Some(self.text())
     }
@@ -169,6 +182,7 @@ impl Widget for TextField {
         let font = self.active_font();
         let sig = TextFieldSig {
             text: st.text.clone(),
+            preedit: self.preedit.clone(),
             cursor: st.cursor,
             anchor: st.anchor,
             focused: self.focused,
@@ -214,10 +228,16 @@ impl Widget for TextField {
         let h = self.bounds.height;
         let r = self.theme.border_radius.unwrap_or(6.0);
         let ins = self.text_insets();
-        let (raw_text, raw_cursor, raw_anchor) = {
+        // With an input-method composition the shown text has it spliced in
+        // and the "selection" collapses to the composition's caret.
+        let (raw_text, raw_cursor, raw_anchor, preedit_span) = if self.preedit.is_some() {
+            let (shown, caret, span) = self.shown_text();
+            (shown, caret, caret, span)
+        } else {
             let st = self.edit.borrow();
-            (st.text.clone(), st.cursor, st.anchor)
+            (st.text.clone(), st.cursor, st.anchor, None)
         };
+        let shown_raw = preedit_span.map(|_| raw_text.clone());
         // In password mode render '•' for every character, but keep byte positions
         // consistent by recomputing them against the masked string.
         let (text, cursor, anchor) = if self.masking_active() {
@@ -284,6 +304,10 @@ impl Widget for TextField {
             ctx.set_fill_color(t.text_color_for(self.focused, self.hovered, v.text_color));
             ctx.fill_text(&text, text_x, baseline_y);
         }
+        if let (Some(span), Some(shown)) = (preedit_span, shown_raw.as_deref()) {
+            let color = t.text_color_for(self.focused, self.hovered, v.text_color);
+            self.paint_preedit_underline(ctx, shown, span, (text_x, baseline_y, m.descent), color);
+        }
 
         // Cursor draws in `paint_overlay` — skipped here so blink
         // state doesn't force the cache to re-raster twice per second.
@@ -333,10 +357,11 @@ impl Widget for TextField {
         }
 
         let cursor_visible = self.focused
-            && {
+            && (self.preedit.is_some() || {
                 let st = self.edit.borrow();
                 st.cursor == st.anchor
-            }
+            })
+            && self.ime_allows_caret()
             && match self.focus_time {
                 Some(t) => (crate::clock::since(t).as_millis() / 500) % 2 == 0,
                 None => false,
@@ -400,7 +425,9 @@ impl Widget for TextField {
             {
                 self.suggest_requery()
             }
-            Event::KeyDown { .. } | Event::MouseDown { .. } => self.suggest_after_edit(),
+            Event::KeyDown { .. } | Event::MouseDown { .. } | Event::TextInput { .. } => {
+                self.suggest_after_edit()
+            }
             Event::MouseMove { .. } if self.mouse_down => self.suggest_after_edit(),
             Event::FocusLost => {
                 if let Some(c) = self.text_suggestions() {
@@ -550,7 +577,12 @@ impl TextField {
                 EventResult::Ignored
             }
 
+            Event::TextInput { .. } | Event::ImePreedit { .. } if self.focused => {
+                self.handle_ime_event(event).unwrap_or(EventResult::Ignored)
+            }
+
             Event::FocusLost => {
+                self.preedit = None;
                 let was_focused = self.focused;
                 self.focused = false;
                 self.focus_time = None;
@@ -603,15 +635,15 @@ impl TextField {
     /// spaces advance the caret glyph-by-glyph like every other character —
     /// matching egui. Shared by the overlay paint and the caret regression test.
     pub(crate) fn caret_x(&self) -> f64 {
-        let st = self.edit.borrow();
         let font = self.active_font();
+        let before = self.text_before_caret();
         let advance = if self.masking_active() {
             const BULLET: char = '•';
-            let n = st.text[..st.cursor].chars().count();
+            let n = before.chars().count();
             let masked = BULLET.to_string().repeat(n);
             measure_advance(&font, &masked, self.font_size)
         } else {
-            measure_advance(&font, &st.text[..st.cursor], self.font_size)
+            measure_advance(&font, &before, self.font_size)
         };
         self.text_insets().left - self.scroll_x + advance
     }

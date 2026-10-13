@@ -429,6 +429,18 @@ pub(crate) fn ensure_focused_visible_above_keyboard(
 /// (`collect_inspector_nodes`): descending from a widget applies
 /// `translate(widget.bounds) · widget.child_transform`.
 pub(crate) fn focused_widget_screen_bounds(root: &dyn Widget, path: &[usize]) -> Option<Rect> {
+    widget_rect_in_root(root, path, |w| w.bounds())
+}
+
+/// [`focused_widget_screen_bounds`] for any rectangle the widget at `path`
+/// picks: `rect_of` returns it in the widget's **parent-local** space (as
+/// `bounds()` is), and the result is in root logical Y-up space. The IME
+/// candidate-window placement uses it for the caret rectangle.
+pub(crate) fn widget_rect_in_root(
+    root: &dyn Widget,
+    path: &[usize],
+    rect_of: impl FnOnce(&dyn Widget) -> Rect,
+) -> Option<Rect> {
     // `to_screen` maps the CURRENT widget's parent-local coords → screen,
     // starting at identity (the root's parent frame — the inspector walk seeds
     // its `parent_to_screen` the same way with `translate(0, 0)`).  Each loop
@@ -451,7 +463,7 @@ pub(crate) fn focused_widget_screen_bounds(root: &dyn Widget, path: &[usize]) ->
     // `to_screen` now maps the focused widget's parent-local coords → screen;
     // apply it to the leaf's own bounds rect and take the axis-aligned bound
     // (exact for translation + uniform scale, conservative otherwise).
-    Some(transform_rect_aabb(&to_screen, widget.bounds()))
+    Some(transform_rect_aabb(&to_screen, rect_of(widget)))
 }
 
 /// AABB of `rect`'s four corners after passing through `t`.  Mirrors the

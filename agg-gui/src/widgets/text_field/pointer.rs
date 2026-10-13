@@ -76,16 +76,14 @@ impl TextField {
         let inner_w = (self.bounds.width - ins.left - ins.right).max(0.0);
         let font = self.active_font();
         let cx = {
-            let st = self.edit.borrow();
+            let before = self.text_before_caret();
             if self.masking_active() {
                 const BULLET: char = '•';
-                #[allow(dead_code)]
-                const BULLET_LEN: usize = 3;
-                let n = st.text[..st.cursor].chars().count();
+                let n = before.chars().count();
                 let masked = BULLET.to_string().repeat(n);
                 measure_advance(&font, &masked, self.font_size)
             } else {
-                measure_advance(&font, &st.text[..st.cursor], self.font_size)
+                measure_advance(&font, &before, self.font_size)
             }
         };
         if cx < self.scroll_x {

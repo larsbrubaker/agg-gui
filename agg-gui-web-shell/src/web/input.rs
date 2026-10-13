@@ -33,6 +33,12 @@ const TOUCH_DEVICE: agg_gui::TouchDeviceId = agg_gui::TouchDeviceId(0);
 pub(super) fn install_keyboard() {
     agg_gui::web_adapter::install_keyboard_listeners(|key, mods, pressed| {
         let modifiers = Some(mods);
+        // A typed character the app now owns; the hidden IME input's `input`
+        // event for it must not insert it a second time.
+        super::ime::note_key(
+            matches!(key, agg_gui::Key::Char(_)) && !mods.ctrl && !mods.meta,
+            pressed,
+        );
         forward(if pressed {
             ForwarderEvent::KeyDown { key, modifiers }
         } else {
@@ -137,6 +143,7 @@ pub(super) fn install_pointer_listeners(canvas: &web_sys::HtmlCanvasElement) {
         add_listener(target, "pointerdown", move |e: web_sys::PointerEvent| {
             // Capture so drags keep reporting positions outside the canvas.
             let _ = c.set_pointer_capture(e.pointer_id());
+            super::ime::note_canvas_press();
             // A pointerdown is a user gesture — when iOS grants tilt access.
             sensors::service_tilt_permission_gesture();
             let (x, y) = pos(&c, e.client_x(), e.client_y());

@@ -213,6 +213,9 @@ fn tick() {
         }
     }
 
+    // The browser's input method follows focus and the caret.
+    super::ime::sync();
+
     let pointer_idle = POINTERS.with(|p| p.borrow().is_idle());
     let before = POLICY.with(|p| p.get());
     let mut policy = before;

@@ -49,6 +49,7 @@ mod binding;
 mod clipboard;
 mod context_menu;
 mod filter;
+mod ime;
 mod keyboard_mode;
 mod layout_builders;
 mod password;
@@ -56,6 +57,7 @@ mod pointer;
 mod sig;
 mod suggestions;
 mod theme;
+mod undo_ops;
 mod vertical_keys;
 mod widget_impl;
 
@@ -150,6 +152,10 @@ pub struct TextField {
     // words/lines) plus the pivot range the initiating click selected.
     select_granularity: crate::widgets::multi_click::SelectGranularity,
     select_pivot: (usize, usize),
+
+    /// The input-method composition shown inline, if one is in progress.
+    /// See `text_field/ime.rs`.
+    preedit: Option<crate::ime::Preedit>,
 
     // Content
     pub placeholder: String,
@@ -247,6 +253,7 @@ impl TextField {
             multi_click: crate::widgets::multi_click::MultiClickTracker::default(),
             select_granularity: crate::widgets::multi_click::SelectGranularity::default(),
             select_pivot: (0, 0),
+            preedit: None,
             placeholder: String::new(),
             padding: 8.0,
             text_insets: None,
@@ -526,31 +533,6 @@ impl TextField {
             after,
             target: Rc::clone(&self.edit),
         }));
-        self.ensure_cursor_visible();
-        self.notify_change();
-    }
-
-    fn do_undo(&mut self) {
-        self.flush_pending();
-        self.undo.undo();
-        // Clamp positions in case the text changed length.
-        let len = self.edit.borrow().text.len();
-        let mut st = self.edit.borrow_mut();
-        st.cursor = st.cursor.min(len);
-        st.anchor = st.anchor.min(len);
-        drop(st);
-        self.ensure_cursor_visible();
-        self.notify_change();
-    }
-
-    fn do_redo(&mut self) {
-        self.flush_pending();
-        self.undo.redo();
-        let len = self.edit.borrow().text.len();
-        let mut st = self.edit.borrow_mut();
-        st.cursor = st.cursor.min(len);
-        st.anchor = st.anchor.min(len);
-        drop(st);
         self.ensure_cursor_visible();
         self.notify_change();
     }

@@ -6,6 +6,8 @@
 //!   device-loss rebuild;
 //! - [`frame`] — the `requestAnimationFrame` loop: sizing, the paint
 //!   decision, and one painted frame;
+//! - [`ime`] — the hidden input that carries browser input-method
+//!   composition and committed text to the focused text widget;
 //! - [`input`] — canvas pointer / wheel / context-menu listeners;
 //! - [`file_drop`] — canvas file drag-hover and drop listeners;
 //! - [`lifecycle`] — window-level pointer-release resync, page-hide flush;
@@ -34,6 +36,7 @@ use crate::policy::FirstPaintGate;
 mod file_drop;
 mod frame;
 mod gpu;
+mod ime;
 mod input;
 mod lifecycle;
 mod platform;
@@ -228,6 +231,7 @@ where
     CANVAS.with(|c| *c.borrow_mut() = Some(canvas.clone()));
     CONFIG.with(|c| *c.borrow_mut() = Some(config.clone()));
 
+    ime::install();
     input::install_keyboard();
     input::install_pointer_listeners(&canvas);
     file_drop::install_file_drop_listeners(&canvas);

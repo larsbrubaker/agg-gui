@@ -74,6 +74,8 @@ pub(crate) struct ShellLoop<H: ShellHost> {
     /// Paths of the file drag over the window (winit sends one
     /// `HoveredFile` per file); empty when no file drag is in progress.
     pub(crate) hovered_files: Vec<std::path::PathBuf>,
+    /// The IME state last sent to the OS (`ime.rs`).
+    pub(crate) ime: crate::ime::ImeSync,
     pub(crate) input_since_frame: bool,
     pub(crate) pending_resize: Option<(u32, u32)>,
     /// When a backed-off surface configure retry is due, from the last
@@ -100,7 +102,11 @@ pub(crate) struct ShellLoop<H: ShellHost> {
 impl<H: ShellHost> ShellLoop<H> {
     pub(crate) fn handle(&mut self, event: Event<()>, elwt: &ActiveEventLoop) {
         match event {
-            Event::WindowEvent { event, .. } => self.window_event(event, elwt),
+            Event::WindowEvent { event, .. } => {
+                self.window_event(event, elwt);
+                // Focus, the caret and the text may all have moved.
+                self.ime.sync(&self.window, &self.app);
+            }
 
             // A scheduled `WaitUntil` deadline fired. Belt-and-braces only:
             // the scheduled channel is read non-destructively
@@ -326,6 +332,17 @@ impl<H: ShellHost> ShellLoop<H> {
                         modifiers: None,
                     },
                 });
+            }
+
+            // The input method: composition text and committed text. Plain
+            // typing keeps arriving as `KeyboardInput` (winit sends `Commit`
+            // only for text an input method composed).
+            WindowEvent::Ime(ime) => {
+                self.input_since_frame = true;
+                if let Some(event) = crate::ime::forwarder_event(ime) {
+                    self.forward(event);
+                }
+                self.window.request_redraw();
             }
 
             WindowEvent::DroppedFile(path) => {
@@ -564,6 +581,8 @@ impl<H: ShellHost> ShellLoop<H> {
             },
         );
         self.apply_cursor();
+        // A painted frame may have moved the caret (layout, scrolling).
+        self.ime.sync(&self.window, &self.app);
         match outcome {
             Ok(outcome) => {
                 self.surface_retry_at = outcome.retry_at;

@@ -183,7 +183,7 @@ fn rust_only_strokes_map_to_the_keys_the_shells_report() {
             Key::Enter,
             Key::Backspace,
             Key::ArrowLeft,
-            Key::Other("F4".into()),
+            Key::F(4),
             Key::Char(' '),
         ]
     );

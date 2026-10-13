@@ -336,6 +336,9 @@ pub struct TextArea {
     /// How far the text has scrolled left while unwrapped (C#'s
     /// `-TopLeftOffset.X`): `0` shows the start of every line.
     h_offset: f64,
+    /// The input-method composition placed in the buffer, if one is in
+    /// progress. See `text_area/ime.rs`.
+    composition: Option<ime::Composition>,
 }
 
 impl TextArea {
@@ -393,6 +396,7 @@ impl TextArea {
             theme: crate::widgets::TextFieldTheme::default(),
             word_wrap: true,
             h_offset: 0.0,
+            composition: None,
         }
     }
 
@@ -718,6 +722,7 @@ mod edit_ops;
 mod frame;
 mod geometry;
 mod highlight;
+mod ime;
 mod no_wrap;
 mod scroll;
 mod undo;

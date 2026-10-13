@@ -84,7 +84,7 @@ impl Keys {
             return Key::Char(char::from(b'0' + (c - Keys::NUM_PAD0.0) as u8));
         }
         if (Keys::F1.0..=Keys::F24.0).contains(&c) {
-            return Key::Other(format!("F{}", c - Keys::F1.0 + 1));
+            return Key::F((c - Keys::F1.0 + 1) as u8);
         }
         Key::Other(code.to_string())
     }

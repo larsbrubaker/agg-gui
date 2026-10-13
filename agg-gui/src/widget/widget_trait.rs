@@ -355,6 +355,15 @@ pub trait Widget {
         false
     }
 
+    /// Where an input-method (IME) candidate window should appear: the
+    /// caret's rectangle (or the composition's, while one is shown) in this
+    /// widget's local Y-up space. Only asked of the focused widget that
+    /// [`accepts_text_input`](Self::accepts_text_input). `None` (default)
+    /// places the window under the whole widget.
+    fn ime_cursor_area(&self) -> Option<Rect> {
+        None
+    }
+
     /// Current text contents of this widget if it is text-bearing.
     /// Used by the on-screen software keyboard to apply the
     /// sentence-start auto-capitalize heuristic: an empty field (or one

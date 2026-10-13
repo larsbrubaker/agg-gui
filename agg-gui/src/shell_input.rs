@@ -127,6 +127,17 @@ pub enum ForwarderEvent {
         key: Key,
         modifiers: Option<Modifiers>,
     },
+    /// Text the platform committed (an IME finished a composition, a soft
+    /// keyboard, dictation); see `App::on_text_input`.
+    TextInput {
+        text: String,
+    },
+    /// The IME's composition text changed (empty `text` ends it); see
+    /// `App::on_ime_preedit`.
+    ImePreedit {
+        text: String,
+        cursor: Option<(usize, usize)>,
+    },
     /// A raw touch contact; the app aggregates gestures and emulates the mouse.
     Touch {
         phase: TouchPhase,
@@ -340,6 +351,12 @@ impl InputForwarder {
             ForwarderEvent::KeyUp { key, modifiers } => {
                 let mods = self.resolve(modifiers);
                 app.on_key_up(key, mods);
+            }
+            ForwarderEvent::TextInput { text } => {
+                app.on_text_input(&text);
+            }
+            ForwarderEvent::ImePreedit { text, cursor } => {
+                app.on_ime_preedit(&text, cursor);
             }
             ForwarderEvent::Touch {
                 phase,
