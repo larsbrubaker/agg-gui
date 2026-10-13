@@ -24,6 +24,13 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   a logical unit: at 2x a baseline of 3.5 units is device row 7 (as a coverage-mask composite
   puts it), no longer row 8.  A backbuffered `Label` now lands on the same row as direct text.
 
+- The wgpu backend's tessellated-outline text path (`fill_text` on a backend without a coverage-mask
+  composite; the wgpu backend always has one, so it is driven directly in tests) snaps a hinted
+  baseline to a device pixel row, as the software outline fill and the coverage-mask path do, not
+  to a logical unit: at 1.5x a baseline of 10.5 units is device row 16, no longer row 16.5.
+  `text::device_baseline_snap` is now public for this. A rotated or sheared transform keeps the
+  logical-unit snap.
+
 - `lcd_coverage::collapse_lcd_pixel` (and so `LcdBuffer::to_rgba8_top_down_collapsed` and the
   default `DrawCtx::draw_lcd_backbuffer_arc`) collapses to the ink's own straight colour
   (`c_i / a_i`) at the Rec.709-weighted alpha, instead of dividing the colour plane by that alpha.

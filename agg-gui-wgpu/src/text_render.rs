@@ -103,7 +103,23 @@ impl WgpuGfxCtx {
         }
 
         // Grayscale outline path.
-        let shaped = shape_glyphs(&font, text, self.font_size);
+        self.fill_text_outline(&font, text, x, y);
+    }
+
+    /// Draw `text` as tessellated glyph outlines (solid triangles), the path
+    /// for a backend that cannot composite a coverage mask.  Split out of
+    /// [`Self::fill_text_impl`] so it can be driven directly: the wgpu backend
+    /// always has a mask composite, so `fill_text` never reaches it here.
+    pub(crate) fn fill_text_outline(
+        &mut self,
+        font: &Arc<agg_gui::text::Font>,
+        text: &str,
+        x: f64,
+        y: f64,
+    ) {
+        let ctm = *self.ctm();
+        let ctm_scale = (ctm.sx * ctm.sx + ctm.shy * ctm.shy).sqrt().max(1e-6);
+        let shaped = shape_glyphs(font, text, self.font_size);
         let font_size = self.font_size;
         let width_scale = agg_gui::font_settings::current_width();
         let italic_shear =
@@ -120,12 +136,8 @@ impl WgpuGfxCtx {
         for glyph in &shaped {
             let gx = pen_x + glyph.x_offset;
             let gy_raw = y + glyph.y_offset;
-            let gy = if hint_y {
-                (gy_raw + 0.5).floor()
-            } else {
-                gy_raw
-            };
-            let render_font = glyph.fallback_font.as_deref().unwrap_or(&font);
+            let gy = outline_baseline(&ctm, gy_raw, hint_y);
+            let render_font = glyph.fallback_font.as_deref().unwrap_or(font.as_ref());
 
             if let Some(cached) =
                 self.glyph_cache
@@ -455,6 +467,21 @@ impl WgpuGfxCtx {
         }
 
         result
+    }
+}
+
+/// Where the outline path puts a glyph's baseline, in the context's own
+/// units: with Y hinting on, on the device pixel row nearest `y` when `ctm` is
+/// a pure translate and scale (so at 1.5x a baseline of 3.5 units is row 5 or
+/// 6, as the coverage-mask path and the software outline fill put it), and
+/// unchanged with hinting off.  A rotated or sheared transform has no pixel
+/// rows, so it takes the same logical-unit snap the software path keeps
+/// (`agg_gui::text::device_baseline_snap`) and never moves toward a device row.
+pub(crate) fn outline_baseline(ctm: &agg_gui::TransAffine, y: f64, hint_y: bool) -> f64 {
+    if hint_y {
+        agg_gui::text::device_baseline_snap(ctm, y)
+    } else {
+        y
     }
 }
 

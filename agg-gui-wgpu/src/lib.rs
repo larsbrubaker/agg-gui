@@ -186,6 +186,8 @@ mod lcd_layer_tint_readback_tests;
 #[cfg(test)]
 mod lcd_text_scale_readback_tests;
 #[cfg(test)]
+mod outline_text_baseline_tests;
+#[cfg(test)]
 mod radial_gradient_readback_tests;
 #[cfg(test)]
 mod root_transform_readback_tests;

@@ -525,7 +525,7 @@ pub(crate) fn shape_text(
 /// 2x, not the row of logical 4), which is where a coverage-mask composite
 /// puts it too.  A rotated or sheared transform has no pixel rows, so the
 /// logical-unit snap is kept.
-pub(crate) fn device_baseline_snap(t: &TransAffine, y: f64) -> f64 {
+pub fn device_baseline_snap(t: &TransAffine, y: f64) -> f64 {
     if t.shx != 0.0 || t.shy != 0.0 || t.sy.abs() < 1e-9 {
         return (y + 0.5).floor();
     }
