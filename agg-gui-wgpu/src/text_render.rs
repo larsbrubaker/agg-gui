@@ -27,12 +27,16 @@ impl WgpuGfxCtx {
     /// Implementation of `DrawCtx::fill_text`.
     ///
     /// Two paths, mirroring `demo-gl/src/text_render.rs::fill_text_impl`:
-    /// - **LCD subpixel** when `has_lcd_mask_composite` returns true *and*
-    ///   `self.lcd_mode` is on — uses the cached LCD coverage mask path that
-    ///   feeds `draw_lcd_mask_arc`.
+    /// - **Coverage mask** when `has_lcd_mask_composite` returns true *and*
+    ///   the CTM is a pure translate and scale — the cached coverage mask
+    ///   path that feeds `draw_lcd_mask_arc` (LCD subpixel while `lcd_mode`
+    ///   is on, grayscale otherwise).
     /// - **Grayscale outline** otherwise — tessellates glyph outlines via the
     ///   shared `GlyphCache` (XY triangles, no per-vertex alpha) and submits
-    ///   them as solid-coloured triangles via `DrawCommand::Solid`.
+    ///   them as solid-coloured triangles via `DrawCommand::Solid`.  A mask is
+    ///   an axis-aligned bitmap blitted at the transformed origin, so it
+    ///   cannot follow a rotation or shear; the outline path runs every vertex
+    ///   through the CTM, as the software `GfxCtx` does.
     pub(crate) fn fill_text_impl(&mut self, text: &str, x: f64, y: f64) {
         let Some(font) = self.font.clone() else {
             return;
@@ -49,9 +53,10 @@ impl WgpuGfxCtx {
         // otherwise a grayscale mask (equal channels, no chroma fringing)
         // for hi-DPI / scaled / touch displays. Both share the same cache,
         // texture upload, and GPU composite — only the finalize differs.
-        // The tessellated-outline path below is a last resort for backends
-        // that can't composite a coverage mask.
-        if self.has_lcd_mask_composite() {
+        // The tessellated-outline path below serves backends that can't
+        // composite a coverage mask, and any transform with rotation or
+        // shear, which a bitmap blit cannot follow.
+        if self.has_lcd_mask_composite() && !ctm_needs_outline_text(&ctm) {
             let phys_size = self.font_size * ctm_scale;
             // LCD subpixel geometry is valid wherever the destination is
             // opaque: the backbuffer, and equally a layer whose caller has
@@ -102,20 +107,37 @@ impl WgpuGfxCtx {
             return;
         }
 
-        // Grayscale outline path.
-        self.fill_text_outline(&font, text, x, y);
+        // Grayscale outline path. Honours the blend mode like the grayscale
+        // mask above.
+        self.draw_with_blend_mode(self.fill_color, |ctx, color| {
+            ctx.fill_text_outline_colored(&font, text, x, y, color)
+        });
     }
 
-    /// Draw `text` as tessellated glyph outlines (solid triangles), the path
-    /// for a backend that cannot composite a coverage mask.  Split out of
-    /// [`Self::fill_text_impl`] so it can be driven directly: the wgpu backend
-    /// always has a mask composite, so `fill_text` never reaches it here.
+    /// Draw `text` as tessellated glyph outlines (solid triangles) in the
+    /// fill colour.  Split out of [`Self::fill_text_impl`] so tests can drive
+    /// it under a pure translate and scale, where `fill_text` takes the mask
+    /// path.
+    #[cfg(test)]
     pub(crate) fn fill_text_outline(
         &mut self,
         font: &Arc<agg_gui::text::Font>,
         text: &str,
         x: f64,
         y: f64,
+    ) {
+        self.fill_text_outline_colored(font, text, x, y, self.fill_color);
+    }
+
+    /// [`Self::fill_text_outline`] in `color`, the colour a blend-mode draw
+    /// hands its closure.
+    pub(crate) fn fill_text_outline_colored(
+        &mut self,
+        font: &Arc<agg_gui::text::Font>,
+        text: &str,
+        x: f64,
+        y: f64,
+        color: Color,
     ) {
         let ctm = *self.ctm();
         let ctm_scale = (ctm.sx * ctm.sx + ctm.shy * ctm.shy).sqrt().max(1e-6);
@@ -164,7 +186,7 @@ impl WgpuGfxCtx {
             self.commands.push(DrawCommand::Solid {
                 verts: all_verts,
                 indices: all_idx,
-                color: self.fill_color,
+                color,
                 global_alpha: self.global_alpha as f32,
                 clip: self.current_clip(),
             });
@@ -468,6 +490,17 @@ impl WgpuGfxCtx {
 
         result
     }
+}
+
+/// Whether `ctm` turns or shears text, so only the outline path can draw it.
+/// A coverage mask is blitted axis-aligned at the transformed origin; under a
+/// pure translate and scale (any positive or negative scale on either axis)
+/// that is exactly the glyph run, and any off-diagonal term breaks it.  The
+/// tolerance absorbs float noise from composing rotations (`rotate(2 * PI)`
+/// leaves terms near 1e-16) without a visible turn of the glyphs.
+pub(crate) fn ctm_needs_outline_text(ctm: &agg_gui::TransAffine) -> bool {
+    const EPS: f64 = 1e-9;
+    ctm.shx.abs() > EPS || ctm.shy.abs() > EPS
 }
 
 /// Where the outline path puts a glyph's baseline, in the context's own

@@ -192,6 +192,8 @@ mod radial_gradient_readback_tests;
 #[cfg(test)]
 mod root_transform_readback_tests;
 #[cfg(test)]
+mod rotated_text_readback_tests;
+#[cfg(test)]
 mod save_restore_readback_tests;
 #[cfg(test)]
 mod screenshot_scaled_tests;
