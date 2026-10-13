@@ -4,6 +4,7 @@
 //! with a glob re-export.
 
 pub use super::gl_paint::GlPaint;
+pub use super::paint_nesting::PaintNesting;
 pub use crate::paints::{
     FillRule, GradientSpread, GradientStop, LinearGradientPaint, PatternPaint, RadialGradientPaint,
 };

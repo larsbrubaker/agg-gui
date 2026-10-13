@@ -2,8 +2,9 @@
 //! `ReportUnhandledException`.
 //!
 //! Work agg-gui runs on the UI thread on someone else's behalf — the idle
-//! actions [`crate::ui_thread`] drains each frame, and the hooks that run with
-//! them — is contained: a panic in one of them is caught, turned into an
+//! actions [`crate::ui_thread`] drains each frame, the hooks that run with
+//! them, and a widget's paint callbacks inside [`crate::App::paint`] — is
+//! contained: a panic in one of them is caught, turned into an
 //! [`UnhandledReport`] and handed to [`report_unhandled`], and the rest of the
 //! frame's work still runs. An automation runner installs a handler with
 //! [`set_unhandled_handler`] so a silent UI failure becomes a test failure.
@@ -27,6 +28,11 @@ pub enum UnhandledOrigin {
     /// A queued UI-thread action (`ui_thread::run_on_idle` and friends,
     /// intervals, drain hooks).
     IdleAction,
+    /// A widget's `paint`, `paint_overlay`, `finish_paint` or
+    /// `paint_global_overlay`, inside [`crate::App::paint`]. The widget draws
+    /// nothing more that frame; the context's save/layer stacks and the paint
+    /// clip stack are rebalanced, and the rest of the tree still paints.
+    Paint,
 }
 
 /// One unhandled UI-thread failure.
@@ -105,6 +111,19 @@ pub fn report_unhandled(report: &UnhandledReport) -> bool {
     true
 }
 
+/// Hands a caught panic `payload` to this thread's handler. Returns the
+/// payload when no handler took it, for the caller to re-raise.
+pub(crate) fn report_panic(
+    origin: UnhandledOrigin,
+    payload: Box<dyn Any + Send>,
+) -> Option<Box<dyn Any + Send>> {
+    if report_unhandled(&UnhandledReport::from_panic(origin, payload.as_ref())) {
+        None
+    } else {
+        Some(payload)
+    }
+}
+
 /// Runs `work`, containing a panic: a panic is reported through
 /// [`report_unhandled`]; when no handler takes it, its payload is returned so
 /// the caller can re-raise it once the rest of its work is done.
@@ -113,9 +132,5 @@ pub(crate) fn run_contained(
     work: impl FnOnce(),
 ) -> Option<Box<dyn Any + Send>> {
     let payload = catch_unwind(AssertUnwindSafe(work)).err()?;
-    if report_unhandled(&UnhandledReport::from_panic(origin, payload.as_ref())) {
-        None
-    } else {
-        Some(payload)
-    }
+    report_panic(origin, payload)
 }

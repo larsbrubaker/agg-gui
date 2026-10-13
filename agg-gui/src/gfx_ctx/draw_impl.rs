@@ -402,6 +402,21 @@ impl crate::draw_ctx::DrawCtx for GfxCtx<'_> {
     fn pop_layer(&mut self) {
         self.pop_layer()
     }
+    fn paint_nesting(&self) -> crate::draw_ctx::PaintNesting {
+        crate::draw_ctx::PaintNesting {
+            layers: self.layer_stack.len(),
+            saves: self.state_stack.len(),
+        }
+    }
+    fn unwind_paint_nesting(&mut self, to: crate::draw_ctx::PaintNesting) {
+        // Layers first: popping one gives the parent's save stack back.
+        while self.layer_stack.len() > to.layers {
+            self.pop_layer();
+        }
+        while self.state_stack.len() > to.saves {
+            self.restore();
+        }
+    }
     fn set_layer_rounded_clip(&mut self, x: f64, y: f64, w: f64, h: f64, r: f64) {
         self.set_layer_rounded_clip(x, y, w, h, r)
     }

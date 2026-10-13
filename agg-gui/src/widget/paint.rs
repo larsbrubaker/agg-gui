@@ -18,8 +18,10 @@
 
 use super::*;
 
+mod contain;
 mod offscreen;
 
+use contain::contained;
 use offscreen::{
     paint_subtree_backbuffered, paint_subtree_layer, paint_subtree_unified_backbuffer,
 };
@@ -209,7 +211,7 @@ pub fn paint_global_overlays(widget: &mut dyn Widget, ctx: &mut dyn DrawCtx) {
         paint_global_overlays(child.as_mut(), ctx);
         ctx.restore();
     }
-    widget.paint_global_overlay(ctx);
+    contained(ctx, |ctx| widget.paint_global_overlay(ctx));
 }
 
 /// Direct (non-cached) paint: widget and its children paint onto `ctx`
@@ -249,7 +251,7 @@ fn paint_subtree_direct_inner(
         ctx.snap_to_pixel();
     }
 
-    widget.paint(ctx);
+    contained(ctx, |ctx| widget.paint(ctx));
 
     let b = widget.bounds();
     let (cx, cy, cw, ch) = widget
@@ -298,9 +300,9 @@ fn paint_subtree_direct_inner(
     });
     ctx.restore(); // lifts the children clip before paint_overlay
     if include_overlay {
-        widget.paint_overlay(ctx);
+        contained(ctx, |ctx| widget.paint_overlay(ctx));
     }
-    widget.finish_paint(ctx);
+    contained(ctx, |ctx| widget.finish_paint(ctx));
 
     if snap_this {
         ctx.restore();

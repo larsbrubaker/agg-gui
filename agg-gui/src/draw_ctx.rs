@@ -33,6 +33,7 @@ use agg_rust::trans_affine::TransAffine;
 // The GL paint hook (`draw_ctx/gl_paint.rs`) and the paint definitions are
 // re-exported from `draw_ctx/reexports.rs` under their old paths.
 mod gl_paint;
+mod paint_nesting;
 mod reexports;
 pub use reexports::*;
 
@@ -131,11 +132,7 @@ pub trait DrawCtx {
     /// inside the current clip with `color` (agg-sharp's
     /// `Graphics2D.Clear(RectangleDouble, Color)`).
     fn clear_rect(&mut self, x: f64, y: f64, w: f64, h: f64, color: Color) {
-        self.save();
-        self.reset_transform();
-        self.clip_rect(x, y, w, h);
-        self.clear_clip(color);
-        self.restore();
+        defaults::clear_rect(self, x, y, w, h, color);
     }
 
     // ── Path building ─────────────────────────────────────────────────────────
@@ -167,16 +164,7 @@ pub trait DrawCtx {
         end_angle: f64,
         ccw: bool,
     ) {
-        use defaults::EllipseOp;
-        for op in defaults::ellipse_ops(cx, cy, rx, ry, rotation, start_angle, end_angle, ccw) {
-            match op {
-                EllipseOp::MoveTo(x, y) => self.move_to(x, y),
-                EllipseOp::CubicTo(c1x, c1y, c2x, c2y, x, y) => {
-                    self.cubic_to(c1x, c1y, c2x, c2y, x, y)
-                }
-                EllipseOp::ClosePath => self.close_path(),
-            }
-        }
+        defaults::ellipse(self, cx, cy, rx, ry, rotation, start_angle, end_angle, ccw)
     }
 
     /// Add an axis-aligned rectangle contour to the current path.
@@ -232,9 +220,7 @@ pub trait DrawCtx {
 
     #[doc = include_str!("draw_ctx/docs/snap_to_pixel.md")]
     fn snap_to_pixel(&mut self) {
-        if let Some((dx, dy)) = defaults::pixel_snap_step(&self.transform()) {
-            self.translate(dx, dy);
-        }
+        defaults::snap_to_pixel(self);
     }
 
     // ── Compositing layers ────────────────────────────────────────────────────
@@ -302,6 +288,22 @@ pub trait DrawCtx {
     ///
     /// Must be called after a matching `push_layer`.  Unmatched calls are ignored.
     fn pop_layer(&mut self) {}
+
+    /// How many `save()` levels and layers are open right now. Paint
+    /// containment reads it before calling into a widget and hands it to
+    /// [`unwind_paint_nesting`](Self::unwind_paint_nesting) if that widget
+    /// panicked, so a draw that unwound between a `save` (or `push_layer`) and
+    /// its `restore` (or `pop_layer`) cannot leak the level into later widgets.
+    /// The default reports nothing open: a context that keeps no stacks has
+    /// nothing to leak; every renderer in the workspace overrides both.
+    fn paint_nesting(&self) -> PaintNesting {
+        PaintNesting::default()
+    }
+
+    /// Close every layer and `save()` level opened since
+    /// [`paint_nesting`](Self::paint_nesting) returned `to`, innermost first
+    /// (layers composite as `pop_layer` does). No-op when nothing is open past it.
+    fn unwind_paint_nesting(&mut self, _to: PaintNesting) {}
 
     // ── GL / GPU content ──────────────────────────────────────────────────────
 

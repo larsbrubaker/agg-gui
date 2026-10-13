@@ -638,7 +638,7 @@ pub(super) fn paint_subtree_backbuffered(widget: &mut dyn Widget, ctx: &mut dyn 
     // `paint_subtree_direct` has the same overlay call after children
     // (see its own body); this keeps the two paint paths consistent.
     let t_overlay = pt::start();
-    widget.paint_overlay(ctx);
+    super::contained(ctx, |ctx| widget.paint_overlay(ctx));
     tm.overlay_ms += pt::ms(&t_overlay);
 
     if timing {

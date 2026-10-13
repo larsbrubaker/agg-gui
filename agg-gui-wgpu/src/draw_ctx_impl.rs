@@ -11,7 +11,7 @@
 //! owns the capture texture, its textured re-draw, and both readback paths.
 
 use super::*;
-use agg_gui::draw_ctx::DrawCtx;
+use agg_gui::draw_ctx::{DrawCtx, PaintNesting};
 use agg_gui::text::{measure_text_metrics, TextMetrics};
 use agg_gui::CompOp;
 use agg_rust::basics::PATH_FLAGS_NONE;
@@ -473,6 +473,23 @@ impl DrawCtx for WgpuGfxCtx {
 
     fn pop_layer(&mut self) {
         self.pop_layer_impl();
+    }
+
+    fn paint_nesting(&self) -> PaintNesting {
+        PaintNesting {
+            layers: self.layer_stack.len(),
+            // `state_stack` always holds the base entry.
+            saves: self.state_stack.len().saturating_sub(1),
+        }
+    }
+
+    fn unwind_paint_nesting(&mut self, to: PaintNesting) {
+        while self.layer_stack.len() > to.layers {
+            self.pop_layer_impl();
+        }
+        while self.state_stack.len().saturating_sub(1) > to.saves {
+            self.restore();
+        }
     }
 
     fn set_layer_rounded_clip(&mut self, x: f64, y: f64, w: f64, h: f64, r: f64) {

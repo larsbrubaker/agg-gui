@@ -593,6 +593,20 @@ impl<'a> DrawCtx for LcdGfxCtx<'a> {
     fn pop_layer(&mut self) {
         self.pop_layer_impl();
     }
+    fn paint_nesting(&self) -> crate::draw_ctx::PaintNesting {
+        crate::draw_ctx::PaintNesting {
+            layers: self.layer_stack.len(),
+            saves: self.state_stack.len(),
+        }
+    }
+    fn unwind_paint_nesting(&mut self, to: crate::draw_ctx::PaintNesting) {
+        while self.layer_stack.len() > to.layers {
+            self.pop_layer_impl();
+        }
+        while self.state_stack.len() > to.saves {
+            self.restore();
+        }
+    }
 
     // ── LCD mask compositing — native format for this ctx ─────────────────
     //

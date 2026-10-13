@@ -65,6 +65,29 @@ pub fn append_circle(path: &mut PathStorage, cx: f64, cy: f64, r: f64) {
 // Elliptical arcs
 // ---------------------------------------------------------------------------
 
+/// [`DrawCtx::ellipse`](crate::draw_ctx::DrawCtx::ellipse)'s default: the
+/// operations of [`ellipse_ops`] replayed on `ctx`.
+#[allow(clippy::too_many_arguments)]
+pub fn ellipse<C: crate::draw_ctx::DrawCtx + ?Sized>(
+    ctx: &mut C,
+    cx: f64,
+    cy: f64,
+    rx: f64,
+    ry: f64,
+    rotation: f64,
+    start_angle: f64,
+    end_angle: f64,
+    ccw: bool,
+) {
+    for op in ellipse_ops(cx, cy, rx, ry, rotation, start_angle, end_angle, ccw) {
+        match op {
+            EllipseOp::MoveTo(x, y) => ctx.move_to(x, y),
+            EllipseOp::CubicTo(c1x, c1y, c2x, c2y, x, y) => ctx.cubic_to(c1x, c1y, c2x, c2y, x, y),
+            EllipseOp::ClosePath => ctx.close_path(),
+        }
+    }
+}
+
 /// One path operation emitted by [`ellipse_ops`].
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum EllipseOp {
@@ -260,4 +283,29 @@ pub fn clear_clip<C: crate::draw_ctx::DrawCtx + ?Sized>(ctx: &mut C, color: crat
     ctx.fill();
     ctx.begin_path();
     ctx.restore();
+}
+
+/// [`DrawCtx::clear_rect`](crate::draw_ctx::DrawCtx::clear_rect)'s default: the
+/// rectangle becomes the clip, in the target's own pixels, and is cleared.
+pub fn clear_rect<C: crate::draw_ctx::DrawCtx + ?Sized>(
+    ctx: &mut C,
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+    color: crate::color::Color,
+) {
+    ctx.save();
+    ctx.reset_transform();
+    ctx.clip_rect(x, y, w, h);
+    ctx.clear_clip(color);
+    ctx.restore();
+}
+
+/// [`DrawCtx::snap_to_pixel`](crate::draw_ctx::DrawCtx::snap_to_pixel)'s
+/// default: translate by [`pixel_snap_step`] when the transform has one.
+pub fn snap_to_pixel<C: crate::draw_ctx::DrawCtx + ?Sized>(ctx: &mut C) {
+    if let Some((dx, dy)) = pixel_snap_step(&ctx.transform()) {
+        ctx.translate(dx, dy);
+    }
 }

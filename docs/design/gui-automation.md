@@ -13,7 +13,7 @@
   - Virtual time: `Delay`, `WaitFor`, timeouts and pointer pacing.
   - Wall time: the hang watchdogs (test budget, bring-up, close).
 - **One thread per test:** `show_window_and_execute_tests` runs each test on a fresh thread. That isolates agg-gui's thread-local state and lets the caller time out a stuck body, which is what C#'s `Task.WhenAny` does.
-- **Order of work:** the remaining slices fill agg-gui's gaps test-first, port the 45 remaining Agg Automation Tests 1:1, then move `mattercad-app-test` onto the runner (section 9).
+- **Order of work:** the remaining slices fill agg-gui's gaps test-first, port the 38 remaining Agg Automation Tests 1:1, then move `mattercad-app-test` onto the runner (section 9).
 
 ## 1. What exists today
 
@@ -203,7 +203,7 @@ pub fn show_window_and_execute_tests<S, R>(
   - Still to come: the stack dump on a forced close (slice 30c).
 - **UI-thread exceptions** (`UiThread.UnhandledException`):
   - idle actions run under `catch_unwind` (`agg_gui::ui_thread`)
-  - paint panics are contained per subtree (slice 27, still to come)
+  - a panic in a widget's `paint`, `paint_overlay`, `finish_paint` or `paint_global_overlay` is caught at that callback (`widget/paint/contain.rs`), reported with `UnhandledOrigin::Paint`, and the context's `save`/layer levels (`DrawCtx::paint_nesting` / `unwind_paint_nesting`) and the paint clip stack are put back, so the rest of the tree still paints and a widget that panics every frame leaks nothing; with no handler on the thread the panic is re-raised, as for idle actions
   - both are reported through `agg_gui::report_unhandled`.
 
   The run installs a handler on its UI thread (`set_unhandled_handler`) that keeps the first report; the body's next runner call unwinds (`UI_THREAD_FAULTED`), and the run fails with `AutomationError::UiThreadPanicked`.
@@ -310,7 +310,6 @@ Rules 3 and 4 are the runner's behaviour for every consumer, not a hook: both ma
 | # | Gap | Slice |
 |---|---|---|
 | G12 | Flex reverse directions (RightToLeft, BottomToTop) | 25 |
-| G15 | Paint panic containment in `App::paint` (reported through `report_unhandled` with a new `UnhandledOrigin::Paint`), `DrawCtx` state rebalance | 27 |
 | G17 | `ShellSession` / pump API, input and deactivation gates | 31 |
 
 **C# class → Rust file** (`agg-gui-automation/tests/`; tests keep their names in snake_case):
@@ -322,7 +321,7 @@ Rules 3 and 4 are the runner's behaviour for every consumer, not a hook: both ma
 | FlowLayoutTests (24) | `flow_layout_tests.rs` (+ `flow_layout_anchor_tests.rs` when over 800 lines) | FlowLayoutWidget → FlexColumn/FlexRow; image compares via `image_match` |
 | MenuTests (1) | `menu_tests.rs` | DropDownList → ComboBox; ported |
 | MouseInteractionTests (13) | `mouse_interaction_tests.rs` (+ `mouse_interaction/*.rs`) | all ported |
-| PaintExceptionContainmentTests (2) | `paint_exception_containment_tests.rs` | headless; live variant when `live` is on |
+| PaintExceptionContainmentTests (2) | `paint_exception_containment_tests.rs` | both ported (headless) |
 | PresentFailureContainmentTests (1) | `agg-gui-wgpu/tests/present_failure_containment_tests.rs` | headless wgpu device and a custom pass recording an invalid copy into the frame's own encoder; ported (passes trivially without a GPU adapter, as C# skips on a CPU host) |
 | TextEditFocusTests (3) | `text_edit_focus_tests.rs` | all ported |
 | TextEditTests (13) | `text_edit_tests.rs` (+ `text_edit/*.rs`) | TextEditWidget → TextField/TextArea; NumEdit → NumberEdit; all ported |
@@ -336,14 +335,13 @@ Rules 3 and 4 are the runner's behaviour for every consumer, not a hook: both ma
 | 25 | G12, then Flow, part 1 | TopToBottomContainerAppliesExpectedMargin, SpacingClearedAfterLoadPositionsCorrectly, NestedLayoutTopToBottomTests, ChangingChildVisiblityUpdatesFlow, ChangingChildFlowWidgetVisiblityUpdatesParentFlow, NestedLayoutTopToBottomWithResizeTests, LeftToRightTests, RightToLeftTests |
 | 26 | Flow, part 2 | NestedMaxFitOrStretchToChildrenParentWidth, NestedMinFitOrStretchToChildrenParentWidth, LeftToRightAnchorLeftBottomTests, AnchorLeftRightTests, NestedFlowWidgetsTopToBottomTests, NestedFlowWidgetsRightToLeftTests, NestedFlowWidgetsLeftToRightTests, FlowWithMaxSizeChildAllocatesToOthers |
 | 26b | Flow, part 3 | LeftRightWithAnchorLeftRightChildTests, RightLeftWithAnchorLeftRightChildTests, BottomTopWithAnchorBottomTopChildTests, TopBottomWithAnchorBottomTopChildTests, ChildVisibilityChangeCauseResize, EnsureCorrectSizeOnChildrenVisibleChange, ChildHAnchorPriority, TestVAnchorCenter |
-| 27 | G15 paint containment (the runner already captures what `report_unhandled` reports) | AThrowingDrawIsReportedAndTheEventLoopKeepsRunning, ADrawThatThrowsEveryFrameForLongerThanTheMatrixStackIsDeepStillCostsOnlyItsOwnFrames |
 | 30 | ThreadStackDump, part 1 (retry and dump-writer subprocess) | ACaptureThatLosesTheDumpRaceIsRetakenNotReparsed, ACaptureThatNeverSucceedsGivesUpAndReportsEveryAttempt, WritingADumpCapturesTheDumpWritersLogInsteadOfPrintingIt, ADumpWriterWithMoreOutputThanAPipeHoldsStillFinishes, ADumpWriterThatNeverExitsIsKilledAtTheTimeout |
 | 30b | ThreadStackDump, part 2 (minidump capture and walk) | CaptureNamesTheCallingThreadsOwnFrames, ADumpThatCannotWalkItsCapturingThreadIsRejected, RegisteredThreadsAreLabelledInTheDump, ATruncatedThreadCommandIsNotRead, ADumpWithTwoThreadsOnOneStackPointerStillReports |
 | 30c | Load and close watchdogs write dumps to `TestResults/` | AnExpectedTimeoutLeavesNoThreadDump |
 | 31 | G17 `ShellSession` plus `LiveDriver`, with the simulated-mouse overlay (`RunOptions.draw_simulated_mouse`, `overlay::render_mouse`) | RealMouseInputDoesNotReachAWindowUnderAutomation |
 | 32 | Live pump robustness | IdlePumpSurvivesAnotherWindowsTeardown, ShowFromNonPumpThreadReturnsToItsCaller |
 
-**Tally** (40 still to port): AutomationRunnerTests 11 (10 ported), Winforms 3, Flow 24, Mac 12 (12 ported), Menu 1 (1 ported), Mouse 13 (13 ported), Paint 2, Present 1 (1 ported), TextEditFocus 3 (3 ported), TextEdit 13 (13 ported), ThreadStackDump 10, ToolTip 7 (7 ported), WidgetClick 3 (3 ported): **103**.
+**Tally** (38 still to port): AutomationRunnerTests 11 (10 ported), Winforms 3, Flow 24, Mac 12 (12 ported), Menu 1 (1 ported), Mouse 13 (13 ported), Paint 2 (2 ported), Present 1 (1 ported), TextEditFocus 3 (3 ported), TextEdit 13 (13 ported), ThreadStackDump 10, ToolTip 7 (7 ported), WidgetClick 3 (3 ported): **103**.
 
 **Moving `mattercad-app-test` onto the runner**
 
