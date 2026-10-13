@@ -13,7 +13,7 @@
   - Virtual time: `Delay`, `WaitFor`, timeouts and pointer pacing.
   - Wall time: the hang watchdogs (test budget, bring-up, close).
 - **One thread per test:** `show_window_and_execute_tests` runs each test on a fresh thread. That isolates agg-gui's thread-local state and lets the caller time out a stuck body, which is what C#'s `Task.WhenAny` does.
-- **Order of work:** the remaining slices fill agg-gui's gaps test-first, port the 38 remaining Agg Automation Tests 1:1, then move `mattercad-app-test` onto the runner (section 9).
+- **Order of work:** the remaining slices fill agg-gui's gaps test-first, port the 18 remaining Agg Automation Tests 1:1, then finish moving `mattercad-app-test` onto the runner (section 9).
 
 ## 1. What exists today
 
@@ -29,7 +29,7 @@
   - `StartupFailureLog`.
   - `ThreadStackDump`: createdump plus ClrMD.
 
-**Tests:** 13 files, 12 classes (`AutomationRunnerTests` is a partial class split across 2 files), 103 tests. Six of the 13 files never call the runner and drive widgets directly: TextEdit, Mac bindings, ThreadStackDump, most of MouseInteraction, ToolTip and FlowLayout. Those still need a headless window to port.
+**Tests:** 13 files, 12 classes (`AutomationRunnerTests` is a partial class split across 2 files), 103 tests. Six of the 13 files never call the runner and drive widgets directly: TextEdit, Mac bindings, ThreadStackDump, most of MouseInteraction, ToolTip and FlowLayout. Their ports run in a `HeadlessWindow` (or, for FlowLayout, agg-gui's own `tests/flow_layout_agg_sharp`).
 
 **agg-gui**
 - `App` (`agg-gui/src/widget/app.rs` with `app/pointer.rs` and `app/keyboard.rs`) takes Y-down physical input:
@@ -50,14 +50,10 @@
 - `Widget::scroll_rect_into_view` (C#'s `ScrollableWidget.ScrollIntoView`, minimum scroll) is implemented by `ScrollView` and `TextArea`. `TextArea` carries C#'s `InternalTextEditWidget` caret API (`with_line_spacing`, `content_height`, `insert_bar_position`, the clamping `set_char_index_to_insert_before`/`set_selection_index_to_start_before`, `copy_selection`).
 - The central tooltip controller (`widgets::tooltip::controller`) is C#'s `ToolTipManager`: `current_text`, `clear`, `observe_tooltips` (`TooltipEvent::Shown`/`Popped`), and C#'s reshow rule (`timings::hover_delay`).
 - `widgets::RadioButton` is C#'s standalone `RadioButton`: a widget per option, exclusive with the radio buttons in its parent (settled by the dispatch walk before its callbacks run), individually disableable, with `on_checked_state_changed`/`on_click` and `check_radio_child` for a programmatic check.
-- **Missing piece:** paint-panic containment.
 
 **`mattercad-app-test`**
-- `TestHarness` builds the real tree headless, sends input straight to `App::on_*`, and keeps its own copy of the shells' frame policy (`input_frame`/`shell_frame`/layout key) instead of `agg_gui::frame_policy` (M2 replaces it).
-- Clicks teleport the pointer: there is no stepped move.
-- Waits count frames (`MAX_WAIT_FRAMES = 120`) instead of seconds.
-- Typing is ad hoc: `type_keys` handles only 4 `{}` tokens and a leading `^`.
-- Names of non-widget targets (3D controls, scene objects, menu rows) are found by parsing `properties()` strings.
+- `TestHarness` owns a `HeadlessDriver` (app window builder, the app's wgpu painter, background-busy hook) with an attached `AutomationRunner` (`runner()`/`runner_mut()`); `run_test`/`new_part_tab_test`, `runner_automation` (MatterCADTests' extension methods) and `AutomationFileService` (the dialog answered by `complete_dialog` through `AutomationFileDialog` on the popup layer) exist. Name lookups are `name_pick::find_on_screen`, and the app's View3D, menus and popup hosts report named targets through `find_named_targets`.
+- Still on the old helpers: `automation.rs`'s `click_by_name`/`wait_for`/`wait_for_name`/`scroll_into_view` (teleporting clicks, a frame-counted `MAX_WAIT_FRAMES = 120`), `harness_input.rs`'s `click`/`drag`, and the ad hoc `type_keys` (4 `{}` tokens and a leading `^`). Test files that still call them are listed under M5-M9 in section 9.
 
 ## 2. Where the code goes
 
@@ -145,7 +141,7 @@ tests/live/*.rs            live tests, `harness = false` (winit on macOS needs t
 |---|---|
 | `ShowWindowAndExecuteTests(window, test, secs = 30, images, closeWindow, timeoutIsTheExpectedOutcome)` | `show_window_and_execute_tests(RunOptions, build, body) -> Result<R, AutomationError>` (section 5) |
 
-**An application's own harness** (no C# counterpart; MatterCAD's `TestHarness`, slice M2)
+**An application's own harness** (no C# counterpart; MatterCAD's `TestHarness`)
 
 | Rust | What it is |
 |---|---|
@@ -155,7 +151,7 @@ tests/live/*.rs            live tests, `harness = false` (winit on macOS needs t
 | `AutomationRunner::wait_for_idle(max_seconds) -> bool` | Pump frames until a frame that did not paint leaves the driver idle (no background work, no due idle work, no draw requested), or until `max_seconds` of UI time has passed. `wait_for_pending_ui_work` also keeps pumping, up to its `max_milliseconds`, while background work runs. |
 
 **Supporting types**
-- `InputMethod` (= `IInputMethod`) gains `current_screen` (slice 23).
+- `InputMethod` (= `IInputMethod`) gains `current_screen` (slice 31: the live window's read-back).
 
 ## 4. How simulated input gets in
 
@@ -309,7 +305,7 @@ Rules 3 and 4 are the runner's behaviour for every consumer, not a hook: both ma
 
 | # | Gap | Slice |
 |---|---|---|
-| G12 | Flex reverse directions (RightToLeft, BottomToTop) | 25 |
+| G12 | Flex reverse directions (`FlexRow`/`FlexColumn` lay children out right-to-left / bottom-to-top, as `FlowDirection.RightToLeft`/`BottomToTop`); neither widget has a reverse mode | 25 |
 | G17 | `ShellSession` / pump API, input and deactivation gates | 31 |
 
 **C# class → Rust file** (`agg-gui-automation/tests/`; tests keep their names in snake_case):
@@ -318,7 +314,9 @@ Rules 3 and 4 are the runner's behaviour for every consumer, not a hook: both ma
 |---|---|---|
 | AutomationRunnerTests (11) | `automation_runner_tests.rs` | via `show_window_and_execute_tests`; 1 to go (AnExpectedTimeoutLeavesNoThreadDump, slice 30c; ImageWaitsSearchTheGivenRegion, VetoedCloseIsForcedAndReportedAsFailure, StaticDelayExpires…, ZeroSecondWaitsReportWhatIsThereNow, WindowLoadTimeIsNotChargedToTheTestBudget, AutomationRunnerTimeoutTest, GetWidgetByNameTestNoRegionSingleWindow, GetWidgetByNameTestRegionSingleWindow, DoubleClickByNameSendsTwoFullClickPairsWithProductionClickCounts and TypeDeliversPunctuationIntoAMultiLineField are ported) |
 | AutomationRunnerTests.Winforms (3) | `live/automation_runner_live_tests.rs` | `harness = false`, all desktop OSes |
-| FlowLayoutTests (24) | `flow_layout_tests.rs` (+ `flow_layout_anchor_tests.rs` when over 800 lines) | FlowLayoutWidget → FlexColumn/FlexRow; image compares via `image_match` |
+| FlowLayoutTests (24) | agg-gui's `tests/flow_layout_agg_sharp/flow_layout_tests.rs` and `flow_layout_tests_anchors.rs` | FlowLayoutWidget → FlexColumn/FlexRow; image compares become box compares. 20 ported; the 4 reverse-direction tests (RightToLeftTests, NestedFlowWidgetsRightToLeftTests, RightLeftWithAnchorLeftRightChildTests, BottomTopWithAnchorBottomTopChildTests) wait on G12. `EnsureFlowLayoutMinSizeFitsChildrenMinSize` has no `[Test]` attribute in C# and is not counted. |
+| MacTextEditKeyBindings (12) | `mac_text_edit_key_binding_tests.rs` | all ported |
+| WidgetClickTests (3) | `widget_click_tests.rs` | all ported |
 | MenuTests (1) | `menu_tests.rs` | DropDownList → ComboBox; ported |
 | MouseInteractionTests (13) | `mouse_interaction_tests.rs` (+ `mouse_interaction/*.rs`) | all ported |
 | PaintExceptionContainmentTests (2) | `paint_exception_containment_tests.rs` | both ported (headless) |
@@ -332,26 +330,21 @@ Rules 3 and 4 are the runner's behaviour for every consumer, not a hook: both ma
 
 | # | Slice | Tests that land |
 |---|---|---|
-| 25 | G12, then Flow, part 1 | TopToBottomContainerAppliesExpectedMargin, SpacingClearedAfterLoadPositionsCorrectly, NestedLayoutTopToBottomTests, ChangingChildVisiblityUpdatesFlow, ChangingChildFlowWidgetVisiblityUpdatesParentFlow, NestedLayoutTopToBottomWithResizeTests, LeftToRightTests, RightToLeftTests |
-| 26 | Flow, part 2 | NestedMaxFitOrStretchToChildrenParentWidth, NestedMinFitOrStretchToChildrenParentWidth, LeftToRightAnchorLeftBottomTests, AnchorLeftRightTests, NestedFlowWidgetsTopToBottomTests, NestedFlowWidgetsRightToLeftTests, NestedFlowWidgetsLeftToRightTests, FlowWithMaxSizeChildAllocatesToOthers |
-| 26b | Flow, part 3 | LeftRightWithAnchorLeftRightChildTests, RightLeftWithAnchorLeftRightChildTests, BottomTopWithAnchorBottomTopChildTests, TopBottomWithAnchorBottomTopChildTests, ChildVisibilityChangeCauseResize, EnsureCorrectSizeOnChildrenVisibleChange, ChildHAnchorPriority, TestVAnchorCenter |
+| 25 | G12 (reverse flex directions), then the four reverse-direction Flow tests | RightToLeftTests, NestedFlowWidgetsRightToLeftTests, RightLeftWithAnchorLeftRightChildTests, BottomTopWithAnchorBottomTopChildTests |
 | 30 | ThreadStackDump, part 1 (retry and dump-writer subprocess) | ACaptureThatLosesTheDumpRaceIsRetakenNotReparsed, ACaptureThatNeverSucceedsGivesUpAndReportsEveryAttempt, WritingADumpCapturesTheDumpWritersLogInsteadOfPrintingIt, ADumpWriterWithMoreOutputThanAPipeHoldsStillFinishes, ADumpWriterThatNeverExitsIsKilledAtTheTimeout |
 | 30b | ThreadStackDump, part 2 (minidump capture and walk) | CaptureNamesTheCallingThreadsOwnFrames, ADumpThatCannotWalkItsCapturingThreadIsRejected, RegisteredThreadsAreLabelledInTheDump, ATruncatedThreadCommandIsNotRead, ADumpWithTwoThreadsOnOneStackPointerStillReports |
 | 30c | Load and close watchdogs write dumps to `TestResults/` | AnExpectedTimeoutLeavesNoThreadDump |
 | 31 | G17 `ShellSession` plus `LiveDriver`, with the simulated-mouse overlay (`RunOptions.draw_simulated_mouse`, `overlay::render_mouse`) | RealMouseInputDoesNotReachAWindowUnderAutomation |
 | 32 | Live pump robustness | IdlePumpSurvivesAnotherWindowsTeardown, ShowFromNonPumpThreadReturnsToItsCaller |
 
-**Tally** (38 still to port): AutomationRunnerTests 11 (10 ported), Winforms 3, Flow 24, Mac 12 (12 ported), Menu 1 (1 ported), Mouse 13 (13 ported), Paint 2 (2 ported), Present 1 (1 ported), TextEditFocus 3 (3 ported), TextEdit 13 (13 ported), ThreadStackDump 10, ToolTip 7 (7 ported), WidgetClick 3 (3 ported): **103**.
+**Tally** (18 still to port): AutomationRunnerTests 11 (10 ported; AnExpectedTimeoutLeavesNoThreadDump to go), Winforms 3, Flow 24 (20 ported), Mac 12 (12 ported), Menu 1 (1 ported), Mouse 13 (13 ported), Paint 2 (2 ported), Present 1 (1 ported), TextEditFocus 3 (3 ported), TextEdit 13 (13 ported), ThreadStackDump 10, ToolTip 7 (7 ported), WidgetClick 3 (3 ported): **103**.
 
-**Moving `mattercad-app-test` onto the runner**
+**Moving `mattercad-app-test` onto the runner** (the harness, `run_test`, the file dialog and the name lookups are done: section 1)
 
 | # | Slice | Notes |
 |---|---|---|
-| M2 | Back `TestHarness` with the runner | Built on `AutomationRunner::attach`, `HeadlessDriver::with_painter` (the wgpu `HeadlessFrame`, or no pixels), `set_background_busy` and `wait_for_idle` (section 3). `TestHarness` owns a `HeadlessDriver` (settings isolation, sample part, compute workers move to a `MatterCadAppWindow` builder) and exposes `runner()`. `frame`/`settle`/`pump_until_idle` use the driver's frame and `ClockPolicy::Real` when workers are on. Existing helpers delegate. |
-| M3 | Delete the name hacks | mattercad-app's View3D and design page implement `find_named_targets` (Object3D controls by C# name, scene children); `CONTROL_KEYS` and `scene_objects`/`controls` string parsing go. `menu_automation` uses menu-row named targets. |
-| M4 | Single name path and `complete_dialog` | MatterCAD has `run_test`/`new_part_tab_test` and the extension traits. Left: its harness drops its own `on_screen` lookup for `name_pick::find_on_screen` / `AutomationRunner::find_now` (section 6), and its file service opens `AutomationFileDialog` through a `ModalPresenter` on its `popup_layer`, so `complete_dialog` answers it. |
-| M5–M9 | Move the 14 ported test files to the runner API, about 3 files per slice | `click_by_name`/`drag_drop_by_name`/`type_text`/`wait_for_name`/`assert` replace harness calls; `MAX_WAIT_FRAMES` becomes C#'s seconds; teleporting clicks become stepped moves (fix whatever this exposes, test-first). |
-| M10 | Remove the old helpers | Delete the deprecated `TestHarness` helpers (`click`, `type_keys`, `drag`, `MAX_WAIT_FRAMES`); update crate docs. That leaves 47 of the 61 C# AutomationTests files, which can then be ported one per slice with the same API. |
+| M5-M9 | Move the test files still on the old harness helpers to the runner API, about 3 files per slice | In `crates/mattercad-app-test/tests`, 63 files still call `h.click(`, 12 `h.type_keys(`, 13 `h.drag(`, 36 `h.click_by_name(`, 61 `h.wait_for(` and 43 `h.wait_for_name(` (the harness versions in `automation.rs`/`harness_input.rs`); `click_by_name`/`drag_drop_by_name`/`type_text`/`wait_for_name`/`assert` on the runner replace them; frame-counted waits become C#'s seconds; teleporting clicks become stepped moves (fix whatever this exposes, test-first). |
+| M10 | Remove the old helpers | Delete the harness's `click`, `type_keys`, `drag`, `click_by_name`/`wait_for*` and `MAX_WAIT_FRAMES` once no test uses them; update crate docs. That leaves 47 of the 61 C# AutomationTests files, which can then be ported one per slice with the same API. |
 
 ## 10. Risks
 
