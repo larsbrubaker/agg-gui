@@ -16,7 +16,13 @@
 //!   `child_paint_clip` for its slot (a `FlexRow` column);
 //! - a subtree that paints in the global overlay pass
 //!   (`defer_paint_to_overlay`, a modal hosted inside a clipped container)
-//!   escapes every ancestor's clip and is clipped by the window alone.
+//!   escapes every ancestor's clip and is clipped by the window alone;
+//! - a clip shows every device pixel it touches: both backends grow the
+//!   clip outward to whole pixels (agg-gui-wgpu's scissor, the software
+//!   renderer's `apply_clip`), so a clip edge inside a pixel hides none of
+//!   it. Children are clipped in their parent's exact frame while a snapped
+//!   child paints up to half a pixel off it, so without this a sub-pixel
+//!   sliver would count as hidden that the frame shows.
 //!
 //! Rectangles are agg-gui's native space: logical units, Y-up, the root's
 //! lower-left corner at the window's.
@@ -84,9 +90,26 @@ pub fn paint_placement(
     }
     Some(PaintPlacement {
         local_to_screen: entered(node, &on_entry),
-        clip,
+        clip: to_whole_pixels(clip, agg_gui::device_scale()),
         visible_chain,
     })
+}
+
+/// `clip` grown outward to whole device pixels at `device_scale` (logical
+/// units in, logical units out), as painting's scissor applies it. Growing
+/// each clip of the chain and intersecting comes to the same as growing
+/// their intersection once (floor and ceil keep the order of edges). An
+/// empty clip stays empty: the scissor of a zero extent is zero pixels.
+pub fn to_whole_pixels(clip: Rect, device_scale: f64) -> Rect {
+    if clip.width <= 0.0 || clip.height <= 0.0 {
+        return clip;
+    }
+    let s = device_scale;
+    let left = (clip.left() * s).floor() / s;
+    let bottom = (clip.bottom() * s).floor() / s;
+    let right = (clip.right() * s).ceil() / s;
+    let top = (clip.top() * s).ceil() / s;
+    Rect::new(left, bottom, right - left, top - bottom)
 }
 
 /// The window-space rectangle `widget` clips its children to

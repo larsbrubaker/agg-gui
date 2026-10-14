@@ -1,6 +1,7 @@
 //! Rust-only tests of the name pick (agg-gui-automation `src/name_pick.rs`
 //! over `src/paint_geometry.rs`): a lookup by name sees what painting shows
-//! (the overlay pass, slot clips, pixel snapping, under a zoom too), aims at the visible part
+//! (the overlay pass, slot clips, pixel snapping, under a zoom too, a clip edge inside a
+//! pixel), aims at the visible part
 //! of a widget whose centre a clip hides, takes the first of equal-sized
 //! widgets despite rounding, prefers a widget whose centre shows, and
 //! answers in one look from a runner (`AutomationRunner::find_now`).
@@ -152,6 +153,44 @@ fn rust_only_the_first_of_equal_sized_widgets_wins_despite_rounding() {
     assert!(areas[1] > areas[0], "the setup has rounding noise");
     let twin = find_on_screen(&root, "twin", VIEWPORT).expect("both show");
     assert_eq!(twin.handle.path(), &[0]);
+}
+
+/// A row at a fractional height holding a label that enforces integer
+/// bounds: the label paints snapped to the nearest pixel, up to half a pixel
+/// past the row's exact clip.
+fn row_with_snapped_label(y: f64) -> Switchable {
+    sw("row", 0.0, y, 200.0, 14.0).with_child(Box::new(
+        sw("label", 0.0, 0.0, 200.0, 14.0).with_integer_bounds(),
+    ))
+}
+
+#[test]
+fn rust_only_a_clip_edge_inside_a_pixel_hides_none_of_it() {
+    // The row's exact clip starts 0.4667 into pixel row 50; the label snaps
+    // down to 50. Painting's scissor grows the clip to whole pixels, so all
+    // 14 pixel rows of the label show.
+    let root = root_with(vec![row_with_snapped_label(50.0 + 7.0 / 15.0)]);
+    let label = WidgetHandle::new(&root, &[0, 0]).expect("label");
+    let placed = placement(&root, &label, VIEWPORT).expect("attached");
+    assert_eq!(placed.screen_rect, Rect::new(0.0, 50.0, 200.0, 14.0));
+    assert_eq!(placed.clipped_rect, placed.screen_rect);
+}
+
+#[test]
+fn rust_only_the_first_of_two_fully_shown_labels_wins_when_a_clip_edge_falls_inside_a_pixel() {
+    // The first row's label shows whole on screen but its row's exact clip
+    // ends inside its bottom pixel; the second's row is on the pixel grid.
+    // Both show all 14 pixel rows, so the first in tree order wins.
+    let root = root_with(vec![
+        row_with_snapped_label(120.0 + 7.0 / 15.0),
+        row_with_snapped_label(40.0),
+    ]);
+    let label = find_on_screen(&root, "label", VIEWPORT).expect("both show");
+    assert_eq!(label.handle.path(), &[0, 0]);
+    assert_eq!(
+        aim_point(&root, &label, VIEWPORT),
+        Some(Point::new(100.0, 127.0))
+    );
 }
 
 #[test]
