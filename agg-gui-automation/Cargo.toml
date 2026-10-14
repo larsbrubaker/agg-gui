@@ -18,3 +18,23 @@ agg-gui = { path = "../agg-gui" }
 # Decodes image needles loaded by file name (`image_source.rs`); the same
 # version and features agg-gui already builds, so nothing new is compiled.
 image = "0.24"
+
+[features]
+# ThreadStackDump (`src/thread_stack_dump/`): the all-thread stack capture's
+# retry policy and dump-writer subprocess. Pure std so far; the minidump
+# writer and walker join it with the next ThreadStackDump slice.
+stack-dump = []
+
+# The controllable dump writer `thread_stack_dump_tests` runs in place of a
+# real one (a writer that floods its output, never exits, or fails).
+[[bin]]
+name = "agg-gui-fake-dump-writer"
+path = "tests/support/fake_dump_writer.rs"
+required-features = ["stack-dump"]
+test = false
+doc = false
+
+[[test]]
+name = "thread_stack_dump_tests"
+path = "tests/thread_stack_dump_tests.rs"
+required-features = ["stack-dump"]

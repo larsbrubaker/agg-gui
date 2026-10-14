@@ -13,7 +13,7 @@
   - Virtual time: `Delay`, `WaitFor`, timeouts and pointer pacing.
   - Wall time: the hang watchdogs (test budget, bring-up, close).
 - **One thread per test:** `show_window_and_execute_tests` runs each test on a fresh thread. That isolates agg-gui's thread-local state and lets the caller time out a stuck body, which is what C#'s `Task.WhenAny` does.
-- **Order of work:** the remaining slices fill agg-gui's gaps test-first, port the 11 remaining Agg Automation Tests 1:1, then finish moving `mattercad-app-test` onto the runner (section 9).
+- **Order of work:** the remaining slices fill agg-gui's gaps test-first, port the 6 remaining Agg Automation Tests 1:1, then finish moving `mattercad-app-test` onto the runner (section 9).
 
 ## 1. What exists today
 
@@ -57,12 +57,12 @@
 
 ## 2. Where the code goes
 
-**Crate `agg-gui/agg-gui-automation`** (workspace member; consumers use it as a dev-dependency). It exists with `keys`, `key_mapping`, `typed_key_parser`, `search_region`, `waits` (`static_delay`), `driver` (`HeadlessDriver`, `HeadlessPainter`, `SoftwarePainter`, `BackgroundBusy`, `HeadlessWindow`, `ClockPolicy`, `FrameKind`, `UiDriver`), `probe` (`ProbeWidget`) and `tree_query` (`WidgetHandle`, `find_by_name`, `find_named_hits` (widgets and the named targets widgets report), `local_rect_to_screen`, `placement`/`screen_rect`/`clipped_rect`, `actually_visible_on_screen`, `parents`/`children` and their `_of_type` forms), `execute` (`show_window_and_execute_tests`, `RunOptions`, `AutomationWindow`, `AutomationError`, the close phase in `execute/close.rs`), `image_match` (`find_least_squares_match`, `LeastSquaresMatch`), `pointer_reach` (`can_reach`, `prefer_reachable`), `pointer_state` (`under_mouse_state`, `mouse_captured`, `child_has_mouse_captured`, `focused` for a handle), `input` (`InputMethod`, `SimulatedInput`, `Point2D`, `MouseAction`) and `runner` (`AutomationRunner` with `AutomationConfig`, `attach`/`into_driver`, `mark_test_complete`, driver access, the waits in `runner/waits.rs`, the name lookups in `runner/named.rs`, `scroll_into_view` in `runner/scroll.rs`, the pointer gestures in `runner/pointer.rs`, the drags in `runner/drag.rs`, the file drags and drops (`drop_files_by_name`, `drop_file_data_by_name`, `file_drag_hover_by_name`, `file_drag_leave`) in `runner/file_drop.rs`, the mouse wheel (`scroll_wheel`, `scroll_wheel_by_name`) in `runner/wheel.rs`, the keyboard (`type_text`, `ModifierKeys` with the Rust-only `PHYSICAL_CONTROL` and `META`, `press_modifier_keys`/`release_modifier_keys`, `select_all`/`select_none`) in `runner/keyboard.rs` the image searches (`get_current_screen`, `get_screen_region`, `capture_region`, `image_exists`, `wait_for_image`) in `runner/images.rs` and the image gestures (`click_image`, `drag_image`, `drop_image`, `drag_drop_image`, `set_image_source`) in `runner/image_gestures.rs`), `image_source` (`ImageNeedle`, `ImageSource`, `DirectoryImageSource`, `decode_needle`); the other modules and members below are still to come.
+**Crate `agg-gui/agg-gui-automation`** (workspace member; consumers use it as a dev-dependency). It exists with `keys`, `key_mapping`, `typed_key_parser`, `search_region`, `waits` (`static_delay`), `driver` (`HeadlessDriver`, `HeadlessPainter`, `SoftwarePainter`, `BackgroundBusy`, `HeadlessWindow`, `ClockPolicy`, `FrameKind`, `UiDriver`), `probe` (`ProbeWidget`) and `tree_query` (`WidgetHandle`, `find_by_name`, `find_named_hits` (widgets and the named targets widgets report), `local_rect_to_screen`, `placement`/`screen_rect`/`clipped_rect`, `actually_visible_on_screen`, `parents`/`children` and their `_of_type` forms), `execute` (`show_window_and_execute_tests`, `RunOptions`, `AutomationWindow`, `AutomationError`, the close phase in `execute/close.rs`), `image_match` (`find_least_squares_match`, `LeastSquaresMatch`), `pointer_reach` (`can_reach`, `prefer_reachable`), `pointer_state` (`under_mouse_state`, `mouse_captured`, `child_has_mouse_captured`, `focused` for a handle), `input` (`InputMethod`, `SimulatedInput`, `Point2D`, `MouseAction`) and `runner` (`AutomationRunner` with `AutomationConfig`, `attach`/`into_driver`, `mark_test_complete`, driver access, the waits in `runner/waits.rs`, the name lookups in `runner/named.rs`, `scroll_into_view` in `runner/scroll.rs`, the pointer gestures in `runner/pointer.rs`, the drags in `runner/drag.rs`, the file drags and drops (`drop_files_by_name`, `drop_file_data_by_name`, `file_drag_hover_by_name`, `file_drag_leave`) in `runner/file_drop.rs`, the mouse wheel (`scroll_wheel`, `scroll_wheel_by_name`) in `runner/wheel.rs`, the keyboard (`type_text`, `ModifierKeys` with the Rust-only `PHYSICAL_CONTROL` and `META`, `press_modifier_keys`/`release_modifier_keys`, `select_all`/`select_none`) in `runner/keyboard.rs` the image searches (`get_current_screen`, `get_screen_region`, `capture_region`, `image_exists`, `wait_for_image`) in `runner/images.rs` and the image gestures (`click_image`, `drag_image`, `drop_image`, `drag_drop_image`, `set_image_source`) in `runner/image_gestures.rs`), `image_source` (`ImageNeedle`, `ImageSource`, `DirectoryImageSource`, `decode_needle`), `thread_stack_dump` (feature `stack-dump`: `capture_with_retries` with `CAPTURE_ATTEMPTS`/`DELAY_BETWEEN_ATTEMPTS` and `CaptureGaveUp`, `run_dump_writer` with `DUMP_WRITER_TIMEOUT` and `DumpWriterError`, `DumpWriterProgram`/`write_dump_with`, and `capture_with` over the `DumpWalker` seam; its tests run the `agg-gui-fake-dump-writer` bin); the other modules and members below are still to come.
 - It keeps test-only code (watchdogs, stack dumps, image matching) out of product builds.
 - Its optional live mode depends on `agg-gui-shell` (winit and wgpu), which core `agg-gui` must not.
-- Features, each added with the slice whose code uses it (none exist yet; headless is the default):
+- Features, each added with the slice whose code uses it (headless is the default):
+  - `stack-dump` (exists, pure std); slice 30b adds `dep:minidump-writer`, `dep:minidump-processor` and `dep:minidump-unwind` to it
   - `live = ["dep:agg-gui-shell"]` (slice 31)
-  - `stack-dump = ["dep:minidump-writer", "dep:minidump-processor", "dep:minidump-unwind"]` (slice 30)
 
 Modules (each under 800 lines, each opening with a purpose comment):
 
@@ -95,7 +95,7 @@ src/dialog/mod.rs          (exists) AutomationFileDialog (AutomationDialogProvid
 src/dialog/overlay.rs      (exists) AutomationWindow's built-in overlay layer, AutomationModalPresenter
 src/runner/dialog.rs       (exists) complete_dialog (MatterCAD's CompleteDialog)
 src/startup_failure_log.rs (exists) StartupFailureLog
-src/thread_stack_dump/     (feature stack-dump) ThreadStackDump
+src/thread_stack_dump/     (exists, feature stack-dump) retry, dump-writer subprocess, capture_with/DumpWalker; the minidump writer program and walker (slice 30b)
 tests/*.rs                 the 103 ports (section 8)
 tests/live/*.rs            live tests, `harness = false` (winit on macOS needs the main thread)
 ```
@@ -297,10 +297,9 @@ Rules 3 and 4 are the runner's behaviour for every consumer, not a hook: both ma
 - an immediate write to `std::io::stderr()`, which libtest's capture (the `print!` family only) does not intercept; `set_immediate_sink` replaces it for tests
 - the time stamp is UTC `HH:mm:ss.fffZ` (C# used local time; there is no time-zone database here).
 
-**`ThreadStackDump`** (`stack-dump` feature). Same design as C#: capture a dump in-process, then walk it.
-- `minidump-writer` writes the current process from a capture thread; `minidump-processor`/`minidump-unwind` walk it with local symbols.
-- Also ported: `CaptureAttempts` = 5 with retry pause, `MaxFramesPerThread`, `register_current_thread(label)`, rejection of a dump that cannot walk the capturing thread, and `write_to_console`.
-- `run_dump_writer(program, args, log_path, timeout)` is the external-writer fallback. It logs to a file (never a pipe) and kills the writer at the timeout.
+**`ThreadStackDump`** (`stack-dump` feature). Same design as C#: another process writes a dump of this one, then it is walked here.
+- Exists: the retry (`capture_with_retries`, 5 attempts, 250 ms apart, each lost attempt noted above the report, `CaptureGaveUp` naming every cause) and the writer subprocess (`run_dump_writer`: stdout and stderr to a log file, never a pipe or the console, read back and deleted; killed at `DUMP_WRITER_TIMEOUT` = 30 s). `capture_with(reason, &DumpWriterProgram, &dyn DumpWalker)` writes each attempt to a fresh temp file, walks it and deletes it. A `DumpWriterProgram` is run as `<exe> <leading args> --name <dump> <pid>`, logs to stdout/stderr and exits 0 when done.
+- Slice 30b: the real writer program and the `DumpWalker` over `minidump-processor`/`minidump-unwind` with local symbols. The writer is a re-invocation of the current executable (or a crate bin) running `minidump-writer` against the parent pid: Linux must dump from another process, and the parent first allows it with `PR_SET_PTRACER` (Yama); on macOS reading another process's task port may need entitlements, in which case the writer becomes an in-process capture thread behind the same `write_dump_with` call. Decide there. Also in 30b: `capture(reason)`/`write_dump_of_this_process`, `MaxFramesPerThread`, `register_current_thread(label)`, rejection of a dump that cannot walk the capturing thread, and `write_to_console`.
 - Two C# cases are Mach-O-specific and port as minidump equivalents:
   - truncated LC_THREAD → a truncated thread-list stream is not read
   - duplicate-stack-pointer repair → two threads on one SP still report.
@@ -328,19 +327,18 @@ Rules 3 and 4 are the runner's behaviour for every consumer, not a hook: both ma
 | PresentFailureContainmentTests (1) | `agg-gui-wgpu/tests/present_failure_containment_tests.rs` | headless wgpu device and a custom pass recording an invalid copy into the frame's own encoder; ported (passes trivially without a GPU adapter, as C# skips on a CPU host) |
 | TextEditFocusTests (3) | `text_edit_focus_tests.rs` | all ported |
 | TextEditTests (13) | `text_edit_tests.rs` (+ `text_edit/*.rs`) | TextEditWidget → TextField/TextArea; NumEdit → NumberEdit; all ported |
-| ThreadStackDumpTests (10) | `thread_stack_dump_tests.rs` | `stack-dump` feature |
+| ThreadStackDumpTests (10) | `thread_stack_dump_tests.rs` | `stack-dump` feature; 5 ported (the retry and the writer subprocess, driven by `agg-gui-fake-dump-writer` on every desktop OS); 5 to go (slice 30b) |
 | ToolTipTests (7) | `tool_tip_tests.rs` (+ `tool_tip/*.rs`) | all ported |
 
 ## 9. Slice plan (about 25 minutes each, one agent; each ends with `cargo test` green)
 
 | # | Slice | Tests that land |
 |---|---|---|
-| 30 | ThreadStackDump, part 1 (retry and dump-writer subprocess) | ACaptureThatLosesTheDumpRaceIsRetakenNotReparsed, ACaptureThatNeverSucceedsGivesUpAndReportsEveryAttempt, WritingADumpCapturesTheDumpWritersLogInsteadOfPrintingIt, ADumpWriterWithMoreOutputThanAPipeHoldsStillFinishes, ADumpWriterThatNeverExitsIsKilledAtTheTimeout |
 | 30b | ThreadStackDump, part 2 (minidump capture and walk) | CaptureNamesTheCallingThreadsOwnFrames, ADumpThatCannotWalkItsCapturingThreadIsRejected, RegisteredThreadsAreLabelledInTheDump, ATruncatedThreadCommandIsNotRead, ADumpWithTwoThreadsOnOneStackPointerStillReports |
 | 30c | Load and close watchdogs write dumps to `TestResults/` | none new; AnExpectedTimeoutLeavesNoThreadDump (ported) must stay green |
 | 31 | G17 `ShellSession` plus `LiveDriver`, with the simulated-mouse overlay (`RunOptions.draw_simulated_mouse`, `overlay::render_mouse`) | RealMouseInputDoesNotReachAWindowUnderAutomation |
 
-**Tally** (11 still to port): AutomationRunnerTests 11 (11 ported), Winforms 3 (1 ported, 1 skipped as N/A, RealMouseInputDoesNotReachAWindowUnderAutomation to go), Flow 24 (24 ported), Mac 12 (12 ported), Menu 1 (1 ported), Mouse 13 (13 ported), Paint 2 (2 ported), Present 1 (1 ported), TextEditFocus 3 (3 ported), TextEdit 13 (13 ported), ThreadStackDump 10, ToolTip 7 (7 ported), WidgetClick 3 (3 ported): **103**.
+**Tally** (6 still to port): AutomationRunnerTests 11 (11 ported), Winforms 3 (1 ported, 1 skipped as N/A, RealMouseInputDoesNotReachAWindowUnderAutomation to go), Flow 24 (24 ported), Mac 12 (12 ported), Menu 1 (1 ported), Mouse 13 (13 ported), Paint 2 (2 ported), Present 1 (1 ported), TextEditFocus 3 (3 ported), TextEdit 13 (13 ported), ThreadStackDump 10 (5 ported), ToolTip 7 (7 ported), WidgetClick 3 (3 ported): **103**.
 
 **Moving `mattercad-app-test` onto the runner** (the harness, `run_test`, the file dialog and the name lookups are done: section 1)
 

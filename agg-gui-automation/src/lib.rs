@@ -57,6 +57,8 @@
 //! - [`tree_query`] — `WidgetHandle`, `NamedHit`, lookup by name, screen and
 //!   clipped rectangles, `ActuallyVisibleOnScreen`, inherited enabled state,
 //!   `Parents<T>`/`Children<T>`.
+//! - `thread_stack_dump` (feature `stack-dump`) — `ThreadStackDump`: the
+//!   all-thread stack capture's retry policy and dump-writer subprocess.
 
 pub mod dialog;
 pub mod driver;
@@ -74,6 +76,8 @@ pub mod probe;
 pub mod runner;
 pub mod search_region;
 pub mod startup_failure_log;
+#[cfg(feature = "stack-dump")]
+pub mod thread_stack_dump;
 pub mod tree_query;
 pub mod typed_key_parser;
 pub mod waits;
