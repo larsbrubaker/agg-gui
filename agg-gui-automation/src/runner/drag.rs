@@ -7,7 +7,8 @@
 //! widget (stepped and paced) and presses there, and
 //! [`AutomationRunner::drop_by_name`] moves onto another and releases, each
 //! with a draw before and after its button event, as C# does.
-//! [`AutomationRunner::drop`] releases wherever the pointer is.
+//! [`AutomationRunner::drop`] releases wherever the pointer is, and
+//! [`AutomationRunner::mouse_down_at_pointer`] presses there.
 //!
 //! Offsets are C#'s: logical units, Y-up from the widget's lower-left corner
 //! (or from its center with [`ClickOrigin::Center`]). `drag_widget`'s
@@ -210,6 +211,17 @@ impl AutomationRunner {
         self.wait_for_draw();
         self.drop(opts.button);
         self.wait_for_draw();
+        self
+    }
+
+    /// Press `button` where the pointer is: no move, no named target, no
+    /// draw. [`drop`](Self::drop) is its release. Rust-only: C# presses at
+    /// the pointer only inside `DragToPosition`, which then moves; a drag of
+    /// a 3D control starts with a press in place and moves on its own.
+    pub fn mouse_down_at_pointer(&mut self, button: MouseButton) -> &mut Self {
+        self.check_not_timed_out();
+        let screen_position = self.input.current_mouse_position();
+        self.send_mouse(MouseAction::down(button), screen_position, 0);
         self
     }
 

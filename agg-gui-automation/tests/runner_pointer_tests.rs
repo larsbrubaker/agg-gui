@@ -383,3 +383,37 @@ fn rust_only_drop_by_name_releases_on_the_named_widget() {
     )
     .expect("drop_by_name releases on the named widget");
 }
+
+fn moves(log: &ProbeLog) -> usize {
+    log.borrow()
+        .iter()
+        .filter(|event| matches!(event, Event::MouseMove { .. }))
+        .count()
+}
+
+/// `mouse_down_at_pointer` presses where the pointer already is, with no
+/// move and no named target; `drop` (C#'s `Drop`) is its release.
+#[test]
+fn rust_only_mouse_down_at_pointer_presses_in_place_without_moving() {
+    show_window_and_execute_tests(
+        RunOptions::default(),
+        window_with_target,
+        |test_runner, log| {
+            test_runner.set_mouse_cursor_position_in_window(60, 45);
+            let pointer = test_runner.current_mouse_position();
+            let moves_before = moves(log);
+
+            test_runner.mouse_down_at_pointer(MouseButton::Right);
+            assert_eq!(presses(log), [(Point::new(10.0, 5.0), MouseButton::Right)]);
+            assert_eq!(test_runner.current_mouse_position(), pointer);
+            assert_eq!(moves(log), moves_before, "a press in place sends no move");
+            assert_eq!(test_runner.input_method().click_count(), 1);
+
+            test_runner.drop(MouseButton::Right);
+            assert_eq!(releases(log), [(Point::new(10.0, 5.0), MouseButton::Right)]);
+            assert_eq!(moves(log), moves_before);
+            test_runner.mark_test_complete();
+        },
+    )
+    .expect("a press and release at the pointer");
+}
