@@ -58,7 +58,8 @@
 //!   clipped rectangles, `ActuallyVisibleOnScreen`, inherited enabled state,
 //!   `Parents<T>`/`Children<T>`.
 //! - `thread_stack_dump` (feature `stack-dump`) — `ThreadStackDump`: the
-//!   all-thread stack capture's retry policy and dump-writer subprocess.
+//!   all-thread stack capture, a minidump of this process written and walked
+//!   into a text report, with thread labels and the capture retry.
 
 pub mod dialog;
 pub mod driver;

@@ -18,12 +18,36 @@ agg-gui = { path = "../agg-gui" }
 # Decodes image needles loaded by file name (`image_source.rs`); the same
 # version and features agg-gui already builds, so nothing new is compiled.
 image = "0.24"
+# The `stack-dump` feature's minidump reader and walker (rust-minidump, MIT):
+# the walker unwinds with each module's CFI (`debuginfo-unwind`: framehop and
+# object, pure Rust) and names frames in-process through `backtrace` (gimli
+# and addr2line, pure Rust); the processor's default `disasm_amd64` is left
+# out. `async-trait` implements the processor's async `SymbolProvider`.
+minidump = { version = "0.27", optional = true }
+minidump-processor = { version = "0.27", default-features = false, optional = true }
+minidump-unwind = { version = "0.27", features = ["debuginfo-unwind"], optional = true }
+async-trait = { version = "0.1", optional = true }
+backtrace = { version = "0.3", optional = true }
+
+# The minidump writer (MIT; pure Rust over mach2 on macOS and ptrace on
+# Linux) and the `libc` FFI bindings (no compiled C) for thread ids, fork and
+# Yama's PR_SET_PTRACER. Windows has no writer yet (docs/design/gui-automation.md).
+[target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]
+minidump-writer = { version = "0.13", optional = true }
+libc = { version = "0.2", optional = true }
 
 [features]
-# ThreadStackDump (`src/thread_stack_dump/`): the all-thread stack capture's
-# retry policy and dump-writer subprocess. Pure std so far; the minidump
-# writer and walker join it with the next ThreadStackDump slice.
-stack-dump = []
+# ThreadStackDump (`src/thread_stack_dump/`): the all-thread stack capture,
+# a minidump of this process written and walked into a text report.
+stack-dump = [
+    "dep:minidump",
+    "dep:minidump-processor",
+    "dep:minidump-unwind",
+    "dep:async-trait",
+    "dep:backtrace",
+    "dep:minidump-writer",
+    "dep:libc",
+]
 
 # The controllable dump writer `thread_stack_dump_tests` runs in place of a
 # real one (a writer that floods its output, never exits, or fails).

@@ -5,10 +5,15 @@
 //! it were broken there nobody would find out until the one run that needed
 //! it printed an apology instead of an answer.
 //!
-//! Where C# ran the runtime's createdump (and `/bin/sleep`), these run the
-//! controllable `agg-gui-fake-dump-writer` (`tests/support/fake_dump_writer.rs`),
-//! so they run on every desktop OS. The tests that walk a real dump are the
-//! next ThreadStackDump slice.
+//! Where C# ran the runtime's createdump (and `/bin/sleep`) to test the
+//! writer subprocess, these run the controllable `agg-gui-fake-dump-writer`
+//! (`tests/support/fake_dump_writer.rs`), so they run on every desktop OS.
+//! The tests that write and walk a real minidump of this process
+//! (`thread_stack_dump_tests/real_dumps.rs`) need a minidump writer, which
+//! exists on macOS and Linux; elsewhere they print why they skipped.
+
+#[path = "thread_stack_dump_tests/real_dumps.rs"]
+mod real_dumps;
 
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
