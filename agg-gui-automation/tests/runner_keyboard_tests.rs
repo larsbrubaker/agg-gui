@@ -262,3 +262,35 @@ fn field(runner: &agg_gui_automation::AutomationRunner) -> &TextField {
         .and_then(|handle| handle.downcast::<TextField>(root))
         .expect("the field is in the window")
 }
+
+/// `type_text_with` and `TypeOpts { delay_after: 0.0 }`: the stroke is
+/// delivered and one frame drawn, and no further UI time passes, so a test
+/// can see a state that lasts one frame (a camera move just started, a
+/// debounce still pending). The default is C#'s `Type`: `delay(0.2)` after.
+#[test]
+fn rust_only_typing_without_a_delay_draws_once_and_lets_no_more_ui_time_pass() {
+    use agg_gui_automation::TypeOpts;
+
+    assert_eq!(
+        TypeOpts::default().delay_after,
+        0.2,
+        "C#'s Type delays 0.2 s"
+    );
+    show_window_and_execute_tests(RunOptions::default(), logging_window, |runner, log| {
+        let frames = runner.driver().frames();
+        let started = agg_gui::clock::now();
+        runner.type_text_with("x", &TypeOpts { delay_after: 0.0 });
+        assert_eq!(*log.borrow(), vec![(Key::Char('x'), Modifiers::default())]);
+        assert_eq!(runner.driver().frames(), frames + 1, "exactly one frame");
+        let one_frame = agg_gui::clock::since(started);
+        assert!(one_frame.as_secs_f64() < 0.2, "{one_frame:?}");
+
+        let frames = runner.driver().frames();
+        let started = agg_gui::clock::now();
+        runner.type_text("y");
+        assert!(runner.driver().frames() > frames + 1);
+        assert!(agg_gui::clock::since(started).as_secs_f64() >= 0.2);
+        runner.mark_test_complete();
+    })
+    .expect("a zero delay_after draws once and returns");
+}

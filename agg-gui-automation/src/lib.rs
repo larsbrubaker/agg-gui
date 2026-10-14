@@ -101,7 +101,7 @@ pub use name_pick::HitPlacement;
 pub use probe::{ProbeLog, ProbeWidget};
 pub use runner::{
     AutomationConfig, AutomationRunner, ClickOpts, ClickOrigin, DragDropOpts, DragOpts,
-    ImageDragDropOpts, ImageOpts, ModifierKeys, WaitOpts,
+    ImageDragDropOpts, ImageOpts, ModifierKeys, TypeOpts, WaitOpts,
 };
 pub use search_region::{ScreenRectangle, SearchRegion};
 pub use startup_failure_log::StartupFailureLog;

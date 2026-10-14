@@ -49,7 +49,7 @@ mod wheel;
 pub use dialog::COMPLETE_DIALOG_WAIT_SECONDS;
 pub use drag::{DragDropOpts, DragOpts};
 pub use image_gestures::{ImageDragDropOpts, ImageOpts};
-pub use keyboard::{ModifierKeys, CLOSE_CHORD};
+pub use keyboard::{ModifierKeys, TypeOpts, CLOSE_CHORD};
 pub use named::{WaitOpts, WidgetPredicate, DEFAULT_WIDGET_WAIT_SECONDS};
 pub use pointer::{cubic_out, mouse_move_steps, ClickOpts, ClickOrigin};
 pub use waits::{

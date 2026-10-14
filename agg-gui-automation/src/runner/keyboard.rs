@@ -9,7 +9,8 @@
 //! widget by the path a keyboard's do. The test body is the UI thread, so
 //! every stroke has been delivered when the call returns; each call then
 //! lets the UI catch up as C#'s does: one frame and `delay(0.2)` after
-//! typing, `delay(0.2)` after a modifier change.
+//! typing (or [`TypeOpts::delay_after`]), `delay(0.2)` after a modifier
+//! change.
 //!
 //! The close chord `%{F4}` is not typed: it asks the window to close
 //! ([`UiDriver::request_close`]), as C#'s input method closes the
@@ -24,6 +25,23 @@ use crate::typed_key_parser::TypedKeyParser;
 
 /// The type string that closes the window instead of typing (Alt+F4).
 pub const CLOSE_CHORD: &str = "%{F4}";
+
+/// How [`AutomationRunner::type_text_with`] ends: C#'s `Type` lets 0.2 s of
+/// UI time pass after the strokes, which is the default.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TypeOpts {
+    /// Seconds of UI time let pass after the strokes and their frame
+    /// (`delay`). Zero returns right after that one frame, so a test can see
+    /// a state that lasts a frame (a camera move just started, a debounce
+    /// still pending). Rust-only: C#'s `Type` always delays 0.2 s.
+    pub delay_after: f64,
+}
+
+impl Default for TypeOpts {
+    fn default() -> Self {
+        Self { delay_after: 0.2 }
+    }
+}
 
 /// C# `AutomationRunner.ModifierKeys`: which modifiers
 /// [`AutomationRunner::press_modifier_keys`] holds and
@@ -100,6 +118,12 @@ impl AutomationRunner {
     /// does not exist (C# throws `ArgumentException`), so a test that meant
     /// to press something it did not fails rather than passing quietly.
     pub fn type_text(&mut self, text_to_type: &str) -> &mut Self {
+        self.type_text_with(text_to_type, &TypeOpts::default())
+    }
+
+    /// [`type_text`](Self::type_text) with `opts.delay_after` seconds of UI
+    /// time after the strokes' frame instead of C#'s 0.2 s.
+    pub fn type_text_with(&mut self, text_to_type: &str, opts: &TypeOpts) -> &mut Self {
         self.check_not_timed_out();
         if text_to_type == CLOSE_CHORD {
             self.driver.request_close();
@@ -111,7 +135,7 @@ impl AutomationRunner {
             self.input.type_strokes(&mut self.driver, &strokes);
         }
         self.pump_frame(FrameKind::Reactive);
-        self.delay(0.2)
+        self.delay(opts.delay_after)
     }
 
     /// C# `PressModifierKeys`: hold `modifier_keys` (on top of any already
