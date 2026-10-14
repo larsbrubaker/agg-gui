@@ -12,13 +12,14 @@ use crate::dialog::AUTOMATION_DIALOG_TEXT_EDIT;
 use crate::runner::waits::{DEFAULT_CHECK_INTERVAL_MILLISECONDS, DEFAULT_CONDITION_WAIT_SECONDS};
 
 use super::{AutomationRunner, WaitOpts};
+use crate::driver::UiDriver;
 
 /// How long [`AutomationRunner::complete_dialog`] waits for the dialog to
 /// show and then to go away (C#'s `RequireWidget(..., 5)` and
 /// `WaitForWidgetDisappear(..., 5)`).
 pub const COMPLETE_DIALOG_WAIT_SECONDS: f64 = 5.0;
 
-impl AutomationRunner {
+impl<D: UiDriver> AutomationRunner<D> {
     /// C# `CompleteDialog(textValue)`: wait up to five seconds for the
     /// dialog's "Automation Dialog TextEdit" (panicking with C#'s
     /// `RequireWidget` message when it never shows), wait for it to hold

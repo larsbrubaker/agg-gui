@@ -45,6 +45,7 @@ use std::time::Duration;
 use agg_gui::{clock, MouseButton};
 
 use super::{AutomationRunner, WaitOpts, DEFAULT_WIDGET_WAIT_SECONDS};
+use crate::driver::UiDriver;
 use crate::input::{InputMethod, MouseAction, Point2D};
 use crate::search_region::SearchRegion;
 use crate::tree_query::{self, NamedHit, WidgetHandle};
@@ -194,7 +195,7 @@ pub(super) fn eased_step(start: Point2D, end: Point2D, i: u32, steps: u32) -> Po
     )
 }
 
-impl AutomationRunner {
+impl<D: UiDriver> AutomationRunner<D> {
     /// C# `CurrentMousePosition`: the pointer, in physical pixels, Y-down.
     pub fn current_mouse_position(&self) -> Point2D {
         self.check_not_timed_out();
@@ -424,7 +425,7 @@ impl AutomationRunner {
 
     /// C# `ClickByName` with its defaults: click the widget named
     /// `widget_name` at its center. Panics with
-    /// [`widget_not_found_message`](Self::widget_not_found_message) when no
+    /// [`widget_not_found_message`](AutomationRunner::widget_not_found_message) when no
     /// such widget turns up.
     pub fn click_by_name(&mut self, widget_name: &str) -> &mut Self {
         self.click_by_name_with(widget_name, &ClickOpts::default())
@@ -433,13 +434,13 @@ impl AutomationRunner {
     /// C# `ClickByName`: look for a visible widget named `widget_name` (as
     /// [`get_widget_hit_by_name`](Self::get_widget_hit_by_name) chooses it)
     /// and click it. Panics with
-    /// [`widget_not_found_message`](Self::widget_not_found_message) when no
+    /// [`widget_not_found_message`](AutomationRunner::widget_not_found_message) when no
     /// such widget turns up.
     pub fn click_by_name_with(&mut self, widget_name: &str, opts: &ClickOpts) -> &mut Self {
         let Some(hit) = self.get_widget_hit_by_name(widget_name, &opts.wait_opts()) else {
             panic!(
                 "{}",
-                Self::widget_not_found_message("ClickByName", widget_name)
+                super::named::widget_not_found_message("ClickByName", widget_name)
             );
         };
         self.click_widget_at(
@@ -563,7 +564,7 @@ impl AutomationRunner {
         let Some(hit) = self.get_widget_hit_by_name(widget_name, &opts.wait_opts()) else {
             panic!(
                 "{}",
-                Self::widget_not_found_message("ClickByName", widget_name)
+                super::named::widget_not_found_message("ClickByName", widget_name)
             );
         };
         self.right_click_widget_at(

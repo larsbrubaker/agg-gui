@@ -28,6 +28,7 @@
 use agg_gui::{clock, Framebuffer, MouseButton};
 
 use super::{AutomationRunner, ClickOrigin, DEFAULT_WIDGET_WAIT_SECONDS};
+use crate::driver::UiDriver;
 use crate::image_match::find_least_squares_match;
 use crate::image_source::{ImageNeedle, ImageSource};
 use crate::input::{MouseAction, Point2D};
@@ -91,7 +92,7 @@ impl Default for ImageDragDropOpts<'_> {
     }
 }
 
-impl AutomationRunner {
+impl<D: UiDriver> AutomationRunner<D> {
     /// Use `source` to load needles given by name (C#'s `imagesDirectory`;
     /// an application passes its own static-data loader).
     pub fn set_image_source(&mut self, source: impl ImageSource + 'static) {

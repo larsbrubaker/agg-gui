@@ -18,6 +18,7 @@
 use agg_gui::MouseButton;
 
 use super::{AutomationRunner, ClickOrigin, WaitOpts, DEFAULT_WIDGET_WAIT_SECONDS};
+use crate::driver::UiDriver;
 use crate::input::{MouseAction, Point2D};
 use crate::search_region::SearchRegion;
 use crate::tree_query::WidgetHandle;
@@ -77,7 +78,7 @@ impl Default for DragDropOpts<'_> {
     }
 }
 
-impl AutomationRunner {
+impl<D: UiDriver> AutomationRunner<D> {
     /// C# `DragDropByName`: [`drag_by_name`](Self::drag_by_name) on
     /// `widget_name_drag`, then [`drop_by_name`](Self::drop_by_name) on
     /// `widget_name_drop`.
@@ -123,7 +124,10 @@ impl AutomationRunner {
             only_visible: true,
         };
         let Some(hit) = self.get_widget_hit_by_name(widget_name, &wait) else {
-            panic!("{}", Self::widget_not_found_message(operation, widget_name));
+            panic!(
+                "{}",
+                super::named::widget_not_found_message(operation, widget_name)
+            );
         };
         let hint = Point2D::from_f64(hit.offset_hint.x, hit.offset_hint.y);
         (hit.handle, hint)

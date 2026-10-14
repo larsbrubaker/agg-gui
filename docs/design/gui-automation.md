@@ -13,7 +13,7 @@
   - Virtual time: `Delay`, `WaitFor`, timeouts and pointer pacing.
   - Wall time: the hang watchdogs (test budget, bring-up, close).
 - **One thread per test:** `show_window_and_execute_tests` runs each test on a fresh thread. That isolates agg-gui's thread-local state and lets the caller time out a stuck body, which is what C#'s `Task.WhenAny` does.
-- **Order of work:** the remaining slices fill agg-gui's gaps test-first, port the 6 remaining Agg Automation Tests 1:1, then finish moving `mattercad-app-test` onto the runner (section 9).
+- **Order of work:** every Agg Automation Test is ported; the remaining slices add the stack dumps and the live run entry point, then finish moving `mattercad-app-test` onto the runner (section 9).
 
 ## 1. What exists today
 
@@ -57,12 +57,12 @@
 
 ## 2. Where the code goes
 
-**Crate `agg-gui/agg-gui-automation`** (workspace member; consumers use it as a dev-dependency). It exists with `keys`, `key_mapping`, `typed_key_parser`, `search_region`, `waits` (`static_delay`), `driver` (`HeadlessDriver`, `HeadlessPainter`, `SoftwarePainter`, `BackgroundBusy`, `HeadlessWindow`, `ClockPolicy`, `FrameKind`, `UiDriver`), `probe` (`ProbeWidget`) and `tree_query` (`WidgetHandle`, `find_by_name`, `find_named_hits` (widgets and the named targets widgets report), `local_rect_to_screen`, `placement`/`screen_rect`/`clipped_rect`, `actually_visible_on_screen`, `parents`/`children` and their `_of_type` forms), `execute` (`show_window_and_execute_tests`, `RunOptions`, `AutomationWindow`, `AutomationError`, the close phase in `execute/close.rs`), `image_match` (`find_least_squares_match`, `LeastSquaresMatch`), `pointer_reach` (`can_reach`, `prefer_reachable`), `pointer_state` (`under_mouse_state`, `mouse_captured`, `child_has_mouse_captured`, `focused` for a handle), `input` (`InputMethod`, `SimulatedInput`, `Point2D`, `MouseAction`) and `runner` (`AutomationRunner` with `AutomationConfig`, `attach`/`into_driver`, `mark_test_complete`, driver access, the waits in `runner/waits.rs`, the name lookups in `runner/named.rs`, `scroll_into_view` in `runner/scroll.rs`, the pointer gestures in `runner/pointer.rs`, the drags in `runner/drag.rs`, the file drags and drops (`drop_files_by_name`, `drop_file_data_by_name`, `file_drag_hover_by_name`, `file_drag_leave`) in `runner/file_drop.rs`, the mouse wheel (`scroll_wheel`, `scroll_wheel_by_name`) in `runner/wheel.rs`, the keyboard (`type_text`, `type_text_with`/`TypeOpts`, `ModifierKeys` with the Rust-only `PHYSICAL_CONTROL` and `META`, `press_modifier_keys`/`release_modifier_keys`, `select_all`/`select_none`) in `runner/keyboard.rs` the image searches (`get_current_screen`, `get_screen_region`, `capture_region`, `image_exists`, `wait_for_image`) in `runner/images.rs` and the image gestures (`click_image`, `drag_image`, `drop_image`, `drag_drop_image`, `set_image_source`) in `runner/image_gestures.rs`), `image_source` (`ImageNeedle`, `ImageSource`, `DirectoryImageSource`, `decode_needle`), `thread_stack_dump` (feature `stack-dump`: `capture`/`write_to_console`, `capture_with_retries` with `CAPTURE_ATTEMPTS`/`DELAY_BETWEEN_ATTEMPTS` and `CaptureGaveUp`, `write_dump_of_this_process`, `report_from_dump`/`MinidumpWalker` with `MAX_FRAMES_PER_THREAD`, `register_current_thread`/`current_os_thread_id`, `read_thread_stack_pointers`/`drop_thread_contexts_with_repeated_stack_pointers`, `run_dump_writer` with `DUMP_WRITER_TIMEOUT` and `DumpWriterError`, `DumpWriterProgram`/`write_dump_with`, and `capture_with` over the `DumpWalker` seam; its writer-subprocess tests run the `agg-gui-fake-dump-writer` bin); the other modules and members below are still to come.
+**Crate `agg-gui/agg-gui-automation`** (workspace member; consumers use it as a dev-dependency). It exists with `keys`, `key_mapping`, `typed_key_parser`, `search_region`, `waits` (`static_delay`), `driver` (`HeadlessDriver`, `HeadlessPainter`, `SoftwarePainter`, `BackgroundBusy`, `HeadlessWindow`, `ClockPolicy`, `FrameKind`, `UiDriver`), `probe` (`ProbeWidget`) and `tree_query` (`WidgetHandle`, `find_by_name`, `find_named_hits` (widgets and the named targets widgets report), `local_rect_to_screen`, `placement`/`screen_rect`/`clipped_rect`, `actually_visible_on_screen`, `parents`/`children` and their `_of_type` forms), `execute` (`show_window_and_execute_tests`, `RunOptions`, `AutomationWindow`, `AutomationError`, the close phase in `execute/close.rs`), `image_match` (`find_least_squares_match`, `LeastSquaresMatch`), `pointer_reach` (`can_reach`, `prefer_reachable`), `pointer_state` (`under_mouse_state`, `mouse_captured`, `child_has_mouse_captured`, `focused` for a handle), `input` (`InputMethod` with `current_screen`, `SimulatedInput`, `Point2D`, `MouseAction`), `overlay` (`render_mouse`, `mouse_label`, `SimulatedMouse`: C#'s `RenderMouse`), `driver::LiveDriver`/`LiveHost` (feature `live`: a real `agg-gui-shell` window over `ShellSession`; real input and activation off, simulated input through the window's forwarder, each painted frame read back for `current_screen`, the simulated mouse drawn on presented frames only; `set_draw_simulated_mouse` is C#'s `DrawSimulatedMouse`, default on) and `runner` (`AutomationRunner` with `AutomationConfig`, `attach`/`into_driver`, `mark_test_complete`, driver access, the waits in `runner/waits.rs`, the name lookups in `runner/named.rs`, `scroll_into_view` in `runner/scroll.rs`, the pointer gestures in `runner/pointer.rs`, the drags in `runner/drag.rs`, the file drags and drops (`drop_files_by_name`, `drop_file_data_by_name`, `file_drag_hover_by_name`, `file_drag_leave`) in `runner/file_drop.rs`, the mouse wheel (`scroll_wheel`, `scroll_wheel_by_name`) in `runner/wheel.rs`, the keyboard (`type_text`, `type_text_with`/`TypeOpts`, `ModifierKeys` with the Rust-only `PHYSICAL_CONTROL` and `META`, `press_modifier_keys`/`release_modifier_keys`, `select_all`/`select_none`) in `runner/keyboard.rs` the image searches (`get_current_screen`, `get_screen_region`, `capture_region`, `image_exists`, `wait_for_image`) in `runner/images.rs` and the image gestures (`click_image`, `drag_image`, `drop_image`, `drag_drop_image`, `set_image_source`) in `runner/image_gestures.rs`), `image_source` (`ImageNeedle`, `ImageSource`, `DirectoryImageSource`, `decode_needle`), `thread_stack_dump` (feature `stack-dump`: `capture`/`write_to_console`, `capture_with_retries` with `CAPTURE_ATTEMPTS`/`DELAY_BETWEEN_ATTEMPTS` and `CaptureGaveUp`, `write_dump_of_this_process`, `report_from_dump`/`MinidumpWalker` with `MAX_FRAMES_PER_THREAD`, `register_current_thread`/`current_os_thread_id`, `read_thread_stack_pointers`/`drop_thread_contexts_with_repeated_stack_pointers`, `run_dump_writer` with `DUMP_WRITER_TIMEOUT` and `DumpWriterError`, `DumpWriterProgram`/`write_dump_with`, and `capture_with` over the `DumpWalker` seam; its writer-subprocess tests run the `agg-gui-fake-dump-writer` bin); the other modules and members below are still to come.
 - It keeps test-only code (watchdogs, stack dumps, image matching) out of product builds.
 - Its optional live mode depends on `agg-gui-shell` (winit and wgpu), which core `agg-gui` must not.
 - Features, each added with the slice whose code uses it (headless is the default):
   - `stack-dump` (exists): rust-minidump's `minidump`, `minidump-processor` (no default features) and `minidump-unwind` (`debuginfo-unwind`: framehop, object), `minidump-writer` and `libc` (macOS and Linux only), `backtrace` and `async-trait`. All pure Rust (no build script compiles C; `minidump-writer`'s only links the system `dbghelp` on Windows, where it is not a dependency) under MIT, MIT/Apache-2.0 or Apache-2.0 (`prost`); `libc` is FFI bindings only.
-  - `live = ["dep:agg-gui-shell"]` (slice 31)
+  - `live = ["dep:agg-gui-shell"]` (exists): `LiveDriver` and the live tests
 
 Modules (each under 800 lines, each opening with a purpose comment):
 
@@ -77,7 +77,7 @@ src/runner/file_drop.rs    (exists) file drags and drops by name (no C# counterp
 src/runner/wheel.rs        (exists) the mouse wheel at the pointer or by name (no C# counterpart)
 src/runner/keyboard.rs     (exists) Type, ModifierKeys, Press/ReleaseModifierKeys, SelectAll/None
 src/runner/waits.rs        (exists) Delay, WaitFor/WaitUntil, Assert, WaitForPendingUiWork, WaitforDraw
-src/input.rs               (exists) InputMethod trait (IInputMethod) + SimulatedInput (AggInputMethods), MouseConsts→MouseAction, keyboard members; current_screen to come
+src/input.rs               (exists) InputMethod trait (IInputMethod, with current_screen) + SimulatedInput (AggInputMethods), MouseConsts→MouseAction, keyboard members
 src/paint_geometry.rs      (exists) painting's transform and clip chain, replayed for the lookups
 src/name_pick.rs           (exists) GetWidgetByName's pick among same-named hits and where the click lands; find_on_screen
 src/pointer_reach.rs       (exists) PointerReach
@@ -88,16 +88,16 @@ src/driver/headless.rs     (exists) HeadlessDriver
 src/driver/painter.rs      (exists) HeadlessPainter, SoftwarePainter
 src/driver/thread_clock.rs (exists) the clock shared by a thread's drivers
 src/driver/window.rs       (exists) HeadlessWindow (the "SystemWindow" for tests that use no runner)
-src/driver/live.rs         (feature live) LiveDriver over agg_gui_shell::ShellSession
+src/driver/live.rs         (exists, feature live) LiveDriver over agg_gui_shell::ShellSession
 src/probe.rs               (exists) ProbeWidget: generic C#-GuiWidget stand-in (name, bounds, colour, event log/callbacks, C# Click semantics)
-src/overlay.rs             RenderMouse (simulated pointer drawing), drawn by the LiveDriver (slice 31)
+src/overlay.rs             (exists) RenderMouse (simulated pointer drawing), drawn by the LiveDriver
 src/dialog/mod.rs          (exists) AutomationFileDialog (AutomationDialogProvider), ModalPresenter
 src/dialog/overlay.rs      (exists) AutomationWindow's built-in overlay layer, AutomationModalPresenter
 src/runner/dialog.rs       (exists) complete_dialog (MatterCAD's CompleteDialog)
 src/startup_failure_log.rs (exists) StartupFailureLog
 src/thread_stack_dump/     (exists, feature stack-dump) capture, retry, minidump writer, walker, stack-pointer repair, thread registry, dump-writer subprocess
 tests/*.rs                 the 103 ports (section 8)
-tests/live/*.rs            live tests, `harness = false` (winit on macOS needs the main thread)
+tests/live/*.rs            (exists, feature live) live tests, `harness = false` (winit on macOS needs the main thread, one event loop per process)
 ```
 
 ## 3. Public API, member by member
@@ -116,10 +116,10 @@ tests/live/*.rs            live tests, `harness = false` (winit on macOS needs t
 | `MatchLimit` (50) | `config.match_limit` |
 | `RequireTestCompletion` / `TestWasCompleted` / `MarkTestComplete()` | `config.require_test_completion`, `test_was_completed()`, `mark_test_complete()` |
 | static `TimeToMoveMouse` (0.1), `MouseMoveSteps` (5), `UpDelaySeconds` (0.1) | `config.time_to_move_mouse`, `config.mouse_move_steps`, `config.up_delay`. Same values, Cubic.Out easing and step formula. |
-| `DrawSimulatedMouse` | `RunOptions.draw_simulated_mouse` (`InputType`/`OverrideInputSystem`/static `InputMethod` are `AutomationRunner::set_input_method`, default `SimulatedInput`) |
+| `DrawSimulatedMouse` | `LiveDriver::set_draw_simulated_mouse` (exists, default true); `RunOptions.draw_simulated_mouse` comes with the live run entry point (section 9). `InputType`/`OverrideInputSystem`/static `InputMethod` are `AutomationRunner::set_input_method`, default `SimulatedInput` |
 | `InterpolationType` (unused) | Dropped as dead code; noted in the port comment. |
 | `GetCurrentScreen()` | `get_current_screen() -> Framebuffer` (exists): headless, a copy of the painter's last frame (the software framebuffer by default, a plugged-in painter's `capture`, or a blank screen of the window's size from a painter with no pixels); live, a read-back. |
-| `RenderMouse` | `overlay::render_mouse` (slice 31). C# draws it on the window's `AfterDraw` while `DrawSimulatedMouse` (default true) is set, as a watcher's aid: a radius-10 circle stroked black (3) and white (2), filled green while the left button is down with "S"/"C" for held Shift/Control plus the click count above 1. The LiveDriver draws it after `App::paint` on the presented frame only, never into `get_current_screen` captures, so image searches never see it; headless runs have no watcher and draw nothing. |
+| `RenderMouse` | `overlay::render_mouse` (exists). C# draws it on the window's `AfterDraw` while `DrawSimulatedMouse` (default true) is set, as a watcher's aid: a radius-10 circle stroked black (3) and white (2), filled green while the left button is down with "S"/"C" for held Shift/Control plus the click count above 1. The LiveDriver draws it in the shell's presented-only overlay pass (`ShellHost::paint_presented_overlay`, after every read-back of the frame) on the presented frame only, never into `get_current_screen` captures, so image searches never see it; headless runs have no watcher and draw nothing. |
 | `Dispose`, `KeyDown`/`KeyUp` (throw NotImplemented in C#) | `Drop`. The two key methods are left out. |
 
 **Name lookup** (the rest of it exists in `runner/named.rs`)
@@ -160,7 +160,7 @@ tests/live/*.rs            live tests, `harness = false` (winit on macOS needs t
 | `AutomationRunner::wait_for_idle(max_seconds) -> bool` | Pump frames until a frame that did not paint leaves the driver idle (no background work, no due idle work, no draw requested), or until `max_seconds` of UI time has passed. `wait_for_pending_ui_work` also keeps pumping, up to its `max_milliseconds`, while background work runs. |
 
 **Supporting types**
-- `InputMethod` (= `IInputMethod`) gains `current_screen` (slice 31: the live window's read-back).
+- `InputMethod` (= `IInputMethod`) has `current_screen` (exists): a copy of the driver's last frame, the live window's read-back on a `LiveDriver`.
 
 ## 4. How simulated input gets in
 
@@ -285,13 +285,8 @@ Rules 3 and 4 are the runner's behaviour for every consumer, not a hook: both ma
 - MatterCAD adds `AutomationFileService: FileService` that opens this dialog. C#'s `CompleteDialog` is `AutomationRunner::complete_dialog(text)` (`runner/dialog.rs`): find the field within 5 s (C# `RequireWidget`'s message otherwise), wait up to 5 s for it to contain focus, `type_text(text)`, `{Enter}`, wait up to 5 s for it to disappear.
 
 **Live shell**
-- **New in `agg-gui-shell`: `ShellSession`.** It does the same window and GPU bring-up as `run`, but returns control to the caller:
-  - `pump(timeout)` via winit 0.30's `EventLoopExtPumpEvents::pump_app_events` (Windows, macOS, Linux)
-  - `app()` / `app_mut()`, `forwarder()`
-  - `request_close()` (runs the host's `on_close_requested`), `force_close()`, `presented_frames()`
-  - `set_platform_input_enabled`, `set_platform_deactivation_enabled`.
-- `run()` becomes a thin loop over the same internals.
-- Live tests are separate `harness = false` binaries (macOS needs the event loop on the main thread). The budget watchdog is a helper thread: it sets `cancel`, and after a grace period it dumps stacks and calls `process::exit`.
+- **`agg_gui_shell::ShellSession`** (exists) does `run`'s window and GPU bring-up (`run::bring_up`, shared) and returns control to the caller: `pump(timeout)` over winit 0.30's `pump_events` (Windows, macOS, Linux), `app()`/`app_mut()`, `forwarder()`, `send_simulated`, `queue_window_event`/`queue_platform_input` (OS events for the next pump, through the shell's winit arms and gate; winit's `KeyEvent` cannot be built outside winit, so a key enters as the `ForwarderEvent` its arm forwards), `request_close()` (the `CloseRequested` arm, vetoable), `force_close()`, `presented_frames()`, `set_platform_input_enabled`, `set_platform_deactivation_enabled`. A session keeps agg-gui's in-process clipboard.
+- Live tests are separate `harness = false` binaries behind the `live` feature (macOS needs the event loop on the main thread; winit allows one per process). They attach a runner to a `LiveDriver` (`AutomationRunner<LiveDriver>`: the runner is generic over `UiDriver`, `HeadlessDriver` by default) and pass, saying why, where no window or GPU comes up. agg-gui's CI does not run them: the `test` job is ubuntu without a display. A macOS runner can (`cargo test -p agg-gui-automation --features live --test automation_runner_live_tests`), as can Linux under `xvfb-run` with a Vulkan driver (lavapipe through `ShellConfig::with_force_fallback_adapter`).
 - The web shell is out of scope for v1, as it is in C# (wasm can't block). The `UiDriver` trait leaves room for a later async front.
 
 **`StartupFailureLog`** (exists, `src/startup_failure_log.rs`):
@@ -307,20 +302,14 @@ Rules 3 and 4 are the runner's behaviour for every consumer, not a hook: both ma
 - Labels: `register_current_thread(role)` records `<role> name="<thread name>"` under `current_os_thread_id()` (the Mach port name on macOS, the tid on Linux). C#'s `threadPool=`/`background=` and its finalizer/gc/worker kinds have no Rust equivalent; an unregistered thread shows the name the OS kept.
 - Differences from C#, all from the dump format and the runtime: the banner reads `ALL THREAD STACKS` (a Rust process has no managed threads); the stack-pointer reader and its repair read a minidump's thread list instead of a Mach-O core's LC_THREAD commands, so ATruncatedThreadCommandIsNotRead truncates a thread-list entry; ADumpWithTwoThreadsOnOneStackPointerStillReports runs wherever there is a writer and parks four threads first (a Rust test process may have only two), and drops C#'s assertion that ClrMD cannot open the unrepaired dump, since rust-minidump can (the repair still runs: the repeated context would print one thread's frames under another's label).
 
-## 8. Gaps to fill first, and the test port map
-
-**agg-gui gap** (lands test-first in the slice listed in section 9):
-
-| # | Gap | Slice |
-|---|---|---|
-| G17 | `ShellSession` / pump API, input and deactivation gates | 31 |
+## 8. The test port map
 
 **C# class → Rust file** (`agg-gui-automation/tests/`; tests keep their names in snake_case):
 
 | C# class (count) | Rust file | Notes |
 |---|---|---|
 | AutomationRunnerTests (11) | `automation_runner_tests.rs` | via `show_window_and_execute_tests`; all ported. AnExpectedTimeoutLeavesNoThreadDump passes vacuously until slice 30c writes dumps, and must stay green when it does. |
-| AutomationRunnerTests.Winforms (3) | `automation_runner_tests.rs`; `live/automation_runner_live_tests.rs` (`harness = false`, all desktop OSes) | IdlePumpSurvivesAnotherWindowsTeardown is ported headless as a behaviour test: C#'s subject, WinForms' process-wide idle timer, does not exist here, but the idle pump is shared too (the main queue passes between UI threads, and windows on one thread share its queue and clock), so another run ending and a second window on the same thread dropped must both leave the live window's pump running. RealMouseInputDoesNotReachAWindowUnderAutomation goes live in slice 31. Skipped as N/A: ShowFromNonPumpThreadReturnsToItsCaller, whose subject is a WinForms `ShowAsSystemWindow` from a non-pump thread starting a second `Application.Run`; agg-gui-shell has one OS window per process (`run` owns winit's single event loop) and widgets are not `Send`, so a worker reaches the UI only by posting to the idle queue, which `agg-gui/tests/ui_thread*.rs` cover. |
+| AutomationRunnerTests.Winforms (3) | `automation_runner_tests.rs`; `live/automation_runner_live_tests.rs` (`harness = false`, all desktop OSes) | IdlePumpSurvivesAnotherWindowsTeardown is ported headless as a behaviour test: C#'s subject, WinForms' process-wide idle timer, does not exist here, but the idle pump is shared too (the main queue passes between UI threads, and windows on one thread share its queue and clock), so another run ending and a second window on the same thread dropped must both leave the live window's pump running. RealMouseInputDoesNotReachAWindowUnderAutomation is ported live (`--features live`). Skipped as N/A: ShowFromNonPumpThreadReturnsToItsCaller, whose subject is a WinForms `ShowAsSystemWindow` from a non-pump thread starting a second `Application.Run`; agg-gui-shell has one OS window per process (`run` owns winit's single event loop) and widgets are not `Send`, so a worker reaches the UI only by posting to the idle queue, which `agg-gui/tests/ui_thread*.rs` cover. |
 | FlowLayoutTests (24) | agg-gui's `tests/flow_layout_agg_sharp/flow_layout_tests.rs` and `flow_layout_tests_anchors.rs` | FlowLayoutWidget → FlexColumn/FlexRow (`with_right_to_left`, `with_bottom_to_top` for the reversed directions); image compares become box compares; all ported. `EnsureFlowLayoutMinSizeFitsChildrenMinSize` has no `[Test]` attribute in C# and is not counted. |
 | MacTextEditKeyBindings (12) | `mac_text_edit_key_binding_tests.rs` | all ported |
 | WidgetClickTests (3) | `widget_click_tests.rs` | all ported |
@@ -338,9 +327,9 @@ Rules 3 and 4 are the runner's behaviour for every consumer, not a hook: both ma
 | # | Slice | Tests that land |
 |---|---|---|
 | 30c | Load and close watchdogs write dumps to `TestResults/` | none new; AnExpectedTimeoutLeavesNoThreadDump (ported) must stay green |
-| 31 | G17 `ShellSession` plus `LiveDriver`, with the simulated-mouse overlay (`RunOptions.draw_simulated_mouse`, `overlay::render_mouse`) | RealMouseInputDoesNotReachAWindowUnderAutomation |
+| 31b | The live run entry point: `show_window_and_execute_tests` over a `LiveDriver` (on the main thread, the budget watchdog a helper thread that sets `cancel` and, after a grace period, dumps stacks and calls `process::exit`), the close phase over `ShellSession::request_close`, and `RunOptions.draw_simulated_mouse` | none new; the live test moves onto it |
 
-**Tally** (1 still to port): AutomationRunnerTests 11 (11 ported), Winforms 3 (1 ported, 1 skipped as N/A, RealMouseInputDoesNotReachAWindowUnderAutomation to go), Flow 24 (24 ported), Mac 12 (12 ported), Menu 1 (1 ported), Mouse 13 (13 ported), Paint 2 (2 ported), Present 1 (1 ported), TextEditFocus 3 (3 ported), TextEdit 13 (13 ported), ThreadStackDump 10 (10 ported), ToolTip 7 (7 ported), WidgetClick 3 (3 ported): **103**.
+**Tally** (all ported): AutomationRunnerTests 11 (11 ported), Winforms 3 (2 ported, 1 skipped as N/A), Flow 24 (24 ported), Mac 12 (12 ported), Menu 1 (1 ported), Mouse 13 (13 ported), Paint 2 (2 ported), Present 1 (1 ported), TextEditFocus 3 (3 ported), TextEdit 13 (13 ported), ThreadStackDump 10 (10 ported), ToolTip 7 (7 ported), WidgetClick 3 (3 ported): **103**.
 
 **Moving `mattercad-app-test` onto the runner** (the harness, `run_test`, the file dialog and the name lookups are done: section 1)
 

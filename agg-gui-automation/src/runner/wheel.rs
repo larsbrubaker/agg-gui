@@ -21,7 +21,7 @@ use agg_gui::shell_input::ForwarderEvent;
 use super::{AutomationRunner, DragOpts};
 use crate::driver::UiDriver;
 
-impl AutomationRunner {
+impl<D: UiDriver> AutomationRunner<D> {
     /// Turn the wheel `notches` at the pointer: a draw, the wheel event, a
     /// draw. Panics when the pointer is outside the window, where the
     /// window would hear no wheel.

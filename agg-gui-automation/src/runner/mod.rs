@@ -12,8 +12,9 @@
 //!
 //! A runner is created by [`crate::execute::show_window_and_execute_tests`]
 //! on the run's own UI thread and handed to the test body. It owns the
-//! window's [`HeadlessDriver`], so every runner call runs on the UI thread and
-//! pumps frames itself. When the run's wall-clock budget expires the caller
+//! window's driver (a [`HeadlessDriver`], or with the `live` feature a
+//! `LiveDriver` over a real window), so every runner call runs on the UI
+//! thread and pumps frames itself. When the run's wall-clock budget expires the caller
 //! cancels the run; the body's next runner call then panics with
 //! [`TEST_TIMED_OUT`], which unwinds a body that was stuck between calls.
 //!
@@ -108,11 +109,13 @@ impl Default for AutomationConfig {
 }
 
 /// The handle a test body drives its window through; see the module docs.
-pub struct AutomationRunner {
+/// `D` is the window's driver: a [`HeadlessDriver`] (the default), or the
+/// live window's `LiveDriver` (feature `live`).
+pub struct AutomationRunner<D: UiDriver = HeadlessDriver> {
     /// This run's settings; a body may change them (C# sets
     /// `testRunner.RequireTestCompletion = false` the same way).
     pub config: AutomationConfig,
-    driver: HeadlessDriver,
+    driver: D,
     /// Where pointer input goes (C# `inputSystem`): the forwarder, unless a
     /// test replaced it.
     input: Box<dyn InputMethod>,
@@ -124,14 +127,10 @@ pub struct AutomationRunner {
     ui_fault: UiFault,
 }
 
-impl AutomationRunner {
+impl<D: UiDriver> AutomationRunner<D> {
     /// A runner over a window that has come up. `cancel` is the run's
     /// timeout flag, set by the watching thread.
-    pub(crate) fn new(
-        driver: HeadlessDriver,
-        config: AutomationConfig,
-        cancel: Arc<AtomicBool>,
-    ) -> Self {
+    pub(crate) fn new(driver: D, config: AutomationConfig, cancel: Arc<AtomicBool>) -> Self {
         Self {
             config,
             driver,
@@ -149,7 +148,7 @@ impl AutomationRunner {
     /// the thread's own `agg_gui::set_unhandled_handler`, or are re-raised),
     /// and loads named needles from the default images folder until
     /// [`set_image_source`](Self::set_image_source) says otherwise.
-    pub fn attach(driver: HeadlessDriver, config: AutomationConfig) -> Self {
+    pub fn attach(driver: D, config: AutomationConfig) -> Self {
         Self::new(driver, config, Arc::new(AtomicBool::new(false)))
     }
 
@@ -174,7 +173,7 @@ impl AutomationRunner {
     /// The window's driver back, once the runner is done with it (a run's
     /// close phase takes it over; an [`attach`](Self::attach)ed runner's
     /// caller gets its driver back).
-    pub fn into_driver(self) -> HeadlessDriver {
+    pub fn into_driver(self) -> D {
         self.driver
     }
 
@@ -193,13 +192,13 @@ impl AutomationRunner {
     }
 
     /// The window's driver (frames, the framebuffer, the input forwarder).
-    pub fn driver(&self) -> &HeadlessDriver {
+    pub fn driver(&self) -> &D {
         self.check_not_timed_out();
         &self.driver
     }
 
     /// The window's driver, mutably.
-    pub fn driver_mut(&mut self) -> &mut HeadlessDriver {
+    pub fn driver_mut(&mut self) -> &mut D {
         self.check_not_timed_out();
         &mut self.driver
     }

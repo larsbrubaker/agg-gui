@@ -167,6 +167,7 @@ impl Painter {
             if should_capture(self.frames_painted, cfg.settle_frames) {
                 let (rgba, w, h) = self.ctx.read_screenshot();
                 let result = write_png(&cfg.path, &rgba, w, h);
+                self.paint_presented_overlay(&surface_frame.texture, app, host, &frame);
                 self.ctx.present(surface_frame);
                 result.map_err(ShellError::Screenshot)?;
                 self.last_duration = started.elapsed();
@@ -178,6 +179,7 @@ impl Painter {
             }
         }
 
+        self.paint_presented_overlay(&surface_frame.texture, app, host, &frame);
         // Drops the ctx's back-buffer clone before presenting (DX12 resize
         // fails otherwise) — see `WgpuGfxCtx::present`.
         self.ctx.present(surface_frame);
@@ -187,6 +189,37 @@ impl Painter {
             captured: false,
             retry_at: None,
         })
+    }
+}
+
+impl Painter {
+    /// Frames painted so far (presented, or refused only after painting).
+    pub(crate) fn frames_painted(&self) -> u64 {
+        self.frames_painted
+    }
+
+    /// The host's presented-only overlay ([`ShellHost::paint_presented_overlay`]),
+    /// as a second pass over the finished frame: after every read-back of
+    /// it, before present.
+    fn paint_presented_overlay<H: ShellHost>(
+        &mut self,
+        texture: &wgpu::Texture,
+        app: &App,
+        host: &mut H,
+        frame: &Frame,
+    ) {
+        if !host.wants_presented_overlay() {
+            return;
+        }
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        self.ctx.begin_frame(view);
+        // `begin_frame` queues the theme's clear as the pass's first command;
+        // the reset drops it, so the pass loads the frame's pixels instead of
+        // clearing them (agg-gui-wgpu clears only when the first command is a
+        // clear).
+        self.ctx.reset(frame.width as f32, frame.height as f32);
+        host.paint_presented_overlay(app, &mut self.ctx, frame);
+        self.ctx.end_frame();
     }
 }
 

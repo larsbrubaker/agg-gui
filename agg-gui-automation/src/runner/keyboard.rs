@@ -106,7 +106,7 @@ impl BitOrAssign for ModifierKeys {
     }
 }
 
-impl AutomationRunner {
+impl<D: UiDriver> AutomationRunner<D> {
     /// C# `Type`: put `text_to_type` through the window, stroke by stroke
     /// (`^` is the command modifier on the next key, `^+` command and shift,
     /// `{Enter}` a named key; see

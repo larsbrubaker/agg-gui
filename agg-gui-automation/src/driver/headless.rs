@@ -296,4 +296,24 @@ impl UiDriver for HeadlessDriver {
     fn request_close(&mut self) {
         self.close_requested = true;
     }
+
+    fn root(&self) -> &dyn Widget {
+        HeadlessDriver::root(self)
+    }
+
+    fn root_mut(&mut self) -> &mut dyn Widget {
+        HeadlessDriver::root_mut(self)
+    }
+
+    fn clock_policy(&self) -> ClockPolicy {
+        HeadlessDriver::clock_policy(self)
+    }
+
+    fn background_busy(&self) -> bool {
+        HeadlessDriver::background_busy(self)
+    }
+
+    fn is_idle(&self) -> bool {
+        HeadlessDriver::is_idle(self)
+    }
 }

@@ -77,6 +77,46 @@ where
     // feature.)
     agg_gui::clipboard::use_system_clipboard();
     let clipboard_guard = SystemClipboardGuard;
+    let BroughtUp {
+        event_loop,
+        mut shell,
+        exit,
+        error,
+    } = bring_up(config, build)?;
+
+    let run_result = event_loop
+        .run(move |event, elwt| shell.handle(event, elwt))
+        .map_err(ShellError::EventLoop);
+    // Released before a relaunch starts the next copy of the app.
+    drop(clipboard_guard);
+    run_result?;
+
+    if let Some(e) = error.borrow_mut().take() {
+        return Err(e);
+    }
+    if exit.get() == Some(ExitAction::Relaunch) {
+        relaunch()?;
+    }
+    Ok(())
+}
+
+/// What [`bring_up`] hands its caller: the event loop and the loop state,
+/// with the window up, the GPU up, the app built and its first frame painted.
+pub(crate) struct BroughtUp<H: ShellHost> {
+    pub(crate) event_loop: EventLoop<()>,
+    pub(crate) shell: ShellLoop<H>,
+    pub(crate) exit: Rc<Cell<Option<ExitAction>>>,
+    pub(crate) error: Rc<RefCell<Option<ShellError>>>,
+}
+
+/// Everything [`run`] does before it hands control to winit, shared with
+/// [`crate::ShellSession`], which pumps the same loop itself. The ordering is
+/// the one documented on [`run`]; the clipboard switch is the caller's.
+pub(crate) fn bring_up<H, B>(config: ShellConfig, build: B) -> Result<BroughtUp<H>, ShellError>
+where
+    H: ShellHost + 'static,
+    B: FnOnce(&ShellInit<'_>) -> Result<(App, H), ShellError>,
+{
     let event_loop = EventLoop::new().map_err(ShellError::EventLoop)?;
     // winit's delegate exists now; make it answer Finder's open-file requests
     // (macOS). Paths that arrive before the host is built are queued.
@@ -183,6 +223,7 @@ where
         exit: Rc::clone(&exit),
         error: Rc::clone(&error),
         finished: false,
+        platform_deactivation: true,
         _waker_guard: waker_guard,
     };
     shell.refresh_click_policy();
@@ -206,20 +247,12 @@ where
     }
     window.set_visible(true);
 
-    let run_result = event_loop
-        .run(move |event, elwt| shell.handle(event, elwt))
-        .map_err(ShellError::EventLoop);
-    // Released before a relaunch starts the next copy of the app.
-    drop(clipboard_guard);
-    run_result?;
-
-    if let Some(e) = error.borrow_mut().take() {
-        return Err(e);
-    }
-    if exit.get() == Some(ExitAction::Relaunch) {
-        relaunch()?;
-    }
-    Ok(())
+    Ok(BroughtUp {
+        event_loop,
+        shell,
+        exit,
+        error,
+    })
 }
 
 /// Closes the system clipboard connection when `run` ends, on every path (an

@@ -34,12 +34,12 @@ pub(super) fn copy_framebuffer(image: &Framebuffer) -> Framebuffer {
     copy
 }
 
-impl AutomationRunner {
+impl<D: UiDriver> AutomationRunner<D> {
     /// C# `GetCurrentScreen`: a copy of the window's last painted frame
     /// (RGBA8, row 0 at the bottom).
     pub fn get_current_screen(&self) -> Framebuffer {
         self.check_not_timed_out();
-        copy_framebuffer(self.driver.current_screen())
+        self.input.current_screen(&self.driver)
     }
 
     /// C# `GetScreenRegion`: the whole window, over a fresh capture.

@@ -25,7 +25,7 @@ use super::AutomationRunner;
 use crate::driver::{FrameKind, UiDriver};
 use crate::tree_query::{self, WidgetHandle};
 
-impl AutomationRunner {
+impl<D: UiDriver> AutomationRunner<D> {
     /// C# `ScrollIntoView(widgetName)`, preferring a copy of the name whose
     /// whole ancestor chain is visible (module docs). Nothing happens when
     /// the name is not found or no ancestor scrolls.

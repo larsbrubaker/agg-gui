@@ -49,7 +49,7 @@ pub const DEFAULT_CONDITION_WAIT_SECONDS: f64 = 5.0;
 /// milliseconds.
 pub const DEFAULT_CHECK_INTERVAL_MILLISECONDS: u64 = 10;
 
-impl AutomationRunner {
+impl<D: UiDriver> AutomationRunner<D> {
     /// Pump one frame, paced to the frame interval on the real clock.
     /// Panics with [`super::TEST_TIMED_OUT`] once the run has been
     /// cancelled.
@@ -139,7 +139,7 @@ impl AutomationRunner {
     /// ([`app`](Self::app), [`named_widget_exists`](Self::named_widget_exists)).
     pub fn wait_until(
         &mut self,
-        mut check_condition_satisfied: impl FnMut(&AutomationRunner) -> bool,
+        mut check_condition_satisfied: impl FnMut(&Self) -> bool,
         max_seconds: f64,
         check_interval_ms: u64,
     ) -> bool {
@@ -159,7 +159,7 @@ impl AutomationRunner {
     /// ([`wait_until`](Self::wait_until)), carrying on either way.
     pub fn wait_for(
         &mut self,
-        check_condition_satisfied: impl FnMut(&AutomationRunner) -> bool,
+        check_condition_satisfied: impl FnMut(&Self) -> bool,
         max_seconds: f64,
         check_interval_ms: u64,
     ) -> &mut Self {
@@ -171,7 +171,7 @@ impl AutomationRunner {
     /// with `Require Failed: {error_response}` if it never holds.
     pub fn assert(
         &mut self,
-        check_condition_satisfied: impl FnMut(&AutomationRunner) -> bool,
+        check_condition_satisfied: impl FnMut(&Self) -> bool,
         error_response: &str,
         max_seconds: f64,
         check_interval_ms: u64,

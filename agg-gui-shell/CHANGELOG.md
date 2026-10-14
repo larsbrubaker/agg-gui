@@ -10,6 +10,23 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- `ShellSession`: the window, GPU and app `run` brings up, with the event
+  loop pumped by the caller (`pump(timeout)` over winit's `pump_events`)
+  instead of owning the thread, for a test that drives a real window step by
+  step (agg-gui-automation's `LiveDriver`). It runs the same event handling
+  as `run`, and adds `send_simulated` (input through the window's
+  `InputForwarder`, never gated), `queue_window_event` and
+  `queue_platform_input` (OS events for the next pump, through the shell's own
+  winit arms and real-input gate), `set_platform_input_enabled` and
+  `set_platform_deactivation_enabled` (agg-sharp's `RealInputIgnored` and
+  `DesktopDeactivationIgnored`), `request_close` (vetoable), `force_close`,
+  and `presented_frames`. A session keeps agg-gui's in-process clipboard.
+
+- `ShellHost::wants_presented_overlay` / `paint_presented_overlay` (default
+  off): a second pass over the finished frame after every read-back of it
+  (`after_paint`, a configured screenshot) and before present, so what it
+  draws is on screen and never in a capture.
+
 - `ShellHost::on_open_files(&mut self, app, paths: Vec<PathBuf>)` (macOS): the
   OS asked the app to open files (Finder double-click, Open With, a drop on the
   Dock icon, `open` while running). The shell adds `application:openFiles:` to

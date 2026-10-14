@@ -28,6 +28,9 @@ minidump-processor = { version = "0.27", default-features = false, optional = tr
 minidump-unwind = { version = "0.27", features = ["debuginfo-unwind"], optional = true }
 async-trait = { version = "0.1", optional = true }
 backtrace = { version = "0.3", optional = true }
+# The `live` feature's real window (`LiveDriver` over `ShellSession`): winit
+# and wgpu through the shell, which core agg-gui must not depend on.
+agg-gui-shell = { path = "../agg-gui-shell", optional = true }
 
 # The minidump writer (MIT; pure Rust over mach2 on macOS and ptrace on
 # Linux) and the `libc` FFI bindings (no compiled C) for thread ids, fork and
@@ -49,6 +52,10 @@ stack-dump = [
     "dep:libc",
 ]
 
+# The live window driver (`src/driver/live.rs`): `LiveDriver` over
+# `agg_gui_shell::ShellSession`, a real window pumped by the test.
+live = ["dep:agg-gui-shell"]
+
 # The controllable dump writer `thread_stack_dump_tests` runs in place of a
 # real one (a writer that floods its output, never exits, or fails).
 [[bin]]
@@ -62,3 +69,12 @@ doc = false
 name = "thread_stack_dump_tests"
 path = "tests/thread_stack_dump_tests.rs"
 required-features = ["stack-dump"]
+
+# Live-window tests: one real window per process, its event loop on the main
+# thread (winit on macOS requires it), so each is a `harness = false` binary
+# with its own `main`.
+[[test]]
+name = "automation_runner_live_tests"
+path = "tests/live/automation_runner_live_tests.rs"
+harness = false
+required-features = ["live"]

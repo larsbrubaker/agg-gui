@@ -101,6 +101,10 @@ pub(crate) struct ShellLoop<H: ShellHost> {
     pub(crate) exit: Rc<Cell<Option<ExitAction>>>,
     pub(crate) error: Rc<RefCell<Option<ShellError>>>,
     pub(crate) finished: bool,
+    /// Whether the window gaining or losing key status reaches the app
+    /// (agg-sharp's `ForwardPlatformDeactivation`); `ShellSession` turns it
+    /// off for an automation run.
+    pub(crate) platform_deactivation: bool,
     /// Clears the `agg_gui` host waker when the loop is dropped, whichever way
     /// the loop ended.
     pub(crate) _waker_guard: HostWakerGuard,
@@ -148,7 +152,7 @@ impl<H: ShellHost> ShellLoop<H> {
         }
     }
 
-    fn window_event(&mut self, event: WindowEvent, elwt: &ActiveEventLoop) {
+    pub(crate) fn window_event(&mut self, event: WindowEvent, elwt: &ActiveEventLoop) {
         match event {
             WindowEvent::CloseRequested => {
                 // The host may veto (unsaved-changes gate) or defer the close
@@ -235,6 +239,9 @@ impl<H: ShellHost> ShellLoop<H> {
                     // The user may have changed the OS double-click setting
                     // while another app had focus; the read is a cheap query.
                     self.refresh_click_policy();
+                }
+                if !self.platform_deactivation {
+                    return;
                 }
                 self.forward(if focused {
                     ForwarderEvent::WindowActivated
@@ -546,7 +553,7 @@ impl<H: ShellHost> ShellLoop<H> {
 
     /// Hand one OS input event to the forwarder, which updates the input
     /// bookkeeping and calls the matching `App` entry point.
-    fn forward(&mut self, event: ForwarderEvent) {
+    pub(crate) fn forward(&mut self, event: ForwarderEvent) {
         self.input.platform(&mut self.app, event);
     }
 
@@ -743,7 +750,7 @@ impl<H: ShellHost> ShellLoop<H> {
     }
 
     /// Final flush, once, however the loop ended.
-    fn finish(&mut self) {
+    pub(crate) fn finish(&mut self) {
         if self.finished {
             return;
         }

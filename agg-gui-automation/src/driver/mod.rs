@@ -12,9 +12,13 @@
 //!   tests that build widgets and send them input without the runner, with
 //!   C#'s Y-up window coordinates.
 //!
-//! The live (winit) driver is a later slice.
+//! - `LiveDriver` (feature `live`) — a real `agg-gui-shell` window pumped
+//!   through `agg_gui_shell::ShellSession`, on the real clock, with the
+//!   simulated mouse drawn on its presented frames (`live.rs`).
 
 mod headless;
+#[cfg(feature = "live")]
+mod live;
 mod painter;
 mod thread_clock;
 mod window;
@@ -22,6 +26,8 @@ mod window;
 use std::time::Duration;
 
 pub use headless::{BackgroundBusy, HeadlessDriver};
+#[cfg(feature = "live")]
+pub use live::{LiveDriver, LiveHost};
 pub use painter::{HeadlessPainter, SoftwarePainter};
 pub use window::HeadlessWindow;
 
@@ -60,6 +66,22 @@ pub trait UiDriver {
     fn logical_size(&self) -> agg_gui::Size;
     /// The last painted frame.
     fn current_screen(&self) -> &agg_gui::Framebuffer;
+    /// The root of the widget tree (for [`crate::tree_query`]).
+    fn root(&self) -> &dyn agg_gui::Widget {
+        self.app().root()
+    }
+    /// The root of the widget tree, mutably.
+    fn root_mut(&mut self) -> &mut dyn agg_gui::Widget {
+        self.app_mut().root_mut()
+    }
+    /// The clock the UI thread runs on; on [`ClockPolicy::Real`] the runner
+    /// paces each pumped frame to [`FRAME_INTERVAL`].
+    fn clock_policy(&self) -> ClockPolicy;
+    /// Whether work the app waits on is still running off the UI thread.
+    fn background_busy(&self) -> bool;
+    /// Whether a frame pumped now would do nothing: no background work, no
+    /// due idle work, no draw requested.
+    fn is_idle(&self) -> bool;
     /// The window's size in physical pixels (the pointer space's extent).
     fn size_px(&self) -> (u32, u32);
     /// Deliver a simulated input event (physical pixels, Y-down) through the

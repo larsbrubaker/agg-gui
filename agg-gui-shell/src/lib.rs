@@ -62,6 +62,11 @@
 //!   "cannot say" elsewhere), for an app to feed
 //!   [`agg_gui::lcd_display_detection`] at startup.
 //!
+//! - [`ShellSession`]: the same window and loop with the event loop pumped by
+//!   the caller, for a test that drives a real window step by step, with
+//!   gates that drop real input and window activation while simulated input
+//!   gets through.
+//!
 //! # What the app owns
 //!
 //! Everything else, through [`ShellHost`]: per-frame state ticks, a custom
@@ -99,6 +104,7 @@ mod position;
 mod redraw_schedule;
 mod run;
 mod screenshot;
+mod session;
 mod shell_init;
 mod shell_loop;
 mod tooltip;
@@ -111,6 +117,7 @@ pub use host::{default_paint, Frame, NoHost, ShellControl, ShellHost, WindowGeom
 pub use lcd_display::WindowsLcdDisplayEnvironmentProvider;
 pub use position::SavedPosition;
 pub use run::run;
+pub use session::ShellSession;
 pub use shell_init::ShellInit;
 
 // Re-exported so a consumer can build a `ShellHost` without naming the

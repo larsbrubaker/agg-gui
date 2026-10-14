@@ -92,13 +92,20 @@ impl AutomationRunner {
     /// ([`StartupFailureLog::append_to`](crate::StartupFailureLog::append_to))
     /// when there is one: a window whose application died during startup has
     /// none of its widgets, and the first name a test asks for is a symptom
-    /// several steps downstream of the cause.
+    /// several steps downstream of the cause. The same for every driver.
     pub fn widget_not_found_message(operation: &str, widget_name: &str) -> String {
-        crate::StartupFailureLog::append_to(&format!(
-            "{operation} Failed: Named GuiWidget not found [{widget_name}]"
-        ))
+        widget_not_found_message(operation, widget_name)
     }
+}
 
+/// [`AutomationRunner::widget_not_found_message`], for runners of any driver.
+pub(crate) fn widget_not_found_message(operation: &str, widget_name: &str) -> String {
+    crate::StartupFailureLog::append_to(&format!(
+        "{operation} Failed: Named GuiWidget not found [{widget_name}]"
+    ))
+}
+
+impl<D: UiDriver> AutomationRunner<D> {
     /// A window rectangle (logical, Y-up, as [`tree_query`] reports it) as
     /// a Y-down pixel [`ScreenRectangle`] — C#'s `SystemWindowToScreen`,
     /// truncating each edge to whole pixels the way C# does.
@@ -444,7 +451,7 @@ impl AutomationRunner {
     /// [`tree_query::actually_enabled`]). A name that belongs to a target a
     /// widget reports (a menu row) waits for the target's own `enabled` flag
     /// as well, as C# waits on the row's `MenuItem` widget. Panics with
-    /// [`widget_not_found_message`](Self::widget_not_found_message) when no
+    /// [`widget_not_found_message`](AutomationRunner::widget_not_found_message) when no
     /// such widget turns up, and with C#'s "not visible and enabled" message
     /// when it never becomes both.
     pub fn wait_for_widget_enabled(&mut self, widget_name: &str, secs_to_wait: f64) -> &mut Self {
@@ -465,7 +472,7 @@ impl AutomationRunner {
         let Some(found) = self.get_widget_hit_by_name(widget_name, &WaitOpts::default()) else {
             panic!(
                 "{}",
-                Self::widget_not_found_message("WaitForWidgetEnabled", widget_name)
+                widget_not_found_message("WaitForWidgetEnabled", widget_name)
             );
         };
 

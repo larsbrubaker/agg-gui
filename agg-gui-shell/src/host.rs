@@ -153,6 +153,22 @@ pub trait ShellHost {
     /// frame index.
     fn after_paint(&mut self, _ctx: &mut WgpuGfxCtx, _frame: &Frame) {}
 
+    /// Whether this frame gets a presented-only overlay
+    /// ([`ShellHost::paint_presented_overlay`]). `false` (the default) costs
+    /// nothing.
+    fn wants_presented_overlay(&self) -> bool {
+        false
+    }
+
+    /// Draw over the finished frame just before it is presented: after
+    /// [`ShellHost::after_paint`] and any configured screenshot have read the
+    /// frame back, so the overlay is seen on screen and never in a read-back.
+    /// Called only when [`ShellHost::wants_presented_overlay`] says so. The
+    /// context starts from a reset state (identity transform, physical
+    /// pixels, Y up) over the frame's pixels, which are kept.
+    /// agg-gui-automation draws its simulated mouse here.
+    fn paint_presented_overlay(&mut self, _app: &App, _ctx: &mut WgpuGfxCtx, _frame: &Frame) {}
+
     /// The OS window was resized, maximized, restored, or changed scale.
     fn on_geometry_changed(&mut self, _geometry: WindowGeometry) {}
 

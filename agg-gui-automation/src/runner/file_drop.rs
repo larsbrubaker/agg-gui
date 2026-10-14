@@ -73,7 +73,7 @@ fn outside_nearest_edge(p: Point2D, size_px: (u32, u32)) -> Point2D {
     }
 }
 
-impl AutomationRunner {
+impl<D: UiDriver> AutomationRunner<D> {
     /// Carry a file drag naming `paths` onto the widget named `widget_name`
     /// (the point [`drop_by_name`](Self::drop_by_name) would move to), as
     /// the module docs describe, then draw. Returns where the drag ended.

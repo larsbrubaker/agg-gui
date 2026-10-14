@@ -5,7 +5,7 @@
 //! shells use, find widgets by name, and wait on conditions.  This crate is
 //! test-only: consumers take it as a dev-dependency so watchdogs and image
 //! matching stay out of product builds.  The design, including the slices
-//! still to land (the live driver, UI-panic capture, stack dumps), is
+//! still to land, is
 //! `docs/design/gui-automation.md`.
 //!
 //! Modules:
@@ -16,7 +16,10 @@
 //! - [`waits`] — `StaticDelay`, the wall-clock condition wait.
 //! - [`driver`] — `HeadlessDriver` (an `App` on a pluggable painter, a
 //!   software framebuffer by default, and a virtual clock) and `HeadlessWindow` (C#'s `SystemWindow` for runner-less
-//!   tests).
+//!   tests), and with the `live` feature `LiveDriver` (a real
+//!   `agg-gui-shell` window the test pumps).
+//! - [`overlay`] — `RenderMouse`: the simulated pointer a live window draws
+//!   on its presented frames.
 //! - [`probe`] — `ProbeWidget`, the stand-in for a plain C# `GuiWidget`.
 //! - [`execute`] — `show_window_and_execute_tests`: one run on its own UI
 //!   thread, with the bring-up and test budgets, the close protocol (the
@@ -70,6 +73,7 @@ pub mod input;
 mod key_mapping;
 pub mod keys;
 pub mod name_pick;
+pub mod overlay;
 pub mod paint_geometry;
 pub mod pointer_reach;
 pub mod pointer_state;
@@ -92,6 +96,8 @@ pub use driver::{
     BackgroundBusy, ClockPolicy, FrameKind, HeadlessDriver, HeadlessPainter, HeadlessWindow,
     SoftwarePainter, UiDriver,
 };
+#[cfg(feature = "live")]
+pub use driver::{LiveDriver, LiveHost};
 pub use execute::{show_window_and_execute_tests, AutomationError, AutomationWindow, RunOptions};
 pub use image_match::{find_least_squares_match, LeastSquaresMatch};
 pub use image_source::{decode_needle, DirectoryImageSource, ImageNeedle, ImageSource};

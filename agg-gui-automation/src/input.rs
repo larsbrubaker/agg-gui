@@ -55,8 +55,8 @@
 //!   no modifier bits), so releasing Shift also dropped a held Control.
 //!
 //! The close chord (`%{F4}`) is not a stroke: the runner asks the window to
-//! close itself. `GetCurrentScreen` joins this trait with the image slice of
-//! `docs/design/gui-automation.md`; `GetCurrentScreenHeight` (always 0 in
+//! close itself. `GetCurrentScreen` is `current_screen`, a copy of the
+//! driver's last frame by default; `GetCurrentScreenHeight` (always 0 in
 //! C#) and `Dispose` are not ported.
 
 use agg_gui::shell_input::{ClickCount, ForwarderEvent};
@@ -260,6 +260,16 @@ pub trait InputMethod {
     /// C# `Type` after parsing: put each stroke through the window, in
     /// order.
     fn type_strokes(&mut self, driver: &mut dyn UiDriver, strokes: &[TypedKey]);
+
+    /// C# `GetCurrentScreen`: a copy of the window's last painted frame
+    /// (RGBA8, row 0 at the bottom). By default the driver's: the headless
+    /// painter's frame, or the live window's read-back.
+    fn current_screen(&self, driver: &dyn UiDriver) -> agg_gui::Framebuffer {
+        let screen = driver.current_screen();
+        let mut copy = agg_gui::Framebuffer::new(screen.width(), screen.height());
+        copy.pixels_mut().copy_from_slice(screen.pixels());
+        copy
+    }
 }
 
 /// C# `AggInputMethods`: input delivered through the driver's input
