@@ -343,9 +343,9 @@ fn the_width_comes_from_the_model_and_the_right_edge_drags_it() {
     f.model.lock().unwrap().widths.push((NodeId(1), 260.0));
     f.editor.layout(VIEW);
     assert_eq!(card(&f.editor).bounds().width, 260.0);
-    // Press inside the right-edge band, below the title, then drag 40.
+    // Press in the band just outside the drawn right edge, then drag 40.
     let b = card(&f.editor).bounds();
-    let p = Point::new(b.x + b.width - 2.0, b.y + 20.0);
+    let p = Point::new(b.x + b.width + 2.0, b.y + 20.0);
     assert!(dispatch(&mut f.editor, press(p), p).is_consumed());
     assert!(
         f.clicks.borrow().is_empty(),

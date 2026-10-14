@@ -1,6 +1,7 @@
 //! Pointer gestures that only exist in hosted-card mode (see
-//! [`super::hosted`]): dragging a card's right edge to resize it, and
-//! raising the card the user presses to the top of the paint order.
+//! [`super::hosted`]): dragging a card's edge to resize it (the bands are
+//! in `hosted_resize.rs`), and raising the card the user presses to the
+//! top of the paint order.
 //!
 //! [`NodeEditor::hosted_preview_event`] is the editor's
 //! `Widget::preview_event`: the framework offers it a press before the
@@ -16,15 +17,36 @@
 
 use agg_gui::{Event, EventResult, MouseButton};
 
-use super::hosted::{ResizeDrag, MIN_HOSTED_CARD_WIDTH};
-use super::hosted_card::RESIZE_GRIP;
+use super::hosted_resize::{edge_at, ResizeDrag, ResizeEdge};
 use super::NodeEditor;
-use crate::draw::{NODE_WIDTH, TITLE_HEIGHT};
+use crate::draw::{NodeLayoutInfo, NODE_WIDTH};
+use crate::model::NodeId;
 
 impl NodeEditor {
-    /// True while a card's right edge is being dragged.
+    /// True while a card's edge is being dragged.
     pub(super) fn hosted_resizing(&self) -> bool {
         self.hosted.resize.is_some()
+    }
+
+    /// The card a press at `canvas` lands on, top first, and the resize
+    /// band it is in (`None`: the drawn card). A card's drawn body beats
+    /// the band of a card beneath it and the other way round, so the
+    /// topmost of the two takes the press.
+    fn hosted_hit(
+        &self,
+        layouts: &[NodeLayoutInfo],
+        canvas: [f64; 2],
+    ) -> Option<(NodeId, Option<ResizeEdge>)> {
+        layouts.iter().rev().find_map(|l| {
+            if l.body_contains(canvas) {
+                return Some((l.node_id, None));
+            }
+            let g = self.hosted.cards.get(&l.node_id)?;
+            let bottom = l.top_left[1] - l.size[1];
+            let local = [canvas[0] - l.top_left[0], canvas[1] - bottom];
+            let edge = edge_at(l.size[0], l.size[1], g.vertical.is_some(), local)?;
+            Some((l.node_id, Some(edge)))
+        })
     }
 
     /// Preview of a press routed into the hosted layer: a left press on a
@@ -49,15 +71,10 @@ impl NodeEditor {
         }
         let canvas = self.local_to_canvas(*pos);
         let layouts = self.snapshot_layouts();
-        let Some(top) = layouts.iter().rev().find(|l| l.body_contains(canvas)) else {
+        let Some((id, None)) = self.hosted_hit(&layouts, canvas) else {
             return EventResult::Ignored;
         };
-        let id = top.node_id;
         if !self.hosted.cards.contains_key(&id) || self.hit_socket(&layouts, canvas).is_some() {
-            return EventResult::Ignored;
-        }
-        let right = top.top_left[0] + top.size[0];
-        if canvas[0] >= right - RESIZE_GRIP && canvas[1] < top.top_left[1] - TITLE_HEIGHT {
             return EventResult::Ignored;
         }
         let before = self.selected.clone();
@@ -86,33 +103,30 @@ impl NodeEditor {
             } => {
                 let canvas = self.local_to_canvas(*pos);
                 let layouts = self.snapshot_layouts();
-                let top = layouts.iter().rev().find(|l| l.body_contains(canvas))?;
-                if !self.hosted.cards.contains_key(&top.node_id) {
-                    return None;
-                }
-                let id = top.node_id;
+                let (id, edge) = self.hosted_hit(&layouts, canvas)?;
+                let card = self.hosted.cards.get(&id)?;
+                let min_height = card.vertical.unwrap_or(0.0);
+                let layout = layouts.iter().find(|l| l.node_id == id)?;
+                let (start_height, start_top) = (layout.size[1], layout.top_left[1]);
                 self.raise_card(id);
-                let right = top.top_left[0] + top.size[0];
-                let in_band = canvas[0] >= right - RESIZE_GRIP
-                    && canvas[1] < top.top_left[1] - TITLE_HEIGHT
-                    && self.hit_socket(&layouts, canvas).is_none();
-                if !in_band {
-                    return None;
-                }
+                // A socket straddling the edge keeps its outer half.
+                let edge = edge.filter(|_| self.hit_socket(&layouts, canvas).is_none())?;
                 let start_width = self.model.lock().unwrap().node_width(id);
                 self.hosted.resize = Some(ResizeDrag {
                     node: id,
+                    edge,
                     start_width: start_width.unwrap_or(NODE_WIDTH),
-                    start_canvas_x: canvas[0],
+                    start_height,
+                    start_top,
+                    start_canvas: canvas,
+                    min_height,
                 });
                 Some(EventResult::Consumed)
             }
             Event::MouseMove { pos } => {
                 let drag = self.hosted.resize?;
                 let canvas = self.local_to_canvas(*pos);
-                let width =
-                    (drag.start_width + canvas[0] - drag.start_canvas_x).max(MIN_HOSTED_CARD_WIDTH);
-                self.model.lock().unwrap().set_node_width(drag.node, width);
+                drag.apply(&mut *self.model.lock().unwrap(), canvas);
                 agg_gui::animation::request_draw();
                 Some(EventResult::Consumed)
             }

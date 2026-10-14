@@ -628,6 +628,25 @@ pub trait NodeGraphModel {
     /// store it and answer it from [`Self::node_width`].
     fn set_node_width(&mut self, _id: NodeId, _width: f64) {}
 
+    /// Opt-in vertical resizing of a hosted card: `Some(min_height)` gives
+    /// the card top and bottom edge handles (beside the right edge every
+    /// hosted card has), never sizing it below `min_height` canvas units.
+    /// For a card whose height is the host's to keep rather than fitted to
+    /// its content (MatterCAD's Output node window); `None`, the default,
+    /// keeps the card's height its body's measured height.
+    fn node_vertical_resize(&self, _id: NodeId) -> Option<f64> {
+        None
+    }
+
+    /// The user dragged the top or bottom edge of a card that
+    /// [`Self::node_vertical_resize`] opted in: its new `height` and the
+    /// canvas y of its top edge (`top`, the new [`NodeView::position`]'s
+    /// y). A bottom drag keeps `top`; a top drag keeps the bottom
+    /// (`top - height`). Hosts store both, move the node to `top` and lay
+    /// the body out at `height`: the card's height is still its body's
+    /// measured height, reported through [`Self::on_node_measured`].
+    fn set_node_height(&mut self, _id: NodeId, _height: f64, _top: f64) {}
+
     /// The hosted card's height, measured from its body, changed to
     /// `height` canvas units. The card grows downward from its top-left
     /// [`NodeView::position`], so a host that keeps the top fixed needs

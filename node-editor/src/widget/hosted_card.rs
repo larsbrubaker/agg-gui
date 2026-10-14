@@ -27,13 +27,11 @@ use crate::draw::{SocketSide, NODE_BOTTOM_PAD, NODE_RADIUS, ROW_HEIGHT, TITLE_HE
 use crate::model::{BadgeSeverity, NodeId, NodeView};
 
 use super::hosted::{card_height, CardGeom, HostedNodeBody, SocketAnchorFn};
+use super::hosted_resize::edge_at;
 
 /// `type_name` of the layer — how the editor finds it among its children.
 pub(crate) const LAYER_TYPE_NAME: &str = "NodeEditorHostedLayer";
 const TITLE_FONT_SIZE: f64 = 13.0;
-/// Width (canvas units) of the band along a card's right edge that
-/// resizes the card.
-pub(crate) const RESIZE_GRIP: f64 = 6.0;
 
 /// The canvas layer: editor-sized, applying the pan/zoom to every card.
 pub(crate) struct HostedLayer {
@@ -141,16 +139,25 @@ impl Widget for HostedLayer {
     }
     fn paint(&mut self, _ctx: &mut dyn DrawCtx) {}
     /// Only a point over a card belongs to the layer, so empty canvas
-    /// reaches the editor directly.
+    /// reaches the editor directly. So does a card's resize band (outside
+    /// the drawn card), even where it lies over a card beneath: the cards
+    /// are walked top first, as the editor resolves a press.
     fn hit_test(&self, local_pos: Point) -> bool {
         let (mut x, mut y) = (local_pos.x, local_pos.y);
         if let Some(t) = self.child_transform() {
             t.inverse_transform(&mut x, &mut y);
         }
-        self.children.iter().any(|c| {
+        for c in self.children.iter().rev() {
             let b = c.bounds();
-            x >= b.x && x <= b.x + b.width && y >= b.y && y <= b.y + b.height
-        })
+            let vertical = card_of(c.as_ref()).is_some_and(|k| k.resize_vertically);
+            if edge_at(b.width, b.height, vertical, [x - b.x, y - b.y]).is_some() {
+                return false;
+            }
+            if x >= b.x && x <= b.x + b.width && y >= b.y && y <= b.y + b.height {
+                return true;
+            }
+        }
+        false
     }
     fn on_event(&mut self, _: &Event) -> EventResult {
         EventResult::Ignored
@@ -207,6 +214,8 @@ pub struct HostedCard {
     children: Vec<Box<dyn Widget>>,
     socket_anchor: Option<SocketAnchorFn>,
     pub(crate) chrome: CardChrome,
+    /// The card has top and bottom resize bands (see `hosted_resize.rs`).
+    pub(crate) resize_vertically: bool,
 }
 
 impl HostedCard {
@@ -230,6 +239,7 @@ impl HostedCard {
                 socket_hit: None,
                 shadow: None,
             },
+            resize_vertically: false,
         }
     }
 
@@ -267,6 +277,7 @@ impl HostedCard {
             width,
             height: card_height(body_h),
             sockets,
+            vertical: None,
         }
     }
 
@@ -405,15 +416,13 @@ impl Widget for HostedCard {
         }
     }
 
-    /// A socket (half of which lies over the body) and the right-edge
-    /// resize band belong to the editor, not to whatever body widget sits
-    /// under them: the card claims the point and, ignoring the event, lets
-    /// it bubble up to the editor's socket / resize handling.
+    /// A socket (half of which lies over the body) belongs to the editor,
+    /// not to whatever body widget sits under it: the card claims the point
+    /// and, ignoring the event, lets it bubble up to the editor's socket
+    /// handling. The resize bands lie outside the card, so the drawn card
+    /// up to its edge is the body's.
     fn claims_pointer_exclusively(&self, p: Point) -> bool {
         let (w, h) = (self.bounds.width, self.bounds.height);
-        if p.x >= w - RESIZE_GRIP && p.y < h - TITLE_HEIGHT {
-            return true;
-        }
         self.chrome.sockets.iter().any(|s| {
             let cx = match s.side {
                 SocketSide::Input => 0.0,

@@ -19,13 +19,15 @@
 //! - sizes the card to [`NodeGraphModel::node_width`] (the right edge can
 //!   be dragged: [`NodeGraphModel::set_node_width`]) and to the body's
 //!   measured height, reported through [`NodeGraphModel::on_node_measured`]
-//!   so the host can keep the top edge fixed while the card grows down.
+//!   so the host can keep the top edge fixed while the card grows down; a
+//!   card opted in through [`NodeGraphModel::node_vertical_resize`] also
+//!   has top and bottom edges to drag ([`NodeGraphModel::set_node_height`]).
 //!
 //! Nodes the factory declines keep the simplified card, so a host can mix
 //! both. Without a factory nothing here runs and the editor behaves as it
 //! always has. Layout of the cards is in this file, the card and layer
-//! widgets in `hosted_card.rs`, the resize/raise gestures in
-//! `hosted_events.rs`.
+//! widgets in `hosted_card.rs`, the resize bands in `hosted_resize.rs`
+//! and the resize/raise gestures in `hosted_events.rs`.
 
 use std::collections::HashMap;
 
@@ -39,6 +41,7 @@ use crate::draw::{
 use crate::model::{NodeId, NodeView};
 
 use super::hosted_card::{CardChrome, CardSocket, HostedCard, HostedLayer, LAYER_TYPE_NAME};
+use super::hosted_resize::ResizeDrag;
 use super::NodeEditor;
 
 /// Where a socket sits on a hosted card: the edge it is drawn on and its
@@ -104,6 +107,14 @@ struct SocketLook {
     hidden: bool,
 }
 
+/// What one hosted card looks like and how it sizes, read from the model.
+struct CardLook {
+    width: f64,
+    vertical: Option<f64>,
+    title: agg_gui::Color,
+    sockets: Vec<SocketLook>,
+}
+
 /// Canvas-space geometry of one hosted card, captured by `layout()` and
 /// read by `snapshot_layouts()` for hit-testing, noodles and snapping.
 #[derive(Clone, Debug, PartialEq)]
@@ -112,14 +123,9 @@ pub(crate) struct CardGeom {
     pub height: f64,
     /// `(socket name, edge, distance from the card's top)`.
     pub sockets: Vec<(String, SocketSide, f64)>,
-}
-
-/// A right-edge resize in progress.
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct ResizeDrag {
-    pub node: NodeId,
-    pub start_width: f64,
-    pub start_canvas_x: f64,
+    /// [`crate::NodeGraphModel::node_vertical_resize`]: the least height
+    /// when the card's top and bottom edges can be dragged.
+    pub vertical: Option<f64>,
 }
 
 /// Everything the hosted-card mode keeps on the editor.
@@ -241,10 +247,11 @@ impl NodeEditor {
         let ext_sel = model.primary_selection();
         let palette = CanvasPalette::from_visuals(&agg_gui::current_visuals());
         let noodles = model.noodles();
-        let looks: Vec<(f64, agg_gui::Color, Vec<SocketLook>)> = nodes
+        let looks: Vec<CardLook> = nodes
             .iter()
             .map(|n| {
                 let width = model.node_width(n.id).unwrap_or(NODE_WIDTH);
+                let vertical = model.node_vertical_resize(n.id);
                 let title = model.category_color(&n.category, palette.node_title_fallback);
                 // Same order as `HostedCard::layout_card`'s sockets.
                 let sockets = n
@@ -264,7 +271,12 @@ impl NodeEditor {
                         hidden: !model.socket_visible(n.id, side, &s.name),
                     })
                     .collect();
-                (width, title, sockets)
+                CardLook {
+                    width,
+                    vertical,
+                    title,
+                    sockets,
+                }
             })
             .collect();
         drop(model);
@@ -295,11 +307,14 @@ impl NodeEditor {
         let mut geoms = HashMap::new();
         let socket_hit = self.socket_hit_half();
         let layer = layer_in(&mut self.children).expect("hosted layer exists");
-        for (n, (width, title_color, colors)) in nodes.iter().zip(looks) {
+        for (n, look) in nodes.iter().zip(looks) {
             let Some(card) = layer.card_mut(n.id) else {
                 continue;
             };
-            let geom = card.layout_card(n, width.max(MIN_HOSTED_CARD_WIDTH));
+            let (title_color, colors) = (look.title, look.sockets);
+            let mut geom = card.layout_card(n, look.width.max(MIN_HOSTED_CARD_WIDTH));
+            geom.vertical = look.vertical;
+            card.resize_vertically = look.vertical.is_some();
             let selected = self.selected.contains(&n.id) || ext_sel == Some(n.id);
             let sockets = geom
                 .sockets

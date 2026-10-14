@@ -27,9 +27,20 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   `NodeEditor.ShowSockets`).
 - `draw::socket_hit` and `NodeLayoutInfo::socket_within`, the shared socket
   hit test.
+- `NodeGraphModel::node_vertical_resize(id) -> Option<f64>` (default
+  `None`) and `NodeGraphModel::set_node_height(id, height, top)`: a hosted
+  card the model opts in (`Some(min_height)`) gets top and bottom resize
+  bands; dragging one moves only that edge, never below the minimum, and
+  tells the host the card's new height and top (MatterCAD's Output node
+  window, whose height is its own rather than fitted to its rows).
 
 ### Changed
 
+- A hosted card's right-edge resize band is a 5-unit border outside the
+  drawn card (agg-sharp `WindowWidget`'s grab handles) instead of 6 units
+  inside it, so a press anywhere on the drawn card, up to its edge, reaches
+  the body's controls; the band runs the card's full height and scales with
+  the zoom.
 - A right-click on a node that is already selected keeps the whole
   selection, so a node menu's Delete (`NodeEditorCommand::DeleteSelection`)
   acts on all of it, as in a file browser; a right-click on any other node

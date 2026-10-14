@@ -11,7 +11,7 @@
 //! live in the [`events`] submodule and paint-cache fingerprinting in
 //! [`fingerprint`], so this file stays under the 800-line guardrail.
 //! Hosted cards (node bodies built by the host as real widgets) live in
-//! [`hosted`], [`hosted_card`] and [`hosted_events`].
+//! [`hosted`], [`hosted_card`], [`hosted_resize`] and [`hosted_events`].
 
 mod add_menu;
 mod canvas_state;
@@ -25,6 +25,7 @@ mod host_hooks;
 mod hosted;
 mod hosted_card;
 mod hosted_events;
+mod hosted_resize;
 mod hover;
 mod node_paint_context;
 pub mod node_parts;
@@ -78,6 +79,8 @@ mod tests_hosted;
 mod tests_hosted_order;
 #[cfg(test)]
 mod tests_hosted_preview;
+#[cfg(test)]
+mod tests_hosted_resize;
 #[cfg(test)]
 mod tests_inline_editor;
 #[cfg(test)]
