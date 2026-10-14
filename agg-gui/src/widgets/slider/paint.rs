@@ -4,12 +4,36 @@
 //! 800-line limit. These are inherent methods on `Slider`; the module core
 //! (mapping, events, layout) lives in `mod.rs` and calls into here from its
 //! `Widget::paint` implementation. Marked `pub(super)` so the parent module can
-//! invoke them.  A disabled slider's colours come from `state.rs`.
+//! invoke them.  A disabled slider's colours come from `state.rs`.  Both
+//! orientations draw the rail between [`Slider::rail_ends`], which honours
+//! `SliderStyle::full_length_track`.
 
 use super::*;
 use crate::color::Color;
 
 impl Slider {
+    /// The rail's ends along the slider axis, `(value-0 end, value-1 end)`.
+    ///
+    /// By default the rail runs between the thumb centre's end positions
+    /// (`position_range`).  With [`SliderStyle::full_length_track`] it
+    /// reaches out at each end by the inset `position_range` keeps the
+    /// thumb in by (the thumb radius horizontally, the handle's extent
+    /// vertically), so the thumb sits flush with the rail's ends at the
+    /// minimum and maximum, as agg-sharp's `SlideView` draws it.
+    pub(super) fn rail_ends(&self) -> (f64, f64) {
+        let (p0, p1) = self.position_range();
+        if !self.style.full_length_track {
+            return (p0, p1);
+        }
+        let inset = if self.is_vertical() {
+            self.handle_extent()
+        } else {
+            self.thumb_radius()
+        };
+        let dir = if p1 < p0 { -1.0 } else { 1.0 };
+        (p0 - dir * inset, p1 + dir * inset)
+    }
+
     /// The (trailing fill, rail) colours: the style's or the theme's, or
     /// their disabled greys (`state.rs`) while the slider is disabled.
     pub(super) fn paint_colors(&self, v: &crate::theme::Visuals) -> (Color, Color) {
@@ -97,10 +121,10 @@ impl Slider {
     pub(super) fn paint_horizontal(&mut self, ctx: &mut dyn DrawCtx) {
         let v = ctx.visuals();
         let cy = self.bounds.height * 0.5;
-        let track_right = self.track_right();
         let thumb_r = self.thumb_radius();
         let track_h = self.track_height();
-        let track_w = (track_right - thumb_r).max(0.0);
+        let (rail_left, rail_right) = self.rail_ends();
+        let track_w = (rail_right - rail_left).max(0.0);
         let tx = self.thumb_pos();
         let radius = self.track_radius();
         let rail_y = self.track_start(cy);
@@ -108,14 +132,14 @@ impl Slider {
         // Rail background.
         ctx.set_fill_color(self.paint_colors(&v).1);
         ctx.begin_path();
-        ctx.rounded_rect(thumb_r, rail_y, track_w, track_h, radius);
+        ctx.rounded_rect(rail_left, rail_y, track_w, track_h, radius);
         ctx.fill();
 
-        // Trailing fill up to the thumb.
-        if self.trailing_fill && tx > thumb_r {
+        // Trailing fill from the rail's start up to the thumb.
+        if self.trailing_fill && tx > rail_left {
             ctx.set_fill_color(self.paint_colors(&v).0);
             ctx.begin_path();
-            ctx.rounded_rect(thumb_r, rail_y, tx - thumb_r, track_h, radius);
+            ctx.rounded_rect(rail_left, rail_y, tx - rail_left, track_h, radius);
             ctx.fill();
         }
 
@@ -136,12 +160,12 @@ impl Slider {
         let thumb_r = self.thumb_radius();
         let track_h = self.track_height();
         let cx = thumb_r; // rail column near the left edge
-        let (p0, p1) = self.position_range(); // (bottom, top) in pixels
+        let (p0, p1) = self.rail_ends(); // (value-0 end, value-1 end)
         let ty = self.thumb_pos();
         let radius = self.track_radius();
         let rail_x = self.track_start(cx);
 
-        // Rail background (full height between the shrunk ends).
+        // Rail background between its ends.
         let top = p1.min(p0);
         let rail_h = (p0 - p1).abs();
         ctx.set_fill_color(self.paint_colors(&v).1);
@@ -149,7 +173,7 @@ impl Slider {
         ctx.rounded_rect(rail_x, top, track_h, rail_h, radius);
         ctx.fill();
 
-        // Trailing fill from the bottom up to the thumb.
+        // Trailing fill from the rail's value-0 end up to the thumb.
         if self.trailing_fill && ty < p0 {
             ctx.set_fill_color(self.paint_colors(&v).0);
             ctx.begin_path();

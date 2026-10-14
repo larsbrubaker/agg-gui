@@ -48,6 +48,16 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- `SliderStyle::full_length_track` (default `false`) draws a `Slider`'s rail as agg-sharp's
+  `SlideView` does: across the whole length the thumb occupies, so the thumb sits flush with the
+  rail's ends at the minimum and maximum and its centre travels the drawn rail less one thumb
+  width.  The thumb's travel and the pointer mapping are unchanged; the trailing fill starts at
+  the rail's start.  Horizontal and vertical sliders both honour it.
+
+- `Slider::set_style` and `Slider::set_trailing_fill` restyle a live slider in place (each
+  requests a redraw when it changes something), with `Slider::trailing_fill` to read the flag
+  back; the consuming `with_style` / `with_trailing_fill` builders are unchanged.
+
 - `LineBox::EmSnapped`: agg-sharp's `TextWidget` line box under `DefaultEnforceIntegerBounds = true`.
   A `Label` is `Floor(bottom)` to `Ceiling(top)` device pixels tall (one em, its bottom
   `LineBoxBottomInPixels` below the baseline) with its width `Ceiling`'d, and a `TextField` is that

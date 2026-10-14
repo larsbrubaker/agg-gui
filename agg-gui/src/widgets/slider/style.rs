@@ -14,6 +14,12 @@
 //! (`track_height`) in the text colour, a 5 px thumb radius, and the thumb
 //! drawn as an accent ring around the background colour (`thumb_center`) or,
 //! with `thumb_hollow`, as a bare outline the track shows through.
+//! `full_length_track` draws the rail as agg-sharp does, across the whole
+//! length the thumb occupies rather than between the thumb centre's ends
+//! (the geometry is `Slider::rail_ends` in `paint.rs`).
+//!
+//! [`super::Slider::set_style`] restyles a live slider in place (agg-sharp
+//! sets `slider.View`'s colours on a slider already on screen).
 
 use super::*;
 use crate::color::Color;
@@ -51,6 +57,14 @@ pub struct SliderStyle {
     /// Trailing-fill colour (the rail from its start to the thumb).
     /// Default `Visuals::accent`.
     pub fill: Option<Color>,
+    /// Draw the rail across the whole length the thumb occupies, as
+    /// agg-sharp's `SlideView` does (its track spans `TotalWidthInPixels`
+    /// while the thumb's centre travels it less one thumb width), instead
+    /// of only between the thumb centre's end positions.  The thumb's travel
+    /// and the pointer mapping are the same in both modes; only the rail
+    /// (and the trailing fill, which starts at the rail's start) reaches
+    /// out by the thumb's half extent at each end.  Default `false`.
+    pub full_length_track: bool,
 }
 
 impl Slider {
@@ -58,6 +72,16 @@ impl Slider {
     pub fn with_style(mut self, style: SliderStyle) -> Self {
         self.style = style;
         self
+    }
+
+    /// In-place [`Self::with_style`] for a live slider (agg-sharp's
+    /// `slider.View.TrackColor = …` and friends); the change reaches the
+    /// next paint.
+    pub fn set_style(&mut self, style: SliderStyle) {
+        if self.style != style {
+            self.style = style;
+            crate::animation::request_draw();
+        }
     }
 
     /// The current per-instance style overrides.
