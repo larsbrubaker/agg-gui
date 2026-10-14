@@ -5,8 +5,8 @@
 //! and the painted frame agree at every clip edge.
 //!
 //! The rules followed, each as painting applies it:
-//! - a child is offset by its exact `bounds()` origin from its parent's
-//!   exact (unsnapped) transform, and a widget that enforces integer bounds
+//! - a child is clipped and offset by its exact `bounds()` origin in its
+//!   parent's exact (unsnapped) transform, and a widget that enforces integer bounds
 //!   paints itself with the translation moved to the nearest whole device
 //!   pixel (`DrawCtx::snap_to_pixel`), so snaps never compound;
 //! - a widget's children are clipped to its `clip_children_rect` (its bounds
@@ -66,10 +66,9 @@ pub fn paint_placement(
         if node.defer_paint_to_overlay() {
             clip = window;
         }
-        let local_to_screen = entered(node, &on_entry);
-        let children_clip = intersect(clip, children_clip_rect(node, &local_to_screen));
-        // Children are offset from the exact transform, not the snapped one
-        // (each snaps itself on entering).
+        // Children are clipped and offset in the exact transform, not the
+        // snapped one (each snaps itself on entering).
+        let children_clip = intersect(clip, children_clip_rect(node, &on_entry));
         let children_to_screen = children_transform(node, &on_entry);
         let child = node.children().get(index)?.as_ref();
         clip = match node.child_paint_clip(index) {

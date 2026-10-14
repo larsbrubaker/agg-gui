@@ -280,6 +280,13 @@ fn paint_subtree_direct_inner(
         .clip_children_rect()
         .unwrap_or((0.0, 0.0, b.width, b.height));
     ctx.save();
+    // The children's clip and offsets are in the exact (unsnapped) frame, where
+    // layout and hit testing put them: each child snaps itself on entering.
+    // Clipping in the snapped frame cut a thin edge line a child draws at a
+    // sub-pixel offset (a property row's divider) in or out with rounding.
+    if let Some((dx, dy)) = snap_step {
+        ctx.translate(-dx, -dy);
+    }
     ctx.clip_rect(cx, cy, cw, ch);
     push_paint_clip(root_rect_from_local(ctx, cx, cy, cw, ch));
 
@@ -289,9 +296,6 @@ fn paint_subtree_direct_inner(
     // children paint under the scaled/translated frame.  The transform is
     // popped by the `ctx.restore()` that lifts the children clip below, so
     // per-child `bounds()` offsets are interpreted inside the transform.
-    if let Some((dx, dy)) = snap_step {
-        ctx.translate(-dx, -dy);
-    }
     if let Some(t) = widget.child_transform() {
         let mut m = ctx.transform();
         m.premultiply(&t);

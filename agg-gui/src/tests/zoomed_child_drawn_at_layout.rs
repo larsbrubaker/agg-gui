@@ -9,6 +9,11 @@
 //! unit per level, and then floor the device translation; under a 1.5x zoom
 //! at 2x that drew the box 3 device pixels right of where hit testing,
 //! `find_widget_screen_rect` and its own drop-down list placed it.
+//!
+//! A parent clips its children in that same exact frame, so a thin line a
+//! child draws in the band its parent leaves for it (a property row's
+//! divider) shows at every zoom instead of flickering in and out of a clip
+//! edge that snapped on its own.
 
 use crate::draw_ctx::DrawCtx;
 use crate::event::{Event, EventResult};
@@ -67,6 +72,9 @@ struct Node {
     children: Vec<Box<dyn Widget>>,
     snapped: bool,
     fill: bool,
+    /// Draws a 1-unit line just below its bounds, as a property row draws its
+    /// divider in the margin its parent leaves under it.
+    divider: bool,
 }
 
 impl Widget for Node {
@@ -101,6 +109,12 @@ impl Widget for Node {
             ctx.rect(0.0, 0.0, self.bounds.width, self.bounds.height);
             ctx.fill();
         }
+        if self.divider {
+            ctx.set_fill_color(Color::white());
+            ctx.begin_path();
+            ctx.rect(0.0, -1.0, self.bounds.width, 1.0);
+            ctx.fill();
+        }
     }
     fn on_event(&mut self, _: &Event) -> EventResult {
         EventResult::Ignored
@@ -114,6 +128,7 @@ fn node(bounds: Rect, snapped: bool, children: Vec<Box<dyn Widget>>) -> Box<dyn 
         children,
         snapped,
         fill: false,
+        divider: false,
     })
 }
 
@@ -126,6 +141,7 @@ fn scene(zoom: f64, pan: [f64; 2]) -> Canvas {
         children: vec![],
         snapped: true,
         fill: true,
+        divider: false,
     });
     let row = node(Rect::new(30.5, 4.0, 364.5, 24.0), true, vec![field]);
     let body = node(Rect::new(0.0, 6.0, 400.0, 119.0), true, vec![row]);
@@ -189,6 +205,48 @@ fn rust_only_a_zoomed_hosted_child_is_drawn_at_its_layout_position() {
                 "the box is drawn from device y {bottom}, its layout from {} - {context}",
                 layout.y * ds
             );
+        }
+    }
+}
+
+/// A row at (0, 1) in a column that clips to its bounds draws its divider in
+/// the 1-unit band below it: the band is inside the column's clip, so the line
+/// shows at every zoom, however the column and the row each snap.
+#[test]
+fn rust_only_a_divider_in_its_parents_bottom_band_is_drawn_at_every_zoom() {
+    for ds in [1.0, 2.0] {
+        for zoom in [0.75, 0.8223021582733813, 0.9, 1.0, 1.5] {
+            for k in 0..8 {
+                let pan_y = 100.0 + k as f64 * 0.137;
+                let row = Box::new(Node {
+                    id: None,
+                    bounds: Rect::new(0.0, 1.0, 200.0, 30.0),
+                    children: vec![],
+                    snapped: true,
+                    fill: false,
+                    divider: true,
+                });
+                let column = node(Rect::new(0.0, 6.0, 200.0, 31.0), true, vec![row]);
+                let card = node(Rect::new(20.3, 5.0, 220.0, 50.0), false, vec![column]);
+                let mut canvas = Canvas {
+                    bounds: Rect::new(0.0, 0.0, CANVAS_W, CANVAS_H),
+                    children: vec![card],
+                    scale: zoom,
+                    offset: [30.0, pan_y],
+                };
+                let mut fb = Framebuffer::new((CANVAS_W * ds) as u32, (CANVAS_H * ds) as u32);
+                {
+                    let mut ctx = GfxCtx::new(&mut fb);
+                    ctx.clear(Color::black());
+                    ctx.scale(ds, ds);
+                    paint_subtree(&mut canvas, &mut ctx);
+                }
+                let brightest = fb.pixels().iter().step_by(4).max().copied().unwrap_or(0);
+                assert!(
+                    brightest > 64,
+                    "the divider has to be drawn - at {ds}x, zoom {zoom}, pan y {pan_y}"
+                );
+            }
         }
     }
 }
