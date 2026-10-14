@@ -27,7 +27,7 @@ pub fn identity_xform() -> TransAffine {
 // Cached LCD text raster
 // ---------------------------------------------------------------------------
 //
-// The mask is fully determined by `(text, font_ptr, font_size)` — colour is
+// The mask is fully determined by `(text, font id, font_size)` — colour is
 // applied at composite time, and placement coordinates are just translations
 // the caller handles.  Caching keeps `fill_text` roughly as fast as the old
 // grayscale path: AGG rasterisation runs once per unique text string, and
@@ -55,7 +55,9 @@ const MASK_PAD: f64 = 2.0;
 #[derive(Clone, PartialEq, Eq, Hash)]
 struct LcdMaskKey {
     text: String,
-    font_ptr: usize,
+    /// [`Font::id`]: unique per font and never reused, unlike the `Arc`'s
+    /// address, which a font allocated after this one was freed can take.
+    font_id: u64,
     size_bits: u64,
     /// Typography-style fingerprint — every parameter that `shape_text`
     /// now applies must be part of the cache key, or a slider drag would
@@ -156,7 +158,7 @@ fn rasterize_text_mask_cached(
 
     let key = LcdMaskKey {
         text: text.to_string(),
-        font_ptr: Arc::as_ptr(font) as *const () as usize,
+        font_id: font.id(),
         size_bits: size.to_bits(),
         width_bits: width_now.to_bits(),
         italic_bits: italic_now.to_bits(),

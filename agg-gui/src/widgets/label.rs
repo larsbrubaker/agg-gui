@@ -163,12 +163,13 @@ pub struct Label {
     layout_text: String,
     layout_font_size: f64,
     layout_width: f64,
-    /// Pointer identity of the [`Font`] used for the last measurement.  If
-    /// the system-wide font override (see
+    /// [`Font::id`] of the font used for the last measurement (0 before the
+    /// first).  If the system-wide font override (see
     /// [`font_settings::current_system_font`](crate::font_settings::current_system_font))
-    /// is swapped, pointer identity changes and we re-measure to pick up
-    /// the new font's glyph metrics.
-    layout_font_ptr: *const Font,
+    /// is swapped, the id changes and we re-measure to pick up the new
+    /// font's glyph metrics.  An id, not the `Arc`'s address: a new font
+    /// can be allocated where the swapped-out one was freed.
+    layout_font_id: u64,
     /// Width used for the last word-wrap computation.
     wrap_at_width: f64,
     /// Lines produced by the last word-wrap computation.
@@ -213,7 +214,7 @@ impl Label {
             layout_text: String::new(),
             layout_font_size: 0.0,
             layout_width: 0.0,
-            layout_font_ptr: std::ptr::null(),
+            layout_font_id: 0,
             wrap_at_width: -1.0,
             wrapped_lines: Vec::new(),
         }
@@ -549,7 +550,7 @@ impl Widget for Label {
         // within a pixel), so the size-based invalidation in `set_bounds`
         // never fires and the stale bitmap lingers until the user hovers
         // (which triggers some other layout-affecting update).
-        let font_changed = Arc::as_ptr(&font) != self.layout_font_ptr;
+        let font_changed = font.id() != self.layout_font_id;
         let size_changed = (self.layout_font_size - size).abs() > 0.01;
         if font_changed || size_changed {
             self.cache.invalidate();
@@ -563,7 +564,7 @@ impl Widget for Label {
                 self.wrap_at_width = available.width;
                 self.layout_text = self.text.clone();
                 self.layout_font_size = size;
-                self.layout_font_ptr = Arc::as_ptr(&font);
+                self.layout_font_id = font.id();
                 // Text changes also need a bitmap rebuild.
                 if text_changed {
                     self.cache.invalidate();
@@ -578,7 +579,7 @@ impl Widget for Label {
                 self.layout_width = metrics.width;
                 self.layout_text = self.text.clone();
                 self.layout_font_size = size;
-                self.layout_font_ptr = Arc::as_ptr(&font);
+                self.layout_font_id = font.id();
             }
             let width = if self.effective_line_box() == crate::font_settings::LineBox::EmSnapped {
                 crate::text::snapped_text_width(

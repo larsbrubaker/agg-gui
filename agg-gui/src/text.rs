@@ -28,8 +28,11 @@ mod elide;
 mod elide_tests;
 mod ellipsis;
 mod faux_style;
+mod font_id;
 mod line_box;
 mod shape_cache;
+#[cfg(test)]
+mod shape_cache_tests;
 mod vertical_metrics;
 pub use bezier_flat::{shape_and_flatten_text, shape_and_flatten_text_via_agg};
 pub use elide::{elide_text, elide_to_width, EllipsisMode, ELLIPSIS};
@@ -38,8 +41,7 @@ pub(crate) use elide::cluster_bounds;
 pub use ellipsis::{ellipsize_to_width, ellipsize_with};
 pub use faux_style::{FAUX_BOLD_WEIGHT, FAUX_ITALIC_SHEAR};
 pub use line_box::{snapped_line_box, snapped_text_width, SnappedLineBox};
-pub use shape_cache::shape_glyphs;
-pub(crate) use shape_cache::with_shaped_glyphs;
+pub use shape_cache::{shape_cache_len, shape_glyphs, with_shaped_glyphs};
 pub use vertical_metrics::VerticalMetrics;
 
 use std::collections::BTreeSet;
@@ -83,6 +85,10 @@ impl TextMetrics {
 /// a glyph is missing from the primary font (glyph_id == 0 after shaping),
 /// the fallback is consulted for both the glyph outline and advance width.
 pub struct Font {
+    /// Unique per font value; see `text/font_id.rs`.
+    id: u64,
+    /// Shared by fonts that shape identically; see `text/font_id.rs`.
+    shape_id: u64,
     pub(crate) data: Arc<Vec<u8>>,
     index: u32,
     /// Cached at construction to avoid repeated parsing. The vertical
@@ -118,7 +124,10 @@ impl Font {
     /// Returns `Err` if the data is not a valid font.
     pub fn from_bytes(data: Vec<u8>) -> Result<Self, &'static str> {
         let face = ttf_parser::Face::parse(&data, 0).map_err(|_| "failed to parse font")?;
+        let id = font_id::next_font_id();
         Ok(Self {
+            id,
+            shape_id: id,
             units_per_em: face.units_per_em(),
             ascender: face.ascender(),
             descender: face.descender(),
@@ -148,6 +157,7 @@ impl Font {
     /// ```
     pub fn with_fallback(mut self, fallback: Arc<Font>) -> Self {
         self.fallback = Some(fallback);
+        self.restamp_shape_id();
         self
     }
 
@@ -164,6 +174,7 @@ impl Font {
     /// ```
     pub fn with_tabular_digits(mut self, tabular: bool) -> Self {
         self.tabular_digits = tabular;
+        self.restamp_id();
         self
     }
 
@@ -173,9 +184,9 @@ impl Font {
     ///
     /// The font data `Arc` is shared rather than copied, so a UI that
     /// wants both the proportional and the tabular variant of a face
-    /// pays for one copy of the bytes instead of two. Sharing the
-    /// pointer is safe for the shape cache: its key is
-    /// `(data pointer, text, size, tabular_digits)`, so the two
+    /// pays for one copy of the bytes instead of two. The variant keeps
+    /// [`shape_id`](Self::shape_id) and the shape cache keys on
+    /// `(shape_id, size, tabular_digits)` and the text, so the two
     /// variants still land on distinct entries and neither can serve
     /// the other's glyphs.
     ///
@@ -185,6 +196,8 @@ impl Font {
     /// ```
     pub fn variant_with_tabular_digits(&self) -> Font {
         Font {
+            id: font_id::next_font_id(),
+            shape_id: self.shape_id,
             data: Arc::clone(&self.data),
             index: self.index,
             units_per_em: self.units_per_em,
@@ -556,8 +569,6 @@ pub(crate) fn shape_text_snapped(
     y: f64,
     snap: impl Fn(f64) -> f64,
 ) -> (Vec<PathStorage>, f64) {
-    let shaped = shape_glyphs(font, text, size);
-
     // Pull the current typography-style globals ONCE per call.  The
     // text render path consults them here so any widget (including the
     // System window's typography controls / Sample Text tab) that writes
@@ -592,42 +603,46 @@ pub(crate) fn shape_text_snapped(
     let mut pen_x = x;
     let mut total_advance = 0.0;
 
-    for g in &shaped {
-        let gx = pen_x + g.x_offset;
-        let gy_unsnapped = y + g.y_offset;
-        // Hinting: snap the glyph origin's Y to the integer pixel
-        // nearest the logical baseline.  Matches the AGG C++
-        // `(y + 0.5).floor()` convention — simple, cheap, preserves
-        // horizontal subpixel positioning.
-        let gy = if hint_y {
-            snap(gy_unsnapped)
-        } else {
-            gy_unsnapped
-        };
-        // glyph_id indexes into whichever font resolved the code point.
-        let render_font = g.fallback_font.as_deref().unwrap_or(font);
-        let scale = size / render_font.units_per_em() as f64;
+    // Borrow the cached glyphs rather than cloning them; the loop only
+    // outlines glyphs, it never shapes text (which would re-enter the cache).
+    with_shaped_glyphs(font, text, size, |shaped| {
+        for g in shaped {
+            let gx = pen_x + g.x_offset;
+            let gy_unsnapped = y + g.y_offset;
+            // Hinting: snap the glyph origin's Y to the integer pixel
+            // nearest the logical baseline.  Matches the AGG C++
+            // `(y + 0.5).floor()` convention — simple, cheap, preserves
+            // horizontal subpixel positioning.
+            let gy = if hint_y {
+                snap(gy_unsnapped)
+            } else {
+                gy_unsnapped
+            };
+            // glyph_id indexes into whichever font resolved the code point.
+            let render_font = g.fallback_font.as_deref().unwrap_or(font);
+            let scale = size / render_font.units_per_em() as f64;
 
-        let mut builder =
-            GlyphPathBuilder::new(gx, gy, scale).with_style(width_scale, italic_shear);
-        let has_outline = render_font.with_ttf_face(|face| {
-            face.outline_glyph(ttf_parser::GlyphId(g.glyph_id), &mut builder)
-                .is_some()
-        });
-        if has_outline && builder.has_outline {
-            // Apply faux weight (zero-cost pass-through at weight_px == 0).
-            let path = apply_faux_weight(builder.path, weight_px);
-            paths.push(path);
+            let mut builder =
+                GlyphPathBuilder::new(gx, gy, scale).with_style(width_scale, italic_shear);
+            let has_outline = render_font.with_ttf_face(|face| {
+                face.outline_glyph(ttf_parser::GlyphId(g.glyph_id), &mut builder)
+                    .is_some()
+            });
+            if has_outline && builder.has_outline {
+                // Apply faux weight (zero-cost pass-through at weight_px == 0).
+                let path = apply_faux_weight(builder.path, weight_px);
+                paths.push(path);
+            }
+
+            // Interval adds a fixed pen-advance delta per glyph, in pixels.
+            // Applied after the font-native advance so kerning (already
+            // baked into x_advance by rustybuzz) is preserved — the extra
+            // spacing just piles on top.
+            let advance = g.x_advance + interval_px;
+            pen_x += advance;
+            total_advance += advance;
         }
-
-        // Interval adds a fixed pen-advance delta per glyph, in pixels.
-        // Applied after the font-native advance so kerning (already
-        // baked into x_advance by rustybuzz) is preserved — the extra
-        // spacing just piles on top.
-        let advance = g.x_advance + interval_px;
-        pen_x += advance;
-        total_advance += advance;
-    }
+    });
     (paths, total_advance)
 }
 

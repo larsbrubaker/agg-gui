@@ -52,6 +52,7 @@ impl Font {
         self.descender = metrics.descent;
         self.line_gap = metrics.line_gap;
         self.cap_height = metrics.cap_height;
+        self.restamp_id();
         self
     }
 

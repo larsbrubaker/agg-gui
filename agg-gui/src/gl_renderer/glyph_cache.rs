@@ -17,7 +17,7 @@
 //!
 //! # Key design choices
 //!
-//! * **One entry per (font_ptr, glyph_id, size_bits)** — different sizes
+//! * **One entry per (font shape id, glyph_id, size_bits)** — different sizes
 //!   produce different tessellations; identical sizes share a single entry.
 //! * **Glyph-local coordinates** — the CTM is applied at draw time
 //!   (`transform_pt(pen_x + vx, y + vy)`), which is correct for any affine
@@ -30,7 +30,6 @@
 //!   (acceptable for typical UI workloads).
 
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use crate::gl_renderer::tessellate_fill;
 use crate::text::{flatten_glyph_at_origin, Font};
@@ -75,7 +74,7 @@ impl GlyphCache {
     /// Returns `None` for glyphs with no visible outline (space, tab, etc.).
     pub fn get_or_insert(&mut self, font: &Font, glyph_id: u16, size: f64) -> Option<&CachedGlyph> {
         let key = GlyphKey {
-            font_ptr: Arc::as_ptr(&font.data) as usize,
+            font_shape_id: font.shape_id(),
             glyph_id,
             size_bits: size.to_bits(),
         };
@@ -115,8 +114,9 @@ impl Default for GlyphCache {
 
 #[derive(Hash, Eq, PartialEq, Clone)]
 struct GlyphKey {
-    /// Pointer identity of the font's backing data (`Arc<Vec<u8>>`).
-    font_ptr: usize,
+    /// [`Font::shape_id`]: covers the face data the outline comes from, and
+    /// unlike the data's address is never reused by a later font.
+    font_shape_id: u64,
     glyph_id: u16,
     /// Exact bit pattern of the `f64` size — guarantees identical sizes share
     /// a single entry even under floating-point representation.

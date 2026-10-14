@@ -494,3 +494,39 @@ noto-tnum "日本" 13.333333333333334 0: shape 9743f2b4a368be25 advance 40300000
 noto-tnum "日本" 13.333333333333334 0.05: shape 9743f2b4a368be25 advance 4031555555555555 metrics 4031555555555555 402c81b4e81b4e82 400f40da740da742 403228f5c28f5c29
 noto-tnum "日本" label x1: size 4030cccccccccccd 4035000000000000 ink 0000000000000000 0000000000000000
 noto-tnum "日本" label x1.5: size 4039333333333334 403f800000000000 ink 0000000000000000 0000000000000000"#;
+
+/// Swapping the system font remeasures a laid-out `Label`, even when the old
+/// font is freed first and the new one is allocated at its address: the
+/// label compares font ids, which are never reused, not pointers. Safe code
+/// cannot force the allocator to reuse an address, so the label swaps
+/// through many fonts of alternating faces, each freed before the next is
+/// made, which is where a reused address would serve a stale width.
+#[test]
+fn system_font_swap_remeasures_label() {
+    let own = Arc::new(Font::from_slice(NOTO).expect("noto"));
+    let mut label = Label::new("Width 15.00 mm", Arc::clone(&own));
+    let available = Size::new(1000.0, 100.0);
+    let mut widths = Vec::new();
+    for i in 0..32 {
+        let bytes = if i % 2 == 0 { CASCADIA } else { NOTO };
+        let font = Arc::new(Font::from_slice(bytes).expect("font"));
+        font_settings::set_system_font(Some(Arc::clone(&font)));
+        let width = label.layout(available).width;
+        font_settings::set_system_font(None);
+        assert_eq!(width, fresh_label_width(&font, available), "swap {i}");
+        widths.push(width);
+        // `font` is freed here, before the next one is allocated.
+    }
+    assert_ne!(
+        widths[0], widths[1],
+        "the two faces must measure differently"
+    );
+}
+
+/// The width a new `Label` of the same text lays out to in `font`, with no
+/// system font override.
+fn fresh_label_width(font: &Arc<Font>, available: Size) -> f64 {
+    Label::new("Width 15.00 mm", Arc::clone(font))
+        .layout(available)
+        .width
+}

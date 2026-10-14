@@ -9,7 +9,14 @@
 //!   on the same strings, which is what apps' own widgets (inline edit
 //!   fields, button text metrics) call from their layout;
 //! - **ink overhang**: `Widget::backbuffer_ink_outset` of every label, which
-//!   the backbuffered paint path asks every frame.
+//!   the backbuffered paint path asks every frame;
+//! - **paint**: `GfxCtx::fill_text` of every row into a software
+//!   framebuffer (the outline path that shapes through the cache each call).
+//!   The rendered pixels' hash is printed so a change to paint can be checked
+//!   for identical output.
+//!
+//! It ends with the shape cache's entry count, the working set this
+//! MatterCAD-like column keeps hot.
 //!
 //! Run in release; the shape cache is warm after the first pass, so every
 //! timed pass measures the steady state:
@@ -23,9 +30,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
-use agg_gui::text::{measure_advance, measure_text_metrics, Font};
+use agg_gui::text::{measure_advance, measure_text_metrics, shape_cache_len, Font};
 use agg_gui::widgets::{Button, FlexColumn, Label};
-use agg_gui::{Size, Widget};
+use agg_gui::{Color, Framebuffer, GfxCtx, Size, Widget};
 
 /// Counts every allocation (and reallocation) the process makes.
 struct CountingAlloc;
@@ -120,4 +127,27 @@ fn main() {
             std::hint::black_box(l.backbuffer_ink_outset());
         }
     });
+    let row_h = 18.0;
+    let mut fb = Framebuffer::new(800, (ROWS as f64 * row_h) as u32);
+    let paint = |fb: &mut Framebuffer| {
+        let mut ctx = GfxCtx::new(fb);
+        ctx.set_font(Arc::clone(&font));
+        ctx.set_font_size(14.0);
+        ctx.set_fill_color(Color::rgba(0.0, 0.0, 0.0, 1.0));
+        for (i, t) in texts.iter().enumerate() {
+            ctx.fill_text(t, 4.25, i as f64 * row_h + 4.5);
+        }
+    };
+    time("paint fill_text x rows", || paint(&mut fb));
+    let mut fresh = Framebuffer::new(800, (ROWS as f64 * row_h) as u32);
+    paint(&mut fresh);
+    // FNV-1a over the RGBA bytes of one paint into a cleared framebuffer.
+    let hash = fresh
+        .pixels()
+        .iter()
+        .fold(0xcbf2_9ce4_8422_2325_u64, |h, &b| {
+            (h ^ b as u64).wrapping_mul(0x0100_0000_01b3)
+        });
+    println!("paint pixel hash {hash:016x}");
+    println!("shape cache entries {}", shape_cache_len());
 }

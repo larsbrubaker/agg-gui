@@ -19,7 +19,7 @@ use std::sync::Arc;
 
 use agg_gui::color::Color;
 use agg_gui::draw_ctx::DrawCtx;
-use agg_gui::text::shape_glyphs;
+use agg_gui::text::with_shaped_glyphs;
 
 use crate::{DrawCommand, LcdArcTextureEntry, WgpuGfxCtx};
 
@@ -141,7 +141,6 @@ impl WgpuGfxCtx {
     ) {
         let ctm = *self.ctm();
         let ctm_scale = (ctm.sx * ctm.sx + ctm.shy * ctm.shy).sqrt().max(1e-6);
-        let shaped = shape_glyphs(font, text, self.font_size);
         let font_size = self.font_size;
         let width_scale = agg_gui::font_settings::current_width();
         let italic_shear =
@@ -155,32 +154,37 @@ impl WgpuGfxCtx {
         let mut all_idx: Vec<u32> = Vec::new();
         let mut pen_x = x;
 
-        for glyph in &shaped {
-            let gx = pen_x + glyph.x_offset;
-            let gy_raw = y + glyph.y_offset;
-            let gy = outline_baseline(&ctm, gy_raw, hint_y);
-            let render_font = glyph.fallback_font.as_deref().unwrap_or(font.as_ref());
+        // Borrow the cached glyphs rather than cloning them; the loop only
+        // tessellates glyph outlines, it never shapes text (which would
+        // re-enter the shape cache).
+        with_shaped_glyphs(font, text, font_size, |shaped| {
+            for glyph in shaped {
+                let gx = pen_x + glyph.x_offset;
+                let gy_raw = y + glyph.y_offset;
+                let gy = outline_baseline(&ctm, gy_raw, hint_y);
+                let render_font = glyph.fallback_font.as_deref().unwrap_or(font.as_ref());
 
-            if let Some(cached) =
-                self.glyph_cache
-                    .get_or_insert(render_font, glyph.glyph_id, tess_size)
-            {
-                let base = all_verts.len() as u32;
-                for &[vx, vy] in &cached.verts {
-                    let vx_f64 = vx as f64 * inv_scale;
-                    let vy_f64 = vy as f64 * inv_scale;
-                    let (mut px, mut py) = (
-                        gx + vx_f64 * width_scale + vy_f64 * italic_shear,
-                        gy + vy_f64,
-                    );
-                    ctm.transform(&mut px, &mut py);
-                    all_verts.push([px as f32, py as f32]);
+                if let Some(cached) =
+                    self.glyph_cache
+                        .get_or_insert(render_font, glyph.glyph_id, tess_size)
+                {
+                    let base = all_verts.len() as u32;
+                    for &[vx, vy] in &cached.verts {
+                        let vx_f64 = vx as f64 * inv_scale;
+                        let vy_f64 = vy as f64 * inv_scale;
+                        let (mut px, mut py) = (
+                            gx + vx_f64 * width_scale + vy_f64 * italic_shear,
+                            gy + vy_f64,
+                        );
+                        ctm.transform(&mut px, &mut py);
+                        all_verts.push([px as f32, py as f32]);
+                    }
+                    all_idx.extend(cached.indices.iter().map(|&i| i + base));
                 }
-                all_idx.extend(cached.indices.iter().map(|&i| i + base));
-            }
 
-            pen_x += glyph.x_advance + interval_px;
-        }
+                pen_x += glyph.x_advance + interval_px;
+            }
+        });
 
         if !all_verts.is_empty() {
             self.commands.push(DrawCommand::Solid {

@@ -447,7 +447,7 @@ fn test_tabular_digits_shape_on_one_advance() {
 /// `variant_with_tabular_digits` must hand back the same face without a
 /// second copy of the bytes: the data `Arc` is shared, the metrics are
 /// identical, and the two variants still shape independently (the shape
-/// cache keys on the flag as well as the data pointer).
+/// cache keys on the flag as well as the shape id).
 #[test]
 fn test_tabular_variant_shares_the_font_data() {
     use std::sync::Arc;

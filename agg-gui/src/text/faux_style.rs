@@ -36,6 +36,8 @@ impl Font {
     /// tabular-digits flag are those of `self`.
     pub fn variant_with_faux_style(&self, italic: bool, bold: bool) -> Font {
         Font {
+            id: super::font_id::next_font_id(),
+            shape_id: self.shape_id,
             data: Arc::clone(&self.data),
             index: self.index,
             units_per_em: self.units_per_em,
