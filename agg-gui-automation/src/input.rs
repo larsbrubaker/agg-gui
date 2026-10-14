@@ -30,6 +30,12 @@
 //!   whether or not it reached the window.
 //! - [`InputMethod::record_cursor_position`] moves the pointer and sends
 //!   nothing (an OS file drag owns the pointer; Rust-only).
+//! - Rust-only, [`InputMethod::set_cursor_position_exact`] moves the pointer
+//!   to a fractional position, and presses and releases after it land there;
+//!   [`InputMethod::current_mouse_position_exact`] reads it back. C#'s
+//!   pointer is whole pixels only (its moves truncate with `(int)`), which is
+//!   what every other call keeps; the exact move is for a drag that must
+//!   cover a span to sub-pixel precision.
 //!
 //!
 //! Keyboard (C#'s `Type`, `SendStroke`, `PressModifierKeys`,
@@ -181,6 +187,24 @@ pub trait InputMethod {
     /// C# `SetCursorPosition`: move the pointer to (`x`, `y`).
     fn set_cursor_position(&mut self, driver: &mut dyn UiDriver, x: i32, y: i32);
 
+    /// The pointer to sub-pixel precision. By default the whole-pixel
+    /// [`current_mouse_position`](Self::current_mouse_position). No C#
+    /// counterpart.
+    fn current_mouse_position_exact(&self) -> (f64, f64) {
+        let p = self.current_mouse_position();
+        (f64::from(p.x), f64::from(p.y))
+    }
+
+    /// Move the pointer to the fractional position (`x`, `y`); presses and
+    /// releases until the next move land there. By default an input method
+    /// with whole pixels only truncates, as C#'s `(int)` does, and moves with
+    /// [`set_cursor_position`](Self::set_cursor_position). No C#
+    /// counterpart.
+    fn set_cursor_position_exact(&mut self, driver: &mut dyn UiDriver, x: f64, y: f64) {
+        // Truncation, as C#'s `(int)`; a window's pixels never saturate.
+        self.set_cursor_position(driver, x as i32, y as i32);
+    }
+
     /// The pointer is now at (`x`, `y`), and the window saw no mouse move
     /// get it there: an OS drag-and-drop from another application owns the
     /// pointer, and the window hears of it only through file-drag events
@@ -243,6 +267,10 @@ pub trait InputMethod {
 #[derive(Clone, Debug, Default)]
 pub struct SimulatedInput {
     current_mouse_position: Point2D,
+    /// The pointer to sub-pixel precision: the whole-pixel position, or the
+    /// last [`InputMethod::set_cursor_position_exact`]. Presses and releases
+    /// go here.
+    exact_mouse_position: (f64, f64),
     left_button_down: bool,
     right_button_down: bool,
     middle_button_down: bool,
@@ -289,18 +317,15 @@ impl SimulatedInput {
         .collect()
     }
 
-    /// Whether `p` is inside the window (edges included).
-    fn window_contains(driver: &dyn UiDriver, p: Point2D) -> bool {
-        window_contains(driver.size_px(), p)
-    }
-
     /// Send one button transition where the pointer is, a press with
     /// `clicks`, when the pointer is inside the window; the held-button
     /// state follows the transition either way.
     fn button_event(&mut self, driver: &mut dyn UiDriver, action: MouseAction, clicks: ClickCount) {
-        let at = self.current_mouse_position;
-        if Self::window_contains(driver, at) {
-            let position = Some((f64::from(at.x), f64::from(at.y)));
+        let (x, y) = self.exact_mouse_position;
+        let (width, height) = driver.size_px();
+        // Edges included, as C#'s `RectangleDouble.Contains`.
+        if x >= 0.0 && x <= f64::from(width) && y >= 0.0 && y <= f64::from(height) {
+            let position = Some((x, y));
             let button = action.button();
             if action.is_down() {
                 driver.send(ForwarderEvent::MouseDown {
@@ -357,15 +382,26 @@ impl InputMethod for SimulatedInput {
 
     fn record_cursor_position(&mut self, x: i32, y: i32) {
         self.current_mouse_position = Point2D::new(x, y);
+        self.exact_mouse_position = (f64::from(x), f64::from(y));
     }
 
     fn set_cursor_position(&mut self, driver: &mut dyn UiDriver, x: i32, y: i32) {
-        self.current_mouse_position = Point2D::new(x, y);
+        self.set_cursor_position_exact(driver, f64::from(x), f64::from(y));
+    }
+
+    fn current_mouse_position_exact(&self) -> (f64, f64) {
+        self.exact_mouse_position
+    }
+
+    fn set_cursor_position_exact(&mut self, driver: &mut dyn UiDriver, x: f64, y: f64) {
+        // Truncation, as C#'s `(int)`; a window's pixels never saturate.
+        self.current_mouse_position = Point2D::new(x as i32, y as i32);
+        self.exact_mouse_position = (x, y);
         // The forwarder knows which buttons are held, so a move with the
         // left button down is a drag without saying so here.
         driver.send(ForwarderEvent::MouseMove {
-            x: f64::from(x),
-            y: f64::from(y),
+            x,
+            y,
             modifiers: None,
         });
     }

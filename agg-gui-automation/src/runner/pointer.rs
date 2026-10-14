@@ -26,6 +26,11 @@
 //! second press of a double click); [`ClickOpts::platform_counts_clicks`]
 //! leaves the count to the window instead, as an OS click does (Rust-only).
 //!
+//! The pointer is whole pixels, as C#'s; the Rust-only
+//! [`AutomationRunner::set_mouse_cursor_position_exact`] (and its window
+//! form) moves it to a fractional position for a drag that must cover an
+//! exact span.
+//!
 //! Widget offsets ([`ClickOpts::offset`]) are logical units, Y-up from the
 //! widget's lower-left corner, as in C#; the pointer itself is physical
 //! pixels, Y-down ([`input`](crate::input) module docs). The name lookups
@@ -292,6 +297,49 @@ impl AutomationRunner {
     pub fn set_mouse_cursor_position_in_window(&mut self, x: i32, y: i32) {
         let screen_position = self.window_to_pointer(Point2D::new(x, y));
         self.set_mouse_cursor_position(screen_position.x, screen_position.y);
+    }
+
+    /// The pointer to sub-pixel precision (physical pixels, Y-down): where
+    /// [`set_mouse_cursor_position_exact`](Self::set_mouse_cursor_position_exact)
+    /// left it, or the whole-pixel position. Rust-only.
+    pub fn current_mouse_position_exact(&self) -> (f64, f64) {
+        self.check_not_timed_out();
+        self.input.current_mouse_position_exact()
+    }
+
+    /// [`set_mouse_cursor_position`](Self::set_mouse_cursor_position) to a
+    /// fractional pointer position (physical pixels, Y-down): the eased,
+    /// paced steps are whole pixels as C#'s, and the last lands on (`x`,
+    /// `y`) exactly, as do presses and releases until the next move.
+    /// Rust-only: C#'s pointer is whole pixels; this is for a drag that must
+    /// cover an exact fractional span.
+    pub fn set_mouse_cursor_position_exact(&mut self, x: f64, y: f64) {
+        self.check_not_timed_out();
+        let (start_x, start_y) = self.input.current_mouse_position_exact();
+        let (delta_x, delta_y) = (x - start_x, y - start_y);
+        let steps = self.config.mouse_move_steps;
+
+        let move_started = clock::now();
+        for i in 0..steps {
+            let ratio = cubic_out(f64::from(i) / f64::from(steps));
+            // Truncation, as C#'s `(int)`; a window's pixels never saturate.
+            self.move_pointer(
+                (start_x + delta_x * ratio) as i32,
+                (start_y + delta_y * ratio) as i32,
+            );
+            self.pace_mouse_move(clock::since(move_started));
+        }
+
+        self.input.set_cursor_position_exact(&mut self.driver, x, y);
+    }
+
+    /// [`set_mouse_cursor_position_exact`](Self::set_mouse_cursor_position_exact)
+    /// to the window point (`x`, `y`) (logical, Y-up), mapped to the pointer
+    /// without truncating. Rust-only.
+    pub fn set_mouse_cursor_position_in_window_exact(&mut self, x: f64, y: f64) {
+        let scale = agg_gui::ux_scale::effective_scale();
+        let (_, height_px) = self.driver.size_px();
+        self.set_mouse_cursor_position_exact(x * scale, f64::from(height_px) - y * scale);
     }
 
     /// Where the pointer goes on `widget`: its window rectangle's lower-left

@@ -417,3 +417,118 @@ fn rust_only_mouse_down_at_pointer_presses_in_place_without_moving() {
     )
     .expect("a press and release at the pointer");
 }
+
+/// An exact (sub-pixel) pointer move: the move, and a press and release
+/// after it, land on the fractional point, where the whole-pixel calls
+/// truncate as C#'s `(int)` does.
+#[test]
+fn rust_only_an_exact_move_lands_presses_on_the_fractional_point() {
+    show_window_and_execute_tests(
+        RunOptions::default(),
+        window_with_target,
+        |test_runner, log| {
+            test_runner.set_mouse_cursor_position_in_window_exact(60.25, 45.75);
+            assert_eq!(
+                test_runner.current_mouse_position_exact(),
+                (60.25, 154.25),
+                "physical pixels, Y-down, untruncated"
+            );
+            assert_eq!(test_runner.current_mouse_position(), Point2D::new(60, 154));
+            assert_eq!(test_runner.driver().forwarder().cursor(), (60.25, 154.25));
+
+            test_runner.mouse_down_at_pointer(MouseButton::Left);
+            test_runner.drop(MouseButton::Left);
+            assert_eq!(presses(log), [(Point::new(10.25, 5.75), MouseButton::Left)]);
+            assert_eq!(
+                releases(log),
+                [(Point::new(10.25, 5.75), MouseButton::Left)]
+            );
+
+            // In pointer space directly, then back to whole pixels.
+            test_runner.set_mouse_cursor_position_exact(70.5, 150.125);
+            assert_eq!(test_runner.driver().forwarder().cursor(), (70.5, 150.125));
+            test_runner.set_mouse_cursor_position(71, 150);
+            assert_eq!(test_runner.current_mouse_position_exact(), (71.0, 150.0));
+            test_runner.mark_test_complete();
+        },
+    )
+    .expect("an exact move keeps its fraction");
+}
+
+/// The trait's default for an input method with only whole pixels
+/// truncates, as C#'s `(int)` does.
+#[test]
+fn rust_only_an_input_methods_default_exact_move_truncates() {
+    struct WholePixels(SimulatedInput);
+    impl InputMethod for WholePixels {
+        fn current_mouse_position(&self) -> Point2D {
+            self.0.current_mouse_position()
+        }
+        fn left_button_down(&self) -> bool {
+            self.0.left_button_down()
+        }
+        fn click_count(&self) -> u32 {
+            self.0.click_count()
+        }
+        fn set_cursor_position(
+            &mut self,
+            driver: &mut dyn agg_gui_automation::UiDriver,
+            x: i32,
+            y: i32,
+        ) {
+            self.0.set_cursor_position(driver, x, y)
+        }
+        fn record_cursor_position(&mut self, x: i32, y: i32) {
+            self.0.record_cursor_position(x, y)
+        }
+        fn mouse_event(
+            &mut self,
+            driver: &mut dyn agg_gui_automation::UiDriver,
+            action: MouseAction,
+            x: i32,
+            y: i32,
+            clicks: u32,
+        ) {
+            self.0.mouse_event(driver, action, x, y, clicks)
+        }
+        fn platform_counted_mouse_event(
+            &mut self,
+            driver: &mut dyn agg_gui_automation::UiDriver,
+            action: MouseAction,
+            x: i32,
+            y: i32,
+        ) {
+            self.0.platform_counted_mouse_event(driver, action, x, y)
+        }
+        fn press_modifier_keys(
+            &mut self,
+            driver: &mut dyn agg_gui_automation::UiDriver,
+            keys: agg_gui_automation::Keys,
+        ) {
+            self.0.press_modifier_keys(driver, keys)
+        }
+        fn release_modifier_keys(
+            &mut self,
+            driver: &mut dyn agg_gui_automation::UiDriver,
+            keys: agg_gui_automation::Keys,
+        ) {
+            self.0.release_modifier_keys(driver, keys)
+        }
+        fn type_strokes(
+            &mut self,
+            driver: &mut dyn agg_gui_automation::UiDriver,
+            strokes: &[agg_gui_automation::TypedKey],
+        ) {
+            self.0.type_strokes(driver, strokes)
+        }
+    }
+
+    let root = ProbeWidget::new("root");
+    let mut driver = HeadlessDriver::new(Box::new(root), 100, 80);
+    driver.layout_if_needed();
+    let mut input = WholePixels(SimulatedInput::new());
+    input.set_cursor_position_exact(&mut driver, 20.75, 30.5);
+    assert_eq!(input.current_mouse_position(), Point2D::new(20, 30));
+    assert_eq!(input.current_mouse_position_exact(), (20.0, 30.0));
+    assert_eq!(driver.forwarder().cursor(), (20.0, 30.0));
+}
