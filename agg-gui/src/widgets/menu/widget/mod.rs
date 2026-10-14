@@ -294,6 +294,8 @@ mod tests_fit;
 #[cfg(test)]
 mod tests_focus;
 #[cfg(test)]
+mod tests_font_swap;
+#[cfg(test)]
 mod tests_hover;
 #[cfg(test)]
 mod tests_image_icon;

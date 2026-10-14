@@ -212,7 +212,7 @@ impl Widget for TextField {
             scroll_x_bits: self.scroll_x.to_bits(),
             w_bits: self.bounds.width.to_bits(),
             h_bits: self.bounds.height.to_bits(),
-            font_ptr: Arc::as_ptr(&font) as usize,
+            font_id: font.id(),
             font_size_bits: self.font_size.to_bits(),
             masking: self.masking_active(),
             insets_bits: {

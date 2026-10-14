@@ -158,8 +158,15 @@ pub enum Event {
     /// containers should DECREASE their scroll offset when `delta_y`
     /// is positive.  `delta_x` follows the same sign rule for
     /// horizontal scroll (positive = see content to the LEFT).
-    /// Magnitude is in logical pixels; line deltas should be
-    /// pre-scaled by the platform shell (~40 px per line).
+    /// Magnitude is in wheel **notches**, not pixels: one classic wheel
+    /// click (one line) is 1.0, and a precision device's pixel delta
+    /// arrives as a fraction of a notch
+    /// ([`wheel::PIXELS_PER_NOTCH`](crate::wheel::PIXELS_PER_NOTCH) = 40
+    /// px per notch). Shells convert their platform's deltas with
+    /// [`wheel::to_notches`](crate::wheel::to_notches); each consumer
+    /// scales the notches itself (a `ScrollView` moves
+    /// `PIXELS_PER_NOTCH` px per notch, a zoom raises its per-notch
+    /// factor to the power of the delta).
     MouseWheel {
         pos: Point,
         delta_y: f64,

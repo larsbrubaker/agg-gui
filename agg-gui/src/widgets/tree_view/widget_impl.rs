@@ -46,8 +46,11 @@ fn row_signature(tree: &TreeView, node: &TreeNode, flat: &FlatRow) -> u64 {
     node.fraction.map(f32::to_bits).hash(&mut h);
     node.tooltip.hash(&mut h);
     node.dimmed.hash(&mut h);
-    Arc::as_ptr(&tree.font).hash(&mut h);
-    tree.icon_font.as_ref().map(Arc::as_ptr).hash(&mut h);
+    // Fonts by `Font::id`, never by address: a freed font's address can be
+    // handed to the next font. (A reusable row holds its fonts alive today,
+    // so the key must not depend on that to stay correct.)
+    tree.font.id().hash(&mut h);
+    tree.icon_font.as_ref().map(|f| f.id()).hash(&mut h);
     tree.font_size.to_bits().hash(&mut h);
     tree.row_height.to_bits().hash(&mut h);
     tree.indent_width.to_bits().hash(&mut h);

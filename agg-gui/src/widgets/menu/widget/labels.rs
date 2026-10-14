@@ -97,9 +97,13 @@ pub struct PopupLabels {
     /// level.  `Option` because separator rows have no labels but we
     /// keep the slot to preserve `row_index` alignment.
     rows: Vec<Vec<Option<PopupRowLabels>>>,
-    /// Font + size we last built with.  Rebuilds happen on change so a
-    /// system-font swap propagates through every cached label.
-    last_font_ptr: *const Font,
+    /// Font (its [`Font::id`], 0 before the first build) + size we last
+    /// built with.  Rebuilds happen on change so a system-font swap
+    /// propagates through every cached label.  The id, not the font's
+    /// address: a freed font's address can be handed to the next font
+    /// (the cached labels hold their font alive today, so the key must not
+    /// depend on that to stay correct).
+    last_font_id: u64,
     last_font_size: f64,
 }
 
@@ -107,7 +111,7 @@ impl PopupLabels {
     pub fn new() -> Self {
         Self {
             rows: Vec::new(),
-            last_font_ptr: std::ptr::null(),
+            last_font_id: 0,
             last_font_size: 0.0,
         }
     }
@@ -125,12 +129,12 @@ impl PopupLabels {
         layouts: &[PopupLayout],
         shortcut_format: ShortcutFormat,
     ) {
-        let font_ptr = Arc::as_ptr(font);
+        let font_id = font.id();
         let font_changed =
-            font_ptr != self.last_font_ptr || (self.last_font_size - font_size).abs() > 0.01;
+            font_id != self.last_font_id || (self.last_font_size - font_size).abs() > 0.01;
         if font_changed {
             self.rows.clear();
-            self.last_font_ptr = font_ptr;
+            self.last_font_id = font_id;
             self.last_font_size = font_size;
         }
         // Resize outer vec to one entry per layout.
@@ -188,6 +192,17 @@ impl PopupLabels {
                 }
             }
         }
+    }
+
+    /// The main label of row `row_idx` in popup level `level_idx`, once
+    /// built.
+    #[cfg(test)]
+    pub(super) fn row_label(&self, level_idx: usize, row_idx: usize) -> Option<&Label> {
+        self.rows
+            .get(level_idx)?
+            .get(row_idx)?
+            .as_ref()
+            .map(|row| &row.label)
     }
 
     /// Paint a single popup row's text (label + optional shortcut).

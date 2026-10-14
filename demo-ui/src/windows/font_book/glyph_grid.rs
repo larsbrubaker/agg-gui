@@ -174,8 +174,10 @@ pub(super) struct GlyphGrid {
     filtered: Vec<char>,
     /// Guards re-filtering: `None` forces a rebuild (font just changed).
     last_filter: Option<String>,
-    /// Identity of the font `all_chars` was enumerated from.
-    last_font_ptr: usize,
+    /// [`Font::id`] of the font `all_chars` was enumerated from (0 before the
+    /// first enumeration). The id, not the font's address: a freed font's
+    /// address can be handed to the next font, which would keep its glyphs.
+    last_font_id: u64,
     /// Whether the empty-filter placeholder label currently occupies the pool.
     showing_empty: bool,
 }
@@ -198,7 +200,7 @@ impl GlyphGrid {
             all_chars: Vec::new(),
             filtered: Vec::new(),
             last_filter: None,
-            last_font_ptr: 0,
+            last_font_id: 0,
             showing_empty: false,
         }
     }
@@ -227,9 +229,8 @@ impl GlyphGrid {
     /// active font so the caller can reuse it without a second lookup.
     fn refresh_font(&mut self) -> Arc<Font> {
         let font = self.active_font();
-        let ptr = Arc::as_ptr(&font) as usize;
-        if ptr != self.last_font_ptr {
-            self.last_font_ptr = ptr;
+        if font.id() != self.last_font_id {
+            self.last_font_id = font.id();
             self.all_chars = font
                 .characters()
                 .into_iter()
@@ -424,6 +425,41 @@ mod tests {
         // Non-matches.
         assert!(!GlyphGrid::matches('A', "z"));
         assert!(!GlyphGrid::matches('€', "0041"));
+    }
+
+    /// Picking a new font re-enumerates the grid every time, even when the
+    /// old font is freed first and the new one is allocated at its address:
+    /// the grid records the font's id, not its pointer. The fonts alternate
+    /// between two faces with different character sets.
+    #[test]
+    fn font_swap_reenumerates_glyphs() {
+        const CASCADIA: &[u8] = include_bytes!("../../../../demo/assets/CascadiaCode.ttf");
+        const FA: &[u8] = include_bytes!("../../../../demo/assets/fa.ttf");
+        let own = Arc::new(Font::from_slice(CASCADIA).expect("cascadia"));
+        let count = Rc::new(Cell::new(0));
+        let mut grid = GlyphGrid::new(
+            own,
+            Rc::new(RefCell::new(String::new())),
+            Rc::clone(&count),
+            Rc::new(Cell::new(Rect::default())),
+        );
+        let mut counts = Vec::new();
+        for i in 0..32 {
+            let bytes = if i % 2 == 0 { CASCADIA } else { FA };
+            let font = Arc::new(Font::from_slice(bytes).expect("font"));
+            font_settings::set_system_font(Some(Arc::clone(&font)));
+            grid.refresh_font();
+            font_settings::set_system_font(None);
+            let expected = font
+                .characters()
+                .into_iter()
+                .filter(|c| !c.is_whitespace() && !c.is_control())
+                .count();
+            assert_eq!(count.get(), expected, "swap {i}");
+            counts.push(count.get());
+            // `font` is freed here, before the next one is allocated.
+        }
+        assert_ne!(counts[0], counts[1], "the two faces must differ");
     }
 
     /// The tooltip carries the char, its hex code point, and an advance width.

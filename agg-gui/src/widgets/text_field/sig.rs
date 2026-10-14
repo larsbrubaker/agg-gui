@@ -27,8 +27,10 @@ pub(super) struct TextFieldSig {
     // window (which runs through `font_settings::set_system_font` /
     // `set_font_size_scale`) must invalidate — otherwise the stale bitmap
     // keeps blitting until some other field in the sig happens to change
-    // (e.g. the user hovers the control, which flips `hovered`).
-    pub(super) font_ptr: usize,
+    // (e.g. the user hovers the control, which flips `hovered`). The font is
+    // recognised by `Font::id`, never its address: a freed font's address
+    // can be handed to the next font, which would keep the stale bitmap.
+    pub(super) font_id: u64,
     pub(super) font_size_bits: u64,
     // Whether characters are masked. Toggling the reveal cell keeps `text`
     // unchanged (the real text), so the cache would otherwise keep blitting the

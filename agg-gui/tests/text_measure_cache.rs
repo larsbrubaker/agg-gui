@@ -10,12 +10,17 @@
 //! produced by the same function on the code before the change, so any drift
 //! in an advance, a glyph id or offset (what paint draws), or a label's ink
 //! bounds fails here.
+//!
+//! The font-swap tests free each font before making the next, so a cache
+//! that recognised a font by its address (which the allocator may hand to
+//! the next font) would keep a stale measurement or bitmap: `Label`,
+//! `TextField` and `TreeView` rows must all follow every swap.
 
 use std::sync::Arc;
 
 use agg_gui::font_settings;
 use agg_gui::text::{measure_advance, measure_text_metrics, shape_glyphs, Font};
-use agg_gui::widgets::Label;
+use agg_gui::widgets::{Label, NodeIcon, TextField, TreeView};
 use agg_gui::{Rect, Size, Widget};
 
 const CASCADIA: &[u8] = include_bytes!("../../demo/assets/CascadiaCode.ttf");
@@ -529,4 +534,76 @@ fn fresh_label_width(font: &Arc<Font>, available: Size) -> f64 {
     Label::new("Width 15.00 mm", Arc::clone(font))
         .layout(available)
         .width
+}
+
+/// Swapping the system font invalidates a laid-out `TextField`'s cached
+/// bitmap every time, even when the old font is freed first and the new one
+/// is allocated at its address: the field's cache signature records the
+/// font's id, not its pointer. Same many-swap scheme as
+/// [`system_font_swap_remeasures_label`].
+#[test]
+fn system_font_swap_invalidates_text_field_cache() {
+    let own = Arc::new(Font::from_slice(NOTO).expect("noto"));
+    let mut field = TextField::new(own).with_text("Width 15.00 mm");
+    field.set_bounds(Rect::new(0.0, 0.0, 200.0, 24.0));
+    let available = Size::new(200.0, 24.0);
+    for i in 0..32 {
+        let bytes = if i % 2 == 0 { CASCADIA } else { NOTO };
+        let font = Arc::new(Font::from_slice(bytes).expect("font"));
+        font_settings::set_system_font(Some(Arc::clone(&font)));
+        field.layout(available);
+        font_settings::set_system_font(None);
+        let cache = field.backbuffer_cache_mut().expect("text field caches");
+        assert!(
+            cache.dirty,
+            "swap {i}: the new font must re-raster the field"
+        );
+        // What a paint does: the bitmap is current for this font now.
+        cache.dirty = false;
+        // `font` is freed here, before the next one is allocated.
+    }
+}
+
+/// Swapping a `TreeView`'s font rebuilds its row widgets, so every row
+/// measures in the new font, even when the old font is freed first: the
+/// row signature hashes the font's id, not its pointer.
+#[test]
+fn tree_view_font_swap_remeasures_rows() {
+    let available = Size::new(400.0, 200.0);
+    let mut tree = tree_with_row(Arc::new(Font::from_slice(NOTO).expect("noto")));
+    tree.layout(available);
+    let mut widths = Vec::new();
+    for i in 0..32 {
+        let bytes = if i % 2 == 0 { CASCADIA } else { NOTO };
+        let font = Arc::new(Font::from_slice(bytes).expect("font"));
+        tree.font = Arc::clone(&font);
+        tree.layout(available);
+        let width = row_label_width(&tree);
+        let mut fresh = tree_with_row(Arc::clone(&font));
+        fresh.layout(available);
+        assert_eq!(width, row_label_width(&fresh), "swap {i}");
+        widths.push(width);
+        // Let go of `font` before the next one is allocated; the tree's
+        // rows release theirs when the next layout replaces them.
+        drop(fresh);
+        drop(font);
+    }
+    assert_ne!(
+        widths[0], widths[1],
+        "the two faces must measure differently"
+    );
+}
+
+/// A tree with one root row, "Width 15.00 mm".
+fn tree_with_row(font: Arc<Font>) -> TreeView {
+    let mut tree = TreeView::new(font);
+    tree.add_root("Width 15.00 mm", NodeIcon::File);
+    tree
+}
+
+/// The laid-out width of the first row's name label (the row's last
+/// child: indent, expand toggle, icon, label).
+fn row_label_width(tree: &TreeView) -> f64 {
+    let row = &tree.children()[0];
+    row.children().last().expect("row label").bounds().width
 }
