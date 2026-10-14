@@ -3,18 +3,20 @@
 //! state are switched from another thread or an idle action, and a container
 //! that lets every press through to what is under it (the GUI demo's fading
 //! window, which C#'s `PointerReach` exists for). A `Switchable` can also
-//! clip its children (all, or one slot), paint in the overlay pass and
-//! enforce integer bounds, for the paint-geometry lookups.
+//! clip its children (all, or one slot), paint in the overlay pass,
+//! enforce integer bounds, transform its children (a zooming canvas), fill
+//! itself with a colour and count the presses it takes, for the
+//! paint-geometry lookups and the scaled-parent ports.
 
 #![allow(dead_code)]
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use agg_gui::draw_ctx::DrawCtx;
 use agg_gui::event::{Event, EventResult};
 use agg_gui::layout_props::WidgetBase;
-use agg_gui::{Point, Rect, Size, Widget};
+use agg_gui::{Color, Point, Rect, Size, TransAffine, Widget};
 
 /// A shared on/off switch an idle action can flip (`ui_thread` actions must
 /// be `Send`).
@@ -41,6 +43,9 @@ pub struct Switchable {
     slot_clips: Vec<(usize, Rect)>,
     defers_paint: bool,
     integer_bounds: bool,
+    child_transform: Option<TransAffine>,
+    fill: Option<Color>,
+    presses: Option<Arc<AtomicUsize>>,
 }
 
 impl Switchable {
@@ -58,6 +63,9 @@ impl Switchable {
             slot_clips: Vec::new(),
             defers_paint: false,
             integer_bounds: false,
+            child_transform: None,
+            fill: None,
+            presses: None,
         }
     }
 
@@ -103,6 +111,24 @@ impl Switchable {
     /// Enforces integer bounds (painted at rounded, pixel-snapped offsets).
     pub fn with_integer_bounds(mut self) -> Self {
         self.integer_bounds = true;
+        self
+    }
+
+    /// Draws its children through `transform` (a pan/zoom canvas).
+    pub fn with_child_transform(mut self, transform: TransAffine) -> Self {
+        self.child_transform = Some(transform);
+        self
+    }
+
+    /// Fills its bounds with `color` when painted.
+    pub fn filled(mut self, color: Color) -> Self {
+        self.fill = Some(color);
+        self
+    }
+
+    /// Counts every left press that reaches it in `presses` (and takes it).
+    pub fn counting_presses(mut self, presses: &Arc<AtomicUsize>) -> Self {
+        self.presses = Some(Arc::clone(presses));
         self
     }
 }
@@ -174,8 +200,24 @@ impl Widget for Switchable {
     fn enforce_integer_bounds(&self) -> bool {
         self.integer_bounds
     }
-    fn paint(&mut self, _ctx: &mut dyn DrawCtx) {}
-    fn on_event(&mut self, _event: &Event) -> EventResult {
-        EventResult::Ignored
+    fn child_transform(&self) -> Option<TransAffine> {
+        self.child_transform
+    }
+    fn paint(&mut self, ctx: &mut dyn DrawCtx) {
+        if let Some(color) = self.fill {
+            ctx.set_fill_color(color);
+            ctx.begin_path();
+            ctx.rect(0.0, 0.0, self.bounds.width, self.bounds.height);
+            ctx.fill();
+        }
+    }
+    fn on_event(&mut self, event: &Event) -> EventResult {
+        match (&self.presses, event) {
+            (Some(presses), Event::MouseDown { .. }) => {
+                presses.fetch_add(1, Ordering::SeqCst);
+                EventResult::Consumed
+            }
+            _ => EventResult::Ignored,
+        }
     }
 }

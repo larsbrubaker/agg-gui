@@ -28,6 +28,7 @@ pub use widget_trait::Widget;
 
 mod app;
 mod backbuffer;
+pub mod coords;
 mod event_observer;
 mod event_root;
 pub(crate) mod keyboard_scroll;

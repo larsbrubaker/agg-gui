@@ -17,5 +17,7 @@ mod popup_horizontal_clamp_tests;
 mod popup_menu_keyboard_scroll_tests;
 #[path = "popup_agg_sharp/popup_menu_overflow_scroll_tests.rs"]
 mod popup_menu_overflow_scroll_tests;
+#[path = "popup_agg_sharp/popup_scaled_parent_tests.rs"]
+mod popup_scaled_parent_tests;
 #[path = "popup_agg_sharp/popup_sub_menu_scroll_tests.rs"]
 mod popup_sub_menu_scroll_tests;
