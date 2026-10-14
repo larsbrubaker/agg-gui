@@ -11,7 +11,7 @@
 use agg_gui::widgets::EditorKind;
 use agg_gui::{EventResult, Key, Modifiers, MouseButton, Point};
 
-use crate::draw::{NodeLayoutInfo, TITLE_HEIGHT};
+use crate::draw::NodeLayoutInfo;
 use crate::model::{EditorHint, NodeId, PropertyValue};
 
 use super::add_menu::CLICK_SLOP;
@@ -253,7 +253,7 @@ impl NodeEditor {
                     // reaches this canvas-space dispatcher.  The
                     // resulting "collapse this node" signal is drained
                     // in `NodeEditor::layout`.)
-                    if hit_title_bar(&layouts, node_id, canvas_pos) {
+                    if hit_title_bar(&layouts, node_id, canvas_pos, self.title_height_of(node_id)) {
                         let now = agg_gui::clock::now();
                         let is_double = self
                             .last_click
@@ -687,15 +687,22 @@ impl NodeEditor {
 // `overlay_editors.rs` to keep this file under the 800-line guardrail.
 
 /// True when `canvas_pos` lands inside the title-bar strip of the given
-/// node's layout. The title bar occupies the top [`TITLE_HEIGHT`] of
-/// the node body in canvas-space (Y-up: `top_left.y` is the top edge).
-fn hit_title_bar(layouts: &[NodeLayoutInfo], node_id: NodeId, canvas_pos: [f64; 2]) -> bool {
+/// node's layout. The title bar occupies the top `title_height` of the
+/// node body in canvas-space (Y-up: `top_left.y` is the top edge):
+/// [`crate::draw::TITLE_HEIGHT`] on a simplified card, the editor's
+/// `card_title_height` on a hosted one.
+fn hit_title_bar(
+    layouts: &[NodeLayoutInfo],
+    node_id: NodeId,
+    canvas_pos: [f64; 2],
+    title_height: f64,
+) -> bool {
     let Some(l) = layouts.iter().find(|l| l.node_id == node_id) else {
         return false;
     };
     let x0 = l.top_left[0];
     let x1 = x0 + l.size[0];
     let y_top = l.top_left[1];
-    let y_bot = y_top - TITLE_HEIGHT;
+    let y_bot = y_top - title_height;
     canvas_pos[0] >= x0 && canvas_pos[0] <= x1 && canvas_pos[1] >= y_bot && canvas_pos[1] <= y_top
 }

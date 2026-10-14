@@ -216,6 +216,8 @@ pub struct HostedCard {
     pub(crate) chrome: CardChrome,
     /// The card has top and bottom resize bands (see `hosted_resize.rs`).
     pub(crate) resize_vertically: bool,
+    /// Height of the title bar, set by every `layout_card`.
+    pub(crate) title_height: f64,
 }
 
 impl HostedCard {
@@ -240,6 +242,7 @@ impl HostedCard {
                 shadow: None,
             },
             resize_vertically: false,
+            title_height: TITLE_HEIGHT,
         }
     }
 
@@ -248,8 +251,15 @@ impl HostedCard {
         self.node_id
     }
 
-    /// Lay the body out at `width`, measure it, and place the sockets.
-    pub(crate) fn layout_card(&mut self, node: &NodeView, width: f64) -> CardGeom {
+    /// Lay the body out at `width` under a `title_height` title bar,
+    /// measure it, and place the sockets.
+    pub(crate) fn layout_card(
+        &mut self,
+        node: &NodeView,
+        width: f64,
+        title_height: f64,
+    ) -> CardGeom {
+        self.title_height = title_height;
         let body = &mut self.children[0];
         let measured = body.measure_min_height(width).max(0.0);
         let got = body.layout(Size::new(width, measured));
@@ -271,11 +281,11 @@ impl HostedCard {
                 .as_ref()
                 .and_then(|f| f(self.children[0].as_ref(), &s.name));
             let (edge, from_body_top) = anchor.unwrap_or((side, ROW_HEIGHT * (i as f64 + 0.5)));
-            sockets.push((s.name.clone(), edge, TITLE_HEIGHT + from_body_top));
+            sockets.push((s.name.clone(), edge, title_height + from_body_top));
         }
         CardGeom {
             width,
-            height: card_height(body_h),
+            height: card_height(body_h, title_height),
             sockets,
             vertical: None,
         }
@@ -284,7 +294,7 @@ impl HostedCard {
     fn style(&self, v: &agg_gui::Visuals) -> ChromeStyle {
         let mut style = ChromeStyle::from_visuals(v);
         style.corner_radius = NODE_RADIUS;
-        style.title_height = TITLE_HEIGHT;
+        style.title_height = self.title_height;
         style.body_color = self.chrome.body;
         style.border_color = if self.chrome.selected {
             v.accent
@@ -355,7 +365,7 @@ impl Widget for HostedCard {
         paint_chrome_title_bar(
             ctx,
             0.0,
-            h - TITLE_HEIGHT,
+            h - self.title_height,
             w,
             &style,
             false,
@@ -387,8 +397,9 @@ impl Widget for HostedCard {
                 1.0,
                 color,
             );
-            let [cx, cy] = crate::draw_error::badge_center_in_title_bar(w, TITLE_HEIGHT, 1.0);
-            crate::draw_error::draw_error_badge(ctx, [cx, cy + h - TITLE_HEIGHT], 1.0, color);
+            let title_h = self.title_height;
+            let [cx, cy] = crate::draw_error::badge_center_in_title_bar(w, title_h, 1.0);
+            crate::draw_error::draw_error_badge(ctx, [cx, cy + h - title_h], 1.0, color);
         }
     }
 

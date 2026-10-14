@@ -149,6 +149,10 @@ pub(crate) struct HostedState {
     /// `animation::invalidation_epoch` seen by the last layout, so a
     /// hosted widget that asked for a redraw re-rasters the canvas.
     pub seen_invalidation: u64,
+    /// Height of a hosted card's title bar, in canvas units.
+    pub title_height: f64,
+    /// Least width a hosted card is laid out at or dragged to.
+    pub min_width: f64,
 }
 
 impl Default for HostedState {
@@ -164,11 +168,14 @@ impl Default for HostedState {
             collapse_enabled: true,
             snap_guides: true,
             seen_invalidation: 0,
+            title_height: TITLE_HEIGHT,
+            min_width: MIN_HOSTED_CARD_WIDTH,
         }
     }
 }
 
-/// Smallest width a right-edge drag can give a card.
+/// Default smallest width a hosted card is laid out at, and a right-edge
+/// drag can give it ([`NodeEditor::with_min_card_width`] changes it).
 pub const MIN_HOSTED_CARD_WIDTH: f64 = 80.0;
 
 impl NodeEditor {
@@ -202,6 +209,66 @@ impl NodeEditor {
     pub fn with_raise_on_click(mut self, raise: bool) -> Self {
         self.hosted.raise_on_click = raise;
         self
+    }
+
+    /// Height of every hosted card's title bar, in canvas units (default
+    /// [`TITLE_HEIGHT`]). The title bar's paint, the socket anchors
+    /// (measured from the body's top, which starts this far below the
+    /// card's top), the body's place, the title-bar hit-test and the card
+    /// height reported through [`crate::NodeGraphModel::on_node_measured`]
+    /// all follow it. MatterCAD's node windows have a 20 unit title bar.
+    pub fn with_card_title_height(mut self, height: f64) -> Self {
+        self.set_card_title_height(height);
+        self
+    }
+
+    /// Change the hosted cards' title-bar height (see
+    /// [`Self::with_card_title_height`]); takes effect at the next layout.
+    pub fn set_card_title_height(&mut self, height: f64) {
+        if self.hosted.title_height != height {
+            self.hosted.title_height = height;
+            self.backbuffer.invalidate();
+            agg_gui::animation::request_layout();
+        }
+    }
+
+    /// The hosted cards' title-bar height.
+    pub fn card_title_height(&self) -> f64 {
+        self.hosted.title_height
+    }
+
+    /// Least width of a hosted card, in canvas units (default
+    /// [`MIN_HOSTED_CARD_WIDTH`]): a card is never laid out narrower, and
+    /// a right-edge drag stops there. MatterCAD's node windows go down to
+    /// a drawn width of 30.
+    pub fn with_min_card_width(mut self, width: f64) -> Self {
+        self.set_min_card_width(width);
+        self
+    }
+
+    /// Change the hosted cards' least width (see
+    /// [`Self::with_min_card_width`]); takes effect at the next layout.
+    pub fn set_min_card_width(&mut self, width: f64) {
+        if self.hosted.min_width != width {
+            self.hosted.min_width = width;
+            self.backbuffer.invalidate();
+            agg_gui::animation::request_layout();
+        }
+    }
+
+    /// The hosted cards' least width.
+    pub fn min_card_width(&self) -> f64 {
+        self.hosted.min_width
+    }
+
+    /// Height of the title bar of node `id`'s card: the hosted cards'
+    /// setting for a hosted card, [`TITLE_HEIGHT`] for a simplified one.
+    pub(super) fn title_height_of(&self, id: NodeId) -> f64 {
+        if self.hosted.cards.contains_key(&id) {
+            self.hosted.title_height
+        } else {
+            TITLE_HEIGHT
+        }
     }
 
     /// The hosted cards' node ids, bottom → top.
@@ -319,13 +386,14 @@ impl NodeEditor {
 
         let mut geoms = HashMap::new();
         let socket_hit = self.socket_hit_half();
+        let (title_height, min_width) = (self.hosted.title_height, self.hosted.min_width);
         let layer = layer_in(&mut self.children).expect("hosted layer exists");
         for (n, look) in nodes.iter().zip(looks) {
             let Some(card) = layer.card_mut(n.id) else {
                 continue;
             };
             let (title_color, colors) = (look.title, look.sockets);
-            let mut geom = card.layout_card(n, look.width.max(MIN_HOSTED_CARD_WIDTH));
+            let mut geom = card.layout_card(n, look.width.max(min_width), title_height);
             geom.vertical = look.vertical;
             card.resize_vertically = look.vertical.is_some();
             let selected = self.selected.contains(&n.id) || ext_sel == Some(n.id);
@@ -501,7 +569,8 @@ fn layer_in(children: &mut [Box<dyn Widget>]) -> Option<&mut HostedLayer> {
         .downcast_mut::<HostedLayer>()
 }
 
-/// Height of a card whose body measured `body_h`.
-pub(crate) fn card_height(body_h: f64) -> f64 {
-    TITLE_HEIGHT + body_h + NODE_BOTTOM_PAD
+/// Height of a card whose body measured `body_h`, under a title bar
+/// `title_height` tall.
+pub(crate) fn card_height(body_h: f64, title_height: f64) -> f64 {
+    title_height + body_h + NODE_BOTTOM_PAD
 }

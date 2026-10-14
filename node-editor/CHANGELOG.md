@@ -10,6 +10,16 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- `NodeEditor::with_card_title_height(f64)` / `set_card_title_height` /
+  `card_title_height()` (default `TITLE_HEIGHT`, 26): the hosted cards'
+  title-bar height. The title bar's paint and error badge, the socket
+  anchors (measured from the body's top, this far below the card's top),
+  the body's place, the title-bar double-click and the height reported
+  through `on_node_measured` follow it (MatterCAD's node windows: 20).
+- `NodeEditor::with_min_card_width(f64)` / `set_min_card_width` /
+  `min_card_width()` (default `MIN_HOSTED_CARD_WIDTH`, 80): the least width
+  a hosted card is laid out at and a right-edge drag gives it (MatterCAD's
+  node windows: 30).
 - `NodeEditor::set_palette_fn(Fn(&Visuals) -> CanvasPalette)` /
   `with_palette_fn`: the host builds the canvas palette from agg-gui's
   visuals on every layout and paint, so its own theme changes reach the

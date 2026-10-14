@@ -19,7 +19,7 @@
 
 use crate::model::{NodeGraphModel, NodeId};
 
-use super::hosted::{card_height, MIN_HOSTED_CARD_WIDTH};
+use super::hosted::card_height;
 
 /// Width (canvas units) of the band outside a card's drawn edge that
 /// resizes the card: agg-sharp `WindowWidget`'s 5-unit `grabWidth`.
@@ -65,6 +65,12 @@ pub(crate) struct ResizeDrag {
     pub start_canvas: [f64; 2],
     /// Least card height a top or bottom drag gives.
     pub min_height: f64,
+    /// Least card width a right drag gives (the editor's
+    /// `min_card_width`).
+    pub min_width: f64,
+    /// The card's title-bar height: a card is never shorter than its
+    /// title bar and bottom pad.
+    pub title_height: f64,
 }
 
 impl ResizeDrag {
@@ -72,10 +78,10 @@ impl ResizeDrag {
     pub fn apply(&self, model: &mut dyn NodeGraphModel, canvas: [f64; 2]) {
         let dx = canvas[0] - self.start_canvas[0];
         let dy = canvas[1] - self.start_canvas[1];
-        let min_height = self.min_height.max(card_height(0.0));
+        let min_height = self.min_height.max(card_height(0.0, self.title_height));
         match self.edge {
             ResizeEdge::Right => {
-                let width = (self.start_width + dx).max(MIN_HOSTED_CARD_WIDTH);
+                let width = (self.start_width + dx).max(self.min_width);
                 model.set_node_width(self.node, width);
             }
             ResizeEdge::Bottom => {

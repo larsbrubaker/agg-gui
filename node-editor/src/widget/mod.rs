@@ -87,6 +87,8 @@ mod tests_hosted_preview;
 #[cfg(test)]
 mod tests_hosted_resize;
 #[cfg(test)]
+mod tests_hosted_title;
+#[cfg(test)]
 mod tests_inline_editor;
 #[cfg(test)]
 mod tests_noodle;

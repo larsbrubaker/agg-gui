@@ -120,6 +120,8 @@ impl NodeEditor {
                     start_top,
                     start_canvas: canvas,
                     min_height,
+                    min_width: self.hosted.min_width,
+                    title_height: self.hosted.title_height,
                 });
                 Some(EventResult::Consumed)
             }
