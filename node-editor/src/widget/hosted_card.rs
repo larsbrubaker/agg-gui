@@ -164,6 +164,30 @@ impl Widget for HostedLayer {
     }
 }
 
+/// Width of a selected card's ring, in card units.
+const SELECTION_RING_WIDTH: f64 = 2.0;
+/// Gap between the card's edge and the ring's inside, in card units.
+const SELECTION_RING_GAP: f64 = 0.5;
+
+/// A selected card's ring (MatterCAD's `NodeCardSelection.DrawRing`): a
+/// 2 unit outline just outside the card, its inside half a unit beyond the
+/// card's edge, so it covers neither the card's border nor its content.
+/// Drawn on the edge, half of it would cover the title bar's and body's
+/// outer pixels; 2 units, not 1, because the card's edge can fall between
+/// pixels, where a 1 unit line anti-aliased across two of them reads as a
+/// faint smudge. In card units, so the ring scales with the zoom as the
+/// card does. It follows the card's corners (concentric, its radius grown
+/// by the same distance), where MatterCAD strokes a square-cornered
+/// rectangle round its rounded card.
+fn paint_selection_ring(ctx: &mut dyn DrawCtx, w: f64, h: f64, color: Color) {
+    let out = SELECTION_RING_WIDTH * 0.5 + SELECTION_RING_GAP;
+    ctx.set_stroke_color(color);
+    ctx.set_line_width(SELECTION_RING_WIDTH);
+    ctx.begin_path();
+    ctx.rounded_rect(-out, -out, w + 2.0 * out, h + 2.0 * out, NODE_RADIUS + out);
+    ctx.stroke();
+}
+
 /// One socket as the card paints it.
 #[derive(Clone, Debug)]
 pub(crate) struct CardSocket {
@@ -296,11 +320,8 @@ impl HostedCard {
         style.corner_radius = NODE_RADIUS;
         style.title_height = self.title_height;
         style.body_color = self.chrome.body;
-        style.border_color = if self.chrome.selected {
-            v.accent
-        } else {
-            self.chrome.border
-        };
+        // Selection leaves the border alone: the ring round the card says it.
+        style.border_color = self.chrome.border;
         style.title_color = self.chrome.title_color;
         style.title_text_color = self.chrome.label;
         if let Some(shadow) = self.chrome.shadow {
@@ -374,17 +395,7 @@ impl Widget for HostedCard {
         );
         paint_chrome_border(ctx, w, h, &style);
         if self.chrome.selected {
-            ctx.set_stroke_color(v.accent);
-            ctx.set_line_width(2.0);
-            ctx.begin_path();
-            ctx.rounded_rect(
-                1.0,
-                1.0,
-                (w - 2.0).max(0.0),
-                (h - 2.0).max(0.0),
-                NODE_RADIUS,
-            );
-            ctx.stroke();
+            paint_selection_ring(ctx, w, h, v.accent);
         }
         if let Some((_, color)) = self.chrome.badge {
             crate::draw_error::draw_error_outline(

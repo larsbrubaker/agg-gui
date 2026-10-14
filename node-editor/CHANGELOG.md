@@ -211,6 +211,12 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Fixed
 
+- A selected hosted card's ring runs outside the card (its inside half a
+  unit beyond the card's edge, 2 units wide, its corners concentric with
+  the card's, in card units so it follows the zoom), as MatterCAD's node
+  cards ring theirs, instead of a 2 unit stroke over the card's border
+  and content; selection no longer recolours the card's border, so the
+  card itself looks the same selected or not.
 - `NodeEditor::set_palette` lasts: paint and layout no longer rebuild the
   palette from the visuals over it, so the canvas, the simplified cards and
   the hosted cards' chrome keep the host's colours through every repaint
