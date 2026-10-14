@@ -13,7 +13,7 @@
   - Virtual time: `Delay`, `WaitFor`, timeouts and pointer pacing.
   - Wall time: the hang watchdogs (test budget, bring-up, close).
 - **One thread per test:** `show_window_and_execute_tests` runs each test on a fresh thread. That isolates agg-gui's thread-local state and lets the caller time out a stuck body, which is what C#'s `Task.WhenAny` does.
-- **Order of work:** the remaining slices fill agg-gui's gaps test-first, port the 14 remaining Agg Automation Tests 1:1, then finish moving `mattercad-app-test` onto the runner (section 9).
+- **Order of work:** the remaining slices fill agg-gui's gaps test-first, port the 11 remaining Agg Automation Tests 1:1, then finish moving `mattercad-app-test` onto the runner (section 9).
 
 ## 1. What exists today
 
@@ -317,8 +317,8 @@ Rules 3 and 4 are the runner's behaviour for every consumer, not a hook: both ma
 
 | C# class (count) | Rust file | Notes |
 |---|---|---|
-| AutomationRunnerTests (11) | `automation_runner_tests.rs` | via `show_window_and_execute_tests`; 1 to go (AnExpectedTimeoutLeavesNoThreadDump, slice 30c; ImageWaitsSearchTheGivenRegion, VetoedCloseIsForcedAndReportedAsFailure, StaticDelayExpires…, ZeroSecondWaitsReportWhatIsThereNow, WindowLoadTimeIsNotChargedToTheTestBudget, AutomationRunnerTimeoutTest, GetWidgetByNameTestNoRegionSingleWindow, GetWidgetByNameTestRegionSingleWindow, DoubleClickByNameSendsTwoFullClickPairsWithProductionClickCounts and TypeDeliversPunctuationIntoAMultiLineField are ported) |
-| AutomationRunnerTests.Winforms (3) | `live/automation_runner_live_tests.rs` | `harness = false`, all desktop OSes |
+| AutomationRunnerTests (11) | `automation_runner_tests.rs` | via `show_window_and_execute_tests`; all ported. AnExpectedTimeoutLeavesNoThreadDump passes vacuously until slice 30c writes dumps, and must stay green when it does. |
+| AutomationRunnerTests.Winforms (3) | `automation_runner_tests.rs`; `live/automation_runner_live_tests.rs` (`harness = false`, all desktop OSes) | IdlePumpSurvivesAnotherWindowsTeardown is ported headless as a behaviour test: C#'s subject, WinForms' process-wide idle timer, does not exist here, but the idle pump is shared too (the main queue passes between UI threads, and windows on one thread share its queue and clock), so another run ending and a second window on the same thread dropped must both leave the live window's pump running. RealMouseInputDoesNotReachAWindowUnderAutomation goes live in slice 31. Skipped as N/A: ShowFromNonPumpThreadReturnsToItsCaller, whose subject is a WinForms `ShowAsSystemWindow` from a non-pump thread starting a second `Application.Run`; agg-gui-shell has one OS window per process (`run` owns winit's single event loop) and widgets are not `Send`, so a worker reaches the UI only by posting to the idle queue, which `agg-gui/tests/ui_thread*.rs` cover. |
 | FlowLayoutTests (24) | agg-gui's `tests/flow_layout_agg_sharp/flow_layout_tests.rs` and `flow_layout_tests_anchors.rs` | FlowLayoutWidget → FlexColumn/FlexRow (`with_right_to_left`, `with_bottom_to_top` for the reversed directions); image compares become box compares; all ported. `EnsureFlowLayoutMinSizeFitsChildrenMinSize` has no `[Test]` attribute in C# and is not counted. |
 | MacTextEditKeyBindings (12) | `mac_text_edit_key_binding_tests.rs` | all ported |
 | WidgetClickTests (3) | `widget_click_tests.rs` | all ported |
@@ -337,11 +337,10 @@ Rules 3 and 4 are the runner's behaviour for every consumer, not a hook: both ma
 |---|---|---|
 | 30 | ThreadStackDump, part 1 (retry and dump-writer subprocess) | ACaptureThatLosesTheDumpRaceIsRetakenNotReparsed, ACaptureThatNeverSucceedsGivesUpAndReportsEveryAttempt, WritingADumpCapturesTheDumpWritersLogInsteadOfPrintingIt, ADumpWriterWithMoreOutputThanAPipeHoldsStillFinishes, ADumpWriterThatNeverExitsIsKilledAtTheTimeout |
 | 30b | ThreadStackDump, part 2 (minidump capture and walk) | CaptureNamesTheCallingThreadsOwnFrames, ADumpThatCannotWalkItsCapturingThreadIsRejected, RegisteredThreadsAreLabelledInTheDump, ATruncatedThreadCommandIsNotRead, ADumpWithTwoThreadsOnOneStackPointerStillReports |
-| 30c | Load and close watchdogs write dumps to `TestResults/` | AnExpectedTimeoutLeavesNoThreadDump |
+| 30c | Load and close watchdogs write dumps to `TestResults/` | none new; AnExpectedTimeoutLeavesNoThreadDump (ported) must stay green |
 | 31 | G17 `ShellSession` plus `LiveDriver`, with the simulated-mouse overlay (`RunOptions.draw_simulated_mouse`, `overlay::render_mouse`) | RealMouseInputDoesNotReachAWindowUnderAutomation |
-| 32 | Live pump robustness | IdlePumpSurvivesAnotherWindowsTeardown, ShowFromNonPumpThreadReturnsToItsCaller |
 
-**Tally** (14 still to port): AutomationRunnerTests 11 (10 ported; AnExpectedTimeoutLeavesNoThreadDump to go), Winforms 3, Flow 24 (24 ported), Mac 12 (12 ported), Menu 1 (1 ported), Mouse 13 (13 ported), Paint 2 (2 ported), Present 1 (1 ported), TextEditFocus 3 (3 ported), TextEdit 13 (13 ported), ThreadStackDump 10, ToolTip 7 (7 ported), WidgetClick 3 (3 ported): **103**.
+**Tally** (11 still to port): AutomationRunnerTests 11 (11 ported), Winforms 3 (1 ported, 1 skipped as N/A, RealMouseInputDoesNotReachAWindowUnderAutomation to go), Flow 24 (24 ported), Mac 12 (12 ported), Menu 1 (1 ported), Mouse 13 (13 ported), Paint 2 (2 ported), Present 1 (1 ported), TextEditFocus 3 (3 ported), TextEdit 13 (13 ported), ThreadStackDump 10, ToolTip 7 (7 ported), WidgetClick 3 (3 ported): **103**.
 
 **Moving `mattercad-app-test` onto the runner** (the harness, `run_test`, the file dialog and the name lookups are done: section 1)
 

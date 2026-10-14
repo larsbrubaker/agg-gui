@@ -1,7 +1,6 @@
-//! Port of agg-sharp `Tests/Agg.Tests/Agg Automation Tests/AutomationRunnerTests.cs`.
-//!
-//! Only the tests whose subjects have landed are here; the rest of the class
-//! (the thread-dump test) arrives with the runner slice listed in
+//! Port of agg-sharp `Tests/Agg.Tests/Agg Automation Tests/AutomationRunnerTests.cs`
+//! and the headless part of its WinForms half (`AutomationRunnerTests.Winforms.cs`);
+//! the WinForms tests that need a live window are listed in
 //! `docs/design/gui-automation.md`. C#'s `SystemWindow` is an
 //! [`AutomationWindow`], built on the run's own UI thread; C#'s captured
 //! locals are shared atomics when the calling thread sets them, and state
@@ -9,6 +8,9 @@
 //! as both the widgets and the body run on that thread.
 
 use std::cell::{Cell, RefCell};
+use std::collections::HashSet;
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -18,12 +20,15 @@ use std::time::{Duration, Instant};
 use agg_gui::event::{self, Event, EventResult};
 use agg_gui::widgets::{Button, TextArea};
 use agg_gui::{Color, Font, Framebuffer, GfxCtx, Rect, Size, Widget};
-use agg_gui_automation::runner::DEFAULT_WIDGET_WAIT_SECONDS;
+use agg_gui_automation::runner::{
+    DEFAULT_CHECK_INTERVAL_MILLISECONDS, DEFAULT_WIDGET_WAIT_SECONDS,
+};
 use agg_gui_automation::tree_query::find_by_name;
 use agg_gui_automation::WaitOpts;
 use agg_gui_automation::{
     show_window_and_execute_tests, static_delay, AutomationError, AutomationRunner,
-    AutomationWindow, ProbeWidget, RunOptions, ScreenRectangle, SearchRegion,
+    AutomationWindow, FrameKind, HeadlessDriver, ProbeWidget, RunOptions, ScreenRectangle,
+    SearchRegion, UiDriver,
 };
 
 #[test]
@@ -178,6 +183,119 @@ fn automation_runner_timeout_test() {
 
     // Should have returned a timeout
     assert_eq!(result.err(), Some(AutomationError::Timeout));
+}
+
+#[test]
+fn an_expected_timeout_leaves_no_thread_dump() {
+    let dump_directory = std::env::current_dir()
+        .expect("the test has a current directory")
+        .join("TestResults");
+    let before = thread_dumps_in(&dump_directory);
+
+    let result = show_window_and_execute_tests(
+        RunOptions {
+            secs_to_test_failure: 1.0,
+            timeout_is_the_expected_outcome: true,
+            ..RunOptions::default()
+        },
+        || (AutomationWindow::new(300.0, 200.0), ()),
+        |test_runner, _| {
+            thread::sleep(Duration::from_secs(3));
+            test_runner.mark_test_complete();
+        },
+    );
+    match result {
+        // The point of the run; the assertion is about what it did not leave behind.
+        Ok(()) | Err(AutomationError::Timeout) => {}
+        Err(other) => panic!("the run failed for another reason: {other}"),
+    }
+
+    let after = thread_dumps_in(&dump_directory);
+    let new_dumps: Vec<&PathBuf> = after.difference(&before).collect();
+    assert!(
+        new_dumps.is_empty(),
+        "a timeout the test is asserting is a result, not a hang to photograph: {new_dumps:?}"
+    );
+}
+
+/// C# `Directory.GetFiles(dumpDirectory, "threadstacks-*.txt")`, empty when
+/// the directory does not exist.
+fn thread_dumps_in(directory: &Path) -> HashSet<PathBuf> {
+    let Ok(entries) = fs::read_dir(directory) else {
+        return HashSet::new();
+    };
+    entries
+        .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with("threadstacks-") && name.ends_with(".txt"))
+        })
+        .collect()
+}
+
+/// From the WinForms half of the class (`AutomationRunnerTests.Winforms.cs`).
+/// C#'s subject is WinformsSystemWindow's process-wide idle timer, which
+/// tearing down one window (`ResetFirstWindowFlag`) stopped for every other
+/// live window. agg-gui has no such timer, but its idle pump is shared too:
+/// the process's main queue passes between UI threads as their runs end, and
+/// windows on one UI thread share its queue and virtual clock. So "another
+/// window's teardown" is both of what that means here: another test's run
+/// ending (its window closed, its UI thread gone) and a second window on this
+/// run's own thread dropped. Neither may leave this window with a dead pump.
+#[test]
+fn idle_pump_survives_another_windows_teardown() {
+    let idle_action_ran = Arc::new(AtomicBool::new(false));
+    let ran = Arc::clone(&idle_action_ran);
+
+    show_window_and_execute_tests(
+        RunOptions {
+            secs_to_test_failure: 30.0,
+            close_window_timeout: 5.0,
+            ..RunOptions::default()
+        },
+        || (AutomationWindow::new(300.0, 200.0), ()),
+        move |test_runner, _| {
+            let this_windows_pump = agg_gui::ui_thread::current_queue();
+
+            // Exactly what the runner does when another test finishes while this window is live.
+            show_window_and_execute_tests(
+                RunOptions {
+                    close_window_timeout: 5.0,
+                    ..RunOptions::default()
+                },
+                || (AutomationWindow::new(300.0, 200.0), ()),
+                |other_runner, _| other_runner.mark_test_complete(),
+            )
+            .expect("the other test's run passes");
+            let mut other_window =
+                HeadlessDriver::new(Box::new(ProbeWidget::new("Other Window")), 300, 200);
+            other_window.pump(FrameKind::Forced);
+            drop(other_window);
+            // Checked as well as the action below, which a queue swapped
+            // under this thread can still run when it adopts the main queue.
+            assert!(
+                agg_gui::ui_thread::current_queue().same_queue(&this_windows_pump),
+                "another window's teardown must leave this window on its own pump"
+            );
+
+            let flag = Arc::clone(&ran);
+            agg_gui::ui_thread::run_on_idle(move || flag.store(true, Ordering::SeqCst));
+            test_runner.wait_for(
+                |_| ran.load(Ordering::SeqCst),
+                5.0,
+                DEFAULT_CHECK_INTERVAL_MILLISECONDS,
+            );
+
+            test_runner.mark_test_complete();
+        },
+    )
+    .expect("the run passes");
+
+    assert!(
+        idle_action_ran.load(Ordering::SeqCst),
+        "a live window's RunOnIdle pump must survive another window's teardown"
+    );
 }
 
 #[test]
