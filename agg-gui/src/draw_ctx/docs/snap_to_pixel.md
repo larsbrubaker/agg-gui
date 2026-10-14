@@ -1,5 +1,5 @@
-**Opt-in** pixel snapping.  Strips the fractional part of the current
-CTM translation so subsequent integer-coordinate `rect` / `fill` /
+**Opt-in** pixel snapping.  Moves the current CTM translation to the
+nearest whole device pixel (at most half a pixel each way) so subsequent integer-coordinate `rect` / `fill` /
 `stroke` / `draw_image_rgba*` calls land exactly on the physical pixel
 grid — no AA fringe on edges, no LINEAR-filter blur on 1:1 texture
 blits.

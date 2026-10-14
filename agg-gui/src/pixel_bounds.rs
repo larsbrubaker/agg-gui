@@ -14,11 +14,15 @@
 //! # Read site
 //!
 //! `paint_subtree` reads the effective flag (widget's override, falling back
-//! to the global default) and rounds the child-translation to the nearest
-//! integer pixel before calling the child's `paint`.  That single snap kills
-//! fractional CTM accumulated by cumulative-heights flex layout (e.g. Label
+//! to the global default) and, on entering a widget that enforces it, moves
+//! the CTM translation to the nearest whole device pixel
+//! ([`DrawCtx::snap_to_pixel`](crate::draw_ctx::DrawCtx::snap_to_pixel))
+//! before calling the widget's `paint`.  That single snap kills fractional
+//! CTM accumulated by cumulative-heights flex layout (e.g. Label
 //! `line_h = font_size × 1.5` is fractional for most font sizes), which is
 //! what caused the Y-axis pixel fringe on crisp rectangle fills downstream.
+//! The child's own offset is applied exactly, so the widget is drawn within
+//! half a device pixel of its layout position at any display scale or zoom.
 //!
 //! # Opt-out
 //!

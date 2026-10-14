@@ -504,10 +504,11 @@ fn test_paint_subtree_snaps_ctm_for_manual_translate_entry() {
         "ty still fractional at paint() entry: {} — paint_subtree snap regressed",
         ctm.ty,
     );
-    // Specific floor values so this also guards against a silent change to
-    // round-nearest (which would subtly shift widgets by up to 0.5 px).
+    // Specific nearest-pixel values: a snapped widget sits on the device
+    // pixel nearest its layout position (100.3 -> 100, 50.7 -> 51), never a
+    // whole pixel left or down of it as flooring put it.
     assert_eq!(ctm.tx, 100.0);
-    assert_eq!(ctm.ty, 50.0);
+    assert_eq!(ctm.ty, 51.0);
 }
 
 /// A widget that opts OUT of enforce_integer_bounds must NOT have its CTM
@@ -685,19 +686,29 @@ fn test_snap_to_pixel_zeros_fractional_translation() {
     let after = ctx.transform();
     assert_eq!(after.tx.fract(), 0.0, "tx still fractional: {}", after.tx);
     assert_eq!(after.ty.fract(), 0.0, "ty still fractional: {}", after.ty);
-    // Snap rounds DOWN (floor) so text/strokes sit on the pixel they would
-    // have partially covered — predictable and matches MatterCAD semantics.
+    // Snap goes to the NEAREST pixel, so a snapped widget is drawn within half
+    // a device pixel of where layout, hit testing and the popups it anchors
+    // place it (agg-sharp draws at the layout position itself).
     assert_eq!(after.tx, 100.0);
-    assert_eq!(after.ty, 50.0);
+    assert_eq!(after.ty, 51.0);
 
-    // Negative translations floor toward -infinity.
+    // Negative translations go to the nearest pixel too, and an exact half
+    // pixel goes down (toward -infinity) on either side of zero, as flooring
+    // put it.
     let mut fb2 = Framebuffer::new(10, 10);
     let mut ctx2 = GfxCtx::new(&mut fb2);
     ctx2.translate(-3.3, -4.7);
     ctx2.snap_to_pixel();
     let after2 = ctx2.transform();
-    assert_eq!(after2.tx, -4.0);
+    assert_eq!(after2.tx, -3.0);
     assert_eq!(after2.ty, -5.0);
+    let mut fb4 = Framebuffer::new(10, 10);
+    let mut ctx4 = GfxCtx::new(&mut fb4);
+    ctx4.translate(-3.5, 4.5);
+    ctx4.snap_to_pixel();
+    let after4 = ctx4.transform();
+    assert_eq!(after4.tx, -4.0);
+    assert_eq!(after4.ty, 4.0);
 
     // Already-integer translation is a no-op.
     let mut fb3 = Framebuffer::new(10, 10);

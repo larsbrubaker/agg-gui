@@ -256,10 +256,22 @@ fn paint_subtree_direct_inner(
     }
 
     let snap_this = widget.enforce_integer_bounds();
-    if snap_this {
+    // The widget paints itself snapped onto the device pixel grid, but its
+    // children are offset from the exact (unsnapped) transform: each child
+    // snaps itself on entering, so snaps never compound down the tree and a
+    // widget is drawn within half a device pixel of its layout position. The
+    // snap is undone as a relative step, not by restoring a saved transform,
+    // because `paint` may have pushed a layer with its own coordinates.
+    let snap_step = if snap_this {
         ctx.save();
-        ctx.snap_to_pixel();
-    }
+        let step = crate::draw_ctx::defaults::pixel_snap_step(&ctx.transform());
+        if let Some((dx, dy)) = step {
+            ctx.translate(dx, dy);
+        }
+        step
+    } else {
+        None
+    };
 
     contained(ctx, |ctx| widget.paint(ctx));
 
@@ -277,6 +289,9 @@ fn paint_subtree_direct_inner(
     // children paint under the scaled/translated frame.  The transform is
     // popped by the `ctx.restore()` that lifts the children clip below, so
     // per-child `bounds()` offsets are interpreted inside the transform.
+    if let Some((dx, dy)) = snap_step {
+        ctx.translate(-dx, -dy);
+    }
     if let Some(t) = widget.child_transform() {
         let mut m = ctx.transform();
         m.premultiply(&t);
@@ -323,7 +338,6 @@ fn paint_subtree_direct_inner(
 /// of [`paint_subtree_direct_inner`]'s child traversal).
 fn paint_child(widget: &mut dyn Widget, ctx: &mut dyn DrawCtx, i: usize) {
     let child_bounds = widget.children()[i].bounds();
-    let snap_to_pixel = widget.children()[i].enforce_integer_bounds();
     ctx.save();
     // A per-child clip (a `FlexRow` slot) applies before the child's own
     // translation, in the space its bounds live in.
@@ -332,11 +346,15 @@ fn paint_child(widget: &mut dyn Widget, ctx: &mut dyn DrawCtx, i: usize) {
         ctx.clip_rect(r.x, r.y, r.width, r.height);
         push_paint_clip(root_rect_from_local(ctx, r.x, r.y, r.width, r.height));
     }
-    if snap_to_pixel {
-        ctx.translate(child_bounds.x.round(), child_bounds.y.round());
-    } else {
-        ctx.translate(child_bounds.x, child_bounds.y);
-    }
+    // The child paints at its exact layout offset, where hit testing,
+    // `paint_global_overlays` and the automation rects place it. A child that
+    // enforces integer bounds is put on the device pixel grid by the snap on
+    // entering it (`paint_subtree_direct_inner`'s `snap_this`), in device
+    // pixels; rounding the offset here in logical units instead moved it by
+    // up to half a logical unit per level, which under a parent's scaling
+    // child transform (a zoomed node-editor card) or a 2x display added up to
+    // several device pixels off layout.
+    ctx.translate(child_bounds.x, child_bounds.y);
     let child = &mut widget.children_mut()[i];
     // `ctx` is at the child's origin and the clip stack holds the parent's children clip and
     // the slot clip, so a hidden opt-in child (and its subtree) is skipped whole.

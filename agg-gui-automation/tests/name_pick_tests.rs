@@ -74,9 +74,9 @@ fn rust_only_a_slot_clip_cuts_a_child_as_painting_does() {
 
 #[test]
 fn rust_only_a_widget_with_integer_bounds_is_found_where_it_paints() {
-    // The outer offset leaves a half pixel; the inner widget's own offset is
-    // rounded (10.4 -> 10, 20.6 -> 21) and its transform floored onto the
-    // grid (10.5 -> 10).
+    // The outer offset leaves a half pixel; the inner widget's exact offset
+    // puts it at (10.9, 20.6), and its transform goes to the nearest pixel
+    // (11, 21), as painting snaps it.
     let outer = sw("outer", 0.5, 0.0, 100.0, 100.0).with_child(Box::new(
         sw("snapped", 10.4, 20.6, 10.0, 10.0).with_integer_bounds(),
     ));
@@ -84,7 +84,7 @@ fn rust_only_a_widget_with_integer_bounds_is_found_where_it_paints() {
     let snapped = WidgetHandle::new(&root, &[0, 0]).expect("snapped");
     assert_eq!(
         screen_rect(&root, &snapped),
-        Some(Rect::new(10.0, 21.0, 10.0, 10.0))
+        Some(Rect::new(11.0, 21.0, 10.0, 10.0))
     );
 }
 

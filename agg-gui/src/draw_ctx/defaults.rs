@@ -186,11 +186,20 @@ pub fn ellipse_ops(
 // Pixel snapping
 // ---------------------------------------------------------------------------
 
-/// Fractional part of `t`'s translation, or `None` when it is already
-/// pixel-aligned.  Callers translate by the negated pair to snap.
+/// How far `t`'s translation lies from the NEAREST whole device pixel (each
+/// component in `(-0.5, 0.5]`: an exact half pixel goes down, as flooring
+/// put it, so the common centred-at-a-half layouts keep their pixels), or
+/// `None` when it is already pixel-aligned.  Callers translate by the negated
+/// pair to snap.
+///
+/// Nearest, not floor: a snapped widget is drawn within half a device pixel
+/// of where layout (and so hit testing, automation rects and the popups it
+/// anchors) puts it. Flooring moved it up to a whole pixel left and down,
+/// which at fractional zooms (a node editor's canvas) showed as a control
+/// drawn off its own drop-down list.
 pub fn pixel_snap_offset(t: &TransAffine) -> Option<(f64, f64)> {
-    let fx = t.tx - t.tx.floor();
-    let fy = t.ty - t.ty.floor();
+    let fx = t.tx - (t.tx - 0.5).ceil();
+    let fy = t.ty - (t.ty - 0.5).ceil();
     if fx != 0.0 || fy != 0.0 {
         Some((fx, fy))
     } else {

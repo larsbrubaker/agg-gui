@@ -5,10 +5,10 @@
 //! and the painted frame agree at every clip edge.
 //!
 //! The rules followed, each as painting applies it:
-//! - a child is offset by its `bounds()` origin, rounded when it enforces
-//!   integer bounds, and a widget that enforces integer bounds paints with
-//!   the translation floored onto the device pixel grid
-//!   (`DrawCtx::snap_to_pixel`);
+//! - a child is offset by its exact `bounds()` origin from its parent's
+//!   exact (unsnapped) transform, and a widget that enforces integer bounds
+//!   paints itself with the translation moved to the nearest whole device
+//!   pixel (`DrawCtx::snap_to_pixel`), so snaps never compound;
 //! - a widget's children are clipped to its `clip_children_rect` (its bounds
 //!   by default), then offset by its child transform (pan/zoom; the
 //!   inspector's [`Widget::inspector_child_transform`], which defaults to
@@ -68,7 +68,9 @@ pub fn paint_placement(
         }
         let local_to_screen = entered(node, &on_entry);
         let children_clip = intersect(clip, children_clip_rect(node, &local_to_screen));
-        let children_to_screen = children_transform(node, &local_to_screen);
+        // Children are offset from the exact transform, not the snapped one
+        // (each snaps itself on entering).
+        let children_to_screen = children_transform(node, &on_entry);
         let child = node.children().get(index)?.as_ref();
         clip = match node.child_paint_clip(index) {
             Some(slot) => intersect(children_clip, screen_aabb(&children_to_screen, slot)),
@@ -125,23 +127,18 @@ pub fn children_transform(widget: &dyn Widget, local_to_screen: &TransAffine) ->
     t
 }
 
-/// The transform on entering `child`: its offset within its parent's
-/// children space, rounded when it enforces integer bounds, applied as
-/// `DrawCtx::translate` does (pre-multiplied, so in the children's space).
+/// The transform on entering `child`: its exact offset within its parent's
+/// children space (painting snaps it on entering, see [`entered`]), applied
+/// as `DrawCtx::translate` does (pre-multiplied, so in the children's space).
 pub fn offset_child(child: &dyn Widget, children_to_screen: &TransAffine) -> TransAffine {
     let b = child.bounds();
-    let (x, y) = if child.enforce_integer_bounds() {
-        (b.x.round(), b.y.round())
-    } else {
-        (b.x, b.y)
-    };
     let mut t = *children_to_screen;
-    t.premultiply(&TransAffine::new_translation(x, y));
+    t.premultiply(&TransAffine::new_translation(b.x, b.y));
     t
 }
 
-/// `DrawCtx::snap_to_pixel` on a transform: strip the fractional part of
-/// its translation (agg-gui's `draw_ctx::defaults::pixel_snap_offset`),
+/// `DrawCtx::snap_to_pixel` on a transform: move its translation to the
+/// nearest whole pixel (agg-gui's `draw_ctx::defaults::pixel_snap_offset`),
 /// through the same pre-multiplied `translate` the paint context uses. The
 /// walk is in logical units, so this is the device grid at a device scale of
 /// 1 (headless test windows); at other scales a snapped widget can sit up to

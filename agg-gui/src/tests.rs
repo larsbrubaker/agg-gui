@@ -192,3 +192,4 @@ mod window_widget_options_tests;
 mod window_widget_resize_tests;
 mod window_widget_title_bar_drag_tests;
 mod windowing;
+mod zoomed_child_drawn_at_layout;
