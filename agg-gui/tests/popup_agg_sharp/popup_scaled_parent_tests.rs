@@ -273,6 +273,79 @@ fn drawn_combo(app: &App, scale: f64, at: Point) -> Rect {
     Rect::new(low.x, low.y, high.x - low.x, high.y - low.y)
 }
 
+/// An anchor whose drawn edges do not start at its origin (C#: `LocalBounds`
+/// of `-6, -4, 34, 16`, a text widget's bounds reaching below its origin by
+/// the font's descent) is met at its drawn edges by both popup paths: a
+/// mated popup and a drop-down list.
+///
+/// An agg-gui widget's local space always starts at its origin, so the
+/// offset reaches each path the way it can in agg-gui: the mated popup is
+/// anchored to the offset rectangle in the anchor's space, and the drop-down
+/// list's box (C# gives `PopupLayoutEngine` the offset anchor directly) is a
+/// [`ComboBox`] sitting at `-6, -4` in the anchor.
+#[test]
+fn both_popup_paths_meet_the_drawn_edges_of_an_anchor_not_starting_at_its_origin() {
+    let rows = [(1.0, 1.0), (1.5, 1.0), (1.0, 2.0), (1.5, 2.0)];
+    // C#'s `RectangleDouble(-6, -4, 34, 16)`: left, bottom, right, top.
+    let offset_bounds = Rect::new(-6.0, -4.0, 40.0, 20.0);
+    for (scale, device) in rows {
+        let why = format!("zoom {scale}, device scale {device}");
+        let drawn_bottom_left = drawn(scale, Point::new(offset_bounds.x, offset_bounds.y));
+
+        // A mated popup: under the anchor, left edges together.
+        let align = RectAlign {
+            parent: Align2::LEFT_BOTTOM,
+            child: Align2::LEFT_TOP,
+        };
+        let popup = open_from_anchor(scale, device, align, offset_bounds);
+        assert_near(
+            popup.x,
+            drawn_bottom_left.x,
+            &format!("a mated popup has to line up with the anchor's drawn left, {why}"),
+        );
+        assert_near(
+            popup.y + popup.height,
+            drawn_bottom_left.y,
+            &format!("a mated popup has to meet the anchor's drawn bottom, {why}"),
+        );
+
+        // The drop-down list path, its box at the same offset in the anchor.
+        let saved = device_scale();
+        set_device_scale(device);
+        let mut combo =
+            fitted(ComboBox::new(vec!["Item 0", "Item 1"], 0, font()).with_no_selection("none"));
+        let b = combo.bounds();
+        combo.set_bounds(Rect::new(
+            offset_bounds.x,
+            offset_bounds.y,
+            b.width,
+            b.height,
+        ));
+        let mut app = zoomed_app(scale, device, ANCHOR_POSITION, combo);
+        click_root(
+            &mut app,
+            device,
+            drawn_at(scale, ANCHOR_POSITION, Point::new(10.0, 12.0)),
+        );
+        paint(&mut app, device, Size::new(800.0, 600.0));
+        set_device_scale(saved);
+
+        let list = combo_at(&app, &ZOOMED_COMBO)
+            .open_list_rect()
+            .expect("the click opens the list");
+        assert_near(
+            list.x,
+            drawn_bottom_left.x,
+            &format!("a drop-down list has to line up with the anchor's drawn left, {why}"),
+        );
+        assert_near(
+            list.y + list.height,
+            drawn_bottom_left.y,
+            &format!("a drop-down list has to open right under its drawn bottom, {why}"),
+        );
+    }
+}
+
 #[test]
 fn a_drop_down_list_opens_under_its_drawn_control() {
     for (scale, device) in ROWS {
