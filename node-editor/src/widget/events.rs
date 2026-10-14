@@ -87,6 +87,30 @@ impl NodeEditor {
                     };
                     return EventResult::Consumed;
                 }
+                // Control (Cmd on a Mac) with the left button on empty canvas
+                // takes the view, as MatterCAD's NodeEditor does: it pans, or
+                // with Alt as well it zooms. Before the socket test: a socket
+                // hangs half outside its window, and the held modifier means
+                // the view, not a noodle. A press on a window keeps it.
+                if (modifiers.ctrl || agg_gui::platform::command_modifier_pressed(modifiers))
+                    && self.hit_node(&layouts, canvas_pos).is_none()
+                {
+                    self.cancel_view_animation();
+                    self.interaction = if modifiers.alt {
+                        CanvasState::ZoomingCanvas {
+                            start_scale: self.canvas_scale,
+                            start_local: pos,
+                            anchor_canvas: canvas_pos,
+                        }
+                    } else {
+                        CanvasState::PanningCanvas {
+                            start_offset: self.canvas_offset,
+                            start_local: pos,
+                            menu_on_click: false,
+                        }
+                    };
+                    return EventResult::Consumed;
+                }
                 if let Some((node_id, socket)) = self.hit_socket(&layouts, canvas_pos) {
                     // A press on an output starts a noodle; on an empty
                     // input it drags backwards; on a connected input it

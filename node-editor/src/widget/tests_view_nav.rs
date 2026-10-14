@@ -384,3 +384,71 @@ fn commands_drive_mode_view_and_fit() {
     editor.layout(PANE);
     assert!(editor.is_view_animating());
 }
+
+fn left_down_with(editor: &mut NodeEditor, x: f64, y: f64, modifiers: Modifiers) {
+    editor.on_event(&Event::MouseDown {
+        pos: Point::new(x, y),
+        button: MouseButton::Left,
+        modifiers,
+    });
+}
+
+/// Control with the left button on empty canvas pans in Select mode (as
+/// MatterCAD's node editor does); Cmd does the same on a Mac, where the
+/// command modifier is `meta`.
+#[test]
+fn control_left_drag_on_empty_canvas_pans() {
+    let command = Modifiers {
+        meta: agg_gui::platform::current_platform() == agg_gui::platform::Platform::MacOS,
+        ctrl: agg_gui::platform::current_platform() != agg_gui::platform::Platform::MacOS,
+        ..Modifiers::default()
+    };
+    let control = Modifiers {
+        ctrl: true,
+        ..Modifiers::default()
+    };
+    for modifiers in [control, command] {
+        let (shared, typed) = fixture_with_typed_handle();
+        let mut editor = NodeEditor::new(shared);
+        seed_nodes(&mut editor, &typed, vec![mk_node(1, "a", [0.0, 200.0])]);
+        assert_eq!(editor.interaction_mode(), InteractionMode::Select);
+        // (300, 50) is clear of the node (top-left [0, 200], Y-up).
+        left_down_with(&mut editor, 300.0, 50.0, modifiers);
+        mouse_move(&mut editor, 320.0, 35.0);
+        mouse_up(&mut editor, 320.0, 35.0);
+        assert_eq!(editor.pan(), [20.0, -15.0], "{modifiers:?}");
+        assert_eq!(typed.lock().unwrap().nodes[0].position, [0.0, 200.0]);
+    }
+}
+
+/// Control+Alt with the left button on empty canvas zooms about the
+/// press, and Control with the left button on a node still drags the node.
+#[test]
+fn control_alt_left_drag_zooms_and_control_left_on_a_node_drags_it() {
+    let (shared, typed) = fixture_with_typed_handle();
+    let mut editor = NodeEditor::new(shared);
+    seed_nodes(&mut editor, &typed, vec![mk_node(1, "a", [0.0, 200.0])]);
+    editor.set_view(1.0, [0.0, 0.0]);
+    let ctrl_alt = Modifiers {
+        ctrl: true,
+        alt: true,
+        ..Modifiers::default()
+    };
+    left_down_with(&mut editor, 300.0, 50.0, ctrl_alt);
+    mouse_move(&mut editor, 300.0, 90.0);
+    mouse_up(&mut editor, 300.0, 90.0);
+    let expected_scale = (40.0f64 * 0.005).exp();
+    assert!((editor.scale() - expected_scale).abs() < 1e-9);
+    assert!((300.0 * editor.scale() + editor.pan()[0] - 300.0).abs() < 1e-9);
+
+    editor.set_view(1.0, [0.0, 0.0]);
+    let ctrl = Modifiers {
+        ctrl: true,
+        ..Modifiers::default()
+    };
+    left_down_with(&mut editor, 10.0, 190.0, ctrl);
+    mouse_move(&mut editor, 60.0, 220.0);
+    mouse_up(&mut editor, 60.0, 220.0);
+    assert_eq!(editor.pan(), [0.0, 0.0]);
+    assert_eq!(typed.lock().unwrap().nodes[0].position, [50.0, 230.0]);
+}
