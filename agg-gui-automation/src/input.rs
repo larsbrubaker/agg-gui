@@ -25,6 +25,8 @@
 //!   WinForms delivers real input.
 //! - [`InputMethod::left_button_down`] follows the last button event
 //!   whether or not it reached the window.
+//! - [`InputMethod::record_cursor_position`] moves the pointer and sends
+//!   nothing (an OS file drag owns the pointer; Rust-only).
 //!
 //!
 //! Keyboard (C#'s `Type`, `SendStroke`, `PressModifierKeys`,
@@ -175,6 +177,13 @@ pub trait InputMethod {
     /// C# `SetCursorPosition`: move the pointer to (`x`, `y`).
     fn set_cursor_position(&mut self, driver: &mut dyn UiDriver, x: i32, y: i32);
 
+    /// The pointer is now at (`x`, `y`), and the window saw no mouse move
+    /// get it there: an OS drag-and-drop from another application owns the
+    /// pointer, and the window hears of it only through file-drag events
+    /// (`runner/file_drop.rs`). Later moves start from here. No C#
+    /// counterpart (C#'s `IInputMethod` has no file drags).
+    fn record_cursor_position(&mut self, x: i32, y: i32);
+
     /// C# `CreateMouseEvent`: send one button transition. For a press,
     /// `clicks` is the click number the event should report — 2 for the
     /// second press of a double click, anything else a single click. The
@@ -257,12 +266,18 @@ impl SimulatedInput {
 
     /// Whether `p` is inside the window (edges included).
     fn window_contains(driver: &dyn UiDriver, p: Point2D) -> bool {
-        let (width, height) = driver.size_px();
-        p.x >= 0
-            && i64::from(p.x) <= i64::from(width)
-            && p.y >= 0
-            && i64::from(p.y) <= i64::from(height)
+        window_contains(driver.size_px(), p)
     }
+}
+
+/// Whether the pointer position `p` is inside a window of `size_px`
+/// (physical pixels), edges included, as C#'s `RectangleDouble.Contains`.
+pub(crate) fn window_contains(size_px: (u32, u32), p: Point2D) -> bool {
+    let (width, height) = size_px;
+    p.x >= 0
+        && i64::from(p.x) <= i64::from(width)
+        && p.y >= 0
+        && i64::from(p.y) <= i64::from(height)
 }
 
 impl InputMethod for SimulatedInput {
@@ -276,6 +291,10 @@ impl InputMethod for SimulatedInput {
 
     fn click_count(&self) -> u32 {
         self.click_count
+    }
+
+    fn record_cursor_position(&mut self, x: i32, y: i32) {
+        self.current_mouse_position = Point2D::new(x, y);
     }
 
     fn set_cursor_position(&mut self, driver: &mut dyn UiDriver, x: i32, y: i32) {

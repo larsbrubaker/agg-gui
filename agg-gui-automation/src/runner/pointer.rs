@@ -136,7 +136,7 @@ pub fn mouse_move_steps(start: Point2D, end: Point2D, steps: u32) -> Vec<Point2D
         .collect()
 }
 
-fn eased_step(start: Point2D, end: Point2D, i: u32, steps: u32) -> Point2D {
+pub(super) fn eased_step(start: Point2D, end: Point2D, i: u32, steps: u32) -> Point2D {
     let (start_x, start_y) = (f64::from(start.x), f64::from(start.y));
     let delta_x = f64::from(end.x) - start_x;
     let delta_y = f64::from(end.y) - start_y;
@@ -194,7 +194,7 @@ impl AutomationRunner {
     /// no longer than the move's remaining share of `time_to_move_mouse`.
     /// `move_elapsed` is the UI time since the move's first step, so the cap
     /// covers the move as a whole.
-    fn pace_mouse_move(&mut self, move_elapsed: Duration) {
+    pub(super) fn pace_mouse_move(&mut self, move_elapsed: Duration) {
         let remaining_milliseconds =
             (self.config.time_to_move_mouse * 1000.0 - move_elapsed.as_secs_f64() * 1000.0) as i32;
         self.wait_for_pending_ui_work(remaining_milliseconds);
