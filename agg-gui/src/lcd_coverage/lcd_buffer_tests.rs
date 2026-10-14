@@ -13,6 +13,10 @@
 //!   `draw_lcd_backbuffer_arc` onto a premultiplied [`Framebuffer`], with
 //!   the fade as `global_alpha`; its planes are top-row-first.
 //! - `FlipPlane` is the private `flip_plane`.
+//!
+//! The collapse test is converted: agg-gui's collapse paints the ink's own
+//! colour at the weighted alpha where C# lifts the alpha and keeps the
+//! fringe's colour (see the test's doc comment).
 
 use super::*;
 use crate::framebuffer::Framebuffer;
@@ -251,21 +255,53 @@ fn fill_path_clips_to_every_pixel_the_clip_rect_touches() {
     assert_pixel(&buf, 7, 7, [255, 255, 255], [255, 255, 255]);
 }
 
-/// The collapse uses the Rec.709-weighted mean of the channel alphas over
-/// the ink's own straight colour.
+/// The collapse uses the Rec.709-weighted mean of the channel alphas, and
+/// light ink stays exactly as light as the per-channel composite would show it.
+///
+/// Converted: C#'s `CollapseLcdPixel` lifts the alpha to `max(colour)` and
+/// unpremultiplies against it, so white ink through coverage (200, 60, 150)
+/// collapses to (255, 77, 191, 200) — the subpixel fringe's colour, kept in a
+/// flattened pixel where LCD geometry is not valid.  agg-gui's collapse keeps
+/// the weighted alpha and paints the ink's own straight colour
+/// ([`collapse_lcd_pixel`]), so light ink needs no lift: the behaviour the
+/// lift was for — light-on-dark text keeping its brightness — is asserted
+/// below as luminance over a dark and a light background.
 #[test]
-fn collapse_weights_alpha_by_rec709_over_the_inks_own_colour() {
+fn collapse_weights_alpha_by_rec709_and_lifts_for_light_ink() {
+    // Opaque white ink through coverage (200, 60, 150): premultiplied colour
+    // equals coverage, so colour = alpha = (200, 60, 150).
     let mut light = LcdBuffer::new(1, 1);
     light.composite_mask(&mask1([200, 60, 150]), white(), 0, 0, None);
     assert_pixel(&light, 0, 0, [200, 60, 150], [200, 60, 150]);
 
-    // weighted 96.262 -> alpha 96; the ink is white, so every channel's
-    // colour is c_i / a_i = 1. (Channel 1's alpha, 60, is under the 64 below
-    // which its colour blends toward the strongest channel's, which is the
-    // same white.)
+    // weighted = 0.2126*200 + 0.7152*60 + 0.0722*150 = 96.262 -> 96; the ink
+    // is white, so every channel's colour is c_i / a_i = 1. (Channel 1's
+    // alpha, 60, is under the 64 below which its colour blends toward the
+    // strongest channel's, which is the same white.)
     let straight = collapse_lcd_pixel([200, 60, 150], [200, 60, 150]);
     assert_eq!(straight, [255, 255, 255, 96], "straight-alpha collapse");
 
+    // What the lift protects, asserted as what the user sees: the collapsed
+    // pixel drawn source-over a background has the same Rec.709 luminance as
+    // the per-channel composite `c_i + d * (1 - a_i)`.  Over black that is
+    // 96.262 against 96 (light text on a dark theme is not dimmed); over
+    // white both are pure white.
+    let luminance = |rgb: [f64; 3]| 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2];
+    for background in [0.0, 255.0] {
+        let a = straight[3] as f64 / 255.0;
+        let collapsed = [0, 1, 2].map(|i| straight[i] as f64 * a + background * (1.0 - a));
+        let per_channel = [200.0, 60.0, 150.0].map(|c: f64| c + background * (1.0 - c / 255.0));
+        let (collapsed, per_channel) = (luminance(collapsed), luminance(per_channel));
+        assert!(
+            (collapsed - per_channel).abs() <= 0.5,
+            "over {background}: collapsed luminance {collapsed} vs per-channel {per_channel}"
+        );
+    }
+
+    // Dark ink on the same coverage: premultiplied colour is zero, and the
+    // collapse lands on the weighted alpha - which keeps dark-on-light
+    // luminance exact. max would give 200, and transposing the red and blue
+    // weights 0.0722*200 + 0.7152*60 + 0.2126*150 = 89.
     let mut dark = LcdBuffer::new(1, 1);
     dark.composite_mask(&mask1([200, 60, 150]), c8(0, 0, 0, 255), 0, 0, None);
     assert_pixel(&dark, 0, 0, [0, 0, 0], [200, 60, 150]);
@@ -274,6 +310,9 @@ fn collapse_weights_alpha_by_rec709_over_the_inks_own_colour() {
         [0, 0, 0, 96],
         "dark collapse"
     );
+
+    // Nothing at all collapses to a fully transparent pixel, not to an
+    // opaque black one.
     assert_eq!(
         collapse_lcd_pixel([0, 0, 0], [0, 0, 0]),
         [0, 0, 0, 0],
