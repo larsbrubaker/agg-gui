@@ -11,7 +11,7 @@
 use agg_gui::widget::{logical_root_transform, paint_subtree};
 use agg_gui::{DrawCtx, Size};
 
-use crate::draw::{draw_canvas_grid, CanvasPalette};
+use crate::draw::draw_canvas_grid;
 use crate::socket_style::{draw_noodle, draw_socket_ring, NoodleStyle};
 
 use super::connect;
@@ -28,9 +28,10 @@ impl NodeEditor {
             return;
         }
 
-        // Refresh palette per frame — theme switches flow through.
+        // Refresh palette per frame — theme switches flow through (a host
+        // palette or palette function included; see `palette_source`).
         let visuals = ctx.visuals();
-        self.palette = CanvasPalette::from_visuals(&visuals);
+        self.palette = self.resolve_palette(&visuals);
 
         // Capture our app-absolute origin in root logical units
         // (`logical_root_transform` divides out the device × UX zoom and the
@@ -98,6 +99,16 @@ impl NodeEditor {
                 40.0,
                 self.palette.canvas_grid,
             );
+        }
+
+        // The origin's axes go over the grid and under the noodles, in
+        // editor-local space: step out of the canvas transform for them.
+        if self.presentation.axes {
+            ctx.restore();
+            self.paint_axes(ctx);
+            ctx.save();
+            ctx.translate(self.canvas_offset[0], self.canvas_offset[1]);
+            ctx.scale(self.canvas_scale, self.canvas_scale);
         }
 
         // Edges (under nodes).  Re-snapshot here rather than caching the

@@ -11,7 +11,9 @@ use agg_gui::Color;
 /// Theme palette used by the canvas. Built from agg-gui's current
 /// visuals so light / dark mode toggles flow through automatically.
 /// Hosts that want different colours can construct one manually and
-/// pass it via [`crate::NodeEditor::set_palette`].
+/// pass it via [`crate::NodeEditor::set_palette`] (or derive one per
+/// theme with [`crate::NodeEditor::set_palette_fn`]).
+#[derive(Clone, Debug, PartialEq)]
 pub struct CanvasPalette {
     pub canvas_bg: Color,
     pub canvas_grid: Color,

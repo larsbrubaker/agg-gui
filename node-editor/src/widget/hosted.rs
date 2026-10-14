@@ -33,7 +33,6 @@ use std::collections::HashMap;
 
 use agg_gui::{Rect, Size, Widget};
 
-use crate::draw::CanvasPalette;
 use crate::draw::{
     NodeLayoutInfo, NodeRow, SocketLayout, SocketSide, NODE_BOTTOM_PAD, NODE_WIDTH, ROW_HEIGHT,
     TITLE_HEIGHT,
@@ -225,6 +224,20 @@ impl NodeEditor {
         agg_gui::animation::request_draw();
     }
 
+    /// Tell every hosted card whether to draw its sockets, now rather than
+    /// at the next layout (which rebuilds the whole chrome).
+    pub(super) fn set_cards_draw_sockets(&mut self, show: bool) {
+        let ids: Vec<NodeId> = self.hosted.cards.keys().copied().collect();
+        let Some(layer) = layer_in(&mut self.children) else {
+            return;
+        };
+        for id in ids {
+            if let Some(card) = layer.card_mut(id) {
+                card.chrome.draw_sockets = show;
+            }
+        }
+    }
+
     /// Remove the hosted layer from the end of `children` (it is put back
     /// by `rebuild_children`, so the cached bodies survive a rebuild).
     pub(super) fn take_hosted_layer(&mut self) -> Option<Box<dyn Widget>> {
@@ -245,7 +258,7 @@ impl NodeEditor {
         let nodes = model.nodes();
         let epoch = model.body_epoch();
         let ext_sel = model.primary_selection();
-        let palette = CanvasPalette::from_visuals(&agg_gui::current_visuals());
+        let palette = self.resolve_palette(&agg_gui::current_visuals());
         let noodles = model.noodles();
         let looks: Vec<CardLook> = nodes
             .iter()

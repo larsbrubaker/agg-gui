@@ -199,3 +199,33 @@ fn with_sockets_off_a_hosted_card_draws_no_socket_but_keeps_its_hit_area() {
         .unwrap();
     assert_eq!(editor.socket_at(c), out_hit());
 }
+
+#[test]
+fn toggling_sockets_reaches_a_hosted_card_before_the_next_layout() {
+    let shared: SharedModel = Arc::new(Mutex::new(model()));
+    let mut editor = NodeEditor::new(shared).with_body_factory(|_n: &NodeView| {
+        Some(HostedNodeBody::new(Box::new(EmptyBody::default())))
+    });
+    editor.set_bounds(Rect::new(0.0, 0.0, VIEW.width, VIEW.height));
+    editor.layout(VIEW);
+    let overlay_shots = |editor: &mut NodeEditor| {
+        let card = editor
+            .children_mut()
+            .last_mut()
+            .and_then(|l| l.children_mut().first_mut())
+            .and_then(|c| c.as_any_mut())
+            .and_then(|a| a.downcast_mut::<HostedCard>())
+            .expect("hosted card");
+        let mut r = Recorder::default();
+        card.paint_overlay(&mut r);
+        r.shots.len()
+    };
+    let shown = overlay_shots(&mut editor);
+    assert!(shown > 0, "the card draws its socket");
+    // The very next paint, with no layout between: the socket is gone ...
+    editor.set_show_sockets(false);
+    assert_eq!(overlay_shots(&mut editor), 0);
+    // ... and back.
+    editor.set_show_sockets(true);
+    assert_eq!(overlay_shots(&mut editor), shown);
+}

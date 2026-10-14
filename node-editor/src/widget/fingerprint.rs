@@ -128,6 +128,12 @@ impl NodeEditor {
         // the cached chrome (body, border, labels, sockets) keeps
         // painting in the old theme's colours.
         agg_gui::current_visuals_epoch().hash(&mut h);
+        // A host palette function can answer differently with the same
+        // visuals (its own theme changed), so the colours take part too.
+        super::palette_source::hash_palette(
+            &self.resolve_palette(&agg_gui::current_visuals()),
+            &mut h,
+        );
         h.finish()
     }
 }

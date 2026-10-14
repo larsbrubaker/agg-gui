@@ -14,6 +14,7 @@
 //! [`hosted`], [`hosted_card`], [`hosted_resize`] and [`hosted_events`].
 
 mod add_menu;
+mod axes;
 mod canvas_state;
 mod collapse_snap;
 mod commands;
@@ -32,6 +33,7 @@ pub mod node_parts;
 pub mod nodes;
 mod overlay_editors;
 mod paint;
+mod palette_source;
 mod popup;
 mod presentation;
 mod snap_guides;
@@ -45,6 +47,7 @@ pub use hosted::{
     HostedNodeBody, NodeBodyFactory, SocketAnchor, SocketAnchorFn, MIN_HOSTED_CARD_WIDTH,
 };
 pub use hosted_card::{CardShadow, HostedCard};
+pub use palette_source::PaletteFn;
 pub use view_anchor::ViewAnchor;
 pub use view_nav::InteractionMode;
 
@@ -57,6 +60,8 @@ mod nodes_tests;
 mod tests;
 #[cfg(test)]
 mod tests_add_menu;
+#[cfg(test)]
+mod tests_axes;
 #[cfg(test)]
 mod tests_canvas_grid;
 #[cfg(test)]
@@ -87,6 +92,8 @@ mod tests_inline_editor;
 mod tests_noodle;
 #[cfg(test)]
 mod tests_overlay;
+#[cfg(test)]
+mod tests_palette;
 #[cfg(test)]
 mod tests_presentation;
 #[cfg(test)]
@@ -177,6 +184,8 @@ pub struct NodeEditor {
     /// detect double-clicks on a node's title bar (toggle collapse).
     last_click: Option<(agg_gui::Point, web_time::Instant)>,
     palette: CanvasPalette,
+    /// Where `palette` comes from (see [`palette_source`]).
+    palette_source: palette_source::PaletteSource,
     interaction: CanvasState,
     /// What a left-drag does (see [`InteractionMode`]). Hosts flip it
     /// from a toolbar via [`NodeEditorCommand::SetInteractionMode`].
@@ -285,6 +294,7 @@ impl NodeEditor {
             pending_collapse: Rc::new(Cell::new(None)),
             last_click: None,
             palette: CanvasPalette::dark(),
+            palette_source: palette_source::PaletteSource::default(),
             interaction: CanvasState::Idle,
             mode: InteractionMode::default(),
             view_anim: None,
@@ -340,14 +350,6 @@ impl NodeEditor {
     pub fn with_id(mut self, id: &'static str) -> Self {
         self.id = id;
         self
-    }
-
-    /// Override the palette (theme colours). Default is rebuilt every
-    /// paint from `ctx.visuals()` so light/dark mode toggles flow
-    /// through automatically — call this only if you want a custom
-    /// look.
-    pub fn set_palette(&mut self, palette: CanvasPalette) {
-        self.palette = palette;
     }
 
     /// The pan, measured from the [`ViewAnchor`].
@@ -470,7 +472,7 @@ impl NodeEditor {
     /// pixels AND `collect_inspector_nodes` sees the on-screen rect.
     fn rebuild_children(&mut self, layouts: &[NodeLayoutInfo], ext_sel: Option<NodeId>) {
         let visuals = agg_gui::current_visuals();
-        let palette = CanvasPalette::from_visuals(&visuals);
+        let palette = self.resolve_palette(&visuals);
         let model = self.model.lock().unwrap();
         let mut node_ctx = NodePaintContext::from_model(palette, &*model);
         node_ctx.noodle_style = self.presentation.noodle_style;

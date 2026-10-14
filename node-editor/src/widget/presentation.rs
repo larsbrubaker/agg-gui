@@ -29,6 +29,8 @@ pub(crate) struct PresentationState {
     pub show_sockets: bool,
     /// The grid backdrop is drawn.
     pub canvas_grid: bool,
+    /// The canvas origin's axes are drawn (see [`super::axes`]).
+    pub axes: bool,
     /// The hosted cards' drop shadow (`None`: agg-gui's window shadow).
     pub card_shadow: Option<super::CardShadow>,
 }
@@ -41,6 +43,7 @@ impl Default for PresentationState {
             hovered: None,
             show_sockets: true,
             canvas_grid: true,
+            axes: false,
             card_shadow: None,
         }
     }
@@ -89,9 +92,13 @@ impl NodeEditor {
     pub fn set_show_sockets(&mut self, show: bool) {
         if self.presentation.show_sockets != show {
             self.presentation.show_sockets = show;
+            // The hosted cards' chrome is otherwise refreshed only by
+            // `layout()`; the simplified cards rebuild from the fingerprint.
+            self.set_cards_draw_sockets(show);
             self.last_paint_fingerprint = None;
             self.backbuffer.invalidate();
-            agg_gui::animation::request_draw();
+            // A layout too, which rebuilds the simplified cards' sockets.
+            agg_gui::animation::request_layout();
         }
     }
 

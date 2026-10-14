@@ -10,6 +10,17 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- `NodeEditor::set_palette_fn(Fn(&Visuals) -> CanvasPalette)` /
+  `with_palette_fn`: the host builds the canvas palette from agg-gui's
+  visuals on every layout and paint, so its own theme changes reach the
+  canvas and the cards with no further call (the palette takes part in the
+  paint fingerprint). `with_palette(CanvasPalette)`, `clear_palette()` and
+  `palette()`; `PaletteFn` is the boxed function type. `CanvasPalette` is
+  now `Clone`, `Debug` and `PartialEq`.
+- `NodeEditor::with_axes(bool)` / `axes()` (off by default): a red x axis
+  and a green y axis through the canvas origin, 1 unit wide across the
+  whole editor at any pan and zoom, over the canvas background and grid
+  and under the noodles (MatterCAD's `NodeEditor.OnDraw`).
 - `NodeEditor::with_canvas_grid(bool)` / `canvas_grid()` (on by default):
   off, the canvas draws no grid backdrop (MatterCAD's node editor draws a
   plain canvas).
@@ -189,6 +200,14 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 - `SocketSide` is re-exported at the crate root.
 
 ### Fixed
+
+- `NodeEditor::set_palette` lasts: paint and layout no longer rebuild the
+  palette from the visuals over it, so the canvas, the simplified cards and
+  the hosted cards' chrome keep the host's colours through every repaint
+  and relayout.
+- `NodeEditor::set_show_sockets` reaches the hosted cards on the next paint
+  instead of the next layout, and requests a layout for the simplified
+  cards.
 
 - Dashed noodles stroke with butt caps, as MatterCAD / NodeDesigner do; the
   default round cap nearly closed their 8-unit gaps.

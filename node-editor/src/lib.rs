@@ -62,6 +62,6 @@ pub use model::{
 pub use socket_style::{NoodleStyle, SocketShape};
 pub use widget::{
     AddMenuRequest, CardShadow, HostedCard, HostedNodeBody, InteractionMode, NodeBodyFactory,
-    NodeEditor, NodeEditorCommand, NodeEditorHandle, SharedModel, SocketAnchor, SocketAnchorFn,
-    ViewAnchor, MIN_HOSTED_CARD_WIDTH,
+    NodeEditor, NodeEditorCommand, NodeEditorHandle, PaletteFn, SharedModel, SocketAnchor,
+    SocketAnchorFn, ViewAnchor, MIN_HOSTED_CARD_WIDTH,
 };
