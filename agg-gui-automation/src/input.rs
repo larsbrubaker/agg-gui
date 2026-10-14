@@ -23,6 +23,9 @@
 //! - A press reports the click count it is given when that is 2 (the second
 //!   press of a double click) and 1 otherwise; every release reports 1, as
 //!   WinForms delivers real input.
+//! - Rust-only, [`InputMethod::platform_counted_mouse_event`] sends a press
+//!   with no count ([`ClickCount::Auto`]): the forwarder counts it from the
+//!   time and travel since the previous press, as for an OS click.
 //! - [`InputMethod::left_button_down`] follows the last button event
 //!   whether or not it reached the window.
 //! - [`InputMethod::record_cursor_position`] moves the pointer and sends
@@ -199,6 +202,24 @@ pub trait InputMethod {
         clicks: u32,
     );
 
+    /// A button transition whose press's click count the window works out,
+    /// as it does for an OS click: the press goes to the driver's input
+    /// forwarder with [`ClickCount::Auto`], so it continues the previous
+    /// press's sequence when it is of the same button within the
+    /// forwarder's double-click time and travel tolerance
+    /// ([`ClickPolicy`](agg_gui::shell_input::ClickPolicy)), and starts a
+    /// new one at 1 otherwise. A release is sent as by
+    /// [`mouse_event`](Self::mouse_event). No C# counterpart: C#'s automation
+    /// always states the count; this is for tests of how the product reads
+    /// counts the platform worked out.
+    fn platform_counted_mouse_event(
+        &mut self,
+        driver: &mut dyn UiDriver,
+        action: MouseAction,
+        x: i32,
+        y: i32,
+    );
+
     /// C# `PressModifierKeys`: hold the modifiers whose bits
     /// ([`Keys::SHIFT`], [`Keys::CONTROL`], [`Keys::ALT`]) are set in
     /// `modifier_keys`, on top of any already held. Key codes are ignored:
@@ -268,6 +289,43 @@ impl SimulatedInput {
     fn window_contains(driver: &dyn UiDriver, p: Point2D) -> bool {
         window_contains(driver.size_px(), p)
     }
+
+    /// Send one button transition where the pointer is, a press with
+    /// `clicks`, when the pointer is inside the window; the held-button
+    /// state follows the transition either way.
+    fn button_event(&mut self, driver: &mut dyn UiDriver, action: MouseAction, clicks: ClickCount) {
+        let at = self.current_mouse_position;
+        if Self::window_contains(driver, at) {
+            let position = Some((f64::from(at.x), f64::from(at.y)));
+            let button = action.button();
+            if action.is_down() {
+                driver.send(ForwarderEvent::MouseDown {
+                    at: position,
+                    button,
+                    modifiers: None,
+                    clicks,
+                });
+                self.click_count = match clicks {
+                    ClickCount::Explicit(n) => n,
+                    // The count the forwarder worked out, as the press just
+                    // dispatched on this (the UI) thread reported it.
+                    ClickCount::Auto => agg_gui::event::current_click_count(),
+                };
+            } else {
+                // Every release reports 1; the forwarder carries no count on
+                // a release at all, which `App` reads the same way.
+                driver.send(ForwarderEvent::MouseUp {
+                    at: position,
+                    button,
+                    modifiers: None,
+                });
+            }
+        }
+
+        self.left_button_down = action == MouseAction::LeftDown;
+        self.middle_button_down = action == MouseAction::MiddleDown;
+        self.right_button_down = action == MouseAction::RightDown;
+    }
 }
 
 /// Whether the pointer position `p` is inside a window of `size_px`
@@ -318,35 +376,22 @@ impl InputMethod for SimulatedInput {
         _y: i32,
         clicks: u32,
     ) {
-        let at = self.current_mouse_position;
-        if Self::window_contains(driver, at) {
-            let position = Some((f64::from(at.x), f64::from(at.y)));
-            let button = action.button();
-            if action.is_down() {
-                // Only "second press of a double click" is meaningful;
-                // everything else is a single click.
-                let clicks = if clicks == 2 { 2 } else { 1 };
-                self.click_count = clicks;
-                driver.send(ForwarderEvent::MouseDown {
-                    at: position,
-                    button,
-                    modifiers: None,
-                    clicks: ClickCount::Explicit(clicks),
-                });
-            } else {
-                // Every release reports 1; the forwarder carries no count on
-                // a release at all, which `App` reads the same way.
-                driver.send(ForwarderEvent::MouseUp {
-                    at: position,
-                    button,
-                    modifiers: None,
-                });
-            }
-        }
+        // Only "second press of a double click" is meaningful; everything
+        // else is a single click.
+        let clicks = if clicks == 2 { 2 } else { 1 };
+        self.button_event(driver, action, ClickCount::Explicit(clicks));
+    }
 
-        self.left_button_down = action == MouseAction::LeftDown;
-        self.middle_button_down = action == MouseAction::MiddleDown;
-        self.right_button_down = action == MouseAction::RightDown;
+    /// Like [`mouse_event`](InputMethod::mouse_event), the event's own
+    /// coordinates are ignored.
+    fn platform_counted_mouse_event(
+        &mut self,
+        driver: &mut dyn UiDriver,
+        action: MouseAction,
+        _x: i32,
+        _y: i32,
+    ) {
+        self.button_event(driver, action, ClickCount::Auto);
     }
 
     fn press_modifier_keys(&mut self, driver: &mut dyn UiDriver, modifier_keys: Keys) {

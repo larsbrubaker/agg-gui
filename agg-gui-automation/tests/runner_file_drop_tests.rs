@@ -79,6 +79,17 @@ impl InputMethod for RecordingInput {
         self.inner.mouse_event(driver, action, x, y, clicks);
     }
 
+    fn platform_counted_mouse_event(
+        &mut self,
+        driver: &mut dyn agg_gui_automation::driver::UiDriver,
+        action: MouseAction,
+        x: i32,
+        y: i32,
+    ) {
+        self.inner
+            .platform_counted_mouse_event(driver, action, x, y);
+    }
+
     fn press_modifier_keys(
         &mut self,
         driver: &mut dyn agg_gui_automation::driver::UiDriver,

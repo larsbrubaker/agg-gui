@@ -82,3 +82,54 @@ fn rust_only_text_area_scrolls_a_rect_into_view() {
     let mut probe = ProbeWidget::new("p");
     assert!(!probe.scroll_rect_into_view(Rect::new(0.0, 0.0, 1.0, 1.0)));
 }
+
+/// Two widgets named "item": a shallow one in a hidden subtree, and one in a
+/// scroll view, below the fold (the last of four 100-tall rows in a 100-tall
+/// view). C#'s order alone (fewest on-screen ancestors) would pick the hidden
+/// one; the copy in a visible chain wins, as MatterCAD's `ClickEnumOption`
+/// chose it.
+#[test]
+fn rust_only_scroll_into_view_scrolls_the_visible_copy_of_a_shared_name() {
+    let offsets = show_window_and_execute_tests(
+        RunOptions::default(),
+        || {
+            let mut window = AutomationWindow::new(300.0, 200.0);
+            let mut hidden = ProbeWidget::new("hidden row")
+                .with_bounds(Rect::new(150.0, 0.0, 100.0, 100.0))
+                .with_child(Box::new(
+                    ProbeWidget::new("item").with_bounds(Rect::new(0.0, 0.0, 100.0, 100.0)),
+                ));
+            hidden.set_visible(false);
+            window.add_child(Box::new(hidden));
+            let mut content =
+                ProbeWidget::new("content").with_bounds(Rect::new(0.0, 0.0, 100.0, 400.0));
+            for i in 0..4 {
+                let name = if i == 3 {
+                    "item".to_string()
+                } else {
+                    format!("row{i}")
+                };
+                let y = 300.0 - i as f64 * 100.0;
+                content.add_child(Box::new(
+                    ProbeWidget::new(name).with_bounds(Rect::new(0.0, y, 100.0, 100.0)),
+                ));
+            }
+            let mut view = ScrollView::new(Box::new(content)).with_name("scroller");
+            view.set_bounds(Rect::new(0.0, 0.0, 100.0, 100.0));
+            window.add_child(Box::new(view));
+            (window, ())
+        },
+        |runner, _| {
+            runner.delay(0.1);
+            let start = offset(runner);
+            runner.scroll_into_view("item");
+            let scrolled = offset(runner);
+            runner.mark_test_complete();
+            (start, scrolled)
+        },
+    )
+    .expect("the run completes");
+    // The last row spans 300..400 below the top: raising the content 300
+    // puts its bottom on the view's bottom.
+    assert_eq!(offsets, (0.0, 300.0));
+}

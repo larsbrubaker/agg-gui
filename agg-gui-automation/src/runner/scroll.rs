@@ -1,8 +1,18 @@
 //! The runner's `ScrollIntoView` (agg-sharp `GuiAutomation/AutomationRunner.cs`):
-//! find the named widget — the shallowest by count of on-screen ancestors
-//! when several share the name, visible or not — and ask its nearest
-//! scrolling ancestor to bring it into view through
+//! find the named widget and ask its nearest scrolling ancestor to bring it
+//! into view through
 //! [`Widget::scroll_rect_into_view`](agg_gui::Widget::scroll_rect_into_view).
+//!
+//! Which widget, when several share the name: C# took the shallowest by
+//! count of on-screen ancestors, visible or not, so a copy in a hidden row
+//! (whose hidden ancestors do not count) beat the one showing, and the
+//! scroll went nowhere useful. MatterCAD's tests worked around it with
+//! `ClickEnumOption`, which takes the copy whose whole parent chain is
+//! visible. Here the copies whose own and every ancestor's visibility flag
+//! is set go first, and C#'s shallowest-first order chooses among them (or
+//! among all copies, when none is in a visible chain). The flag, not
+//! on-screen visibility, decides: the copy wanted is often scrolled below
+//! the fold, clipped out of its viewport.
 //!
 //! C#'s `ScrollAmount` parameter has only its default (`Minimum`) here; no
 //! port needs `Center` yet. C# then nudges the scroller's width to force a
@@ -16,8 +26,9 @@ use crate::driver::{FrameKind, UiDriver};
 use crate::tree_query::{self, WidgetHandle};
 
 impl AutomationRunner {
-    /// C# `ScrollIntoView(widgetName)`. Nothing happens when the name is not
-    /// found or no ancestor scrolls.
+    /// C# `ScrollIntoView(widgetName)`, preferring a copy of the name whose
+    /// whole ancestor chain is visible (module docs). Nothing happens when
+    /// the name is not found or no ancestor scrolls.
     pub fn scroll_into_view(&mut self, widget_name: &str) -> &mut Self {
         let opts = WaitOpts {
             only_visible: false,
@@ -32,11 +43,18 @@ impl AutomationRunner {
                 .filter(|p| tree_query::actually_visible_on_screen(root, p, viewport))
                 .count()
         };
-        // C#'s OrderBy is stable: the first of equally shallow widgets wins.
+        let shown = |handle: &WidgetHandle| {
+            std::iter::once(handle.clone())
+                .chain(tree_query::parents(root, handle))
+                .all(|w| w.widget(root).is_some_and(|w| w.is_visible()))
+        };
+        // A copy in a visible chain first (false orders before true), then
+        // C#'s order. `min_by_key` keeps the first of equal keys, as C#'s
+        // stable OrderBy does.
         let Some(target) = hits
             .iter()
-            .map(|hit| (depth(&hit.handle), &hit.handle))
-            .min_by_key(|(d, _)| *d)
+            .map(|hit| ((!shown(&hit.handle), depth(&hit.handle)), &hit.handle))
+            .min_by_key(|(key, _)| *key)
             .map(|(_, h)| h.clone())
         else {
             return self;

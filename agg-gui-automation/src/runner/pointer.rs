@@ -22,6 +22,10 @@
 //! ([`AutomationRunner::refind_target`]), so a target that moves while the
 //! pointer travels (a camera framing animation) is still the one pressed.
 //!
+//! A click states each press's click count, as C#'s does (1, or 2 for the
+//! second press of a double click); [`ClickOpts::platform_counts_clicks`]
+//! leaves the count to the window instead, as an OS click does (Rust-only).
+//!
 //! Widget offsets ([`ClickOpts::offset`]) are logical units, Y-up from the
 //! widget's lower-left corner, as in C#; the pointer itself is physical
 //! pixels, Y-down ([`input`](crate::input) module docs). The name lookups
@@ -70,6 +74,14 @@ pub struct ClickOpts<'a> {
     /// mouse's back button. The right-click gestures always press
     /// [`MouseButton::Right`].
     pub button: MouseButton,
+    /// Leave each press's click count to the window, as for an OS click
+    /// ([`InputMethod::platform_counted_mouse_event`]): two quick clicks on
+    /// one spot become a double click, and a press elsewhere in between (or
+    /// a gap past the double-click time) keeps them single. False by
+    /// default: C#'s automation states every count (a press reports 1, the
+    /// second press of [`is_double_click`](Self::is_double_click) 2).
+    /// Rust-only.
+    pub platform_counts_clicks: bool,
 }
 
 impl Default for ClickOpts<'_> {
@@ -81,6 +93,7 @@ impl Default for ClickOpts<'_> {
             is_double_click: false,
             secs_to_wait: DEFAULT_WIDGET_WAIT_SECONDS,
             button: MouseButton::Left,
+            platform_counts_clicks: false,
         }
     }
 }
@@ -93,6 +106,34 @@ impl<'a> ClickOpts<'a> {
             only_visible: true,
         }
     }
+}
+
+/// Who decides a click gesture's press counts.
+#[derive(Clone, Copy)]
+enum Counts {
+    /// The runner states each press's count, as C# does.
+    Stated,
+    /// The window counts each press ([`ClickOpts::platform_counts_clicks`]).
+    Platform,
+}
+
+impl Counts {
+    fn of(opts: &ClickOpts) -> Self {
+        if opts.platform_counts_clicks {
+            Counts::Platform
+        } else {
+            Counts::Stated
+        }
+    }
+}
+
+/// The presses of a left-click gesture: one pair or a double click, of
+/// which button, counted by whom.
+#[derive(Clone, Copy)]
+struct Press {
+    is_double_click: bool,
+    button: MouseButton,
+    counts: Counts,
 }
 
 /// What a stepped move onto a widget aims at, offset hint first (the
@@ -213,6 +254,19 @@ impl AutomationRunner {
     pub(super) fn send_mouse(&mut self, action: MouseAction, at: Point2D, clicks: u32) {
         self.input
             .mouse_event(&mut self.driver, action, at.x, at.y, clicks);
+    }
+
+    /// A click gesture's button transition: with `counts` stating it, as
+    /// [`send_mouse`](Self::send_mouse); with [`Counts::Platform`], a press
+    /// the window counts ([`ClickOpts::platform_counts_clicks`]).
+    fn send_click(&mut self, action: MouseAction, at: Point2D, clicks: u32, counts: Counts) {
+        match counts {
+            Counts::Stated => self.send_mouse(action, at, clicks),
+            Counts::Platform => {
+                self.input
+                    .platform_counted_mouse_event(&mut self.driver, action, at.x, at.y)
+            }
+        }
     }
 
     /// C# `SetMouseCursorPosition(x, y)`: move the pointer to (`x`, `y`)
@@ -345,8 +399,11 @@ impl AutomationRunner {
             opts.origin,
             opts.offset,
             Aim::of_hit(widget_name, &hit),
-            opts.is_double_click,
-            opts.button,
+            Press {
+                is_double_click: opts.is_double_click,
+                button: opts.button,
+                counts: Counts::of(opts),
+            },
         );
         self
     }
@@ -384,8 +441,11 @@ impl AutomationRunner {
             ClickOrigin::Center,
             Point2D::ZERO,
             Aim::Hint(offset_hint),
-            is_double_click,
-            MouseButton::Left,
+            Press {
+                is_double_click,
+                button: MouseButton::Left,
+                counts: Counts::Stated,
+            },
         );
         self
     }
@@ -398,12 +458,16 @@ impl AutomationRunner {
         origin: ClickOrigin,
         offset: Point2D,
         aim: Aim,
-        is_double_click: bool,
-        button: MouseButton,
+        press: Press,
     ) {
+        let Press {
+            is_double_click,
+            button,
+            counts,
+        } = press;
         let (down, up) = (MouseAction::down(button), MouseAction::up(button));
         let screen_position = self.move_mouse_to_widget(widget, offset, aim, origin, "ClickWidget");
-        self.send_mouse(down, screen_position, 0);
+        self.send_click(down, screen_position, 0, counts);
 
         if !is_double_click {
             // Only a single click can afford to settle here; for a double
@@ -422,13 +486,13 @@ impl AutomationRunner {
             // first press, and a loaded machine could spend the whole
             // double-click window on intervening frames. So the three events
             // go back to back, and the draws happen after the pair.
-            self.send_mouse(up, screen_position, 0);
-            self.send_mouse(down, screen_position, 2);
+            self.send_click(up, screen_position, 0, counts);
+            self.send_click(down, screen_position, 2, counts);
         }
 
         self.hold_button();
 
-        self.send_mouse(up, screen_position, 0);
+        self.send_click(up, screen_position, 0, counts);
 
         self.wait_for_draw();
 
@@ -460,6 +524,7 @@ impl AutomationRunner {
             opts.offset,
             Aim::of_hit(widget_name, &hit),
             opts.is_double_click,
+            Counts::of(opts),
         );
         self
     }
@@ -474,6 +539,7 @@ impl AutomationRunner {
             Point2D::ZERO,
             Aim::Hint(offset_hint),
             false,
+            Counts::Stated,
         );
         self
     }
@@ -487,26 +553,27 @@ impl AutomationRunner {
         offset: Point2D,
         aim: Aim,
         is_double_click: bool,
+        counts: Counts,
     ) {
         let screen_position =
             self.move_mouse_to_widget(widget, offset, aim, origin, "RightClickWidget");
-        self.send_mouse(MouseAction::RightDown, screen_position, 0);
+        self.send_click(MouseAction::RightDown, screen_position, 0, counts);
         self.wait_for_draw();
 
         if is_double_click {
             // The same double-click shape as the left click: two full
             // press/release pairs, the second press reporting 2 clicks.
             self.hold_button();
-            self.send_mouse(MouseAction::RightUp, screen_position, 0);
+            self.send_click(MouseAction::RightUp, screen_position, 0, counts);
             self.wait_for_draw();
 
-            self.send_mouse(MouseAction::RightDown, screen_position, 2);
+            self.send_click(MouseAction::RightDown, screen_position, 2, counts);
             self.wait_for_draw();
         }
 
         self.hold_button();
 
-        self.send_mouse(MouseAction::RightUp, screen_position, 0);
+        self.send_click(MouseAction::RightUp, screen_position, 0, counts);
 
         self.wait_for_draw();
 
