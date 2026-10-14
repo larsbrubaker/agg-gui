@@ -28,7 +28,9 @@
 //!   and its pointer gestures (`click_by_name`, `double_click_by_name`, `right_click_by_name`,
 //!   `move_to_by_name`, `set_mouse_cursor_position`, ...) and drags
 //!   (`drag_by_name`, `drop_by_name`, `drag_drop_by_name`, `drag_widget`,
-//!   `drag_to_position`, `drop`) and keyboard (`type_text`,
+//!   `drag_to_position`, `drop`), file drags and drops (`drop_files_by_name`,
+//!   `drop_file_data_by_name`, `file_drag_hover_by_name`, `file_drag_leave`),
+//!   the mouse wheel (`scroll_wheel`, `scroll_wheel_by_name`) and keyboard (`type_text`,
 //!   `press_modifier_keys`/`release_modifier_keys` with `ModifierKeys`,
 //!   `select_all`, `select_none`) and image searches (`get_current_screen`,
 //!   `image_exists`, `wait_for_image`) and image gestures (`click_image`,

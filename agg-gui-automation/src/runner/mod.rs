@@ -5,8 +5,10 @@
 //! them, `pointer.rs` the pointer gestures (stepped moves, clicks),
 //! `drag.rs` the drags and drops built on them, `keyboard.rs` typing and
 //! held modifiers, `images.rs` the screen capture and image searches, and
-//! `image_gestures.rs` the clicks, drags and drops onto found images, and
-//! `dialog.rs` `complete_dialog`, which answers an automation file dialog.
+//! `image_gestures.rs` the clicks, drags and drops onto found images,
+//! `file_drop.rs` files dragged over and dropped onto widgets, `wheel.rs`
+//! the mouse wheel, and `dialog.rs` `complete_dialog`, which answers an
+//! automation file dialog.
 //!
 //! A runner is created by [`crate::execute::show_window_and_execute_tests`]
 //! on the run's own UI thread and handed to the test body. It owns the
@@ -34,6 +36,7 @@ use crate::tree_query::WidgetHandle;
 
 mod dialog;
 mod drag;
+mod file_drop;
 mod image_gestures;
 mod images;
 mod keyboard;
@@ -41,6 +44,7 @@ mod named;
 mod pointer;
 mod scroll;
 mod waits;
+mod wheel;
 
 pub use dialog::COMPLETE_DIALOG_WAIT_SECONDS;
 pub use drag::{DragDropOpts, DragOpts};

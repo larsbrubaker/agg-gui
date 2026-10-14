@@ -110,7 +110,7 @@ impl AutomationRunner {
 
     /// The widget named `widget_name` and its offset hint, or C#'s
     /// not-found message for `operation`.
-    fn drag_target(
+    pub(super) fn drag_target(
         &mut self,
         operation: &str,
         widget_name: &str,
@@ -130,7 +130,7 @@ impl AutomationRunner {
 
     /// Where the pointer goes on `widget` for `offset` from `origin`, or a
     /// panic naming `operation` once the widget has left the tree.
-    fn drag_point(
+    pub(super) fn drag_point(
         &self,
         operation: &str,
         widget: &WidgetHandle,
