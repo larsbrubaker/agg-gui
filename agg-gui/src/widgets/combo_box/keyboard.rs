@@ -13,7 +13,8 @@
 //!
 //! Open list (the keys go to the combo: it is modal while open):
 //! - **Up** / **Down** move the highlight one row, stopping at the ends, and
-//!   scroll it into view.  The selection does not change.  Disabled rows
+//!   scroll it into view by the least they can (C# `ScrollIntoView`'s
+//!   default; only opening centres the selected row).  The selection does not change.  Disabled rows
 //!   are skipped, by type-ahead too, and Enter never picks one
 //!   (`combo_box/item_enabled.rs`).
 //! - **Enter** picks the highlighted row and closes; `on_change` fires only
@@ -102,7 +103,8 @@ impl ComboBox {
     }
 
     /// Open the list with the highlight on the selected row (or the first
-    /// row when nothing is selected).  `by_keyboard` paints that highlight at
+    /// row when nothing is selected), scrolled to put that row in the
+    /// middle of the list (C# `DropDownList.ShowMenu`).  `by_keyboard` paints that highlight at
     /// once; a click leaves it to the hover, as before.
     pub(super) fn open_list(&mut self, by_keyboard: bool) {
         self.open = true;
@@ -113,7 +115,12 @@ impl ComboBox {
         self.type_ahead = None;
         self.key_highlight = if self.has_selection { self.selected } else { 0 };
         self.hovered_item = (by_keyboard && !self.options.is_empty()).then_some(self.key_highlight);
-        self.ensure_selected_visible();
+        // Centred on the selection (C# `ScrollAmount.Center`, here and only
+        // here), again once the first paint knows the list's room.
+        self.popup_frame = None;
+        self.scroll_frac = 0.0;
+        self.reveal_on_open();
+        self.centre_on_open = true;
         crate::animation::request_draw();
     }
 

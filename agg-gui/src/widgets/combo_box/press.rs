@@ -20,6 +20,8 @@ impl ComboBox {
             return EventResult::Consumed;
         }
         if self.open {
+            // The list's rows and scroll bar are tested where they are drawn.
+            let pos = self.to_popup(pos);
             if self.pos_in_scrollbar(pos) {
                 let style = self.popup_scroll_style();
                 let viewport = self.popup_scroll_viewport();
@@ -69,6 +71,7 @@ impl ComboBox {
     /// consumed, the desktop convention the menus follow
     /// (`menu/state.rs`).  A press on the closed box is left alone.
     pub(super) fn on_other_press(&mut self, button: MouseButton, pos: Point) -> EventResult {
+        let pos = self.to_popup(pos);
         if button == MouseButton::Middle && self.pos_in_popup(pos) {
             self.middle_dragging = true;
             self.middle_last_pos = pos;

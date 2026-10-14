@@ -9,6 +9,12 @@
 //! (`menu::current_menu_style`), as agg-sharp's DropDownList popup shares
 //! `ThemeConfig.MenuPopupRadius` with PopupMenu.
 //!
+//! The request's `x` / `y` are the list's left at the drawn box edge it
+//! hangs from (`combo_box/popup_frame.rs`): the list spans `y..y + popup_h`
+//! opening up and `y - popup_h..y` opening down. A list centred on its
+//! selection as it opened is scrolled a part row past `first_item`
+//! (`scroll_frac`); the part rows at its ends are clipped to the panel.
+//!
 //! Coordinates in the request are root LOGICAL space (unlifted layout
 //! space) — the drain pass runs while App's effective-scale CTM and the
 //! on-screen keyboard's lift translate are still active, so logical x/y map
@@ -69,7 +75,7 @@ fn paint_combo_popup(ctx: &mut dyn DrawCtx, request: ComboPopupRequest) {
     // popup-menu style the host installed.
     let radius = current_menu_style().radius;
     let popup_y = if request.opens_up {
-        request.y + request.closed_h
+        request.y
     } else {
         request.y - request.popup_h
     };
@@ -100,12 +106,18 @@ fn paint_combo_popup(ctx: &mut dyn DrawCtx, request: ComboPopupRequest) {
     // bitmap is blitted on subsequent frames, instead of the prior
     // raw `ctx.fill_text` per item per frame.
     let mut labels = request.item_labels.borrow_mut();
-    for row in 0..request.visible_count {
+    // A part row shows at each end of a list scrolled off the row grid.
+    let part_row = request.scroll_frac > 0.0;
+    if part_row {
+        ctx.save();
+        ctx.clip_rect(request.x, popup_y, request.width, request.popup_h);
+    }
+    for row in 0..request.visible_count + usize::from(part_row) {
         let idx = request.first_item + row;
         if idx >= labels.len() {
             break;
         }
-        let item_y = popup_y + request.popup_h - (row as f64 + 1.0) * ITEM_H;
+        let item_y = row_y(&request, popup_y, row);
         let disabled = request_row_disabled(&request.disabled_items, idx);
         let is_selected = !disabled && request.selected == Some(idx);
         let is_hovered = !disabled && request.hovered_item == Some(idx);
@@ -159,6 +171,9 @@ fn paint_combo_popup(ctx: &mut dyn DrawCtx, request: ComboPopupRequest) {
         paint_subtree(label, ctx);
         ctx.restore();
     }
+    if part_row {
+        ctx.restore();
+    }
     drop(labels);
 
     if let Some(scrollbar) = request.scrollbar {
@@ -174,6 +189,11 @@ fn paint_combo_popup(ctx: &mut dyn DrawCtx, request: ComboPopupRequest) {
     paint_item_hover_tooltip(ctx, &request, popup_y);
 }
 
+/// Bottom of the `row`th row from the top of the list's rows in view.
+fn row_y(request: &ComboPopupRequest, popup_y: f64, row: usize) -> f64 {
+    popup_y + request.popup_h - (row as f64 + 1.0) * ITEM_H + request.scroll_frac
+}
+
 /// Paint the per-item hover tooltip (from `ComboBox::with_item_tooltips`)
 /// beside the hovered row.  Painted immediately (no hover delay) because the
 /// dropdown is already an explicit, transient interaction — unlike the
@@ -186,7 +206,8 @@ fn paint_item_hover_tooltip(ctx: &mut dyn DrawCtx, request: &ComboPopupRequest, 
         return;
     };
     // Only rows currently scrolled into view can anchor a tooltip.
-    if hovered < request.first_item || hovered >= request.first_item + request.visible_count {
+    let in_view = request.visible_count + usize::from(request.scroll_frac > 0.0);
+    if hovered < request.first_item || hovered >= request.first_item + in_view {
         return;
     }
     let v = ctx.visuals();
@@ -200,7 +221,7 @@ fn paint_item_hover_tooltip(ctx: &mut dyn DrawCtx, request: &ComboPopupRequest, 
     let panel_h = FONT_SIZE * 1.5 + PAD * 2.0 - 4.0;
 
     let row = hovered - request.first_item;
-    let item_y = popup_y + request.popup_h - (row as f64 + 1.0) * ITEM_H;
+    let item_y = row_y(request, popup_y, row);
     let mut px = request.x + request.width + GAP;
     let mut py = item_y + (ITEM_H - panel_h) * 0.5;
     // Keep on-screen (the visible part of root space, which the keyboard

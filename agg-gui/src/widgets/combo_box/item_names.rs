@@ -50,7 +50,7 @@ impl ComboBox {
         if !self.open {
             return;
         }
-        let end = (self.scroll_offset + self.popup_visible_count).min(self.options.len());
+        let end = (self.scroll_offset + self.rows_in_view()).min(self.options.len());
         for index in self.scroll_offset..end {
             if self.item_name(index).as_deref() == Some(name) {
                 out.push(

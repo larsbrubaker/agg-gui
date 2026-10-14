@@ -67,6 +67,7 @@ impl ComboBox {
         self.scroll_offset = self
             .scroll_offset
             .min(n.saturating_sub(self.popup_visible_count));
+        self.scroll_frac = 0.0;
         if n == 0 {
             self.selected = 0;
             if self.has_selection {

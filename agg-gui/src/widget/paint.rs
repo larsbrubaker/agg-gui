@@ -202,11 +202,21 @@ pub fn paint_global_overlays(widget: &mut dyn Widget, ctx: &mut dyn DrawCtx) {
     if !widget.is_visible() {
         return;
     }
+    // The children's frame: the widget's child transform (a zoomed canvas)
+    // goes on before each child's offset, as `paint_children` applies it, so
+    // an overlay drawn from under a zoomed parent is placed where its widget
+    // is drawn.
+    let child_transform = widget.child_transform();
     let n = widget.children().len();
     for i in 0..n {
         let child = &mut widget.children_mut()[i];
         let b = child.bounds();
         ctx.save();
+        if let Some(t) = child_transform {
+            let mut m = ctx.transform();
+            m.premultiply(&t);
+            ctx.set_transform(m);
+        }
         ctx.translate(b.x, b.y);
         paint_global_overlays(child.as_mut(), ctx);
         ctx.restore();

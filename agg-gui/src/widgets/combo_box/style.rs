@@ -160,7 +160,9 @@ impl ComboBox {
         let arrow_x = w - ARROW_W * 0.5;
         let arrow_cy = h * 0.5;
         let half_w = CHEVRON_HALF_W;
-        let half_h = CHEVRON_HALF_W * 0.5;
+        // A list that prefers to open upward points its tip up (C#'s
+        // `tipDirection` for `Direction.Up`).
+        let half_h = CHEVRON_HALF_W * 0.5 * if self.prefer_up { -1.0 } else { 1.0 };
         ctx.set_stroke_color(self.text_for_state(v.text_color));
         ctx.set_line_width(CHEVRON_STROKE);
         ctx.begin_path();

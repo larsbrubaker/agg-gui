@@ -1,8 +1,10 @@
 //! `ComboBox` — a single-selection dropdown widget.
 //!
 //! The widget always occupies its compact closed height.  When open, options
-//! are painted as a floating panel below the button in `paint_overlay()` so
-//! sibling widgets are not pushed down by the dropdown.  While open the combo
+//! are painted as a floating panel below or above the button by the global
+//! popup pass (`combo_box/popup_paint.rs`), placed against where the button
+//! is drawn (`combo_box/popup_frame.rs`), so sibling widgets are not pushed
+//! down by the dropdown.  While open the combo
 //! is modal: a press outside the list closes it and goes no further
 //! (`combo_box/press.rs`).  The keyboard follows agg-sharp's `DropDownList`
 //! (`combo_box/keyboard.rs`).
@@ -39,8 +41,9 @@ const MIN_VISIBLE_ITEMS: usize = 3;
 const DEFAULT_VISIBLE_ITEMS: usize = 8;
 const SCROLLBAR_W: f64 = 6.0;
 
-/// One open dropdown queued for the popup drain. `x` / `y` (the closed box's
-/// origin) are root logical, unlifted — App drains under the keyboard lift.
+/// One open dropdown queued for the popup drain. `x` / `y` (the list's
+/// left, at the drawn box edge it hangs from — `combo_box/popup_frame.rs`)
+/// are root logical, unlifted — App drains under the keyboard lift.
 pub(super) struct ComboPopupRequest {
     pub(super) x: f64,
     pub(super) y: f64,
@@ -48,6 +51,8 @@ pub(super) struct ComboPopupRequest {
     pub(super) popup_h: f64,
     pub(super) opens_up: bool,
     pub(super) first_item: usize,
+    /// How far past `first_item`'s top the list is scrolled, under a row.
+    pub(super) scroll_frac: f64,
     pub(super) visible_count: usize,
     /// Highlighted (selected) row; `None` while the combo has no selection.
     pub(super) selected: Option<usize>,
@@ -64,9 +69,6 @@ pub(super) struct ComboPopupRequest {
     /// from [`ComboBox::with_item_tooltips`]. Painted beside the hovered
     /// row by the popup drain pass.
     pub(super) hover_tooltip: Option<(String, Arc<Font>)>,
-    /// Resolved closed-box height (honours [`ComboBoxStyle::height`]) so the
-    /// popup attaches flush to the button.
-    pub(super) closed_h: f64,
     /// Per-instance popup colours — see [`ComboBoxStateStyle`].
     pub(super) state_style: ComboBoxStateStyle,
     /// Lazy per-row fonts, resolved here as each row first paints.
@@ -150,6 +152,19 @@ pub struct ComboBox {
     popup_opens_up: bool,
     popup_visible_count: usize,
     scroll_offset: usize,
+    /// Pixels the list is scrolled past `scroll_offset` rows, under one row:
+    /// only opening centres a row off the row grid (`geometry.rs`).
+    scroll_frac: f64,
+    /// Opening centres the selected row once the list's room is known.
+    centre_on_open: bool,
+    /// Where the open list was last placed (`combo_box/popup_frame.rs`).
+    popup_frame: Option<popup_frame::PopupFrame>,
+    /// Prefer opening upward (C# `Direction.Up`).
+    prefer_up: bool,
+    /// C# `AlignToRightEdge`.
+    align_to_right_edge: bool,
+    /// C#'s `maxHeight` for the open list; `0` = no limit.
+    max_height: f64,
     scrollbar: ScrollbarAxis,
     middle_dragging: bool,
     middle_last_pos: Point,
@@ -224,6 +239,12 @@ impl ComboBox {
             popup_opens_up: false,
             popup_visible_count: DEFAULT_VISIBLE_ITEMS,
             scroll_offset: 0,
+            scroll_frac: 0.0,
+            centre_on_open: false,
+            popup_frame: None,
+            prefer_up: false,
+            align_to_right_edge: false,
+            max_height: 0.0,
             scrollbar: ScrollbarAxis {
                 enabled: true,
                 ..ScrollbarAxis::default()
@@ -418,6 +439,7 @@ mod item_names;
 mod keyboard;
 mod lazy_fonts;
 mod options;
+mod popup_frame;
 mod press;
 mod selection;
 mod style;
@@ -465,7 +487,7 @@ impl Widget for ComboBox {
     }
 
     fn hit_test(&self, local_pos: Point) -> bool {
-        self.in_button(local_pos) || self.pos_in_popup(local_pos)
+        self.in_button(local_pos) || self.pos_in_popup(self.to_popup(local_pos))
     }
 
     fn find_named_targets(&self, name: &str, out: &mut Vec<crate::NamedTarget>) {
@@ -473,7 +495,7 @@ impl Widget for ComboBox {
     }
 
     fn hit_test_global_overlay(&self, local_pos: Point) -> bool {
-        self.pos_in_popup(local_pos)
+        self.pos_in_popup(self.to_popup(local_pos))
     }
 
     /// Open, the drop-down owns the pointer (`combo_box/press.rs`): the press
@@ -575,54 +597,7 @@ impl Widget for ComboBox {
 
     fn paint_global_overlay(&mut self, ctx: &mut dyn DrawCtx) {
         if self.open && !self.close_if_disabled() {
-            // The popup queue is drained while App's effective (device × UX)
-            // scale and keyboard lift are still active on the ctx, so the
-            // request coords must be root logical (unlifted). Otherwise on
-            // HiDPI / UX-zoomed mobile the popup paints at a scale²-magnified
-            // position while hit-testing (purely logical) stays on the box.
-            let (mut x, mut y) = (0.0, 0.0);
-            crate::widget::logical_root_transform(ctx).transform(&mut x, &mut y);
-            // Open up or down by the room ON SCREEN (`y` is unlifted).
-            let vis = crate::widgets::combo_box::current_combo_viewport()
-                .map(crate::widget::visible_root_rect)
-                .unwrap_or(Rect::new(0.0, 0.0, 0.0, f64::MAX / 4.0));
-            self.configure_popup_geometry(y - vis.y, vis.height);
-            let style = self.popup_scroll_style();
-            let visibility = current_scroll_visibility();
-            let viewport = self.popup_scroll_viewport();
-            let geom = self.scrollbar_geometry(style);
-            let scrollbar = self
-                .scrollbar
-                .prepare_paint(viewport, style, visibility, geom)
-                .map(|bar| bar.translated(x, y));
-            submit_combo_popup(ComboPopupRequest {
-                x,
-                y,
-                width: self.bounds.width,
-                popup_h: self.popup_h(),
-                opens_up: self.popup_opens_up,
-                first_item: self.scroll_offset,
-                visible_count: self.popup_visible_count,
-                selected: self.has_selection.then_some(self.selected),
-                hovered_item: self.hovered_item,
-                scrollbar,
-                item_count: self.options.len(),
-                item_labels: Rc::clone(&self.item_labels),
-                hover_tooltip: self.hovered_item.and_then(|idx| {
-                    let text = self.item_tooltips.as_ref()?.get(idx)?;
-                    if text.is_empty() {
-                        return None;
-                    }
-                    Some((text.clone(), Arc::clone(&self.font)))
-                }),
-                closed_h: self.closed_h(),
-                state_style: self.state_style,
-                lazy_fonts: self.lazy_fonts_for_paint(),
-                font_size: self.font_size,
-                label_w: (self.bounds.width - PAD_X * 2.0 - ARROW_W).max(0.0),
-                disabled_items: self.disabled_items.clone(),
-                disabled_label_alpha: self.disabled_style.label_alpha,
-            });
+            self.submit_open_popup(ctx);
         }
     }
 
@@ -638,6 +613,9 @@ impl Widget for ComboBox {
             } => self.on_left_press(*pos),
             Event::MouseDown { button, pos, .. } => self.on_other_press(*button, *pos),
             Event::MouseMove { pos } => {
+                let button_hovered = self.in_button(*pos);
+                // The list's rows are hit-tested where they are drawn.
+                let pos = &self.to_popup(*pos);
                 if self.middle_dragging {
                     let dy = pos.y - self.middle_last_pos.y;
                     self.middle_last_pos = *pos;
@@ -660,7 +638,6 @@ impl Widget for ComboBox {
                     }
                     return EventResult::Consumed;
                 }
-                let button_hovered = self.in_button(*pos);
                 if button_hovered != self.button_hovered {
                     self.button_hovered = button_hovered;
                     if self.style.hover_fill.is_some() || self.state_style.hover_border.is_some() {
