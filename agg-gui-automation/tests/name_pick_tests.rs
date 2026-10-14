@@ -1,13 +1,13 @@
 //! Rust-only tests of the name pick (agg-gui-automation `src/name_pick.rs`
 //! over `src/paint_geometry.rs`): a lookup by name sees what painting shows
-//! (the overlay pass, slot clips, pixel snapping), aims at the visible part
+//! (the overlay pass, slot clips, pixel snapping, under a zoom too), aims at the visible part
 //! of a widget whose centre a clip hides, takes the first of equal-sized
 //! widgets despite rounding, prefers a widget whose centre shows, and
 //! answers in one look from a runner (`AutomationRunner::find_now`).
 
 mod support;
 
-use agg_gui::{Point, Rect, Size};
+use agg_gui::{Point, Rect, Size, TransAffine};
 use agg_gui_automation::name_pick::{aim_point, find_on_screen, hit_placement};
 use agg_gui_automation::tree_query::{placement, screen_rect, WidgetHandle};
 use agg_gui_automation::{AutomationConfig, AutomationRunner, HeadlessDriver, WaitOpts};
@@ -85,6 +85,25 @@ fn rust_only_a_widget_with_integer_bounds_is_found_where_it_paints() {
     assert_eq!(
         screen_rect(&root, &snapped),
         Some(Rect::new(11.0, 21.0, 10.0, 10.0))
+    );
+}
+
+#[test]
+fn rust_only_a_widget_with_integer_bounds_under_a_zoom_is_found_on_the_pixel_it_paints_at() {
+    // A canvas zoomed 1.5x puts its child's exact origin at (15.75, 30.75);
+    // painting's snap step (`pixel_snap_step`) is a local translate the zoom
+    // stretches, so it is divided by the zoom and the child paints at the
+    // nearest whole pixel, (16, 31), not a fraction of the zoom past it.
+    let canvas = sw("canvas", 0.0, 0.0, 200.0, 200.0)
+        .with_child_transform(TransAffine::new_scaling(1.5, 1.5))
+        .with_child(Box::new(
+            sw("snapped", 10.5, 20.5, 10.0, 10.0).with_integer_bounds(),
+        ));
+    let root = root_with(vec![canvas]);
+    let snapped = WidgetHandle::new(&root, &[0, 0]).expect("snapped");
+    assert_eq!(
+        screen_rect(&root, &snapped),
+        Some(Rect::new(16.0, 31.0, 15.0, 15.0))
     );
 }
 

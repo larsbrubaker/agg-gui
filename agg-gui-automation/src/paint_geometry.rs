@@ -137,14 +137,16 @@ pub fn offset_child(child: &dyn Widget, children_to_screen: &TransAffine) -> Tra
 }
 
 /// `DrawCtx::snap_to_pixel` on a transform: move its translation to the
-/// nearest whole pixel (agg-gui's `draw_ctx::defaults::pixel_snap_offset`),
-/// through the same pre-multiplied `translate` the paint context uses. The
-/// walk is in logical units, so this is the device grid at a device scale of
-/// 1 (headless test windows); at other scales a snapped widget can sit up to
+/// nearest whole pixel through the same pre-multiplied `translate` step the
+/// paint context takes (agg-gui's `draw_ctx::defaults::pixel_snap_step`,
+/// which divides by the scale, so under a zoomed parent the origin lands on
+/// the pixel rather than a fraction of the zoom past it). The walk is in
+/// logical units, so this is the device grid at a device scale of 1
+/// (headless test windows); at other scales a snapped widget can sit up to
 /// a pixel away from where it paints.
 fn snap_to_pixel(t: &mut TransAffine) {
-    if let Some((fx, fy)) = agg_gui::draw_ctx::defaults::pixel_snap_offset(t) {
-        t.premultiply(&TransAffine::new_translation(-fx, -fy));
+    if let Some((dx, dy)) = agg_gui::draw_ctx::defaults::pixel_snap_step(t) {
+        t.premultiply(&TransAffine::new_translation(dx, dy));
     }
 }
 
