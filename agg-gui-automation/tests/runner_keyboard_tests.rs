@@ -1,6 +1,7 @@
 //! Rust-only tests of the runner's keyboard calls (`runner/keyboard.rs`) and
 //! `SimulatedInput`'s keyboard members (`input.rs`): what a chord leaves
-//! held, how pressed modifiers are carried and released, the close chord,
+//! held, how pressed modifiers are carried and released, physical Control
+//! and Meta apart from the command modifier, the close chord,
 //! a type string naming no key, and `select_all`/`select_none`. The C#
 //! tests that type are in `automation_runner_tests.rs` and
 //! `text_edit_focus_tests.rs`.
@@ -131,6 +132,70 @@ fn rust_only_a_shift_press_reports_shift_alone() {
         runner.mark_test_complete();
     })
     .expect("a Shift press is the Shift key with Shift held");
+}
+
+/// `ModifierKeys::PHYSICAL_CONTROL` holds agg-gui's ctrl and `META` its meta
+/// on every platform, apart from `CONTROL` (the command modifier: meta on
+/// macOS, ctrl elsewhere), so a test can tell Control from Cmd on a Mac.
+#[test]
+fn rust_only_physical_control_and_meta_are_held_apart_from_the_command_modifier() {
+    use agg_gui::platform::{override_platform_for_thread, Platform};
+
+    let ctrl = Modifiers {
+        ctrl: true,
+        ..Modifiers::default()
+    };
+    let meta = Modifiers {
+        meta: true,
+        ..Modifiers::default()
+    };
+    for platform in [Platform::MacOS, Platform::Windows] {
+        show_window_and_execute_tests(RunOptions::default(), logging_window, move |runner, log| {
+            let _platform = override_platform_for_thread(platform);
+            runner.press_modifier_keys(ModifierKeys::PHYSICAL_CONTROL);
+            runner.type_text("{Up}");
+            runner.release_modifier_keys(ModifierKeys::PHYSICAL_CONTROL);
+            assert_eq!(
+                *log.borrow(),
+                vec![(Key::Other("Control".into()), ctrl), (Key::ArrowUp, ctrl),],
+                "{platform:?}: the physical Control key goes down and carries ctrl"
+            );
+            assert_eq!(
+                runner.driver().forwarder().modifiers(),
+                Modifiers::default()
+            );
+
+            log.borrow_mut().clear();
+            runner.press_modifier_keys(ModifierKeys::META);
+            runner.type_text("{Up}");
+            assert_eq!(
+                *log.borrow(),
+                vec![(Key::Other("Super".into()), meta), (Key::ArrowUp, meta)],
+                "{platform:?}: the Meta key goes down and carries meta"
+            );
+
+            // Held with the command modifier, each keeps its own flag.
+            log.borrow_mut().clear();
+            runner.press_modifier_keys(ModifierKeys::PHYSICAL_CONTROL);
+            runner.type_text("^{Down}");
+            let held = Modifiers {
+                ctrl: true,
+                meta: true,
+                ..Modifiers::default()
+            };
+            assert_eq!(log.borrow().last(), Some(&(Key::ArrowDown, held)));
+            runner.release_modifier_keys(ModifierKeys::META);
+            assert_eq!(runner.driver().forwarder().modifiers(), ctrl);
+            runner.release_modifier_keys(ModifierKeys::PHYSICAL_CONTROL);
+            assert_eq!(
+                runner.driver().forwarder().modifiers(),
+                Modifiers::default()
+            );
+            assert_eq!(agg_gui::event::current_modifiers(), Modifiers::default());
+            runner.mark_test_complete();
+        })
+        .expect("physical Control and Meta are held as themselves");
+    }
 }
 
 #[test]

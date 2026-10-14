@@ -212,6 +212,20 @@ impl Keys {
     pub const ALT: Keys = Keys(262144);
 }
 
+/// Rust-only modifier bits, in the `Modifiers` mask above C#'s three. C#
+/// names no physical Control apart from its command use, and no Meta:
+/// [`Keys::CONTROL`] is the platform's command modifier here (Cmd on macOS,
+/// see `key_mapping.rs`), so a test that has to hold the physical Control key
+/// on macOS, or Meta elsewhere, holds these. Neither has a member name, so
+/// `try_parse` and a type string's `{...}` never produce them.
+impl Keys {
+    /// The physical Control key on every platform (agg-gui `Modifiers::ctrl`).
+    pub const PHYSICAL_CONTROL: Keys = Keys(0x80000);
+    /// The Meta key on every platform: Cmd on macOS, the Windows/Super key
+    /// elsewhere (agg-gui `Modifiers::meta`).
+    pub const META: Keys = Keys(0x100000);
+}
+
 /// Every C# member name with its value, in declaration order (aliases
 /// included, e.g. `Return` = `Enter`), for `Enum.TryParse`-style lookup.
 const NAMES: &[(&str, i32)] = &[
@@ -496,6 +510,8 @@ impl fmt::Display for Keys {
             (Keys::CONTROL, "Control"),
             (Keys::SHIFT, "Shift"),
             (Keys::ALT, "Alt"),
+            (Keys::PHYSICAL_CONTROL, "PhysicalControl"),
+            (Keys::META, "Meta"),
         ] {
             if self.contains(flag) {
                 parts.push(label.to_string());

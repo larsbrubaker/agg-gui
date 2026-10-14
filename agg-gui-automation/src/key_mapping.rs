@@ -90,15 +90,17 @@ impl Keys {
     }
 
     /// The agg-gui modifiers for this value's modifier bits: Control is the
-    /// platform command modifier (meta on macOS, ctrl elsewhere).
+    /// platform command modifier (meta on macOS, ctrl elsewhere); the
+    /// Rust-only [`Keys::PHYSICAL_CONTROL`] is ctrl and [`Keys::META`] meta on
+    /// every platform.
     pub fn to_agg_modifiers(self) -> Modifiers {
         let command = self.contains(Keys::CONTROL);
         let on_mac = current_platform() == Platform::MacOS;
         Modifiers {
             shift: self.contains(Keys::SHIFT),
-            ctrl: command && !on_mac,
+            ctrl: (command && !on_mac) || self.contains(Keys::PHYSICAL_CONTROL),
             alt: self.contains(Keys::ALT),
-            meta: command && on_mac,
+            meta: (command && on_mac) || self.contains(Keys::META),
         }
     }
 }

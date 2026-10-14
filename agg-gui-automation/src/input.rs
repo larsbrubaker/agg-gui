@@ -61,8 +61,9 @@ use crate::keys::Keys;
 use crate::typed_key_parser::TypedKey;
 
 /// The modifier bits an input method holds (C# `Keys.Shift`, `Control`,
-/// `Alt`).
-const MODIFIER_BITS: Keys = Keys(Keys::SHIFT.0 | Keys::CONTROL.0 | Keys::ALT.0);
+/// `Alt`, and the Rust-only `PHYSICAL_CONTROL` and `META`).
+const MODIFIER_BITS: Keys =
+    Keys(Keys::SHIFT.0 | Keys::CONTROL.0 | Keys::ALT.0 | Keys::PHYSICAL_CONTROL.0 | Keys::META.0);
 
 /// C# `Point2D`: an integer point. In the runner's pointer space it is
 /// physical pixels, Y-down; as a widget offset it is logical units, Y-up
@@ -221,7 +222,8 @@ pub trait InputMethod {
     );
 
     /// C# `PressModifierKeys`: hold the modifiers whose bits
-    /// ([`Keys::SHIFT`], [`Keys::CONTROL`], [`Keys::ALT`]) are set in
+    /// ([`Keys::SHIFT`], [`Keys::CONTROL`], [`Keys::ALT`], and the Rust-only
+    /// [`Keys::PHYSICAL_CONTROL`] and [`Keys::META`]) are set in
     /// `modifier_keys`, on top of any already held. Key codes are ignored:
     /// or'd together they cannot be told apart (`ShiftKey | ControlKey` is
     /// `ControlKey`).
@@ -272,12 +274,14 @@ impl SimulatedInput {
     }
 
     /// The modifier keys whose bits are set in `bits`, in Shift, Control,
-    /// Alt order, as agg-gui keys.
+    /// Alt, physical Control, Meta order, as agg-gui keys.
     fn modifier_keys_of(bits: Keys) -> Vec<agg_gui::Key> {
         [
             (Keys::SHIFT, Keys::SHIFT_KEY),
             (Keys::CONTROL, Keys::CONTROL_KEY),
             (Keys::ALT, Keys::MENU),
+            (Keys::PHYSICAL_CONTROL, Keys::CONTROL_KEY),
+            (Keys::META, Keys::L_WIN),
         ]
         .into_iter()
         .filter(|(bit, _)| bits.contains(*bit))

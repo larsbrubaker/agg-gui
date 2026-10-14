@@ -38,6 +38,13 @@ impl ModifierKeys {
     /// string).
     pub const CONTROL: ModifierKeys = ModifierKeys(0x2);
     pub const ALT: ModifierKeys = ModifierKeys(0x4);
+    /// Rust-only: the physical Control key on every platform, Control on
+    /// macOS too, where [`CONTROL`](Self::CONTROL) is Cmd. C# has no such
+    /// flag (it sent a literal Control on the Mac).
+    pub const PHYSICAL_CONTROL: ModifierKeys = ModifierKeys(0x8);
+    /// Rust-only: the Meta key on every platform: Cmd on macOS, the
+    /// Windows/Super key elsewhere.
+    pub const META: ModifierKeys = ModifierKeys(0x10);
 
     /// Whether every flag of `other` is set.
     pub fn contains(self, other: ModifierKeys) -> bool {
@@ -45,13 +52,20 @@ impl ModifierKeys {
     }
 
     /// The `Keys` modifier bits and keys these flags stand for (C#
-    /// `ShiftKey | Shift`, `ControlKey | Control`, `Menu | Alt`).
+    /// `ShiftKey | Shift`, `ControlKey | Control`, `Menu | Alt`; Rust-only
+    /// `ControlKey | PHYSICAL_CONTROL` and `LWin | META`).
     pub fn to_keys(self) -> Keys {
         let mut keys = Keys::NONE;
         for (flag, key, bit) in [
             (ModifierKeys::SHIFT, Keys::SHIFT_KEY, Keys::SHIFT),
             (ModifierKeys::CONTROL, Keys::CONTROL_KEY, Keys::CONTROL),
             (ModifierKeys::ALT, Keys::MENU, Keys::ALT),
+            (
+                ModifierKeys::PHYSICAL_CONTROL,
+                Keys::CONTROL_KEY,
+                Keys::PHYSICAL_CONTROL,
+            ),
+            (ModifierKeys::META, Keys::L_WIN, Keys::META),
         ] {
             if self.contains(flag) {
                 keys |= key | bit;
