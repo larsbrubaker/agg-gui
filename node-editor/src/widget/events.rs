@@ -308,9 +308,13 @@ impl NodeEditor {
                 // Right-click on a node selects it and offers a
                 // node-context menu (the host's, or Delete + Add Node
                 // submenu); on
-                // empty canvas, the plain Add-Node menu opens.
+                // empty canvas, the plain Add-Node menu opens. As in a
+                // file browser, a right-click on a node that is already
+                // selected keeps the whole selection, so the menu's
+                // Delete acts on all of it; on any other node it
+                // selects just that node (Shift adds it instead).
                 if let Some(node_id) = self.hit_node(&layouts, canvas_pos) {
-                    if !modifiers.shift {
+                    if !modifiers.shift && !self.selected.contains(&node_id) {
                         self.selected.clear();
                     }
                     self.selected.insert(node_id);

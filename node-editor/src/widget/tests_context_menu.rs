@@ -173,3 +173,45 @@ fn select_node_command_is_applied_on_layout() {
     assert_eq!(editor.selected_ids(), &ids);
     assert_eq!(typed.lock().unwrap().last_selection, Some(NodeId(1)));
 }
+
+#[test]
+fn right_click_inside_the_selection_keeps_it_and_deletes_all_of_it() {
+    let (mut editor, typed) = editor_with_two_nodes();
+    typed.lock().unwrap().context_command = Some(NodeEditorCommand::DeleteSelection);
+    typed.lock().unwrap().context_menu = Some(vec![MenuEntry::Item(MenuItem::action(
+        "Delete Node",
+        "Delete Node Menu Item",
+    ))]);
+    editor.select_all();
+    assert_eq!(editor.selected_ids().len(), 2);
+
+    right_click(&mut editor, 260.0, 240.0);
+    assert_eq!(
+        editor.selected_ids().len(),
+        2,
+        "a right-click on a selected node keeps the selection"
+    );
+    editor.handle_popup_action("Delete Node Menu Item");
+    assert!(typed.lock().unwrap().nodes.is_empty());
+}
+
+#[test]
+fn right_click_outside_the_selection_selects_only_that_node() {
+    let (mut editor, typed) = editor_with_two_nodes();
+    typed.lock().unwrap().context_command = Some(NodeEditorCommand::DeleteSelection);
+    typed.lock().unwrap().context_menu = Some(vec![MenuEntry::Item(MenuItem::action(
+        "Delete Node",
+        "Delete Node Menu Item",
+    ))]);
+    editor.select_node(NodeId(1), false);
+
+    right_click(&mut editor, 260.0, 240.0);
+    assert_eq!(
+        editor.selected_ids().iter().copied().collect::<Vec<_>>(),
+        [NodeId(2)]
+    );
+    editor.handle_popup_action("Delete Node Menu Item");
+    let memory = typed.lock().unwrap();
+    assert_eq!(memory.nodes.len(), 1);
+    assert_eq!(memory.nodes[0].id, NodeId(1));
+}

@@ -30,6 +30,10 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Changed
 
+- A right-click on a node that is already selected keeps the whole
+  selection, so a node menu's Delete (`NodeEditorCommand::DeleteSelection`)
+  acts on all of it, as in a file browser; a right-click on any other node
+  still selects just that node (Shift adds it).
 - With `NoodleStyle::NodeDesigner` a socket's hit area is MatterCAD's box,
   6 x 10 canvas units either side and never under 8 device pixels a side,
   instead of the round `SOCKET_HIT_RADIUS` (still used by
