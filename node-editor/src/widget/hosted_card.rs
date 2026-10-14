@@ -18,8 +18,7 @@
 //! `Widget::preview_event` (`hosted_events.rs`).
 
 use agg_gui::widgets::window::{
-    paint_chrome_body, paint_chrome_border, paint_chrome_shadow, paint_chrome_title_bar,
-    ChromeStyle,
+    paint_chrome_border, paint_chrome_shadow, paint_chrome_title_bar, ChromeStyle,
 };
 use agg_gui::{Color, DrawCtx, Event, EventResult, Point, Rect, Size, TransAffine, Widget};
 
@@ -382,7 +381,15 @@ impl Widget for HostedCard {
         let v = ctx.visuals();
         let style = self.style(&v);
         paint_chrome_shadow(ctx, w, h, &style);
-        paint_chrome_body(ctx, w, h, &style, false);
+        // The body fills the whole card, title strip included, and the
+        // title colour lies over it (agg-sharp `WindowWidget.DrawBody`), so
+        // a translucent title tint reads as a tint of the body rather than
+        // of the canvas and shadow beneath the card. The title bar's top
+        // corners share the body's radius, so they stay inside its edge.
+        ctx.set_fill_color(style.body_color);
+        ctx.begin_path();
+        ctx.rounded_rect(0.0, 0.0, w, h, style.corner_radius);
+        ctx.fill();
         paint_chrome_title_bar(
             ctx,
             0.0,

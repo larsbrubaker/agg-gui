@@ -211,6 +211,11 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Fixed
 
+- A hosted card's body fills the whole card, title strip included, and the
+  title colour lies over it, as agg-sharp's `WindowWidget.DrawBody` paints
+  a window: a translucent title tint (MatterCAD's node windows) now reads
+  as a tint of the body instead of showing the canvas and the card's
+  shadow through the title bar. Opaque title colours look the same.
 - A selected hosted card's ring runs outside the card (its inside half a
   unit beyond the card's edge, 2 units wide, its corners concentric with
   the card's, in card units so it follows the zoom), as MatterCAD's node

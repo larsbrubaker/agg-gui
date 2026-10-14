@@ -105,6 +105,8 @@ mod tests_socket_at;
 #[cfg(test)]
 mod tests_socket_visibility;
 #[cfg(test)]
+mod tests_title_tint;
+#[cfg(test)]
 mod tests_value;
 #[cfg(test)]
 mod tests_view_anchor;
