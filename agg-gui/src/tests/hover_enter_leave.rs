@@ -248,19 +248,20 @@ fn nested_chains_gain_and_lose_only_the_changed_widgets() {
         ]
     );
 
-    // b1 → a1 directly: the deepest leaves first, b1 is cleared, then the
-    // new branch enters.
+    // b1 → a1 directly: the deepest leaves first, b1's clear with its own
+    // leave, then the new branch enters.
     app.on_mouse_move(50.0, 50.0);
     assert_eq!(
         take(&log),
-        ["b1 leave", "b leave", "b1 clear", "a enter", "a1 enter", "a1 move"]
+        ["b1 leave", "b1 clear", "b leave", "a enter", "a1 enter", "a1 move"]
     );
 
-    // The pointer leaves the window: everything leaves, root last.
+    // The pointer leaves the window: everything leaves, root last, and a1's
+    // clear comes with its own leave.
     app.on_mouse_leave();
     assert_eq!(
         take(&log),
-        ["a1 leave", "a leave", "root leave", "a1 clear"]
+        ["a1 leave", "a1 clear", "a leave", "root leave"]
     );
 }
 

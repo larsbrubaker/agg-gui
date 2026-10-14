@@ -677,20 +677,14 @@ impl App {
         // If the hovered widget changed, clear the old one — but skip the clear
         // event when the old widget still has mouse capture (it should keep
         // receiving real positions, not a (-1,-1) sentinel that snaps state).
-        // The clear goes after the chain's leaves and before its enters.
+        // The clear goes with the old leaf's own leave, before any enter
+        // (`hover_chain.rs`).
         let hover_changed = new_hit != self.hovered;
         let to_clear = self
             .hovered
             .clone()
             .filter(|old| hover_changed && self.captured.as_ref() != Some(old));
-        self.update_hover_chain_then(new_hit.as_deref(), Some(pos), |app| {
-            if let Some(old_path) = to_clear {
-                let clear = Event::MouseMove {
-                    pos: Point::new(-1.0, -1.0),
-                };
-                dispatch_event(&mut app.root, &old_path, &clear, Point::new(-1.0, -1.0));
-            }
-        });
+        self.update_hover_chain_clearing(new_hit.as_deref(), Some(pos), to_clear);
         if hover_changed {
             self.store_hovered(new_hit.clone());
         }

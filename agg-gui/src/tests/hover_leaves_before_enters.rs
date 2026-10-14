@@ -1,13 +1,16 @@
-//! Hover order on a move that swaps the hovered widget: every widget the
-//! pointer left hears about it (`MouseOut`, `MouseLeave` and the old leaf's
-//! `(-1, -1)` hover-clear move) before any widget it reached hears
-//! `MouseEnter` / `MouseOver`.
+//! Hover order on a move that swaps the hovered widget: the old leaf hears
+//! its own `MouseOut`, `MouseLeave` and `(-1, -1)` hover-clear move before
+//! its ancestors hear their `MouseLeave`, and every leave comes before any
+//! widget the pointer reached hears `MouseEnter` / `MouseOver`.
 //!
 //! The bug this pins: `App::dispatch_pointer_move` sent the old leaf its
-//! hover-clear move after the hover chain's enters, so a leaf that clears a
-//! shared value when it loses hover (MatterCAD's Undo button clearing the
-//! status-bar hint) wiped what the newly entered widget had just set (the tab
-//! strip's drop hint). `hover_enter_leave.rs` covers the chain diff itself.
+//! hover-clear move after the whole hover chain was updated, so a leaf that
+//! clears a shared value when it loses hover (MatterCAD's Undo button
+//! clearing the status-bar hint) wiped what another widget had just set on
+//! the same move: on an enter (a sibling), or on an ancestor's leave
+//! (MatterCAD's tab strip, which shows its drop hint when the pointer leaves
+//! the tab content for the tabs). `hover_enter_leave.rs` covers the chain
+//! diff itself.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -32,6 +35,8 @@ enum HintRole {
     ClearsOnLeave,
     /// Sets the hint to its name when the pointer enters it.
     SetsOnEnter,
+    /// Sets the hint to its name when the pointer leaves it.
+    SetsOnLeave,
 }
 
 /// A rectangle at `rect` in its parent that logs `"<name> <event>"` for the
@@ -93,7 +98,7 @@ impl Widget for Node {
             (HintRole::ClearsOnLeave, "out" | "leave" | "clear") => {
                 *self.hint.borrow_mut() = None;
             }
-            (HintRole::SetsOnEnter, "enter") => {
+            (HintRole::SetsOnEnter, "enter") | (HintRole::SetsOnLeave, "leave") => {
                 *self.hint.borrow_mut() = Some(self.name);
             }
             _ => {}
@@ -193,12 +198,85 @@ fn every_leave_and_the_old_leaf_clear_come_before_any_enter() {
     s.take();
     assert_eq!(*s.hint.borrow(), None);
 
-    // One step from b onto c: b and a are left, b gets its hover-clear move,
-    // and only then does c enter.
+    // One step from b onto c: b is left and gets its hover-clear move, then
+    // its ancestor a is left, and only then does c enter.
     app.on_mouse_move(250.0, 50.0);
     assert_eq!(
         s.take(),
-        ["b out", "b leave", "a leave", "b clear", "c enter", "c over", "c move"]
+        ["b out", "b leave", "b clear", "a leave", "c enter", "c over", "c move"]
     );
     assert_eq!(*s.hint.borrow(), Some("c"), "b's clear wiped c's hint");
+}
+
+/// root (0..300) ── strip (0..300) ─┬─ content (0..200) ── b (100..200, leaf)
+///                                   └─ tab (200..300, leaf)
+///
+/// The strip's hint shows while the pointer is on the strip but not on its
+/// content, so it is set when the content is left (`SetsOnLeave`): the old
+/// leaf's clear must come before that ancestor's leave.
+#[test]
+fn the_old_leaf_clear_comes_before_its_ancestors_leave() {
+    let s = Shared {
+        log: Rc::new(RefCell::new(Vec::new())),
+        hint: Rc::new(RefCell::new(None)),
+    };
+    let b = s.node(
+        "b",
+        Rect::new(100.0, 0.0, 100.0, 100.0),
+        true,
+        HintRole::ClearsOnLeave,
+        vec![],
+    );
+    let content = s.node(
+        "content",
+        Rect::new(0.0, 0.0, 200.0, 100.0),
+        false,
+        HintRole::SetsOnLeave,
+        vec![b],
+    );
+    let tab = s.node(
+        "tab",
+        Rect::new(200.0, 0.0, 100.0, 100.0),
+        true,
+        HintRole::None,
+        vec![],
+    );
+    let strip = s.node(
+        "strip",
+        Rect::new(0.0, 0.0, 300.0, 100.0),
+        false,
+        HintRole::None,
+        vec![content, tab],
+    );
+    let root = s.node(
+        "root",
+        Rect::new(0.0, 0.0, 300.0, 100.0),
+        false,
+        HintRole::None,
+        vec![strip],
+    );
+    let mut app = App::new(root);
+    app.layout(VIEW);
+
+    app.on_mouse_move(150.0, 50.0);
+    s.take();
+
+    app.on_mouse_move(250.0, 50.0);
+    assert_eq!(
+        s.take(),
+        [
+            "b out",
+            "b leave",
+            "b clear",
+            "content leave",
+            "tab enter",
+            "tab over",
+            "tab move"
+        ]
+    );
+    assert_eq!(
+        *s.hint.borrow(),
+        Some("content"),
+        "b's clear wiped the hint its ancestor's leave set"
+    );
 }
