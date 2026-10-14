@@ -197,9 +197,10 @@ fn wrapper_around_text_field_gets_enter_and_leave() {
 
     // Onto the field: the field takes the move, yet its wrapper is told the
     // pointer arrived.
-    // (The root gets the hover-clear sentinel: it was the hovered widget.)
+    // (The root gets the hover-clear sentinel first: it was the hovered
+    // widget, and every leave comes before any enter.)
     app.on_mouse_move(150.0, 50.0);
-    assert_eq!(take(&log), ["wrap enter", "root clear"]);
+    assert_eq!(take(&log), ["root clear", "wrap enter"]);
 
     // Moving within the field announces nothing new. (The field consumes
     // only the move on which its hover flips; later moves bubble, which is
@@ -232,25 +233,27 @@ fn nested_chains_gain_and_lose_only_the_changed_widgets() {
         ]
     );
 
-    // a → b1: a leaves, b and b1 enter (shallowest first), root stays.
+    // a → b1: a leaves and gets the hover-clear, then b and b1 enter
+    // (shallowest first); root stays.
     app.on_mouse_move(350.0, 50.0);
     assert_eq!(
         take(&log),
         [
             "a leave",
-            "b enter",
-            "b1 enter",
             "a clear",
             "root clear",
+            "b enter",
+            "b1 enter",
             "b1 move"
         ]
     );
 
-    // b1 → a1 directly: the deepest leaves first, then the new branch enters.
+    // b1 → a1 directly: the deepest leaves first, b1 is cleared, then the
+    // new branch enters.
     app.on_mouse_move(50.0, 50.0);
     assert_eq!(
         take(&log),
-        ["b1 leave", "b leave", "a enter", "a1 enter", "b1 clear", "a1 move"]
+        ["b1 leave", "b leave", "b1 clear", "a enter", "a1 enter", "a1 move"]
     );
 
     // The pointer leaves the window: everything leaves, root last.
@@ -277,8 +280,9 @@ fn capture_keeps_ancestors_and_toggles_only_the_captured_widget() {
 
     // Back over a1: it re-enters.
     app.on_mouse_move(60.0, 50.0);
-    // (b1, hit-tested as hovered during the drag, gets the hover-clear.)
-    assert_eq!(take(&log), ["a1 enter", "b1 clear", "a1 move"]);
+    // (b1, hit-tested as hovered during the drag, gets the hover-clear
+    // before a1 enters.)
+    assert_eq!(take(&log), ["b1 clear", "a1 enter", "a1 move"]);
 
     // Out again, then release over b1: capture ends and the chain catches up.
     app.on_mouse_move(350.0, 50.0);

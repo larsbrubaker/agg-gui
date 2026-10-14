@@ -18,7 +18,13 @@
 //! it (shallowest first); a widget that moves between the chain and the
 //! covered set stays under the pointer and gets neither. Delivery is direct
 //! (no bubbling) and happens before the move is dispatched, so who handles
-//! `MouseMove` is unchanged.
+//! `MouseMove` is unchanged. On a move, the previously hovered leaf's
+//! `(-1, -1)` hover-clear move goes between the leaves and the enters
+//! ([`App::update_hover_chain_then`]): every leave reaches its widget before
+//! any enter does. (agg-sharp delivers them in tree order, children last to
+//! first, so whether a sibling's enter comes before another's leave there
+//! depends on which was added first; leaves-first is the order that never
+//! lets a widget the pointer left undo what the one it reached just did.)
 //!
 //! Pointer capture follows agg-sharp's `OnMouseMoveWhenCaptured`: while a
 //! widget holds capture, its ancestors (and the covered widgets) stay as
@@ -169,6 +175,21 @@ impl App {
     /// the pointer in root space, from which the widgets it covers are found
     /// (`None` for a modal's hit, which covers nothing).
     pub(super) fn update_hover_chain(&mut self, hit: Option<&[usize]>, at: Option<Point>) {
+        self.update_hover_chain_then(hit, at, |_| {});
+    }
+
+    /// [`update_hover_chain`](Self::update_hover_chain) with `before_enters`
+    /// run after every `MouseOut` / `MouseLeave` and before the first
+    /// `MouseEnter` / `MouseOver`. A pointer move sends the old leaf its
+    /// hover-clear move there, so everything the pointer left has let go of
+    /// shared state (a status hint, a highlight) before anything it reached
+    /// takes it up; a clear delivered after the enters wipes what they set.
+    pub(super) fn update_hover_chain_then(
+        &mut self,
+        hit: Option<&[usize]>,
+        at: Option<Point>,
+        before_enters: impl FnOnce(&mut App),
+    ) {
         let over_area = match (self.captured.as_deref(), at) {
             (Some(cap), Some(at)) => point_in_widget(self.root.as_ref(), cap, at),
             _ => None,
@@ -276,6 +297,7 @@ impl App {
                 deliver_exact(self.root.as_mut(), path, &Event::MouseLeave);
             }
         }
+        before_enters(self);
         if let Some(new) = &new {
             for level in shared..=new.len() {
                 if !stays(self.root.as_ref(), &new[..level], &old_ids) {

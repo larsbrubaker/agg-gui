@@ -71,6 +71,7 @@ mod focus_replaced_subtree;
 mod horizontal_wheel_routing;
 mod hover_cursor_tests;
 mod hover_enter_leave;
+mod hover_leaves_before_enters;
 mod huge_offset_blit;
 mod icon_font_tests;
 mod image_icons;

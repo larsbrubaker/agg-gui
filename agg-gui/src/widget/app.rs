@@ -674,21 +674,24 @@ impl App {
     /// pointer-leave sentinel, which a captured widget never receives.
     fn dispatch_pointer_move(&mut self, pos: Point, to_capture: bool) {
         let new_hit = self.compute_hit(pos);
-        self.update_hover_chain(new_hit.as_deref(), Some(pos));
-
         // If the hovered widget changed, clear the old one — but skip the clear
         // event when the old widget still has mouse capture (it should keep
         // receiving real positions, not a (-1,-1) sentinel that snaps state).
-        if new_hit != self.hovered {
-            if let Some(old_path) = self.hovered.clone() {
-                let is_captured = self.captured.as_ref() == Some(&old_path);
-                if !is_captured {
-                    let clear = Event::MouseMove {
-                        pos: Point::new(-1.0, -1.0),
-                    };
-                    dispatch_event(&mut self.root, &old_path, &clear, Point::new(-1.0, -1.0));
-                }
+        // The clear goes after the chain's leaves and before its enters.
+        let hover_changed = new_hit != self.hovered;
+        let to_clear = self
+            .hovered
+            .clone()
+            .filter(|old| hover_changed && self.captured.as_ref() != Some(old));
+        self.update_hover_chain_then(new_hit.as_deref(), Some(pos), |app| {
+            if let Some(old_path) = to_clear {
+                let clear = Event::MouseMove {
+                    pos: Point::new(-1.0, -1.0),
+                };
+                dispatch_event(&mut app.root, &old_path, &clear, Point::new(-1.0, -1.0));
             }
+        });
+        if hover_changed {
             self.store_hovered(new_hit.clone());
         }
 
