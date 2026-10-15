@@ -87,12 +87,12 @@ pub fn format_budget_seconds(duration: Duration) -> String {
 }
 
 /// The report sink, defaulting to the `log` facade.
-fn report_to(report: Option<BudgetReport>) -> BudgetReport {
+pub(crate) fn report_to(report: Option<BudgetReport>) -> BudgetReport {
     report.unwrap_or_else(|| Arc::new(|message: &str| log::warn!("{message}")))
 }
 
 /// A panic payload's message, for a report.
-fn panic_text(payload: &(dyn Any + Send)) -> String {
+pub(crate) fn panic_text(payload: &(dyn Any + Send)) -> String {
     payload
         .downcast_ref::<&str>()
         .map(|s| (*s).to_string())

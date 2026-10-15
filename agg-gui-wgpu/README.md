@@ -33,7 +33,9 @@ instead.
   max-texture-dimension clamp.
 - **`headless`** (native) — rendering with no window, for test harnesses:
   `HeadlessGpu::shared()` (one device per process, requested as `Gpu::new`
-  requests a window's), `HeadlessTarget` (an offscreen texture in the shells'
+  requests a window's but with `MemoryUsage` memory hints;
+  `shared_with_options` takes `HeadlessOptions`, e.g. a longer start-up
+  budget for a loaded machine), `HeadlessTarget` (an offscreen texture in the shells'
   frame format with RGBA read-back), and `HeadlessFrame`, which runs a shell's
   frame around a paint closure or an `App` — custom render passes included —
   and paces its frames as a window's swap chain does: at most two on the GPU.

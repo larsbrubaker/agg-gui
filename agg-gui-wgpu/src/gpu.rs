@@ -33,6 +33,7 @@ use std::time::Duration;
 
 use crate::gpu_budget::{create_within_budget, BACKGROUND_THREAD_AVAILABLE, GPU_STARTUP_BUDGET};
 use crate::surface_retry::{ConfigureRetry, DEFAULT_RETRY_BUDGET};
+use crate::GpuMemoryHints;
 
 #[path = "gpu_acquire.rs"]
 mod acquire;
@@ -117,6 +118,12 @@ pub struct GpuConfig {
     /// [`GpuInitError::NoFallbackAdapter`]. [`Gpu::adapter`] reports what
     /// was chosen.
     pub force_fallback_adapter: bool,
+    /// How the device's allocator sizes the memory blocks it reserves.
+    /// Default [`GpuMemoryHints::Performance`]: large blocks, few native
+    /// allocations for a long-lived interactive window. A host that would
+    /// rather keep video memory free (several devices, a tight budget) asks
+    /// for [`GpuMemoryHints::MemoryUsage`]; see that type for what each costs.
+    pub memory_hints: GpuMemoryHints,
 }
 
 impl Default for GpuConfig {
@@ -129,6 +136,7 @@ impl Default for GpuConfig {
             surface_retry_budget: DEFAULT_RETRY_BUDGET,
             startup_budget: GPU_STARTUP_BUDGET,
             force_fallback_adapter: false,
+            memory_hints: GpuMemoryHints::Performance,
         }
     }
 }
@@ -181,6 +189,13 @@ impl GpuConfig {
     /// [`GpuConfig::force_fallback_adapter`].
     pub fn with_force_fallback_adapter(mut self, force: bool) -> Self {
         self.force_fallback_adapter = force;
+        self
+    }
+
+    /// Choose how the device's allocator reserves memory (default
+    /// [`GpuMemoryHints::Performance`]). See [`GpuConfig::memory_hints`].
+    pub fn with_memory_hints(mut self, hints: GpuMemoryHints) -> Self {
+        self.memory_hints = hints;
         self
     }
 }
@@ -314,6 +329,7 @@ fn request_device(
     label: &'static str,
     optional_features: wgpu::Features,
     force_fallback_adapter: bool,
+    memory_hints: GpuMemoryHints,
 ) -> Result<RequestedDevice, GpuInitError> {
     let adapter = pollster::block_on(
         instance.request_adapter(&adapter_options(force_fallback_adapter, Some(&surface))),
@@ -328,6 +344,7 @@ fn request_device(
     let (device, queue) = pollster::block_on(adapter.request_device(&device_descriptor(
         label,
         optional_features,
+        memory_hints,
         &adapter,
     )))
     .map_err(|_| GpuInitError::RequestDevice)?;
@@ -337,10 +354,13 @@ fn request_device(
 /// The device request every agg-gui-wgpu device is made with: a window's
 /// ([`Gpu::new`]) and the offscreen one ([`crate::headless::HeadlessGpu`]),
 /// so a frame painted headlessly runs under the same features and limits as
-/// the app's.
+/// the app's. Only the memory hints differ by default (see
+/// [`GpuMemoryHints`]): they decide how much memory is reserved, never what
+/// a frame can draw.
 pub(crate) fn device_descriptor<'a>(
     label: &'a str,
     optional_features: wgpu::Features,
+    memory_hints: GpuMemoryHints,
     adapter: &wgpu::Adapter,
 ) -> wgpu::DeviceDescriptor<'a> {
     wgpu::DeviceDescriptor {
@@ -354,7 +374,7 @@ pub(crate) fn device_descriptor<'a>(
         // a fullscreen HiDPI window needs textures several times the window's
         // size, and the default would force it down to a softer frame.
         required_limits: wgpu::Limits::default().using_resolution(adapter.limits()),
-        memory_hints: wgpu::MemoryHints::Performance,
+        memory_hints: memory_hints.into(),
         experimental_features: wgpu::ExperimentalFeatures::default(),
         trace: wgpu::Trace::Off,
     }
@@ -416,8 +436,18 @@ impl Gpu {
         let label = config.label;
         let optional_features = config.optional_features;
         let force_fallback = config.force_fallback_adapter;
+        let memory_hints = config.memory_hints;
         let built = create_within_budget(
-            move || request_device(instance, surface, label, optional_features, force_fallback),
+            move || {
+                request_device(
+                    instance,
+                    surface,
+                    label,
+                    optional_features,
+                    force_fallback,
+                    memory_hints,
+                )
+            },
             &format!("{label} device"),
             config.startup_budget,
             BACKGROUND_THREAD_AVAILABLE,
@@ -709,6 +739,15 @@ mod tests {
         assert_eq!(cfg.surface_retry_budget, Duration::from_secs(10));
         let cfg = cfg.with_surface_retry_budget(Duration::from_secs(3));
         assert_eq!(cfg.surface_retry_budget, Duration::from_secs(3));
+    }
+
+    #[test]
+    fn memory_hints_default_to_performance_and_build() {
+        use crate::GpuMemoryHints;
+        let cfg = super::GpuConfig::new("t");
+        assert_eq!(cfg.memory_hints, GpuMemoryHints::Performance);
+        let cfg = cfg.with_memory_hints(GpuMemoryHints::MemoryUsage);
+        assert_eq!(cfg.memory_hints, GpuMemoryHints::MemoryUsage);
     }
 
     #[test]

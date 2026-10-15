@@ -4,12 +4,15 @@
 //!
 //! - [`HeadlessGpu::shared`] — one device and queue for the whole process,
 //!   requested the way [`crate::Gpu::new`] requests a window's (same backends,
-//!   features and limits, same start-up budget), but with no surface.
-//!   [`HeadlessGpu::shared_with`] takes the window's
-//!   [`crate::GpuConfig::force_fallback_adapter`] option, so a harness can
-//!   paint on wgpu's software adapter where the platform has one.
-//!   [`HeadlessGpu::create`] builds a device the caller owns, for the rare
-//!   test binary that has to end its device's life (device-loss recovery).
+//!   features and limits, same default start-up budget), but with no surface
+//!   and with [`GpuMemoryHints::MemoryUsage`] by default.
+//!   [`HeadlessGpu::shared_with_options`] takes [`HeadlessOptions`]: wgpu's
+//!   software adapter where the platform has one, a longer start-up budget
+//!   for a loaded machine, other memory hints. The shared device is built
+//!   through `crate::gpu_shared_startup`, so one that arrives after a
+//!   caller's budget still reaches later callers. [`HeadlessGpu::create`]
+//!   builds a device the caller owns, for the rare test binary that has to
+//!   end its device's life (device-loss recovery).
 //! - [`HeadlessTarget`] — an offscreen texture of a given device-pixel size in
 //!   [`HEADLESS_FORMAT`], with RGBA8 read-back ([`HeadlessTarget::read_rgba`],
 //!   top row first, unpadded) and an `agg_gui::Framebuffer` copy (bottom row
@@ -25,14 +28,17 @@
 //! [`WgpuGfxCtx::read_screenshot`] uses. Native only: the device request
 //! blocks, which a browser cannot.
 
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 use std::time::Duration;
 
 use agg_gui::color::Color;
 use agg_gui::{App, Framebuffer};
 
-use crate::gpu_budget::{create_within_budget, BACKGROUND_THREAD_AVAILABLE, GPU_STARTUP_BUDGET};
-use crate::WgpuGfxCtx;
+use crate::gpu_budget::{
+    create_within_budget, report_to, spawn_thread, BACKGROUND_THREAD_AVAILABLE, GPU_STARTUP_BUDGET,
+};
+use crate::gpu_shared_startup::SharedStartup;
+use crate::{GpuMemoryHints, WgpuGfxCtx};
 
 /// The format of a [`HeadlessTarget`]: the frame format the native shells get
 /// on every primary backend (`Gpu::new` takes the surface's first non-sRGB
@@ -43,6 +49,77 @@ pub const HEADLESS_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Bgra8Unorm
 /// The device label of [`HeadlessGpu::shared`] — shows up in backend
 /// validation messages and GPU captures.
 const HEADLESS_LABEL: &str = "agg-gui-wgpu headless";
+
+/// How the headless device is requested: [`HeadlessGpu::shared_with_options`]
+/// and [`HeadlessGpu::create_with_options`].
+///
+/// Build one with [`HeadlessOptions::new`] (or [`Default`]) and the `with_*`
+/// setters; the struct is `#[non_exhaustive]` so options can be added:
+///
+/// ```no_run
+/// use std::time::Duration;
+/// use agg_gui_wgpu::{HeadlessGpu, HeadlessOptions};
+/// let options = HeadlessOptions::new().with_startup_budget(Duration::from_secs(120));
+/// let gpu = HeadlessGpu::shared_with_options(options);
+/// ```
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct HeadlessOptions {
+    /// Demand wgpu's software (fallback) adapter, as
+    /// [`crate::GpuConfig::force_fallback_adapter`]. Default `false`. The
+    /// shared device is kept per choice: asking for both holds two devices.
+    pub force_fallback_adapter: bool,
+    /// How long a call waits for the device, counted from when its creation
+    /// began. Default [`crate::GPU_STARTUP_BUDGET`] (15 s), which a healthy
+    /// machine meets with room to spare; a test harness on a machine that may
+    /// be saturated by parallel builds asks for more (say 120 s), so a slow
+    /// request is not taken for a hung driver.
+    pub startup_budget: Duration,
+    /// How the device's allocator reserves memory. Default
+    /// [`GpuMemoryHints::MemoryUsage`]: a headless device serves tests and
+    /// offscreen renders, where the few hundred MiB `Performance` reserves up
+    /// front are pure overhead, paid again by every process of a test runner
+    /// that gives each test its own.
+    pub memory_hints: GpuMemoryHints,
+}
+
+impl Default for HeadlessOptions {
+    fn default() -> Self {
+        Self {
+            force_fallback_adapter: false,
+            startup_budget: GPU_STARTUP_BUDGET,
+            memory_hints: GpuMemoryHints::MemoryUsage,
+        }
+    }
+}
+
+impl HeadlessOptions {
+    /// The defaults: the hardware adapter, a 15 s budget, `MemoryUsage`.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Demand wgpu's software (fallback) adapter. See
+    /// [`HeadlessOptions::force_fallback_adapter`].
+    pub fn with_force_fallback_adapter(mut self, force: bool) -> Self {
+        self.force_fallback_adapter = force;
+        self
+    }
+
+    /// Wait up to `budget` for the device. See
+    /// [`HeadlessOptions::startup_budget`].
+    pub fn with_startup_budget(mut self, budget: Duration) -> Self {
+        self.startup_budget = budget;
+        self
+    }
+
+    /// Choose how the device reserves memory. See
+    /// [`HeadlessOptions::memory_hints`].
+    pub fn with_memory_hints(mut self, hints: GpuMemoryHints) -> Self {
+        self.memory_hints = hints;
+        self
+    }
+}
 
 /// Why headless rendering could not run.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -58,7 +135,10 @@ pub enum HeadlessError {
     /// The adapter refused the device request. Carries wgpu's text.
     RequestDevice(String),
     /// The adapter or device request did not return within the start-up
-    /// budget (a hung driver). The half-built device is leaked on its own
+    /// budget (a hung driver, or a machine too loaded to meet the budget).
+    /// For the shared device this is not final: the request keeps running,
+    /// and a later call gets the device if it arrives. For
+    /// [`HeadlessGpu::create`] the half-built device is leaked on its own
     /// thread, as `Gpu::new` does.
     StartupTimedOut {
         /// The budget that expired.
@@ -69,6 +149,13 @@ pub enum HeadlessError {
     UnreadableFormat(wgpu::TextureFormat),
     /// Mapping the read-back buffer failed (the device was lost).
     Readback(String),
+    /// The shared device's adapter or device request panicked inside wgpu
+    /// (only [`HeadlessGpu::shared_with_options`] and the calls built on it:
+    /// every caller of the shared device gets the same answer). Carries the
+    /// panic's text. [`HeadlessGpu::create`] and
+    /// [`HeadlessGpu::create_with_options`] resume the panic on their caller
+    /// instead, since the device is that caller's alone.
+    CreationPanicked(String),
 }
 
 impl std::fmt::Display for HeadlessError {
@@ -95,6 +182,9 @@ impl std::fmt::Display for HeadlessError {
                  converted"
             ),
             Self::Readback(e) => write!(f, "headless read-back failed: {e}"),
+            Self::CreationPanicked(e) => {
+                write!(f, "the headless wgpu device request panicked: {e}")
+            }
         }
     }
 }
@@ -111,11 +201,15 @@ pub struct HeadlessGpu {
     /// report (see [`HeadlessGpu::wgpu_adapter`]).
     wgpu_adapter: wgpu::Adapter,
     device_lost: Arc<std::sync::atomic::AtomicBool>,
+    /// The hints the device was requested with.
+    memory_hints: GpuMemoryHints,
 }
 
 impl HeadlessGpu {
     /// The process-wide headless device, created on first use and never
-    /// dropped; every later call returns the same one (or the same error).
+    /// dropped; every later call returns the same one (or the same error —
+    /// except a timeout, see [`Self::shared_with_options`]). The default
+    /// [`HeadlessOptions`].
     ///
     /// One device for the whole process, because a fresh instance + device
     /// per test broke in two ways on Windows/NVIDIA, both seen in thread
@@ -144,7 +238,7 @@ impl HeadlessGpu {
     /// fails a test suite is the caller's policy. agg-gui's own GPU tests skip
     /// (pass trivially) on [`HeadlessError::NoAdapter`].
     pub fn shared() -> Result<&'static HeadlessGpu, HeadlessError> {
-        Self::shared_with(false)
+        Self::shared_with_options(HeadlessOptions::default())
     }
 
     /// [`Self::shared`], or with `force_fallback_adapter` the process-wide
@@ -157,30 +251,82 @@ impl HeadlessGpu {
     pub fn shared_with(
         force_fallback_adapter: bool,
     ) -> Result<&'static HeadlessGpu, HeadlessError> {
-        static HARDWARE: OnceLock<Result<HeadlessGpu, HeadlessError>> = OnceLock::new();
-        static FALLBACK: OnceLock<Result<HeadlessGpu, HeadlessError>> = OnceLock::new();
-        let shared = if force_fallback_adapter {
+        Self::shared_with_options(
+            HeadlessOptions::default().with_force_fallback_adapter(force_fallback_adapter),
+        )
+    }
+
+    /// The process-wide device for `options.force_fallback_adapter` (one per
+    /// choice, as [`Self::shared_with`]), waiting up to
+    /// `options.startup_budget` for it.
+    ///
+    /// **The first call creates it, so its memory hints win**: a later call
+    /// asking for other hints gets the existing device ([`Self::memory_hints`]
+    /// says which it was made with). Rebuilding the device per hint is what
+    /// [`Self::shared`] exists to avoid.
+    ///
+    /// **Every call has its own budget, counted from when the creation
+    /// began.** A call whose budget runs out gets
+    /// [`HeadlessError::StartupTimedOut`] (and a `log::warn!`), but that is
+    /// not cached: the request keeps running, and once it returns every call
+    /// gets the device. A request that never returns times out every call,
+    /// and a call made after the deadline is told at once rather than waiting
+    /// again. A failure the request itself returns (no adapter, a refused
+    /// device, a panic) is every later call's answer, without a retry.
+    pub fn shared_with_options(
+        options: HeadlessOptions,
+    ) -> Result<&'static HeadlessGpu, HeadlessError> {
+        static HARDWARE: SharedStartup<HeadlessGpu, HeadlessError> = SharedStartup::new();
+        static FALLBACK: SharedStartup<HeadlessGpu, HeadlessError> = SharedStartup::new();
+        let shared = if options.force_fallback_adapter {
             &FALLBACK
         } else {
             &HARDWARE
         };
         shared
-            .get_or_init(|| create_shared(force_fallback_adapter))
-            .as_ref()
-            .map_err(Clone::clone)
+            .get_or_create(
+                move || {
+                    request_headless_device(options.force_fallback_adapter, options.memory_hints)
+                },
+                HEADLESS_LABEL,
+                options.startup_budget,
+                HeadlessError::CreationPanicked,
+                BACKGROUND_THREAD_AVAILABLE,
+                &report_to(None),
+                spawn_thread,
+            )?
+            .ok_or(HeadlessError::StartupTimedOut {
+                budget: options.startup_budget,
+            })
     }
 
     /// A headless device of the caller's own, requested exactly as
-    /// [`Self::shared`]'s (same backends, features, limits and start-up
-    /// budget) but not shared: dropping it releases it, and destroying it
-    /// affects no one else.
+    /// [`Self::shared`]'s (same backends, features, limits, memory hints and
+    /// start-up budget) but not shared: dropping it releases it, and
+    /// destroying it affects no one else.
     ///
     /// For a test binary that has to end its device's life — destroy it to
     /// simulate a loss and rebuild, as a shell recovers a lost window
     /// device. Everything else uses [`Self::shared`]: see its doc for why a
     /// device per test is unsafe on some drivers.
     pub fn create() -> Result<HeadlessGpu, HeadlessError> {
-        create_shared(false)
+        Self::create_with_options(HeadlessOptions::default())
+    }
+
+    /// [`Self::create`] with `options`. A device that arrives after
+    /// `options.startup_budget` is leaked on its own thread, as a window's
+    /// is: it belongs to this one caller, so no later call could use it.
+    pub fn create_with_options(options: HeadlessOptions) -> Result<HeadlessGpu, HeadlessError> {
+        create_within_budget(
+            move || request_headless_device(options.force_fallback_adapter, options.memory_hints),
+            HEADLESS_LABEL,
+            options.startup_budget,
+            BACKGROUND_THREAD_AVAILABLE,
+            None,
+        )?
+        .ok_or(HeadlessError::StartupTimedOut {
+            budget: options.startup_budget,
+        })
     }
 
     /// The device every target and frame of this GPU allocates on.
@@ -222,27 +368,22 @@ impl HeadlessGpu {
     pub fn device_lost(&self) -> bool {
         self.device_lost.load(std::sync::atomic::Ordering::Relaxed)
     }
+
+    /// The memory hints the device was requested with — for the shared
+    /// device, the first caller's (see [`Self::shared_with_options`]).
+    pub fn memory_hints(&self) -> GpuMemoryHints {
+        self.memory_hints
+    }
 }
 
-/// Build the shared device inside the start-up budget `Gpu::new` uses, so a
-/// hung driver fails the caller with [`HeadlessError::StartupTimedOut`]
-/// instead of hanging it.
-fn create_shared(force_fallback_adapter: bool) -> Result<HeadlessGpu, HeadlessError> {
-    create_within_budget(
-        move || request_headless_device(force_fallback_adapter),
-        HEADLESS_LABEL,
-        GPU_STARTUP_BUDGET,
-        BACKGROUND_THREAD_AVAILABLE,
-        None,
-    )?
-    .ok_or(HeadlessError::StartupTimedOut {
-        budget: GPU_STARTUP_BUDGET,
-    })
-}
-
-/// The adapter and device requests of [`create_shared`]: `Gpu::new`'s, with
-/// no surface to be compatible with.
-fn request_headless_device(force_fallback_adapter: bool) -> Result<HeadlessGpu, HeadlessError> {
+/// The adapter and device requests of the headless device, which its callers
+/// run under a start-up budget so a hung driver fails them with
+/// [`HeadlessError::StartupTimedOut`] instead of hanging them: `Gpu::new`'s
+/// requests, with no surface to be compatible with.
+fn request_headless_device(
+    force_fallback_adapter: bool,
+    memory_hints: GpuMemoryHints,
+) -> Result<HeadlessGpu, HeadlessError> {
     let mut desc = wgpu::InstanceDescriptor::new_without_display_handle();
     desc.backends = wgpu::Backends::PRIMARY;
     let instance = wgpu::Instance::new(desc);
@@ -256,8 +397,12 @@ fn request_headless_device(force_fallback_adapter: bool) -> Result<HeadlessGpu, 
             HeadlessError::NoAdapter(e.to_string())
         }
     })?;
-    let descriptor =
-        crate::gpu::device_descriptor(HEADLESS_LABEL, wgpu::Features::empty(), &adapter);
+    let descriptor = crate::gpu::device_descriptor(
+        HEADLESS_LABEL,
+        wgpu::Features::empty(),
+        memory_hints,
+        &adapter,
+    );
     let (device, queue) = pollster::block_on(adapter.request_device(&descriptor))
         .map_err(|e| HeadlessError::RequestDevice(e.to_string()))?;
     let device_lost = crate::gpu::watch_device_loss(&device);
@@ -268,6 +413,7 @@ fn request_headless_device(force_fallback_adapter: bool) -> Result<HeadlessGpu, 
         adapter_limits: adapter.limits(),
         wgpu_adapter: adapter,
         device_lost,
+        memory_hints,
     })
 }
 

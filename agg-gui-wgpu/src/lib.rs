@@ -67,6 +67,12 @@ pub use gpu::{
 /// Wall-clock budgets around building a device at start-up and draining the
 /// GPU at close (agg-sharp `GpuStartup` / `GpuTeardown`).
 pub mod gpu_budget;
+/// How a device's allocator reserves memory, for windows and headless alike.
+mod gpu_memory_hints;
+pub use gpu_memory_hints::GpuMemoryHints;
+/// The process-wide device creation a late device can still complete.
+#[cfg(not(target_arch = "wasm32"))]
+mod gpu_shared_startup;
 /// The swap-chain format rule both shells share (agg-sharp
 /// `WebGpuRenderDevice.PickSurfaceFormat`).
 mod surface_format;
@@ -95,7 +101,9 @@ pub use custom_render::{SharedCustomRenderer, WgpuCustomRender, WgpuCustomRender
 #[cfg(not(target_arch = "wasm32"))]
 pub mod headless;
 #[cfg(not(target_arch = "wasm32"))]
-pub use headless::{HeadlessError, HeadlessFrame, HeadlessGpu, HeadlessTarget, HEADLESS_FORMAT};
+pub use headless::{
+    HeadlessError, HeadlessFrame, HeadlessGpu, HeadlessOptions, HeadlessTarget, HEADLESS_FORMAT,
+};
 
 pub mod ssaa;
 pub mod tumble_cube;
@@ -163,48 +171,11 @@ pub use screenshot_scaled::RectInPixels;
 mod shaders;
 mod text_render;
 
+/// Every in-crate test module (see `test_modules.rs`).
 #[cfg(test)]
-mod clip_path_readback_tests;
+mod test_modules;
 #[cfg(test)]
-mod dead_sweep_tests;
-#[cfg(test)]
-mod frame_release_tests;
-#[cfg(test)]
-mod golden;
-#[cfg(test)]
-mod gpu_comp_op_tests;
-#[cfg(all(test, not(target_arch = "wasm32")))]
-mod gpu_frame_capture_tests;
-#[cfg(all(test, not(target_arch = "wasm32")))]
-mod headless_tests;
-#[cfg(test)]
-mod image_blit_readback_tests;
-#[cfg(test)]
-mod layer_text_readback_tests;
-#[cfg(test)]
-mod lcd_arc_cache_tests;
-#[cfg(test)]
-mod lcd_gpu_composite_tests;
-#[cfg(test)]
-mod lcd_layer_tint_readback_tests;
-#[cfg(test)]
-mod lcd_text_scale_readback_tests;
-#[cfg(test)]
-mod outline_text_baseline_tests;
-#[cfg(test)]
-mod radial_gradient_readback_tests;
-#[cfg(test)]
-mod root_transform_readback_tests;
-#[cfg(test)]
-mod rotated_text_readback_tests;
-#[cfg(test)]
-mod save_restore_readback_tests;
-#[cfg(test)]
-mod screenshot_scaled_tests;
-#[cfg(test)]
-mod wgsl_browser_validation_tests;
-#[cfg(test)]
-mod wgsl_uniformity;
+pub(crate) use test_modules::{layer_text_readback_tests, wgsl_uniformity};
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Weak};

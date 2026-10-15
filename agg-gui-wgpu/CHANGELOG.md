@@ -8,7 +8,31 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ## [Unreleased]
 
+### Added
+
+- `GpuMemoryHints` and `GpuConfig::with_memory_hints`: how a device's
+  allocator reserves memory. Windows keep `Performance` by default.
+- `HeadlessOptions` (`force_fallback_adapter`, `startup_budget`,
+  `memory_hints`), `HeadlessGpu::shared_with_options`,
+  `HeadlessGpu::create_with_options`, `HeadlessGpu::memory_hints`, and
+  `HeadlessError::CreationPanicked`.
+
 ### Changed
+
+- The headless device opens with `GpuMemoryHints::MemoryUsage` by default:
+  on Vulkan (GTX 1070) the device alone reserved 198 MiB with `Performance`
+  and 18 MiB with `MemoryUsage`, paid by every process of a per-test runner.
+- A shared headless device that times out is no longer a failure for the rest
+  of the process: each call waits until its own budget after the creation
+  began, the request keeps running, and once it returns every later call
+  gets the device. A hung request still times out every call, and a call past
+  the deadline is told at once. A loaded machine (parallel builds) needed more
+  than the 15 s default for an ordinary device request, which then failed
+  every GPU test in the binary.
+- A panic inside the shared headless device request is cached as
+  `HeadlessError::CreationPanicked` for every caller, instead of unwinding
+  into the first caller and being retried by the next call: the shared device
+  gives every caller the same answer.
 
 - `HeadlessFrame::render` (and `render_app`) keeps at most two frames on the
   GPU, as a window's double-buffered swap chain does: once a frame is
