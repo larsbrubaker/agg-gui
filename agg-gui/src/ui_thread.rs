@@ -31,6 +31,10 @@
 //!   ([`mark_current_thread_as_ui_thread`]) or resets ([`reset_for_tests`])
 //!   is bound to a queue: the process's **main** queue when no live UI thread
 //!   owns it yet, otherwise a queue of its own.
+//! - A thread that declares itself with
+//!   [`mark_current_thread_as_ui_thread_with_own_queue`] always gets a fresh
+//!   queue of its own and never adopts the main queue, so no other thread's
+//!   unbound posts (or remote image loads) land on it.
 //! - Any other thread (a worker) posts to the main queue — in an app, the one
 //!   UI thread's. A worker serving a different UI thread posts through that
 //!   thread's [`current_queue`] handle, or binds to it with
@@ -239,6 +243,29 @@ pub fn is_ui_thread() -> bool {
 pub fn mark_current_thread_as_ui_thread() {
     bind_current_thread();
     PUMPS.with(|p| p.set(true));
+}
+
+/// Make the calling thread a UI thread bound to a fresh queue of its own,
+/// which is never the main queue, and return that queue's handle. Unlike
+/// [`mark_current_thread_as_ui_thread`] it never adopts the main queue, so
+/// work posted by threads bound to no queue, and the remote image loads they
+/// start, never land on this thread: those still go to the main queue, for
+/// the UI thread that owns it, or wait there until a thread adopts it. For
+/// UI threads that must see only their own work, such as one App per thread
+/// in a parallel test run, where the main queue's owner would otherwise also
+/// see every unbound thread's posts and whatever a previous owner left.
+///
+/// Call it before the thread queues any work: a queue it was already bound
+/// to is let go first (the main queue, if this thread owned it, passes to the
+/// next thread that adopts it, with what is queued on it; work left on a
+/// queue of its own is dropped with that queue unless another thread holds
+/// it). [`unbind_current_thread`] ends it as for any UI thread.
+pub fn mark_current_thread_as_ui_thread_with_own_queue() -> UiQueue {
+    unbind_current_thread();
+    let queue = UiQueue::new();
+    queue.attach_current_thread();
+    PUMPS.with(|p| p.set(true));
+    queue
 }
 
 /// The calling thread is done being a UI thread (no C# counterpart: C#'s one

@@ -4,8 +4,10 @@
 //! through the markdown viewer's own loading: the host's image provider (the
 //! viewer's `with_image_provider` contract: RGBA8, top row first) and, for an
 //! http(s) or `file://` url the provider does not supply, the viewer's remote
-//! image loader (`markdown::image_loader`: this cache's own, else the process
-//! default; with neither, the image does not load and no request is made).  A
+//! image loader (`markdown::image_loader`: this cache's own, else the
+//! painting thread's override, else the process default; with none, or a
+//! thread override of "no loader", the image does not load and no request is
+//! made).  A
 //! `file://` picture is offered to the loader exactly as `MarkdownView` offers
 //! it, so a host reads local pictures off the frame; a file the loader cannot
 //! read ends as the same failed load the viewer shows.  The edit widget hands
@@ -57,9 +59,10 @@ pub struct RichImageCache {
     loads: RefCell<HashMap<String, Load>>,
     provider: Option<RichImageProvider>,
     resolve_url: Option<RichResolveUrl>,
-    /// Fetches http(s) and `file://` images; `None` uses the process default
-    /// (`markdown::set_default_remote_image_loader`), and with neither such an
-    /// image does not load.
+    /// Fetches http(s) and `file://` images; `None` uses the painting thread's
+    /// loader or the process default
+    /// (`markdown::remote_image_loader_on_this_thread`), and with neither such
+    /// an image does not load.
     remote_loader: Option<Arc<dyn RemoteImageLoader>>,
 }
 
@@ -82,7 +85,9 @@ impl RichImageCache {
     }
 
     /// Sets the loader that fetches http(s) and `file://` images (the viewer's
-    /// `with_remote_image_loader`); `None` uses the process default.
+    /// `with_remote_image_loader`); `None` uses the painting thread's loader
+    /// (`markdown::set_remote_image_loader_on_this_thread`, whose own `None`
+    /// means no loads on that thread), else the process default.
     pub fn set_remote_image_loader(&mut self, loader: Option<Arc<dyn RemoteImageLoader>>) {
         self.remote_loader = loader;
     }

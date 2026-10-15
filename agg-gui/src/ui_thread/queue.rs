@@ -17,7 +17,7 @@
 //! is not the UI's) is stamped by the next drain, so a virtual UI clock
 //! governs it either way.
 
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
 use std::time::Duration;
 
@@ -133,6 +133,11 @@ pub(super) struct Shared {
     /// into a draining thread's draw request and epochs by
     /// `crate::animation` (see [`super::current_wakeups`]).
     wakeups: AtomicU64,
+    /// Remote image loads started on a thread that uses this queue and not
+    /// yet completed (`crate::widgets::markdown::image_loader`): each load
+    /// holds this queue's handle and settles its count from whichever thread
+    /// completes or drops it, so parallel UI threads count only their own.
+    remote_images_in_flight: AtomicUsize,
 }
 
 /// A UI-thread work queue. Cheap to clone (a shared handle) and `Send`, so a
@@ -224,6 +229,28 @@ impl UiQueue {
             crate::animation::bump_local_async_state();
         }
         crate::animation::wake_host();
+    }
+
+    /// Remote markdown image loads started on a thread that uses this queue
+    /// (they wake it when they arrive) and not yet completed or dropped. A
+    /// headless harness waits for its own App's queue to reach zero before
+    /// checking pixels; loads other UI threads started are not counted.
+    pub fn remote_images_in_flight(&self) -> usize {
+        self.shared.remote_images_in_flight.load(Ordering::SeqCst)
+    }
+
+    /// One more remote image load started for this queue.
+    pub(crate) fn remote_image_started(&self) {
+        self.shared
+            .remote_images_in_flight
+            .fetch_add(1, Ordering::SeqCst);
+    }
+
+    /// One remote image load for this queue completed (or was dropped).
+    pub(crate) fn remote_image_settled(&self) {
+        self.shared
+            .remote_images_in_flight
+            .fetch_sub(1, Ordering::SeqCst);
     }
 
     /// The wakeup counter [`Self::signal_async_state_change`] bumps.

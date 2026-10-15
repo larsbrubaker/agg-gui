@@ -223,9 +223,11 @@ pub use widget::{
 };
 pub use widget_background::{render_background, render_progress_fill};
 pub use widgets::{
-    color_wheel_picker_dialog, color_wheel_picker_dialog_with_on_close, current_scroll_style,
-    current_scroll_visibility, default_remote_image_loader, paint_sparkline,
-    remote_images_in_flight, set_default_remote_image_loader, set_scroll_style,
+    clear_remote_image_loader_on_this_thread, color_wheel_picker_dialog,
+    color_wheel_picker_dialog_with_on_close, current_scroll_style, current_scroll_visibility,
+    default_remote_image_loader, paint_sparkline, remote_image_loader_on_this_thread,
+    remote_images_in_flight, remote_images_in_flight_on_this_thread,
+    set_default_remote_image_loader, set_remote_image_loader_on_this_thread, set_scroll_style,
     set_scroll_visibility, set_tooltip_timings, shared_frame_history, shared_run_mode,
     single_font_resolver, tooltip_timings, Align, Align2, Button, CellInfo, Checkbox,
     ClickAwayAction, Clickable, CloseReason, CollapsingHeader, ColorPicker, ColorWheelPicker,

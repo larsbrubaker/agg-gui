@@ -17,7 +17,8 @@
 //!
 //! **Remote images (`http(s)://`) load only through a host-supplied
 //! [`RemoteImageLoader`]**: the view's own
-//! ([`MarkdownView::with_remote_image_loader`]) or the process default
+//! ([`MarkdownView::with_remote_image_loader`]), the painting thread's
+//! ([`set_remote_image_loader_on_this_thread`]) or the process default
 //! ([`set_default_remote_image_loader`]). With none installed the view makes
 //! no network request and shows the image's placeholder. Install
 //! [`HttpRemoteImageLoader`] to have agg-gui fetch them itself
@@ -142,8 +143,11 @@ pub use colors::MarkdownColors;
 pub use emphasis::MarkdownRunStyle;
 pub use html_form::{markdown_html, markdown_html_collapsed};
 pub use image_loader::{
-    default_remote_image_loader, remote_images_in_flight, set_default_remote_image_loader,
-    HttpRemoteImageLoader, RemoteImageDone, RemoteImageLoader,
+    clear_remote_image_loader_on_this_thread, default_remote_image_loader,
+    remote_image_loader_on_this_thread, remote_images_in_flight,
+    remote_images_in_flight_on_this_thread, set_default_remote_image_loader,
+    set_remote_image_loader_on_this_thread, HttpRemoteImageLoader, RemoteImageDone,
+    RemoteImageLoader,
 };
 pub use introspect::{MarkdownBlockKind, MarkdownTableCell, MarkdownTextBlock, MarkdownWord};
 pub use styled_html::{css_color, style_html_fragment, to_styled_html, HtmlStyleTheme};

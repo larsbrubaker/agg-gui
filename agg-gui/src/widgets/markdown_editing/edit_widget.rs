@@ -257,9 +257,10 @@ impl RichMarkdownEditWidget {
     }
 
     /// Sets the loader that reads http(s) and `file://` images (the viewer's
-    /// `with_remote_image_loader`); `None` uses the process default
-    /// ([`crate::set_default_remote_image_loader`]), and with neither such an
-    /// image does not load.
+    /// `with_remote_image_loader`); `None` uses the thread's loader or the
+    /// process default ([`crate::set_remote_image_loader_on_this_thread`],
+    /// [`crate::set_default_remote_image_loader`]), and with neither (or a
+    /// thread override of "no loader") such an image does not load.
     pub fn set_remote_image_loader(
         &mut self,
         loader: Option<std::sync::Arc<dyn crate::RemoteImageLoader>>,

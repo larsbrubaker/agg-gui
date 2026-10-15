@@ -183,9 +183,10 @@ impl MarkdownView {
                 .lock()
                 .is_ok_and(|state| matches!(*state, ImageState::RemotePending));
             if pending {
-                // With no loader (the view's or the process default) this
-                // makes no request and the image stays pending: a loader
-                // installed later loads it on a later paint.
+                // With no loader (the view's, the thread's or the process
+                // default) this makes no request and the image stays
+                // pending: a loader installed later loads it on a later
+                // paint.
                 image_loader::load_remote_image(
                     self.remote_image_loader.clone(),
                     entry.load_url.clone(),
