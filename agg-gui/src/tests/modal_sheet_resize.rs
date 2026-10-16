@@ -1,6 +1,7 @@
-//! Resizable [`ModalSheet`]s (`ModalSheet::with_resizable`): edge and corner
-//! drags resize the centred panel symmetrically, honour the minimum size and
-//! the host bounds, show the resize cursors, and report every size change —
+//! Resizable [`ModalSheet`]s (`ModalSheet::with_resizable`): an edge or corner
+//! drag moves only the grabbed edges while the opposite ones stay put, honours
+//! the minimum size (without the fixed edge drifting) and the host bounds,
+//! shows the resize cursors, and reports every size change —
 //! the hooks a desktop dialog needs to remember its size (agg-sharp
 //! `DialogWindow` / MatterCAD `DialogPage.WindowSizeSettingsKey`). Sheets
 //! that do not opt in stay fixed.
@@ -52,10 +53,10 @@ fn drag(app: &mut App, from: (f64, f64), to: (f64, f64)) {
     app.layout(Size::new(HOST, HOST));
 }
 
-/// The east edge shows the resize cursor and dragging it widens the
-/// centred panel by twice the drag (both edges move), reporting the size.
+/// The east edge shows the resize cursor and dragging it widens the panel
+/// by the drag with the west edge fixed, reporting the size.
 #[test]
-fn east_edge_drag_widens_the_centred_panel() {
+fn east_edge_drag_keeps_the_west_edge_fixed() {
     let mut h = harness(true, Size::new(200.0, 100.0), Size::new(120.0, 80.0));
     assert_eq!(
         sheet(&h.app).panel_rect(),
@@ -68,44 +69,82 @@ fn east_edge_drag_widens_the_centred_panel() {
     assert_eq!(current_cursor_icon(), CursorIcon::Default, "panel interior");
 
     drag(&mut h.app, (298.0, 200.0), (318.0, 200.0));
-    assert_eq!(sheet(&h.app).panel_size(), Size::new(240.0, 100.0));
+    assert_eq!(sheet(&h.app).panel_size(), Size::new(220.0, 100.0));
     assert_eq!(
         sheet(&h.app).panel_rect(),
-        Rect::new(80.0, 150.0, 240.0, 100.0)
+        Rect::new(100.0, 150.0, 220.0, 100.0)
     );
     assert_eq!(
         h.sizes.borrow().last().copied(),
-        Some(Size::new(240.0, 100.0))
+        Some(Size::new(220.0, 100.0))
     );
 }
 
-/// A corner drag resizes both axes; the bottom-right corner is south-east.
+/// Dragging the west edge moves it with the pointer; the east edge stays.
 #[test]
-fn corner_drag_resizes_both_axes() {
+fn west_edge_drag_keeps_the_east_edge_fixed() {
+    let mut h = harness(true, Size::new(200.0, 100.0), Size::ZERO);
+    drag(&mut h.app, (102.0, 200.0), (72.0, 200.0));
+    assert_eq!(
+        sheet(&h.app).panel_rect(),
+        Rect::new(70.0, 150.0, 230.0, 100.0)
+    );
+}
+
+/// A corner drag resizes both axes with the opposite corner fixed; the
+/// bottom-right corner is south-east, so the top-left corner stays.
+#[test]
+fn corner_drag_keeps_the_opposite_corner_fixed() {
     let mut h = harness(true, Size::new(200.0, 100.0), Size::ZERO);
     // Bottom-right corner: x = 300, screen y = 250 (panel bottom).
     h.app.on_mouse_move(298.0, 248.0);
     assert_eq!(current_cursor_icon(), CursorIcon::ResizeSouthEast);
     drag(&mut h.app, (298.0, 248.0), (308.0, 268.0));
-    assert_eq!(sheet(&h.app).panel_size(), Size::new(220.0, 140.0));
+    assert_eq!(sheet(&h.app).panel_size(), Size::new(210.0, 120.0));
+    // Top-left stays at x 100, Y-up top 250: the bottom drops to 130.
+    assert_eq!(
+        sheet(&h.app).panel_rect(),
+        Rect::new(100.0, 130.0, 210.0, 120.0)
+    );
 }
 
-/// Shrinking stops at the minimum size.
+/// Shrinking stops at the minimum size, and the edge opposite the drag
+/// stays where it was even when the pointer goes on past the minimum.
 #[test]
 fn drag_stops_at_the_minimum_size() {
     let mut h = harness(true, Size::new(200.0, 100.0), Size::new(120.0, 80.0));
     drag(&mut h.app, (102.0, 200.0), (190.0, 200.0));
     assert_eq!(sheet(&h.app).panel_size(), Size::new(120.0, 100.0));
+    assert_eq!(
+        sheet(&h.app).panel_rect(),
+        Rect::new(180.0, 150.0, 120.0, 100.0),
+        "the east edge stays at 300"
+    );
+    // The top edge (screen y 150) dragged down past the minimum height.
     drag(&mut h.app, (200.0, 152.0), (200.0, 190.0));
     assert_eq!(sheet(&h.app).panel_size(), Size::new(120.0, 80.0));
+    assert_eq!(
+        sheet(&h.app).panel_rect(),
+        Rect::new(180.0, 150.0, 120.0, 80.0),
+        "the bottom edge stays at 150"
+    );
 }
 
-/// Growing stops at the host bounds minus the sheet's edge margin.
+/// The dragged edge stops at the host's edge; a panel the user has
+/// resized may then fill the host.
 #[test]
-fn drag_stops_at_the_host_bounds() {
+fn drag_stops_at_the_host_edge() {
     let mut h = harness(true, Size::new(200.0, 100.0), Size::ZERO);
-    drag(&mut h.app, (298.0, 200.0), (399.0, 200.0));
-    assert_eq!(sheet(&h.app).panel_size(), Size::new(HOST - 48.0, 100.0));
+    drag(&mut h.app, (298.0, 200.0), (420.0, 200.0));
+    assert_eq!(
+        sheet(&h.app).panel_rect(),
+        Rect::new(100.0, 150.0, 300.0, 100.0)
+    );
+    drag(&mut h.app, (102.0, 200.0), (-50.0, 200.0));
+    assert_eq!(
+        sheet(&h.app).panel_rect(),
+        Rect::new(0.0, 150.0, HOST, 100.0)
+    );
 }
 
 /// Sheets are fixed unless they opt in: no cursor, no resize, no callback.

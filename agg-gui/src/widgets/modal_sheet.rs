@@ -1,13 +1,17 @@
-//! ModalSheet — a centered modal panel over a dimming scrim, the
-//! SwiftUI-`.sheet` / desktop-dialog presentation.
+//! ModalSheet — a modal panel over a dimming scrim, the SwiftUI-`.sheet` /
+//! desktop-dialog presentation.
 //!
-//! Unlike [`Window`](super::window::Window) the sheet is not draggable or
-//! collapsible: it is a surface centered over the app, fixed-size unless it
-//! opts in to edge / corner resizing with
-//! [`with_resizable`](ModalSheet::with_resizable) (see `modal_sheet/resize.rs`),
-//! with a translucent scrim blocking interaction with
-//! everything behind it. Place it as a late child of the root
-//! [`Stack`](super::primitives::Stack) so it paints above the app; while
+//! Unlike [`Window`](super::window::Window) the sheet is not collapsible: it
+//! is a surface that first shows centred over the app, fixed in size and
+//! place unless it opts in to edge / corner resizing with
+//! [`with_resizable`](ModalSheet::with_resizable) (see `modal_sheet/resize.rs`)
+//! or to moving by its top strip with
+//! [`with_drag_strip`](ModalSheet::with_drag_strip) (see `modal_sheet/drag.rs`),
+//! with a translucent scrim blocking interaction with everything behind it.
+//! Once the user moves or resizes it the panel keeps its place relative to
+//! the host's top-left corner (as a desktop dialog stays put when its parent
+//! window grows) and is kept inside the host. Place it as a late child of
+//! the root [`Stack`](super::primitives::Stack) so it paints above the app; while
 //! its visibility cell is `true`, `has_active_modal` routes all input to
 //! the sheet subtree (the scrim swallows what the panel doesn't use) and
 //! `Escape` closes it.
@@ -54,6 +58,7 @@ use crate::theme::current_visuals;
 use crate::widget::{activate_action_at, cancel_action_path, default_action_path, Widget};
 use crate::widgets::window::chrome::{paint_chrome_shadow, ChromeStyle};
 
+mod drag;
 mod resize;
 
 /// Minimum gap kept between the panel and the host bounds when the
@@ -97,8 +102,16 @@ pub struct ModalSheet {
     resize_drag: Option<resize::ResizeDrag>,
     /// Invoked with the new panel size whenever a user resize changes it.
     on_size_changed: Option<Box<dyn Fn(Size)>>,
-    /// The host size of the last layout; a resize clamps against it.
+    /// The host size of the last layout; a resize or move clamps against it.
     host_size: Size,
+    /// Height of the top strip a press can move the panel by (0 = off;
+    /// see `drag.rs`).
+    drag_strip: f64,
+    /// The move drag in progress, if any.
+    move_drag: Option<drag::MoveDrag>,
+    /// Where the user put the panel: its top-left corner's offset from the
+    /// host's top-left, x rightward and y downward. `None` while centred.
+    position: Option<Point>,
 }
 
 impl ModalSheet {
@@ -120,6 +133,9 @@ impl ModalSheet {
             resize_drag: None,
             on_size_changed: None,
             host_size: Size::ZERO,
+            drag_strip: 0.0,
+            move_drag: None,
+            position: None,
         }
     }
 
@@ -157,9 +173,11 @@ impl ModalSheet {
     }
 
     /// Let the user resize the panel by dragging its edges and corners, as a
-    /// desktop dialog window allows (default off). The panel stays centred,
-    /// never shrinks below [`with_min_panel_size`](Self::with_min_panel_size)
-    /// and never grows past the host bounds minus the edge margin.
+    /// desktop dialog window allows (default off). The edge (or the two
+    /// edges) opposite the one dragged stays put while the dragged one
+    /// follows the pointer; the panel never shrinks below
+    /// [`with_min_panel_size`](Self::with_min_panel_size) and never grows
+    /// past the host bounds.
     pub fn with_resizable(mut self, resizable: bool) -> Self {
         self.resizable = resizable;
         self
@@ -357,22 +375,26 @@ impl Widget for ModalSheet {
             return Size::new(0.0, 0.0);
         }
         self.host_size = available;
+        // A panel the user placed may fill the host; a centred one keeps
+        // the edge margin around it.
+        let margin = if self.position.is_some() {
+            0.0
+        } else {
+            2.0 * EDGE_MARGIN
+        };
         let w = self
             .panel_size
             .width
-            .min(available.width - 2.0 * EDGE_MARGIN)
+            .min(available.width - margin)
             .max(self.min_panel_size.width)
             .max(0.0);
         let h = self
             .panel_size
             .height
-            .min(available.height - 2.0 * EDGE_MARGIN)
+            .min(available.height - margin)
             .max(self.min_panel_size.height)
             .max(0.0);
-        // Centered, snapped to whole pixels for crisp chrome.
-        let x = ((available.width - w) / 2.0).round();
-        let y = ((available.height - h) / 2.0).round();
-        self.panel = Rect::new(x, y, w, h);
+        self.panel = self.place_panel(available, Size::new(w, h));
         if let Some(child) = self.children.first_mut() {
             child.layout(Size::new(w, h));
             child.set_bounds(self.panel);
@@ -419,11 +441,23 @@ impl Widget for ModalSheet {
         ctx.restore();
     }
 
+    /// A move drag in progress takes the pointer before the content the
+    /// press landed on, which would otherwise see the moves first.
+    fn preview_event(&mut self, event: &Event) -> EventResult {
+        if !self.visible.get() || !self.is_moving() {
+            return EventResult::Ignored;
+        }
+        self.move_event(event).unwrap_or(EventResult::Ignored)
+    }
+
     fn on_event(&mut self, event: &Event) -> EventResult {
         if !self.visible.get() {
             return EventResult::Ignored;
         }
         if let Some(result) = self.resize_event(event) {
+            return result;
+        }
+        if let Some(result) = self.move_event(event) {
             return result;
         }
         match event {
