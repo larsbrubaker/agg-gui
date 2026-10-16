@@ -10,6 +10,11 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- `ModalSheet::centred_room(available)`: the largest panel a centred sheet draws within a host of
+  that size (the host less the edge margin on every side, never negative), and the margin itself
+  as `modal_sheet::EDGE_MARGIN` (24). A host sizing something to match the panel, such as a
+  remembered dialog size it wants the sheet to draw at exactly, no longer copies the number.
+
 - `web_adapter::install_keyboard_listeners_while(belongs, on_key)`: the web keyboard and clipboard
   bridge for a canvas that shares its page. While `belongs()` is false a key or clipboard event is
   the page's: not forwarded and never `preventDefault()`ed. `install_keyboard_listeners` is

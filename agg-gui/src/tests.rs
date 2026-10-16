@@ -113,6 +113,7 @@ mod markdown_image_visibility;
 mod menu_hidpi_scale;
 mod modal_sheet_move;
 mod modal_sheet_resize;
+mod modal_sheet_room;
 mod multi_touch_routing;
 mod on_screen_keyboard;
 pub(crate) mod paint_recorder;

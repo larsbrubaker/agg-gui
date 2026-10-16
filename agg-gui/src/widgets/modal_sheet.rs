@@ -61,9 +61,12 @@ use crate::widgets::window::chrome::{paint_chrome_shadow, ChromeStyle};
 mod drag;
 mod resize;
 
-/// Minimum gap kept between the panel and the host bounds when the
-/// desired panel size doesn't fit.
-const EDGE_MARGIN: f64 = 24.0;
+/// The gap a centred panel keeps on every side between itself and the host
+/// bounds when its desired size doesn't fit. A panel the user moved keeps
+/// none. Public so a host sizing something to match the panel (a remembered
+/// size it wants the sheet to draw at exactly) need not copy the number;
+/// [`ModalSheet::centred_room`] applies it.
+pub const EDGE_MARGIN: f64 = 24.0;
 const CORNER_R: f64 = 10.0;
 
 /// A centered, fixed-size modal panel over a scrim. One content child.
@@ -152,6 +155,19 @@ impl ModalSheet {
     pub fn with_panel_size(mut self, size: Size) -> Self {
         self.panel_size = size;
         self
+    }
+
+    /// The largest panel a centred sheet draws within a host of `available`
+    /// size: the host less [`EDGE_MARGIN`] on every side, never negative. A
+    /// desired size within this room draws at exactly that size (still at
+    /// least [`min_panel_size`](Self::min_panel_size)); a larger one is
+    /// clamped to it.
+    pub fn centred_room(available: Size) -> Size {
+        let margin = 2.0 * EDGE_MARGIN;
+        Size::new(
+            (available.width - margin).max(0.0),
+            (available.height - margin).max(0.0),
+        )
     }
 
     /// Replace the desired panel size on a built sheet — a host restoring a
@@ -377,21 +393,21 @@ impl Widget for ModalSheet {
         self.host_size = available;
         // A panel the user placed may fill the host; a centred one keeps
         // the edge margin around it.
-        let margin = if self.position.is_some() {
-            0.0
+        let room = if self.position.is_some() {
+            available
         } else {
-            2.0 * EDGE_MARGIN
+            Self::centred_room(available)
         };
         let w = self
             .panel_size
             .width
-            .min(available.width - margin)
+            .min(room.width)
             .max(self.min_panel_size.width)
             .max(0.0);
         let h = self
             .panel_size
             .height
-            .min(available.height - margin)
+            .min(room.height)
             .max(self.min_panel_size.height)
             .max(0.0);
         self.panel = self.place_panel(available, Size::new(w, h));
