@@ -164,6 +164,10 @@ pub struct WebShellConfig {
     pub on_fatal: Option<FatalHook>,
     /// Keys and the clipboard reach the app only while the canvas (or the
     /// shell's IME input) has focus, and a press on the canvas focuses it.
+    /// A canvas the page gave no `tabindex` gets `tabindex="0"` (it could
+    /// not take focus otherwise); the page may want `outline: none` on it.
+    /// A key whose keydown reached the app still has its keyup delivered
+    /// after focus moves away.
     /// Off by default: a full-window app owns every key on its page. Turn it
     /// on for a canvas embedded in a larger page, so the page's own keyboard
     /// scrolling, find and copy keep working while it has focus.

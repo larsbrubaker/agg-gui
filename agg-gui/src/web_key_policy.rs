@@ -1,6 +1,6 @@
 //! Which browser keydowns the web keyboard bridge (`web_adapter`'s
 //! `install_keyboard_listeners`) `preventDefault()`s after forwarding them
-//! to the app. Pure logic with no DOM types, so it compiles and is tested
+//! to the app, and which keyups it forwards ([`HeldKeys`]). Pure logic with no DOM types, so it compiles and is tested
 //! on every target; only the wasm `web_adapter` calls it.
 
 use crate::event::{Key, Modifiers};
@@ -53,9 +53,65 @@ pub(crate) fn should_prevent_default(k: &Key, mods: Modifiers) -> bool {
     }
 }
 
+/// The physical keys whose keydown went to the app and whose keyup has not
+/// yet arrived. A keyup for one of them goes to the app even when focus has
+/// moved meanwhile (Tab moving focus off a canvas, a click into a page field
+/// while a key is held), so no key the app saw pressed stays down in it.
+#[derive(Default, Debug)]
+// Only the wasm `web_adapter` uses this outside the tests.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+pub(crate) struct HeldKeys {
+    codes: Vec<String>,
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+impl HeldKeys {
+    /// A keydown for physical key `code` (`KeyboardEvent.code`) went to the app.
+    pub(crate) fn pressed(&mut self, code: &str) {
+        if !self.codes.iter().any(|c| c == code) {
+            self.codes.push(code.to_string());
+        }
+    }
+
+    /// Whether the keyup for `code` goes to the app: always when its keydown
+    /// did, else when the keyboard belongs to the app now (`belongs_now`).
+    /// Either way `code` is no longer held.
+    pub(crate) fn released(&mut self, code: &str, belongs_now: bool) -> bool {
+        let held = match self.codes.iter().position(|c| c == code) {
+            Some(i) => {
+                self.codes.remove(i);
+                true
+            }
+            None => false,
+        };
+        held || belongs_now
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_keyup_reaches_the_app_after_focus_left_when_its_keydown_did() {
+        let mut held = HeldKeys::default();
+        held.pressed("Tab");
+        // Tab moved focus off the canvas before its keyup.
+        assert!(held.released("Tab", false));
+        // Released once: a second keyup elsewhere is the page's.
+        assert!(!held.released("Tab", false));
+    }
+
+    #[test]
+    fn a_keyup_the_app_never_saw_pressed_follows_focus() {
+        let mut held = HeldKeys::default();
+        assert!(!held.released("KeyA", false));
+        assert!(held.released("KeyA", true));
+        held.pressed("KeyA");
+        held.pressed("KeyA"); // auto-repeat
+        assert!(held.released("KeyA", false));
+        assert!(!held.released("KeyA", false));
+    }
 
     fn plain() -> Modifiers {
         Modifiers::default()

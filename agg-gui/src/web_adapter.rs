@@ -96,6 +96,18 @@ pub(crate) fn targets_dom_editor(event: &web_sys::Event) -> bool {
     false
 }
 
+/// The physical key of `e` (`code`), which a keydown and its keyup share
+/// even when a modifier changes the `key` text between them; the `key` text
+/// where the browser reports no code.
+fn physical_key(e: &web_sys::KeyboardEvent) -> String {
+    let code = e.code();
+    if code.is_empty() {
+        e.key()
+    } else {
+        code
+    }
+}
+
 fn modifiers_of(e: &web_sys::KeyboardEvent) -> Modifiers {
     Modifiers {
         shift: e.shift_key(),
@@ -156,11 +168,13 @@ pub fn install_keyboard_listeners_while(
     };
     let belongs: Belongs = Rc::new(belongs);
     let on_key: crate::web_paste::OnKey = Rc::new(RefCell::new(on_key));
+    let held = Rc::new(RefCell::new(crate::web_key_policy::HeldKeys::default()));
 
     // --- keydown -----------------------------------------------------------
     let down_cb = {
         let on_key = Rc::clone(&on_key);
         let belongs = Rc::clone(&belongs);
+        let held = Rc::clone(&held);
         Closure::<dyn FnMut(web_sys::KeyboardEvent)>::new(move |e: web_sys::KeyboardEvent| {
             if !belongs() {
                 return;
@@ -185,6 +199,7 @@ pub fn install_keyboard_listeners_while(
             if crate::web_key_policy::should_prevent_default(&k, mods) {
                 e.prevent_default();
             }
+            held.borrow_mut().pressed(&physical_key(&e));
             (on_key.borrow_mut())(k, mods, true);
         })
     };
@@ -195,8 +210,12 @@ pub fn install_keyboard_listeners_while(
     let up_cb = {
         let on_key = Rc::clone(&on_key);
         let belongs = Rc::clone(&belongs);
+        let held = Rc::clone(&held);
         Closure::<dyn FnMut(web_sys::KeyboardEvent)>::new(move |e: web_sys::KeyboardEvent| {
-            if !belongs() || targets_dom_editor(&e) {
+            // A key the app saw go down is released in the app wherever focus
+            // went meanwhile; any other keyup follows the keydown rules.
+            let belongs_now = belongs() && !targets_dom_editor(&e);
+            if !held.borrow_mut().released(&physical_key(&e), belongs_now) {
                 return;
             }
             if let Some(k) = key(&e.key()) {

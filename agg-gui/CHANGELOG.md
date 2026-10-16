@@ -15,6 +15,12 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   the page's: not forwarded and never `preventDefault()`ed. `install_keyboard_listeners` is
   unchanged (it owns every key).
 
+### Fixed
+
+- The web keyboard bridge delivers the keyup of every key whose keydown it delivered, even when
+  the keyup targets a DOM editor or focus left the canvas in between, so no key stays held in the
+  app.
+
 ### Changed
 
 - The rich editor's formatting toolbar draws vector icons (`toolbar_icons`) instead of Font Awesome

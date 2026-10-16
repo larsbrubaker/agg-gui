@@ -20,8 +20,8 @@ use wasm_bindgen::JsCast;
 use super::{forward, sensors};
 use super::{frame::input_scale, lifecycle, note_input, note_input_without_repaint};
 use crate::dom_math::{
-    client_to_physical, keyboard_belongs_to_app, modifiers, mouse_button_from_dom,
-    pressed_button_count, PageFocus, PointerKind,
+    canvas_tabindex_to_add, client_to_physical, keyboard_belongs_to_app, modifiers,
+    mouse_button_from_dom, pressed_button_count, PageFocus, PointerKind,
 };
 use crate::pointer::move_forces_repaint;
 
@@ -35,6 +35,13 @@ const TOUCH_DEVICE: agg_gui::TouchDeviceId = agg_gui::TouchDeviceId(0);
 /// with `needs_focus` ([`crate::WebShellConfig::keyboard_needs_focus`]),
 /// whenever neither the canvas nor the shell's IME input has focus.
 pub(super) fn install_keyboard(canvas: &web_sys::HtmlCanvasElement, needs_focus: bool) {
+    // A canvas the page made no `tabindex` for can't take focus, so with
+    // `needs_focus` it would never get a key.
+    if let Some(tabindex) =
+        canvas_tabindex_to_add(needs_focus, canvas.get_attribute("tabindex").as_deref())
+    {
+        let _ = canvas.set_attribute("tabindex", tabindex);
+    }
     let canvas = canvas.clone();
     let belongs = move || keyboard_belongs_to_app(needs_focus, page_focus(&canvas));
     agg_gui::web_adapter::install_keyboard_listeners_while(belongs, |key, mods, pressed| {

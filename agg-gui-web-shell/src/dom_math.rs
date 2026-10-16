@@ -28,6 +28,17 @@ pub(crate) fn keyboard_belongs_to_app(needs_focus: bool, focus: PageFocus) -> bo
     !needs_focus || focus != PageFocus::Elsewhere
 }
 
+/// The `tabindex` the shell gives the canvas: `"0"` when the keyboard needs
+/// the canvas's focus and the page gave it none (a canvas without one can't
+/// be focused, so it would never get a key); `None` leaves the attribute as
+/// the page wrote it.
+pub(crate) fn canvas_tabindex_to_add(
+    needs_focus: bool,
+    existing: Option<&str>,
+) -> Option<&'static str> {
+    (needs_focus && existing.is_none()).then_some("0")
+}
+
 /// Smallest device scale the shell will hand agg-gui. A zero / negative /
 /// NaN `devicePixelRatio` (seen in headless browsers and during some zoom
 /// transitions) would collapse layout.
@@ -261,6 +272,16 @@ mod tests {
         for focus in [PageFocus::Canvas, PageFocus::ImeInput, PageFocus::Elsewhere] {
             assert!(keyboard_belongs_to_app(false, focus));
         }
+    }
+
+    #[test]
+    fn an_embedded_canvas_is_made_focusable_unless_the_page_chose() {
+        assert_eq!(canvas_tabindex_to_add(true, None), Some("0"));
+        // The page's own choice stands (even -1: focusable by script only).
+        assert_eq!(canvas_tabindex_to_add(true, Some("-1")), None);
+        assert_eq!(canvas_tabindex_to_add(true, Some("0")), None);
+        // A full-window app's canvas is left as the page wrote it.
+        assert_eq!(canvas_tabindex_to_add(false, None), None);
     }
 
     #[test]

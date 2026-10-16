@@ -13,7 +13,8 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 - `WebShellConfig::with_keyboard_needs_focus`: for a canvas embedded in a
   larger page, keys and the clipboard reach the app only while the canvas (or
   the shell's IME input) has focus, and a press on the canvas focuses it
-  without scrolling the page. With focus elsewhere the page keeps its own
+  without scrolling the page (a canvas with no `tabindex` gets
+  `tabindex="0"` so it can take focus). With focus elsewhere the page keeps its own
   keyboard scrolling, find and copy. Off by default (a full-window app owns
   every key). Built on agg-gui's new
   `web_adapter::install_keyboard_listeners_while`.
