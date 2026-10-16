@@ -10,6 +10,9 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- `WgpuGfxCtx` answers `DrawCtx::max_image_dimension` with the device's
+  `max_texture_dimension_2d`, so a backbuffered widget past it paints
+  directly instead of panicking at the texture upload.
 - `GpuMemoryHints` and `GpuConfig::with_memory_hints`: how a device's
   allocator reserves memory. Windows keep `Performance` by default.
 - `HeadlessOptions` (`force_fallback_adapter`, `startup_budget`,

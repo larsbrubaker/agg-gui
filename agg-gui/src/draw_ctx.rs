@@ -373,6 +373,17 @@ pub trait DrawCtx {
         false
     }
 
+    /// The largest width or height, in physical pixels, of one image this
+    /// context can draw (`draw_image_rgba_arc`, `draw_lcd_backbuffer_arc`).
+    /// A GPU context returns its texture limit. A CPU backbuffer that would
+    /// be larger is not made: its widget paints directly for as long as it
+    /// stays that large.
+    ///
+    /// Default: `None`, no limit.
+    fn max_image_dimension(&self) -> Option<u32> {
+        None
+    }
+
     #[doc = include_str!("draw_ctx/docs/draw_image_rgba.md")]
     // Public API: the signature is shared with downstream callers.
     #[allow(clippy::too_many_arguments)]

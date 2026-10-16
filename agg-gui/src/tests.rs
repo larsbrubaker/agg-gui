@@ -40,6 +40,7 @@ mod arc_to_join;
 mod async_wakeup_paint;
 mod back_buffer_tests;
 mod backbuffer_scale;
+mod backbuffer_size_limit;
 mod button_click_focus;
 mod button_click_semantics;
 mod capture_reorder;
