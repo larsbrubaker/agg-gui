@@ -29,11 +29,13 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   callers that want it, but the toolbar no longer draws it; `ICON_DESIGN_SIZE` is now the icon
   box (16).  New `Button::with_icon_painter` draws an icon with a closure.
 
-- `image` is built with only the picture formats a web page shows (PNG, JPEG, GIF, WebP, BMP,
-  ICO), which is what Markdown images, pictures inside SVGs and animated GIFs decode. The other
-  formats `image` decodes by default (TIFF, OpenEXR, HDR, PNM, TGA, DDS, farbfeld, QOI) are the new
-  `image-extra-formats` feature; together with image's multi-threaded JPEG decoder they were about
-  1 MB of a wasm.
+- **Breaking for apps whose pictures use other formats:** `image` is built with only the picture
+  formats a web page shows (PNG, JPEG, GIF, WebP, BMP, ICO), which is what Markdown images,
+  pictures inside SVGs and animated GIFs decode. The other formats `image` decodes by default
+  (TIFF, OpenEXR, HDR, PNM, TGA, DDS, farbfeld, QOI) are the new opt-in `image-extra-formats`
+  feature (not a default feature, so it applies with or without `default-features = false`); an
+  app that shows such pictures must enable it. Together with image's multi-threaded JPEG decoder
+  they were about 1 MB of a wasm.
 
 - The tumble cube's face labels take their font from the caller when no system font is installed:
   `TumbleCube::new_with_label_font`, `CubeFaces::with_label_font` and

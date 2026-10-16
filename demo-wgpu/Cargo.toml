@@ -40,7 +40,8 @@ version = "29"
 features = ["webgl"]
 
 # web_shell — deprecated wrapper over the agg-gui-web-shell crate. WebGL2
-# only (default features off) so the wasm stays the size it always was.
+# only (`webgl` without `webgpu`) so the wasm stays the size it always was;
+# `web_shell::start` asks for `Backend::WebGl2`.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-agg-gui-web-shell = { path = "../agg-gui-web-shell", default-features = false }
+agg-gui-web-shell = { path = "../agg-gui-web-shell", default-features = false, features = ["webgl"] }
 log = "0.4"

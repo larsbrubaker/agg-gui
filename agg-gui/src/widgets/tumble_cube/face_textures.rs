@@ -85,7 +85,9 @@ pub fn get_face_image(
 }
 
 /// [`get_face_image`] with `label_font` as the font when no system font is
-/// installed.
+/// installed.  Pass one shared `Arc<Font>`: the cache is keyed by the font's
+/// address, so each distinct font keeps its own face images, and the font
+/// itself, alive until the next typography change.
 pub fn get_face_image_with_font(
     background: Color,
     text: Color,

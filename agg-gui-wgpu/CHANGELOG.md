@@ -19,9 +19,11 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Changed
 
-- wgpu's WebGL2 backend is the new `webgl` feature (on by default; it only affects wasm32). A
-  WebGPU-only browser app turns this crate's default features off, which leaves wgpu's GLES
-  backend, its GLSL shader writer and glow out of the wasm (about 2.4 MB of code).
+- **Breaking for consumers that set `default-features = false`:** wgpu's WebGL2 backend is the
+  new `webgl` feature (on by default; it only affects wasm32), so such a consumer that renders
+  through WebGL2 must now enable `webgl` (or enable wgpu's `webgl` itself). A WebGPU-only browser
+  app leaves it off, which keeps wgpu's GLES backend, its GLSL shader writer and glow out of the
+  wasm (about 2.4 MB of code).
 - The headless device opens with `GpuMemoryHints::MemoryUsage` by default:
   on Vulkan (GTX 1070) the device alone reserved 198 MiB with `Performance`
   and 18 MiB with `MemoryUsage`, paid by every process of a per-test runner.

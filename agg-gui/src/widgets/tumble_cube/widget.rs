@@ -92,7 +92,10 @@ impl TumbleCube {
 
     /// [`Self::new`] with the faces labelled in `label_font` (the app's own
     /// UI font) when no system font is installed.  An app that builds its
-    /// cubes this way does not link the bundled Noto Sans.
+    /// cubes this way does not link the bundled Noto Sans.  Pass one shared
+    /// `Arc<Font>` (clone the `Arc`, don't re-load the font per cube): each
+    /// distinct font keeps its cached face images, and the font itself,
+    /// alive until the next typography change.
     pub fn new_with_label_font(
         camera: Rc<RefCell<dyn TumbleCubeCamera>>,
         label_font: Arc<Font>,

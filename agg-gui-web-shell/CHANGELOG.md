@@ -83,8 +83,12 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   `pick_surface_format`. `Backend` and `RedrawPolicy` are `#[non_exhaustive]`.
 - Mouse/pen moves no longer force a repaint; they paint through
   `App::wants_draw()` like the pre-extraction `demo-wgpu` shell.
-- WebGL2 is the new `webgl` feature, on by default next to `webgpu`
-  (forwarding to agg-gui-wgpu's `webgl`). A WebGPU-only app builds with
+- **Breaking for consumers that set `default-features = false`:** WebGL2 is
+  the new `webgl` feature, on by default next to `webgpu` (forwarding to
+  agg-gui-wgpu's `webgl`). A WebGL2-only app that turned default features off
+  must now ask for it: `default-features = false, features = ["webgl"]`;
+  without it `Backend::WebGl2` fails with `BackendNotCompiled`. A WebGPU-only
+  app builds with
   `default-features = false, features = ["webgpu"]` and leaves wgpu's GLES
   backend and GLSL shader writer (about 2.4 MB) out of its wasm.
   `Backend::wgpu_backends` returns only what is compiled in, so asking for

@@ -21,8 +21,8 @@ default-target = "wasm32-unknown-unknown"
 [features]
 default = ["webgpu", "webgl"]
 # Compile wgpu's browser WebGPU backend in. Which of the compiled-in backends a
-# page actually uses is `WebShellConfig::backend`. Turn it off for a
-# WebGL2-only app to keep the wasm smaller.
+# page actually uses is `WebShellConfig::backend`. A WebGL2-only app keeps the
+# wasm smaller with `default-features = false, features = ["webgl"]`.
 webgpu = ["wgpu/webgpu"]
 # Compile wgpu's WebGL2 backend in (agg-gui-wgpu's `webgl`). Turn it off for a
 # WebGPU-only app: the GLES backend and its GLSL shader writer are about
