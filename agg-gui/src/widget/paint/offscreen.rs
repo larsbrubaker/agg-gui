@@ -242,6 +242,20 @@ pub(super) fn paint_subtree_backbuffered(widget: &mut dyn Widget, ctx: &mut dyn 
     let w_phys = (b.width * dps_x).ceil().max(1.0) as u32;
     let base_h_phys = (b.height * dps_y).ceil().max(1.0) as u32;
     let h_phys = base_h_phys + over_top_phys + over_bottom_phys;
+    // A bitmap the destination cannot draw in one piece (a GPU texture past
+    // the device limit, `DrawCtx::max_image_dimension`) would fail at the
+    // blit, and wgpu's default error handler panics. A Label as wide as a
+    // long line of text gets there. Paint the subtree directly instead,
+    // uncached; the cache stays as it was, and its size no longer matches,
+    // so it is rastered again when the widget fits.
+    if ctx
+        .max_image_dimension()
+        .is_some_and(|max| w_phys > max || h_phys > max)
+    {
+        ctx.restore();
+        super::paint_subtree_direct(widget, ctx);
+        return;
+    }
     // Logical translate that places the widget's own origin above the
     // bottom over-scan margin inside the taller buffer (physical-aligned).
     let over_bottom_logical = over_bottom_phys as f64 / dps_y;

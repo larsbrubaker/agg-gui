@@ -84,6 +84,9 @@ pub(crate) struct PaintRecorder {
     /// Every image blit (a backbuffered widget's cached bitmap): its device
     /// destination and the device clip in force.
     pub image_clips: Vec<(DeviceRect, Option<DeviceRect>)>,
+    /// What [`DrawCtx::max_image_dimension`] answers: a GPU destination's
+    /// texture limit. `None` (the default) for none.
+    pub max_image_dimension: Option<u32>,
     /// When set ([`PaintRecorder::with_real_fonts`]), `measure_text` measures
     /// with the font and size the widget set, instead of the fixed seven
     /// pixels a character.
@@ -110,6 +113,7 @@ impl PaintRecorder {
             texts: Vec::new(),
             text_clips: Vec::new(),
             image_clips: Vec::new(),
+            max_image_dimension: None,
             real_fonts: false,
             font: None,
             font_size: 0.0,
@@ -339,4 +343,7 @@ impl DrawCtx for PaintRecorder {
         self.transform = TransAffine::new();
     }
     fn gl_paint(&mut self, _screen_rect: Rect, _painter: &mut dyn GlPaint) {}
+    fn max_image_dimension(&self) -> Option<u32> {
+        self.max_image_dimension
+    }
 }

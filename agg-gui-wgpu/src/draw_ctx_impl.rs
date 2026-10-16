@@ -285,6 +285,10 @@ impl DrawCtx for WgpuGfxCtx {
         true
     }
 
+    fn max_image_dimension(&self) -> Option<u32> {
+        Some(self.device.limits().max_texture_dimension_2d)
+    }
+
     fn draw_image_rgba(
         &mut self,
         data: &[u8],

@@ -40,6 +40,8 @@ mod lcd_layer_tint_readback_tests;
 mod lcd_text_scale_readback_tests;
 #[path = "outline_text_baseline_tests.rs"]
 mod outline_text_baseline_tests;
+#[path = "oversized_backbuffer_tests.rs"]
+mod oversized_backbuffer_tests;
 #[path = "radial_gradient_readback_tests.rs"]
 mod radial_gradient_readback_tests;
 #[path = "root_transform_readback_tests.rs"]
