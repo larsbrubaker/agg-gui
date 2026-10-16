@@ -10,6 +10,10 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- A `reflect` feature (on by default) forwarding to agg-gui's `reflect`.
+  agg-gui is now depended on with its default features off, so a consumer
+  that sets `default-features = false` on this crate leaves `bevy_reflect`
+  out of its build; with defaults on nothing changes.
 - `NodeEditor::with_card_title_height(f64)` / `set_card_title_height` /
   `card_title_height()` (default `TITLE_HEIGHT`, 26): the hosted cards'
   title-bar height. The title bar's paint and error badge, the socket

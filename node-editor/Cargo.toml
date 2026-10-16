@@ -16,6 +16,17 @@ categories = ["gui"]
 name = "agg_gui_node_editor"
 path = "src/lib.rs"
 
+[features]
+default = ["reflect"]
+# Forwards to agg-gui's `reflect` feature. The node editor itself has no
+# reflection code; agg-gui is depended on with its default features off so a
+# consumer that turns this crate's defaults off (a web build keeping its wasm
+# small, say) can leave `bevy_reflect` out, and one that keeps them gets a
+# single, consistently-featured agg-gui in the dependency graph.
+reflect = ["agg-gui/reflect"]
+
 [dependencies]
-agg-gui = { path = "../agg-gui" }
+# Default features off so they stay the consumer's choice (see `reflect`
+# above); the node editor needs none of agg-gui's optional features.
+agg-gui = { path = "../agg-gui", default-features = false }
 web-time = "1"
