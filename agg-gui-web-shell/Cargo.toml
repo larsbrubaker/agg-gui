@@ -19,12 +19,15 @@ categories = ["gui", "graphics", "rendering", "wasm"]
 default-target = "wasm32-unknown-unknown"
 
 [features]
-default = ["webgpu"]
-# Compile wgpu's browser WebGPU backend in. WebGL2 is always available on
-# wasm32 (agg-gui-wgpu enables wgpu's `webgl` there); `webgpu` is additive, and
-# which of the two a page actually uses is `WebShellConfig::backend`. Turn it
-# off for a WebGL2-only app to keep the wasm smaller.
+default = ["webgpu", "webgl"]
+# Compile wgpu's browser WebGPU backend in. Which of the compiled-in backends a
+# page actually uses is `WebShellConfig::backend`. Turn it off for a
+# WebGL2-only app to keep the wasm smaller.
 webgpu = ["wgpu/webgpu"]
+# Compile wgpu's WebGL2 backend in (agg-gui-wgpu's `webgl`). Turn it off for a
+# WebGPU-only app: the GLES backend and its GLSL shader writer are about
+# 2.4 MB of the wasm.
+webgl = ["agg-gui-wgpu/webgl"]
 # Forwards to agg-gui's `reflect` feature (and agg-gui-wgpu's forward of the
 # same), mirroring agg-gui-shell.
 reflect = ["agg-gui/reflect", "agg-gui-wgpu/reflect"]

@@ -24,6 +24,7 @@ use crate::draw_ctx::DrawCtx;
 use crate::event::{Event, EventResult, MouseButton};
 use crate::geometry::{Point, Rect, Size};
 use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
+use crate::text::Font;
 use crate::widget::Widget;
 
 use super::camera::TumbleCubeCamera;
@@ -82,8 +83,20 @@ pub struct TumbleCube {
 }
 
 impl TumbleCube {
-    /// A cube driving `camera`, with the default (MatterCAD light) style.
+    /// A cube driving `camera`, with the default (MatterCAD light) style,
+    /// its faces labelled in the bundled font when no system font is
+    /// installed.
     pub fn new(camera: Rc<RefCell<dyn TumbleCubeCamera>>) -> Self {
+        Self::new_with_label_font(camera, super::face_textures::bundled_label_font())
+    }
+
+    /// [`Self::new`] with the faces labelled in `label_font` (the app's own
+    /// UI font) when no system font is installed.  An app that builds its
+    /// cubes this way does not link the bundled Noto Sans.
+    pub fn new_with_label_font(
+        camera: Rc<RefCell<dyn TumbleCubeCamera>>,
+        label_font: Arc<Font>,
+    ) -> Self {
         let style = TumbleCubeStyle::default();
         Self {
             bounds: Rect::default(),
@@ -92,7 +105,7 @@ impl TumbleCube {
                 .with_min_size(Size::new(TUMBLE_CUBE_SIZE, TUMBLE_CUBE_SIZE))
                 .with_max_size(Size::new(TUMBLE_CUBE_SIZE, TUMBLE_CUBE_SIZE)),
             camera,
-            faces: CubeFaces::new(style),
+            faces: CubeFaces::with_label_font(style, label_font),
             style,
             gpu: None,
             mouse_down: None,

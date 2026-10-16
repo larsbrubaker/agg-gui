@@ -12,7 +12,7 @@ instead.
 | Windows | Vulkan, DX12 |
 | macOS / iOS | Metal |
 | Linux / Android | Vulkan |
-| WASM (`wasm32-unknown-unknown`) | WebGL2 |
+| WASM (`wasm32-unknown-unknown`) | WebGL2 (the default `webgl` feature; turn default features off for a WebGPU-only app); WebGPU from the shell |
 
 ## What's in here
 

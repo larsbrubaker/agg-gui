@@ -18,7 +18,7 @@ pub enum WebShellError {
     /// No `<canvas>` with the configured id (or the element is not a canvas).
     CanvasNotFound(String),
     /// The configured [`Backend`] was not compiled in (WebGPU without this
-    /// crate's `webgpu` feature).
+    /// crate's `webgpu` feature, WebGL2 without its `webgl` feature).
     BackendNotCompiled(Backend),
     /// [`Backend::WebGpu`] was required and the browser has no usable WebGPU.
     WebGpuUnavailable,
@@ -57,7 +57,7 @@ impl std::fmt::Display for WebShellError {
             Self::CanvasNotFound(id) => write!(f, "canvas element #{id} not found"),
             Self::BackendNotCompiled(b) => write!(
                 f,
-                "{b:?} backend not compiled in (enable agg-gui-web-shell's `webgpu` feature)"
+                "{b:?} backend not compiled in (enable agg-gui-web-shell's `webgpu` or `webgl` feature)"
             ),
             Self::WebGpuUnavailable => write!(
                 f,

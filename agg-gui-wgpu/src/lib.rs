@@ -8,7 +8,7 @@
 //! | Windows | Vulkan, DX12 |
 //! | macOS / iOS | Metal |
 //! | Linux / Android | Vulkan |
-//! | WASM (`wasm32-unknown-unknown`) | WebGL2 (via `wgpu` `webgl` feature) |
+//! | WASM (`wasm32-unknown-unknown`) | WebGL2 (this crate's default `webgl` feature); WebGPU from the shell |
 //!
 //! # Scope
 //!

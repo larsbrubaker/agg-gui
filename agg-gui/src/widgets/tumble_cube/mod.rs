@@ -27,7 +27,9 @@ pub mod view;
 pub mod widget;
 
 pub use camera::TumbleCubeCamera;
-pub use face_textures::{get_face_image, TumbleCubeStyle, FACE_SIZE};
+pub use face_textures::{
+    bundled_label_font, get_face_image, get_face_image_with_font, TumbleCubeStyle, FACE_SIZE,
+};
 pub use hit_test::{get_hit_data, HitData, FACE_NAMES};
 pub use view::CubeView;
 pub use widget::{TumbleCube, TumbleCubeFrame, TumbleCubeGpuRenderer, TUMBLE_CUBE_SIZE};

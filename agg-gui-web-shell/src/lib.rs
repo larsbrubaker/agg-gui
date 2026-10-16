@@ -5,7 +5,8 @@
 //! shell owns everything platform-generic:
 //!
 //! - a WebGPU or WebGL2 wgpu surface on a `<canvas>` — the consumer picks with
-//!   [`Backend`] (WebGPU needs the default `webgpu` feature), including a
+//!   [`Backend`] (WebGPU and WebGL2 need the default `webgpu` and `webgl`
+//!   features; a WebGPU-only app turns `webgl` off), including a
 //!   clean WebGPU → WebGL2 fallback probed before the canvas is bound;
 //! - the `requestAnimationFrame` loop with [`RedrawPolicy::Reactive`] /
 //!   [`RedrawPolicy::Continuous`] run modes, layout caching, and the

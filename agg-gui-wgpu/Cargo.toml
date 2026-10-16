@@ -15,6 +15,13 @@ keywords = ["gui", "wgpu", "renderer", "graphics", "gpu"]
 categories = ["gui", "graphics", "rendering"]
 
 [features]
+default = ["webgl"]
+# webgl: wgpu's WebGL2 backend on wasm32 (no effect on native targets). On by
+# default so a browser app reaches the widest set of browsers. A WebGPU-only app
+# turns default features off (and gets WebGPU from agg-gui-web-shell's `webgpu`
+# feature), which leaves wgpu's GLES backend, its GLSL shader writer and glow
+# out of the wasm: about 2.4 MB of code.
+webgl = ["wgpu/webgl"]
 # Forwards to agg-gui's `reflect` feature. The renderer itself has no
 # reflection code; the forward exists so a consumer that turns agg-gui's
 # default features off can re-enable them through one knob and still get a
@@ -47,10 +54,6 @@ features = ["vulkan", "dx12", "metal"]
 # browser configures its canvas surface instead, so this is native-only.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 pollster = "0.3"
-
-[target.'cfg(target_arch = "wasm32")'.dependencies.wgpu]
-version = "29"
-features = ["webgl"]
 
 [dev-dependencies]
 # The WGSL front end and validator wgpu already uses (same version in the lockfile), for the

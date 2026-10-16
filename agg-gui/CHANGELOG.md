@@ -29,6 +29,17 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   callers that want it, but the toolbar no longer draws it; `ICON_DESIGN_SIZE` is now the icon
   box (16).  New `Button::with_icon_painter` draws an icon with a closure.
 
+- `image` is built with only the picture formats a web page shows (PNG, JPEG, GIF, WebP, BMP,
+  ICO), which is what Markdown images, pictures inside SVGs and animated GIFs decode. The other
+  formats `image` decodes by default (TIFF, OpenEXR, HDR, PNM, TGA, DDS, farbfeld, QOI) are the new
+  `image-extra-formats` feature; together with image's multi-threaded JPEG decoder they were about
+  1 MB of a wasm.
+
+- The tumble cube's face labels take their font from the caller when no system font is installed:
+  `TumbleCube::new_with_label_font`, `CubeFaces::with_label_font` and
+  `face_textures::get_face_image_with_font` (and `bundled_label_font`, the Noto Sans that
+  `TumbleCube::new` keeps using). An app that passes its own font does not link Noto Sans.
+
 - `LineBox::EmSnapped` (`Label`, `TextField`) snaps on the effective scale (device scale times the
   Text Size multiplier) instead of the device scale alone.  The toolbar's pixel grid and em-box
   icons do the same.

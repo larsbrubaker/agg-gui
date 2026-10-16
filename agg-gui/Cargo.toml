@@ -41,7 +41,11 @@ pulldown-cmark = "0.11"
 png = "0.17"
 qrcodegen = "1.8"
 usvg = "0.48.1"
-image = "0.24"
+# The picture formats agg-gui itself decodes (Markdown images, pictures inside
+# SVGs, animated GIFs): the ones a web page shows. TIFF, OpenEXR, HDR, PNM,
+# TGA, DDS, farbfeld and QOI are the `image-extra-formats` feature; together
+# with image's multi-threaded JPEG decoder they were about 1 MB of a wasm.
+image = { version = "0.24", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp", "ico"] }
 base64 = "0.22.1"
 # Fast deterministic hasher for the per-frame text shape cache
 # (`text/shape_cache.rs`). Zlib; already in the tree through bevy_reflect
@@ -65,6 +69,9 @@ winit-adapter  = ["dep:winit"]
 # the demo apps see the full inspector experience; library users that
 # want a smaller dep tree can disable it.
 reflect        = ["dep:bevy_reflect"]
+# image-extra-formats: every other format the `image` crate decodes by
+# default, for an app whose Markdown or SVG pictures use them.
+image-extra-formats = ["image/default"]
 
 # HTTP(S) fetch for remote markdown images (`http_fetch.rs`).  Native: ureq's
 # blocking client over rustls with the RustCrypto provider and the Mozilla

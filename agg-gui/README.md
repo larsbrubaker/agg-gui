@@ -31,6 +31,7 @@ Optional features:
 |---------|---------|
 | `winit-adapter` | `agg_gui::winit_adapter` — maps winit `MouseButton` / `Modifiers` / `Key` / `CursorIcon` to the crate's input types |
 | `clipboard` | `arboard`-backed system clipboard, once the app calls `clipboard::use_system_clipboard()` (`agg_gui_shell::run` does); until then copy and paste use an in-process clipboard, so test binaries never touch the user's clipboard |
+| `image-extra-formats` | Markdown and SVG pictures in TIFF, OpenEXR, HDR, PNM, TGA, DDS, farbfeld and QOI (PNG, JPEG, GIF, WebP, BMP and ICO always decode) |
 
 ```toml
 [dependencies]

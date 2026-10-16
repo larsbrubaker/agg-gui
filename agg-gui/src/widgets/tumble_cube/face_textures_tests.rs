@@ -180,3 +180,68 @@ fn rust_only_tile_rects_partition_the_face() {
     assert_eq!(area, FACE_SIZE * FACE_SIZE);
     assert_eq!(tile_rect(9), None);
 }
+
+/// A font with none of the labels' letters, so a face drawn with it is
+/// told apart from one drawn with the bundled Noto Sans by its pixels.
+fn font_without_latin_letters() -> Arc<crate::text::Font> {
+    let font = crate::fonts::shortcut_symbols_font();
+    assert!(
+        !font.has_glyph('T'),
+        "the test font must lack the label's letters"
+    );
+    Arc::new(font)
+}
+
+// An app that hands the cube its own font gets its labels in that font, and
+// cubes built with different fonts never share a cached image.
+#[test]
+fn the_callers_label_font_draws_the_labels_when_no_system_font_is_set() {
+    crate::font_settings::set_system_font(None);
+    let bundled = get_face_image(blue(), white(), gray(), "Top");
+    let callers = get_face_image_with_font(
+        blue(),
+        white(),
+        gray(),
+        "Top",
+        &font_without_latin_letters(),
+    );
+    assert!(!Arc::ptr_eq(&bundled, &callers));
+    assert_ne!(
+        *bundled, *callers,
+        "the label has to be drawn in the caller's font, not the bundled one"
+    );
+    let faces =
+        CubeFaces::with_label_font(TumbleCubeStyle::default(), font_without_latin_letters());
+    let named = |faces: &CubeFaces, name: &str| {
+        let i = FACE_NAMES
+            .iter()
+            .position(|n| *n == name)
+            .expect("face name");
+        faces.faces[i].source.clone()
+    };
+    assert_ne!(
+        *named(&faces, "Top"),
+        *named(&CubeFaces::new(TumbleCubeStyle::default()), "Top"),
+        "a cube built with a label font draws its faces in it"
+    );
+}
+
+// The app's system font (the one the user picks) wins over the font the cube
+// was built with, as it does for every other text widget.
+#[test]
+fn an_installed_system_font_wins_over_the_label_font() {
+    crate::font_settings::set_system_font(Some(bundled_label_font()));
+    let callers = get_face_image_with_font(
+        blue(),
+        white(),
+        gray(),
+        "Front",
+        &font_without_latin_letters(),
+    );
+    let bundled = get_face_image(blue(), white(), gray(), "Front");
+    crate::font_settings::set_system_font(None);
+    assert!(
+        Arc::ptr_eq(&callers, &bundled),
+        "both drew in the system font"
+    );
+}

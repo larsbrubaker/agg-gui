@@ -9,6 +9,12 @@
 //!   label)` and shared by every cube on the thread (C# shares them
 //!   process wide under a lock; agg-gui's `Font` and widget tree are
 //!   UI-thread objects, so a thread-local cache is the equivalent).
+//! * Labels use the app's system font (`font_settings::set_system_font`)
+//!   when one is installed, else the label font the cube was built with:
+//!   the caller's ([`CubeFaces::with_label_font`]) or the bundled Noto Sans
+//!   ([`bundled_label_font`], what [`CubeFaces::new`] uses).  An app that
+//!   passes its own font never reaches the bundled one, so the font's bytes
+//!   are not linked into its binary.
 //! * The cache is dropped whenever the thread's typography epoch moves — the
 //!   analogue of the C# `LcdRenderSettings.Epoch` check — because a label
 //!   rasterized under the old font / LCD settings must not outlive them.
@@ -39,9 +45,12 @@ const LABEL_SIZE: f64 = 60.0;
 /// Width of the outline stroke (C# `new Stroke(..., 6)`).
 const BORDER_WIDTH: f64 = 6.0;
 
-type CacheKey = ([u8; 4], [u8; 4], [u8; 4], String);
-/// `(epoch the entries were drawn at, entries)`.
-type Cache = (u64, HashMap<CacheKey, Arc<Vec<u8>>>);
+/// `(background, text, border, label, address of the font drawn with)`.
+type CacheKey = ([u8; 4], [u8; 4], [u8; 4], String, usize);
+/// `(epoch the entries were drawn at, entries)`.  Each entry keeps its font
+/// alive, so the address in its key cannot be reused by another font while
+/// the entry is cached.
+type Cache = (u64, HashMap<CacheKey, (Arc<Font>, Arc<Vec<u8>>)>);
 
 thread_local! {
     static CACHE: RefCell<Cache> = RefCell::new((0, HashMap::new()));
@@ -55,8 +64,15 @@ fn color_key(c: Color) -> [u8; 4] {
     [q(c.r), q(c.g), q(c.b), q(c.a)]
 }
 
+/// The bundled label font (Noto Sans with agg-gui's standard fallbacks), for
+/// an app that has not installed a system font and passes no font of its own.
+pub fn bundled_label_font() -> Arc<Font> {
+    FALLBACK_FONT.with(|f| f.clone())
+}
+
 /// The shared, immutable source image for one labelled face — C#
-/// `TumbleCubeFaceTextures.GetFaceImage`.  Repeated calls with the same
+/// `TumbleCubeFaceTextures.GetFaceImage` — with the bundled label font as the
+/// font when no system font is installed.  Repeated calls with the same
 /// colours and label return the *same* `Arc` (test with `Arc::ptr_eq`);
 /// never mutate it — copy it for anything that draws over it.
 pub fn get_face_image(
@@ -65,12 +81,27 @@ pub fn get_face_image(
     border: Color,
     face_name: &str,
 ) -> Arc<Vec<u8>> {
+    get_face_image_with_font(background, text, border, face_name, &bundled_label_font())
+}
+
+/// [`get_face_image`] with `label_font` as the font when no system font is
+/// installed.
+pub fn get_face_image_with_font(
+    background: Color,
+    text: Color,
+    border: Color,
+    face_name: &str,
+    label_font: &Arc<Font>,
+) -> Arc<Vec<u8>> {
     let epoch = crate::font_settings::current_thread_typography_epoch();
+    let font =
+        crate::font_settings::current_system_font().unwrap_or_else(|| Arc::clone(label_font));
     let key = (
         color_key(background),
         color_key(text),
         color_key(border),
         face_name.to_string(),
+        Arc::as_ptr(&font) as usize,
     );
     if let Some(hit) = CACHE.with(|c| {
         let mut c = c.borrow_mut();
@@ -78,30 +109,36 @@ pub fn get_face_image(
             c.1.clear();
             c.0 = epoch;
         }
-        c.1.get(&key).cloned()
+        c.1.get(&key).map(|(_, image)| image.clone())
     }) {
         return hit;
     }
     // Rasterize outside the borrow: text rendering may consult other
     // thread-locals and must not re-enter this RefCell.
-    let image = Arc::new(render_face_image(background, text, border, face_name));
-    CACHE.with(|c| c.borrow_mut().1.insert(key, image.clone()));
+    let image = Arc::new(render_face_image(
+        background, text, border, face_name, &font,
+    ));
+    CACHE.with(|c| c.borrow_mut().1.insert(key, (font, image.clone())));
     image
 }
 
 /// C# `RenderFaceImage`: clear to the background, centre the label at
 /// 60 px, outline the square with a 6 px stroke.
-fn render_face_image(background: Color, text: Color, border: Color, face_name: &str) -> Vec<u8> {
+fn render_face_image(
+    background: Color,
+    text: Color,
+    border: Color,
+    face_name: &str,
+    font: &Arc<Font>,
+) -> Vec<u8> {
     let size = FACE_SIZE as f64;
     let mut fb = Framebuffer::new(FACE_SIZE, FACE_SIZE);
     {
         let mut g = GfxCtx::new(&mut fb);
         g.clear(background);
 
-        let font = crate::font_settings::current_system_font()
-            .unwrap_or_else(|| FALLBACK_FONT.with(|f| f.clone()));
-        let m = measure_text_metrics(&font, face_name, LABEL_SIZE);
-        g.set_font(font);
+        let m = measure_text_metrics(font, face_name, LABEL_SIZE);
+        g.set_font(Arc::clone(font));
         g.set_font_size(LABEL_SIZE);
         g.set_fill_color(text);
         // C# centres the string's bounds (`Justification.Center`,
@@ -220,16 +257,25 @@ pub struct CubeFaces {
     version: u64,
     style: TumbleCubeStyle,
     epoch: u64,
+    /// The labels' font when no system font is installed.
+    label_font: Arc<Font>,
 }
 
 impl CubeFaces {
+    /// Faces labelled in the bundled font when no system font is installed.
     pub fn new(style: TumbleCubeStyle) -> Self {
+        Self::with_label_font(style, bundled_label_font())
+    }
+
+    /// Faces labelled in `label_font` when no system font is installed.
+    pub fn with_label_font(style: TumbleCubeStyle, label_font: Arc<Font>) -> Self {
         let mut s = Self {
             faces: Vec::new(),
             last_hit: HitData::NONE,
             version: 0,
             style,
             epoch: 0,
+            label_font,
         };
         s.rebuild();
         s
@@ -240,7 +286,13 @@ impl CubeFaces {
         self.faces = FACE_NAMES
             .iter()
             .map(|name| {
-                let source = get_face_image(st.background, st.text, st.border, name);
+                let source = get_face_image_with_font(
+                    st.background,
+                    st.text,
+                    st.border,
+                    name,
+                    &self.label_font,
+                );
                 FaceTexture {
                     active: source.clone(),
                     source,

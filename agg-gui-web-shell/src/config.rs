@@ -10,9 +10,10 @@ use crate::fatal::{FatalHook, FatalMessageFn};
 
 /// Which browser graphics API the shell renders through.
 ///
-/// WebGL2 is always compiled in on wasm32 (agg-gui-wgpu enables wgpu's `webgl`
-/// backend there). WebGPU needs this crate's `webgpu` cargo feature (on by
-/// default); asking for [`Backend::WebGpu`] without it is a start-up error.
+/// Each API is a cargo feature of this crate, both on by default: `webgpu`
+/// (wgpu's browser WebGPU backend) and `webgl` (wgpu's WebGL2 backend, through
+/// agg-gui-wgpu). Asking for an API that was not compiled in is a start-up
+/// error ([`crate::WebShellError::BackendNotCompiled`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Backend {
@@ -26,7 +27,8 @@ pub enum Backend {
     /// WebGPU when the browser actually hands out an adapter, WebGL2
     /// otherwise. The probe runs before the canvas is bound to a context
     /// (a canvas can only ever get one context type), so the fallback is
-    /// clean. Degrades to [`Backend::WebGl2`] when the `webgpu` feature is off.
+    /// clean. Degrades to whichever of the two is compiled in when the
+    /// `webgpu` or the `webgl` feature is off.
     ///
     /// Limits and features apply to whichever API it lands on: an explicit
     /// [`WebShellConfig::limits`] or [`WebShellConfig::required_features`]
@@ -54,16 +56,22 @@ impl Backend {
     /// The wgpu backend set to create the instance with, or `None` when the
     /// requested backend was not compiled in.
     pub fn wgpu_backends(self) -> Option<wgpu::Backends> {
-        let webgpu = cfg!(feature = "webgpu");
-        match self {
-            Self::WebGpu if webgpu => Some(wgpu::Backends::BROWSER_WEBGPU),
-            Self::WebGpu => None,
-            Self::WebGl2 => Some(wgpu::Backends::GL),
-            Self::PreferWebGpu if webgpu => {
-                Some(wgpu::Backends::BROWSER_WEBGPU | wgpu::Backends::GL)
-            }
-            Self::PreferWebGpu => Some(wgpu::Backends::GL),
-        }
+        let webgpu = if cfg!(feature = "webgpu") {
+            wgpu::Backends::BROWSER_WEBGPU
+        } else {
+            wgpu::Backends::empty()
+        };
+        let webgl = if cfg!(feature = "webgl") {
+            wgpu::Backends::GL
+        } else {
+            wgpu::Backends::empty()
+        };
+        let wanted = match self {
+            Self::WebGpu => webgpu,
+            Self::WebGl2 => webgl,
+            Self::PreferWebGpu => webgpu | webgl,
+        };
+        (!wanted.is_empty()).then_some(wanted)
     }
 }
 
@@ -284,8 +292,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn webgl2_is_always_available() {
-        assert_eq!(Backend::WebGl2.wgpu_backends(), Some(wgpu::Backends::GL));
+    fn webgl2_availability_follows_the_feature() {
+        let got = Backend::WebGl2.wgpu_backends();
+        if cfg!(feature = "webgl") {
+            assert_eq!(got, Some(wgpu::Backends::GL));
+        } else {
+            assert_eq!(got, None);
+        }
     }
 
     #[test]
@@ -299,11 +312,14 @@ mod tests {
     }
 
     #[test]
-    fn prefer_webgpu_always_includes_the_gl_fallback() {
-        let got = Backend::PreferWebGpu
-            .wgpu_backends()
-            .expect("always buildable");
-        assert!(got.contains(wgpu::Backends::GL));
+    fn prefer_webgpu_includes_every_compiled_in_backend() {
+        let got = Backend::PreferWebGpu.wgpu_backends();
+        if !cfg!(feature = "webgpu") && !cfg!(feature = "webgl") {
+            assert_eq!(got, None);
+            return;
+        }
+        let got = got.expect("buildable with either backend compiled in");
+        assert_eq!(got.contains(wgpu::Backends::GL), cfg!(feature = "webgl"));
         assert_eq!(
             got.contains(wgpu::Backends::BROWSER_WEBGPU),
             cfg!(feature = "webgpu")
