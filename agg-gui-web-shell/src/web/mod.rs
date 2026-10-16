@@ -232,8 +232,8 @@ where
     CONFIG.with(|c| *c.borrow_mut() = Some(config.clone()));
 
     ime::install();
-    input::install_keyboard();
-    input::install_pointer_listeners(&canvas);
+    input::install_keyboard(&canvas, config.keyboard_needs_focus);
+    input::install_pointer_listeners(&canvas, config.keyboard_needs_focus);
     file_drop::install_file_drop_listeners(&canvas);
     lifecycle::install_window_pointer_release();
     lifecycle::install_page_hide();

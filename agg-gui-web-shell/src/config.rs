@@ -162,6 +162,12 @@ pub struct WebShellConfig {
     /// asynchronous start-up failures and an unrecoverable device loss reach
     /// the app (they happen after [`crate::start`] has returned).
     pub on_fatal: Option<FatalHook>,
+    /// Keys and the clipboard reach the app only while the canvas (or the
+    /// shell's IME input) has focus, and a press on the canvas focuses it.
+    /// Off by default: a full-window app owns every key on its page. Turn it
+    /// on for a canvas embedded in a larger page, so the page's own keyboard
+    /// scrolling, find and copy keep working while it has focus.
+    pub keyboard_needs_focus: bool,
 }
 
 impl WebShellConfig {
@@ -183,6 +189,7 @@ impl WebShellConfig {
             fatal_message: None,
             fatal_panel_class: None,
             on_fatal: None,
+            keyboard_needs_focus: false,
         }
     }
 
@@ -260,6 +267,12 @@ impl WebShellConfig {
         self.on_fatal = Some(FatalHook(std::rc::Rc::new(hook)));
         self
     }
+
+    /// See [`Self::keyboard_needs_focus`].
+    pub fn with_keyboard_needs_focus(mut self, on: bool) -> Self {
+        self.keyboard_needs_focus = on;
+        self
+    }
 }
 
 #[cfg(test)]
@@ -315,5 +328,12 @@ mod tests {
         assert!(cfg.required_features.is_empty());
         assert!(cfg.app_name.is_none() && cfg.fatal_message.is_none());
         assert!(cfg.fatal_panel_class.is_none() && cfg.on_fatal.is_none());
+        assert!(!cfg.keyboard_needs_focus);
+    }
+
+    #[test]
+    fn an_embedded_canvas_can_ask_for_keys_only_with_focus() {
+        let cfg = WebShellConfig::new("c").with_keyboard_needs_focus(true);
+        assert!(cfg.keyboard_needs_focus);
     }
 }

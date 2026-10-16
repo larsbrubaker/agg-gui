@@ -25,12 +25,17 @@ use crate::event::{Key, Modifiers};
 /// The shell's key callback, shared with the keyboard listeners.
 pub(crate) type OnKey = Rc<RefCell<dyn FnMut(Key, Modifiers, bool)>>;
 
-/// Register the window-level `paste` listener for the page's lifetime.
-pub(crate) fn install(window: &web_sys::Window, on_key: OnKey) {
+/// Register the window-level `paste` listener for the page's lifetime. A
+/// paste while `belongs()` is false is the page's, left to the browser.
+pub(crate) fn install(
+    window: &web_sys::Window,
+    on_key: OnKey,
+    belongs: crate::web_adapter::Belongs,
+) {
     let sequencer = Rc::new(RefCell::new(PasteSequencer::default()));
     let paste_cb =
         Closure::<dyn FnMut(web_sys::ClipboardEvent)>::new(move |e: web_sys::ClipboardEvent| {
-            if crate::web_adapter::targets_dom_editor(&e) {
+            if !belongs() || crate::web_adapter::targets_dom_editor(&e) {
                 return;
             }
             let Some(data) = e.clipboard_data() else {

@@ -8,6 +8,13 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ## [Unreleased]
 
+### Added
+
+- `web_adapter::install_keyboard_listeners_while(belongs, on_key)`: the web keyboard and clipboard
+  bridge for a canvas that shares its page. While `belongs()` is false a key or clipboard event is
+  the page's: not forwarded and never `preventDefault()`ed. `install_keyboard_listeners` is
+  unchanged (it owns every key).
+
 ### Changed
 
 - The rich editor's formatting toolbar draws vector icons (`toolbar_icons`) instead of Font Awesome

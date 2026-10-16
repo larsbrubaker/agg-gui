@@ -10,6 +10,9 @@
 //! clipboard bridge, so physical-keyboard typing and clipboard shortcuts
 //! work in every agg-gui web app without per-app JS. (Mobile typing is
 //! separate — the in-canvas on-screen keyboard synthesizes keys itself.)
+//! A canvas embedded in a larger page uses
+//! [`install_keyboard_listeners_while`] instead, so the keyboard and
+//! clipboard are the app's only while it has focus and the page's otherwise.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -131,15 +134,37 @@ fn modifiers_of(e: &web_sys::KeyboardEvent) -> Modifiers {
 /// Listeners live for the page lifetime (the closures are leaked — call
 /// this once at startup).
 pub fn install_keyboard_listeners(on_key: impl FnMut(Key, Modifiers, bool) + 'static) {
+    install_keyboard_listeners_while(|| true, on_key);
+}
+
+/// The test a scoped keyboard bridge asks on every event: does the keyboard
+/// belong to the app right now?
+pub(crate) type Belongs = Rc<dyn Fn() -> bool>;
+
+/// [`install_keyboard_listeners`] for a canvas that shares its page: every
+/// key and clipboard event is first checked with `belongs()`, and while it
+/// returns `false` the event is the page's — not forwarded and never
+/// `preventDefault()`ed, so the page scrolls, finds and copies as usual. A
+/// shell embedding its canvas passes "the canvas (or its IME input) has
+/// focus".
+pub fn install_keyboard_listeners_while(
+    belongs: impl Fn() -> bool + 'static,
+    on_key: impl FnMut(Key, Modifiers, bool) + 'static,
+) {
     let Some(window) = web_sys::window() else {
         return;
     };
+    let belongs: Belongs = Rc::new(belongs);
     let on_key: crate::web_paste::OnKey = Rc::new(RefCell::new(on_key));
 
     // --- keydown -----------------------------------------------------------
     let down_cb = {
         let on_key = Rc::clone(&on_key);
+        let belongs = Rc::clone(&belongs);
         Closure::<dyn FnMut(web_sys::KeyboardEvent)>::new(move |e: web_sys::KeyboardEvent| {
+            if !belongs() {
+                return;
+            }
             // Mid-composition keys (`isComposing`, or keyCode 229 "Process" on
             // the browsers that report the key before the composition) belong
             // to the input method; its result arrives as composition events.
@@ -169,8 +194,9 @@ pub fn install_keyboard_listeners(on_key: impl FnMut(Key, Modifiers, bool) + 'st
     // --- keyup -------------------------------------------------------------
     let up_cb = {
         let on_key = Rc::clone(&on_key);
+        let belongs = Rc::clone(&belongs);
         Closure::<dyn FnMut(web_sys::KeyboardEvent)>::new(move |e: web_sys::KeyboardEvent| {
-            if targets_dom_editor(&e) {
+            if !belongs() || targets_dom_editor(&e) {
                 return;
             }
             if let Some(k) = key(&e.key()) {
@@ -186,8 +212,14 @@ pub fn install_keyboard_listeners(on_key: impl FnMut(Key, Modifiers, bool) + 'st
     // selection into the in-process buffer by the time the DOM clipboard
     // event fires; publish it to the system clipboard.
     for event_name in ["copy", "cut"] {
+        let belongs = Rc::clone(&belongs);
         let cb = Closure::<dyn FnMut(web_sys::ClipboardEvent)>::new(
             move |e: web_sys::ClipboardEvent| {
+                // The page's own selection is copied while the app is not
+                // the keyboard's owner.
+                if !belongs() {
+                    return;
+                }
                 let Some(text) = crate::wasm_clipboard::get() else {
                     return;
                 };
@@ -209,5 +241,5 @@ pub fn install_keyboard_listeners(on_key: impl FnMut(Key, Modifiers, bool) + 'st
     // Capture the system clipboard's text (and picture, decoded off the
     // frame) into the in-process buffers, then synthesize Ctrl+V so the
     // focused widget's paste handler runs against them (`web_paste`).
-    crate::web_paste::install(&window, on_key);
+    crate::web_paste::install(&window, on_key, belongs);
 }

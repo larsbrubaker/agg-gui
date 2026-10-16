@@ -1,12 +1,32 @@
 //! DOM → agg-gui input and sizing math: mouse-button codes, the `buttons`
 //! bitmask, CSS-pixel → physical-pixel positions, canvas backing-store size,
-//! and device-pixel-ratio sanitising.
+//! device-pixel-ratio sanitising, and whether the keyboard is the app's.
 //!
 //! Pure functions over plain numbers so they are unit-testable natively; the
 //! wasm listeners (the crate's `web::input` module) read the numbers off the
 //! DOM events and call these. Crate-internal: not part of the public API.
 
 use agg_gui::{Modifiers, MouseButton};
+
+/// Where the page's focus is, as the keyboard bridge sees it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PageFocus {
+    /// The app's canvas.
+    Canvas,
+    /// The shell's hidden IME input, focused on the app's behalf while a
+    /// canvas text widget is edited.
+    ImeInput,
+    /// Anything else: the page's body, a link, a button, another field.
+    Elsewhere,
+}
+
+/// Whether key and clipboard events belong to the app. Always, unless the
+/// shell was told the canvas shares its page
+/// ([`crate::WebShellConfig::keyboard_needs_focus`]); then only while the
+/// canvas or the IME input it hands focus to has it.
+pub(crate) fn keyboard_belongs_to_app(needs_focus: bool, focus: PageFocus) -> bool {
+    !needs_focus || focus != PageFocus::Elsewhere
+}
 
 /// Smallest device scale the shell will hand agg-gui. A zero / negative /
 /// NaN `devicePixelRatio` (seen in headless browsers and during some zoom
@@ -234,5 +254,19 @@ mod tests {
         let ((w, h), scale) = fit_backing(400.0, 1500.0, 2.0, 2048);
         assert!(h <= 2048 && w < 2048);
         assert!(scale < 2.0);
+    }
+
+    #[test]
+    fn a_full_window_app_owns_every_key() {
+        for focus in [PageFocus::Canvas, PageFocus::ImeInput, PageFocus::Elsewhere] {
+            assert!(keyboard_belongs_to_app(false, focus));
+        }
+    }
+
+    #[test]
+    fn an_embedded_app_owns_keys_only_while_focused() {
+        assert!(keyboard_belongs_to_app(true, PageFocus::Canvas));
+        assert!(keyboard_belongs_to_app(true, PageFocus::ImeInput));
+        assert!(!keyboard_belongs_to_app(true, PageFocus::Elsewhere));
     }
 }

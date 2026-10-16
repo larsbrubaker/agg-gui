@@ -1,7 +1,8 @@
 //! DOM input → [`agg_gui::App`]: canvas pointer (mouse / pen / multi-touch),
 //! wheel (a ctrl+wheel is a trackpad pinch), pointer-leave and context-menu
 //! listeners, plus the window-level keyboard + clipboard bridge from
-//! `agg_gui::web_adapter`. Each DOM event becomes an `agg_gui::shell_input::ForwarderEvent` carrying its own
+//! `agg_gui::web_adapter` (scoped to the canvas's focus when it shares its
+//! page, `WebShellConfig::keyboard_needs_focus`). Each DOM event becomes an `agg_gui::shell_input::ForwarderEvent` carrying its own
 //! position and modifiers, handed to the shell's forwarder ([`forward`]).
 //!
 //! Extracted from `demo-wgpu`'s `web_shell` (pointer events, touch pipeline,
@@ -19,7 +20,8 @@ use wasm_bindgen::JsCast;
 use super::{forward, sensors};
 use super::{frame::input_scale, lifecycle, note_input, note_input_without_repaint};
 use crate::dom_math::{
-    client_to_physical, modifiers, mouse_button_from_dom, pressed_button_count, PointerKind,
+    client_to_physical, keyboard_belongs_to_app, modifiers, mouse_button_from_dom,
+    pressed_button_count, PageFocus, PointerKind,
 };
 use crate::pointer::move_forces_repaint;
 
@@ -29,9 +31,13 @@ const TOUCH_DEVICE: agg_gui::TouchDeviceId = agg_gui::TouchDeviceId(0);
 
 /// Physical keyboard (down **and** up) and the copy/cut/paste clipboard
 /// bridge. Window-level, so keys reach the app without canvas focus — except
-/// while a real DOM editor has focus, which the adapter leaves alone.
-pub(super) fn install_keyboard() {
-    agg_gui::web_adapter::install_keyboard_listeners(|key, mods, pressed| {
+/// while a real DOM editor has focus, which the adapter leaves alone, and,
+/// with `needs_focus` ([`crate::WebShellConfig::keyboard_needs_focus`]),
+/// whenever neither the canvas nor the shell's IME input has focus.
+pub(super) fn install_keyboard(canvas: &web_sys::HtmlCanvasElement, needs_focus: bool) {
+    let canvas = canvas.clone();
+    let belongs = move || keyboard_belongs_to_app(needs_focus, page_focus(&canvas));
+    agg_gui::web_adapter::install_keyboard_listeners_while(belongs, |key, mods, pressed| {
         let modifiers = Some(mods);
         // A typed character the app now owns; the hidden IME input's `input`
         // event for it must not insert it a second time.
@@ -46,6 +52,37 @@ pub(super) fn install_keyboard() {
         });
         note_input();
     });
+}
+
+/// Where the page's focus is now.
+fn page_focus(canvas: &web_sys::HtmlCanvasElement) -> PageFocus {
+    let Some(active) = web_sys::window()
+        .and_then(|w| w.document())
+        .and_then(|d| d.active_element())
+    else {
+        return PageFocus::Elsewhere;
+    };
+    let canvas: &wasm_bindgen::JsValue = canvas.as_ref();
+    if *canvas == wasm_bindgen::JsValue::from(active.clone()) {
+        PageFocus::Canvas
+    } else if active.has_attribute(agg_gui::web_adapter::IME_INPUT_ATTRIBUTE) {
+        PageFocus::ImeInput
+    } else {
+        PageFocus::Elsewhere
+    }
+}
+
+/// A press on an embedded canvas takes the keyboard: focus the canvas
+/// (without scrolling the page) unless it or the IME input already has it.
+/// A mouse press would focus the `tabindex` canvas by itself, but a touch
+/// press's `preventDefault()` cancels that.
+fn take_focus_on_press(canvas: &web_sys::HtmlCanvasElement) {
+    if page_focus(canvas) != PageFocus::Elsewhere {
+        return;
+    }
+    let options = web_sys::FocusOptions::new();
+    options.set_prevent_scroll(true);
+    let _ = canvas.focus_with_options(&options);
 }
 
 pub(super) fn add_listener<E>(
@@ -99,7 +136,7 @@ fn touch(phase: TouchPhase, e: &web_sys::PointerEvent, x: f64, y: f64) -> Forwar
     }
 }
 
-pub(super) fn install_pointer_listeners(canvas: &web_sys::HtmlCanvasElement) {
+pub(super) fn install_pointer_listeners(canvas: &web_sys::HtmlCanvasElement, needs_focus: bool) {
     // Touch pointers feed the App's raw-touch entry points (gesture
     // recogniser, per-finger registry, primary-finger mouse emulation); only
     // mouse/pen take the direct mouse path — synthesising mouse events for
@@ -143,6 +180,9 @@ pub(super) fn install_pointer_listeners(canvas: &web_sys::HtmlCanvasElement) {
         add_listener(target, "pointerdown", move |e: web_sys::PointerEvent| {
             // Capture so drags keep reporting positions outside the canvas.
             let _ = c.set_pointer_capture(e.pointer_id());
+            if needs_focus {
+                take_focus_on_press(&c);
+            }
             super::ime::note_canvas_press();
             // A pointerdown is a user gesture — when iOS grants tilt access.
             sensors::service_tilt_permission_gesture();
