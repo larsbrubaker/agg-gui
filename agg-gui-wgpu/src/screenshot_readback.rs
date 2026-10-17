@@ -46,7 +46,8 @@ impl WgpuGfxCtx {
 
     /// Release the ctx's per-frame handles: the [`Self::set_surface_texture`]
     /// stash and the [`begin_frame`](WgpuGfxCtx::begin_frame) view if
-    /// `end_frame` did not already consume it.
+    /// `end_frame` did not already consume it, together with that frame's
+    /// clear, so an abandoned frame's clear never reaches a later `reset`.
     ///
     /// [`Self::present`] calls this for you — including when the stash is an
     /// SSAA / scene texture rather than the surface itself.  Call it directly
@@ -57,6 +58,7 @@ impl WgpuGfxCtx {
     pub fn release_frame_texture(&mut self) {
         self.surface_texture = None;
         self.surface_view = None;
+        self.frame_clear = None;
     }
 
     /// Present `frame`, first releasing the ctx's per-frame handles

@@ -92,7 +92,10 @@ impl DeviceLoss {
     }
 
     /// Record a loss. The reason is stored before the flag is raised, so a
-    /// reader that sees the flag also sees the reason.
+    /// reader that sees the flag also sees the reason. Only the native
+    /// device-lost watcher ([`watch_device_loss_reason`]) and the tests
+    /// record a loss; in the browser nothing calls it.
+    #[cfg(any(test, not(target_arch = "wasm32")))]
     pub(crate) fn record(&self, reason: String) {
         *self.reason.lock().unwrap_or_else(|e| e.into_inner()) = Some(reason);
         self.lost.store(true, Ordering::Release);

@@ -123,7 +123,27 @@ fn an_overlay_frame_drops_a_stale_clear() {
     ctx.reset(SIZE as f32, SIZE as f32);
     ctx.begin_overlay_frame(target.view.clone());
     assert_eq!(queued_clears(&ctx), (vec![], false));
+    ctx.reset(SIZE as f32, SIZE as f32);
+    assert_eq!(
+        queued_clears(&ctx),
+        (vec![], false),
+        "the overlay frame's own reset must not bring the stale clear back"
+    );
     ctx.end_frame();
+}
+
+/// A frame abandoned before its flush and released (as `present` releases
+/// it) leaves no clear for the next reset.
+#[test]
+fn a_released_frame_leaves_no_clear_for_the_next_reset() {
+    let Some((mut ctx, target)) = ctx_and_target() else {
+        eprintln!("SKIP: no GPU adapter");
+        return;
+    };
+    ctx.begin_frame_cleared(target.view.clone(), Color::rgb(0.0, 0.0, 1.0));
+    ctx.release_frame_texture();
+    ctx.reset(SIZE as f32, SIZE as f32);
+    assert_eq!(queued_clears(&ctx), (vec![], false));
 }
 
 /// A paint that starts by clearing gets its own colour: before anything is

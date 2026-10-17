@@ -622,9 +622,11 @@ impl HeadlessFrame {
     /// 2-D commands and custom render passes, `end_frame` submits them, and
     /// the per-frame handles are released as `present` releases them. The
     /// context is reset to the target's size first and the frame starts from
-    /// `clear`, as a shell's frame starts from the theme's background (a
-    /// `reset` inside `paint`, as the shells' `default_paint` makes, keeps
-    /// the clear), so every frame's pixels are determined by what it paints.
+    /// `clear`, as a shell's frame starts from the theme's background, unless
+    /// `paint` clears first, before drawing anything (then it starts from
+    /// that colour). A `reset` inside `paint`, as the shells' `default_paint`
+    /// makes, keeps the clear, so every frame's pixels are determined by what
+    /// it paints.
     /// LCD text follows `agg_gui::font_settings::lcd_enabled`, as
     /// `begin_frame` sets it.
     ///
