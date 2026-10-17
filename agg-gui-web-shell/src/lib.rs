@@ -70,6 +70,9 @@ mod cursor;
 mod dom_math;
 mod error;
 mod fatal;
+// Native only: it paints on a headless GPU frame.
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod frame_clear_tests;
 mod host;
 mod pointer;
 mod policy;

@@ -91,6 +91,8 @@ mod click_policy;
 mod close_request;
 mod config;
 mod display_metrics;
+#[cfg(test)]
+mod frame_clear_tests;
 mod host;
 mod ime;
 mod input;

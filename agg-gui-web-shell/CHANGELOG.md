@@ -100,6 +100,9 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Fixed
 
+- Every frame starts from the theme's background: an area no widget paints
+  shows the background, never the canvas's initial transparent black or an
+  earlier frame's drawing.
 - Canvas resized every frame when `client × DPR` exceeded the GPU's
   `max_texture_dimension_2d`: the backing store is now fitted once (scale
   reduced uniformly) and pointer mapping uses the fitted scale.

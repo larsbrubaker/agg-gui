@@ -224,6 +224,10 @@ impl ShellHost for NoHost {}
 /// The default frame body: reset, lay out if anything that feeds layout
 /// changed, paint. Exposed so a host that overrides [`ShellHost::paint`] to
 /// add work *around* the frame can still delegate the frame itself.
+///
+/// The shell has begun the frame, which queued the theme's background clear;
+/// the reset keeps that clear, so any area no widget paints shows the
+/// background rather than the surface's previous contents.
 pub fn default_paint(app: &mut App, ctx: &mut WgpuGfxCtx, frame: &Frame) {
     ctx.reset(frame.width as f32, frame.height as f32);
     ctx.set_lcd_mode(agg_gui::font_settings::lcd_enabled());

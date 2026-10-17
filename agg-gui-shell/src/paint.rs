@@ -212,15 +212,26 @@ impl Painter {
             return;
         }
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        self.ctx.begin_frame(view);
-        // `begin_frame` queues the theme's clear as the pass's first command;
-        // the reset drops it, so the pass loads the frame's pixels instead of
-        // clearing them (agg-gui-wgpu clears only when the first command is a
-        // clear).
-        self.ctx.reset(frame.width as f32, frame.height as f32);
-        host.paint_presented_overlay(app, &mut self.ctx, frame);
-        self.ctx.end_frame();
+        paint_overlay_pass(&mut self.ctx, view, frame, |ctx| {
+            host.paint_presented_overlay(app, ctx, frame)
+        });
     }
+}
+
+/// One pass drawn over a finished frame: begun with
+/// [`WgpuGfxCtx::begin_overlay_frame`], so no clear is queued and the pass
+/// loads the frame's pixels; reset to the frame's size (identity transform,
+/// physical pixels), `paint` draws, and the pass is flushed.
+pub(crate) fn paint_overlay_pass(
+    ctx: &mut WgpuGfxCtx,
+    view: wgpu::TextureView,
+    frame: &Frame,
+    paint: impl FnOnce(&mut WgpuGfxCtx),
+) {
+    ctx.begin_overlay_frame(view);
+    ctx.reset(frame.width as f32, frame.height as f32);
+    paint(ctx);
+    ctx.end_frame();
 }
 
 /// Arrange the retry for a frame the surface refused, then drop the

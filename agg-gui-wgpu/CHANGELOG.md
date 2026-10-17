@@ -10,6 +10,9 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- `WgpuGfxCtx::begin_overlay_frame`: start a frame that paints over the
+  target's current pixels (no clear is queued, and `reset` adds none), for a
+  pass drawn on top of a finished frame before it is presented.
 - `GpuMemoryHints` and `GpuConfig::with_memory_hints`: how a device's
   allocator reserves memory. Windows keep `Performance` by default.
 - `HeadlessOptions` (`force_fallback_adapter`, `startup_budget`,
@@ -62,6 +65,12 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Fixed
 
+- A `reset` after `begin_frame` (as the shells' `default_paint` makes) keeps
+  the frame's clear instead of dropping it with the queued commands, so a
+  window frame starts from the theme's background rather than the surface's
+  old contents (transparent black in a browser, earlier frames' drawing under
+  anything animated). `DrawCtx::clear` before anything is drawn replaces the
+  frame's clear, so a paint that starts by clearing still gets its colour.
 - The `lcb_flatten` pass (a two-plane LCD backbuffer blitted inside a transparent layer) emits the
   ink's own straight colour at the weighted alpha instead of the per-channel premultiplied colour
   plane, so non-black text collapses to one colour: a 0.2-gray label showed a channel spread of 29

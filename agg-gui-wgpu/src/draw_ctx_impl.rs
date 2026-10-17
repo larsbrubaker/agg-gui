@@ -164,7 +164,9 @@ impl DrawCtx for WgpuGfxCtx {
     // ── Clear ─────────────────────────────────────────────────────────────────
 
     fn clear(&mut self, color: Color) {
-        self.commands.push(DrawCommand::Clear(color));
+        // Before anything is drawn this replaces the frame's own clear, so a
+        // paint that starts by clearing gets its colour.
+        self.queue_leading_clear(color);
     }
 
     // ── Path building ─────────────────────────────────────────────────────────

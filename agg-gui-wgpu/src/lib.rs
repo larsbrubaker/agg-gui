@@ -157,6 +157,9 @@ pub(crate) use draw_command::DrawCommand;
 mod draw_ctx_impl;
 mod end_frame;
 mod end_frame_prepare;
+/// Starting a frame: `reset`, `begin_frame` and the overlay frame that keeps
+/// the target's pixels.
+mod frame_start;
 mod gradient;
 mod image_blit;
 mod layer_mask;
@@ -432,6 +435,11 @@ pub struct WgpuGfxCtx {
     /// deferred 2-D pipeline without the platform shell having to plumb the
     /// view through every call.
     pub(crate) surface_view: Option<wgpu::TextureView>,
+    /// The clear the open frame starts with: set by [`Self::begin_frame`],
+    /// `None` for a frame begun with [`Self::begin_overlay_frame`] and once
+    /// the frame's commands are flushed. [`Self::reset`] re-queues it, so a
+    /// shell that resets after beginning the frame still clears it.
+    pub(crate) frame_clear: Option<Color>,
     /// Cloned handle to the current frame's surface texture (the underlying
     /// resource is internally ref-counted, so cloning the handle is cheap).
     /// Used by [`Self::read_screenshot`] and `capture_screenshot` to copy
@@ -606,6 +614,7 @@ impl WgpuGfxCtx {
             lcd_mode: false,
             glyph_cache: GlyphCache::new(),
             surface_view: None,
+            frame_clear: None,
             surface_texture: None,
             warned_unreleased_frame: false,
             pending_screenshot: None,
@@ -630,70 +639,10 @@ impl WgpuGfxCtx {
         self.last_end_frame_stats
     }
 
-    /// Reset drawing state for a new frame.  Preserves GPU resources.
-    pub fn reset(&mut self, width: f32, height: f32) {
-        self.viewport = (width, height);
-        self.fill_color = Color::rgba(0.0, 0.0, 0.0, 1.0);
-        self.fill_linear_gradient = None;
-        self.fill_radial_gradient = None;
-        self.stroke_color = Color::rgba(0.0, 0.0, 0.0, 1.0);
-        self.stroke_linear_gradient = None;
-        self.stroke_radial_gradient = None;
-        self.line_width = 1.0;
-        self.fill_rule = FillRule::NonZero;
-        self.miter_limit = 4.0;
-        self.line_dash.clear();
-        self.dash_offset = 0.0;
-        self.global_alpha = 1.0;
-        self.blend_mode = CompOp::SrcOver;
-        self.paint_state_stack.clear();
-        self.coverage_pass = false;
-        self.state_stack = vec![(TransAffine::new(), None)];
-        self.path = PathStorage::new();
-        self.font = None;
-        self.font_size = 16.0;
-        self.commands.clear();
-        self.layer_stack.clear();
-    }
-
     /// Enable / disable LCD subpixel text for this context.  Called each frame
     /// from `render_app_frame` with `font_settings::lcd_enabled()`.
     pub fn set_lcd_mode(&mut self, on: bool) {
         self.lcd_mode = on;
-    }
-
-    /// Start a frame: take ownership of this frame's render target and queue
-    /// the clear.
-    ///
-    /// `view` is the `wgpu::TextureView` for the surface texture (or any other
-    /// target) being painted this frame.  It is stashed on the context so that
-    /// mid-frame GPU work — custom render passes, layer compositing — targets
-    /// the same attachment as the deferred 2-D pipeline without the caller
-    /// plumbing it through every method; [`Self::end_frame`] consumes it.
-    ///
-    /// The clear itself happens inside `end_frame`, when the leading
-    /// `DrawCommand::Clear` is flushed into the first render pass; this
-    /// method only pushes the current theme's background colour onto the
-    /// command list so the frame starts from a clean framebuffer.
-    pub fn begin_frame(&mut self, view: wgpu::TextureView) {
-        let bg = agg_gui::current_visuals().bg_color;
-        self.begin_frame_cleared(view, bg);
-    }
-
-    /// [`Self::begin_frame`] with the clear colour stated instead of taken
-    /// from the theme — an offscreen frame ([`headless::HeadlessFrame`])
-    /// whose starting pixels a test pins.
-    pub(crate) fn begin_frame_cleared(&mut self, view: wgpu::TextureView, clear: Color) {
-        self.surface_view = Some(view);
-        self.dead_sweeps.begin_frame();
-        self.commands.push(DrawCommand::Clear(clear));
-        // Sync the per-ctx LCD flag from the global typography setting so
-        // any subsequent `fill_text` routes through the cached subpixel mask
-        // path when LCD is enabled (default at scale ≤ 1.25; an explicit choice at any scale).  Without this
-        // shells that drive the loop via `begin_frame` instead of a helper
-        // that sets it silently fall through to the aliased tessellated-
-        // outline path even when the global says LCD is on.
-        self.set_lcd_mode(agg_gui::font_settings::lcd_enabled());
     }
 
     /// Flush all deferred draw commands into a single wgpu command submission.

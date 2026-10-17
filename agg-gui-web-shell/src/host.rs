@@ -168,6 +168,11 @@ impl WebShellHost for NoHost {}
 
 /// The default frame body: reset, lay out if anything that feeds layout
 /// changed, paint. Identical to `agg_gui_shell::default_paint`.
+///
+/// The shell has begun the frame, which queued the theme's background clear;
+/// the reset keeps that clear, so any area no widget paints shows the
+/// background rather than the canvas's previous (or initially transparent)
+/// contents.
 pub fn default_paint(app: &mut App, ctx: &mut WgpuGfxCtx, frame: &Frame) {
     ctx.reset(frame.width as f32, frame.height as f32);
     ctx.set_lcd_mode(agg_gui::font_settings::lcd_enabled());

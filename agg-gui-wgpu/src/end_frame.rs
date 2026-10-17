@@ -205,6 +205,9 @@ pub(crate) enum Prepared {
 impl WgpuGfxCtx {
     pub(crate) fn flush_to_surface(&mut self, surface_view: &wgpu::TextureView) {
         let commands = std::mem::take(&mut self.commands);
+        // The frame's clear is in `commands` now; a `reset` after this flush
+        // must not queue it again over what was drawn.
+        self.frame_clear = None;
         let command_count = commands.len() as u32;
 
         // Rewind the per-frame buffer pool to chunk 0 / offset 0. Last

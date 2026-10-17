@@ -13,6 +13,8 @@ mod clip_path_readback_tests;
 mod dead_sweep_tests;
 #[path = "frame_release_tests.rs"]
 mod frame_release_tests;
+#[path = "frame_start_tests.rs"]
+mod frame_start_tests;
 #[path = "golden/mod.rs"]
 mod golden;
 #[path = "gpu_comp_op_tests.rs"]

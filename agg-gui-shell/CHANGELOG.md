@@ -88,6 +88,13 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   layout gets the next frame laid out even when the size, scale and
   invalidation epoch are unchanged.
 
+### Fixed
+
+- Every frame starts from the theme's background: an area no widget paints
+  shows the background, never the swap-chain image's previous contents. The
+  presented-overlay pass (`ShellHost::paint_presented_overlay`) begins with
+  `WgpuGfxCtx::begin_overlay_frame`, so it still keeps the frame's pixels.
+
 ## [0.5.2] - 2026-09-28
 
 ### Added
