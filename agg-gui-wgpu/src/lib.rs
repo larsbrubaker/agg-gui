@@ -67,6 +67,9 @@ pub use gpu::{
 /// Wall-clock budgets around building a device at start-up and draining the
 /// GPU at close (agg-sharp `GpuStartup` / `GpuTeardown`).
 pub mod gpu_budget;
+/// Bounded GPU waits (frame pacing, read-back) and device-loss reasons.
+mod gpu_wait;
+pub use gpu_wait::GPU_WAIT_BUDGET;
 /// How a device's allocator reserves memory, for windows and headless alike.
 mod gpu_memory_hints;
 pub use gpu_memory_hints::GpuMemoryHints;

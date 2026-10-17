@@ -16,8 +16,20 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   `memory_hints`), `HeadlessGpu::shared_with_options`,
   `HeadlessGpu::create_with_options`, `HeadlessGpu::memory_hints`, and
   `HeadlessError::CreationPanicked`.
+- Bounded GPU waits: `HeadlessFrame::try_render` / `try_render_app` return the
+  outcome of the frame-pacing wait, `HeadlessError::GpuTimeout` and
+  `HeadlessError::DeviceLost` (with wgpu's reason) report a hung or lost GPU,
+  `HeadlessGpu::device_lost_reason` says why a device was lost, and
+  `HeadlessTarget::with_wait_budget` / `HeadlessFrame::set_wait_budget` set the
+  bound (`GPU_WAIT_BUDGET`, 30 s, by default).
 
 ### Changed
+
+- Headless frame pacing, headless read-back, `WgpuGfxCtx::read_screenshot` and
+  the blocking capture read-back wait at most their budget for the GPU instead
+  of forever, so a GPU that hangs or loses its device fails the call (a
+  logged warning from `HeadlessFrame::render`, an error from the rest) rather
+  than parking the thread.
 
 - **Breaking for consumers that set `default-features = false`:** wgpu's WebGL2 backend is the
   new `webgl` feature (on by default; it only affects wasm32), so such a consumer that renders

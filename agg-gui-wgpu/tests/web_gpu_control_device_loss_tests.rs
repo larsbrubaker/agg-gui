@@ -1,8 +1,9 @@
 //! agg-sharp `Tests/Agg.Tests/Agg.WebGpuRender/WebGpuControlDeviceLossTests.cs`:
 //! device-loss detection driven for real — the device is destroyed, wgpu
 //! raises the device-lost callback, and the flag a frame checks
-//! (`Gpu::device_lost`, the same watcher as [`HeadlessGpu::device_lost`]) has
-//! to see it; then a rebuilt device and context render again.
+//! ([`HeadlessGpu::device_lost`], set from the same callback as
+//! `Gpu::device_lost`) has to see it; then a rebuilt device and context
+//! render again.
 //!
 //! The C# test runs `WebGpuControl` over an off-screen HWND. A window surface
 //! cannot be made from a test thread here (winit owns the main thread on

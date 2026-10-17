@@ -192,7 +192,14 @@ impl WgpuGfxCtx {
         slice.map_async(wgpu::MapMode::Read, move |res| {
             let _ = sender.send(res);
         });
-        let _ = self.device.poll(wgpu::PollType::wait_indefinitely());
+        // Bounded: a hung GPU must fail the capture, not park the UI thread
+        // (see `crate::gpu_wait`). A finished wait has run the map callback.
+        if let Err(e) =
+            crate::gpu_wait::wait_for_submission(&self.device, None, None, crate::GPU_WAIT_BUDGET)
+        {
+            log::warn!("agg-gui-wgpu: screenshot read-back abandoned: {e}");
+            return (Vec::new(), 0, 0);
+        }
         if receiver.recv().ok().and_then(|r| r.ok()).is_none() {
             return (Vec::new(), 0, 0);
         }

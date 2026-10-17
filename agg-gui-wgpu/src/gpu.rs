@@ -42,7 +42,6 @@ pub use acquire::{FrameAcquire, RetryWake, SurfaceError};
 mod adapter;
 #[path = "gpu_surface_acquire.rs"]
 mod surface_acquire;
-pub(crate) use acquire::watch_device_loss;
 pub(crate) use adapter::adapter_options;
 pub use adapter::{is_fallback_adapter, AdapterSummary};
 pub use surface_acquire::{surface_acquire_action, SurfaceAcquire};

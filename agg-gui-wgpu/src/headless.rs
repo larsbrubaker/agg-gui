@@ -24,9 +24,16 @@
 //!   inside it as they do on a window. Frames are paced as a window's are:
 //!   at most two on the GPU at once (see [`HeadlessFrame::render`]).
 //!
-//! The read-back copy is `screenshot_readback::read_texture_rgba`, the one
-//! [`WgpuGfxCtx::read_screenshot`] uses. Native only: the device request
-//! blocks, which a browser cannot.
+//! Every wait on the GPU here — the frame pacing and the read-back — is
+//! bounded ([`crate::GPU_WAIT_BUDGET`] by default, see
+//! [`HeadlessTarget::with_wait_budget`]): a GPU that hangs or loses its
+//! device fails the wait with [`HeadlessError::GpuTimeout`] or
+//! [`HeadlessError::DeviceLost`] (naming wgpu's reason) instead of parking
+//! the caller for good (`crate::gpu_wait` says why and how).
+//!
+//! The read-back copy is `screenshot_readback::read_texture_rgba_bounded`,
+//! the one [`WgpuGfxCtx::read_screenshot`] uses. Native only: the device
+//! request blocks, which a browser cannot.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -38,7 +45,13 @@ use crate::gpu_budget::{
     create_within_budget, report_to, spawn_thread, BACKGROUND_THREAD_AVAILABLE, GPU_STARTUP_BUDGET,
 };
 use crate::gpu_shared_startup::SharedStartup;
-use crate::{GpuMemoryHints, WgpuGfxCtx};
+use crate::gpu_wait::{watch_device_loss_reason, DeviceLoss};
+use crate::screenshot_readback::ReadbackError;
+use crate::{GpuMemoryHints, WgpuGfxCtx, GPU_WAIT_BUDGET};
+
+#[path = "headless_error.rs"]
+mod headless_error;
+pub use headless_error::HeadlessError;
 
 /// The format of a [`HeadlessTarget`]: the frame format the native shells get
 /// on every primary backend (`Gpu::new` takes the surface's first non-sRGB
@@ -121,76 +134,6 @@ impl HeadlessOptions {
     }
 }
 
-/// Why headless rendering could not run.
-#[derive(Clone, Debug, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum HeadlessError {
-    /// No adapter on the primary backends (Vulkan, Metal, DX12): a machine
-    /// with no GPU and no software Vulkan driver. Carries wgpu's text.
-    NoAdapter(String),
-    /// The software (fallback) adapter was demanded and the platform has
-    /// none — always on macOS, on Linux without lavapipe. Carries wgpu's
-    /// text. A caller skips, as on [`Self::NoAdapter`].
-    NoFallbackAdapter(String),
-    /// The adapter refused the device request. Carries wgpu's text.
-    RequestDevice(String),
-    /// The adapter or device request did not return within the start-up
-    /// budget (a hung driver, or a machine too loaded to meet the budget).
-    /// For the shared device this is not final: the request keeps running,
-    /// and a later call gets the device if it arrives. For
-    /// [`HeadlessGpu::create`] the half-built device is leaked on its own
-    /// thread, as `Gpu::new` does.
-    StartupTimedOut {
-        /// The budget that expired.
-        budget: Duration,
-    },
-    /// The target's texels are not 8-bit RGBA or BGRA, which is all the
-    /// read-back converts.
-    UnreadableFormat(wgpu::TextureFormat),
-    /// Mapping the read-back buffer failed (the device was lost).
-    Readback(String),
-    /// The shared device's adapter or device request panicked inside wgpu
-    /// (only [`HeadlessGpu::shared_with_options`] and the calls built on it:
-    /// every caller of the shared device gets the same answer). Carries the
-    /// panic's text. [`HeadlessGpu::create`] and
-    /// [`HeadlessGpu::create_with_options`] resume the panic on their caller
-    /// instead, since the device is that caller's alone.
-    CreationPanicked(String),
-}
-
-impl std::fmt::Display for HeadlessError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::NoAdapter(e) => write!(
-                f,
-                "no wgpu adapter for headless rendering (Vulkan, Metal or DX12): {e}"
-            ),
-            Self::NoFallbackAdapter(e) => write!(
-                f,
-                "no software (fallback) wgpu adapter for headless rendering on this platform: {e}"
-            ),
-            Self::RequestDevice(e) => write!(f, "could not request a headless wgpu device: {e}"),
-            Self::StartupTimedOut { budget } => write!(
-                f,
-                "the headless wgpu device could not be created: the adapter or device request \
-                 did not return within {}s",
-                crate::gpu_budget::format_budget_seconds(*budget)
-            ),
-            Self::UnreadableFormat(format) => write!(
-                f,
-                "cannot read back a {format:?} target: only 8-bit RGBA and BGRA formats are \
-                 converted"
-            ),
-            Self::Readback(e) => write!(f, "headless read-back failed: {e}"),
-            Self::CreationPanicked(e) => {
-                write!(f, "the headless wgpu device request panicked: {e}")
-            }
-        }
-    }
-}
-
-impl std::error::Error for HeadlessError {}
-
 /// A wgpu device and queue with no window.
 pub struct HeadlessGpu {
     device: Arc<wgpu::Device>,
@@ -200,7 +143,8 @@ pub struct HeadlessGpu {
     /// The adapter the device was opened on, kept for what a device cannot
     /// report (see [`HeadlessGpu::wgpu_adapter`]).
     wgpu_adapter: wgpu::Adapter,
-    device_lost: Arc<std::sync::atomic::AtomicBool>,
+    /// Whether, and why, the device was lost.
+    loss: Arc<DeviceLoss>,
     /// The hints the device was requested with.
     memory_hints: GpuMemoryHints,
 }
@@ -363,10 +307,17 @@ impl HeadlessGpu {
         &self.adapter_limits
     }
 
-    /// Has this device been lost (or destroyed) since it was created? The
-    /// same flag as [`crate::Gpu::device_lost`].
+    /// Has this device been lost (or destroyed) since it was created? Set
+    /// from wgpu's device-lost callback, as [`crate::Gpu::device_lost`] is;
+    /// [`Self::device_lost_reason`] says why.
     pub fn device_lost(&self) -> bool {
-        self.device_lost.load(std::sync::atomic::Ordering::Relaxed)
+        self.loss.is_lost()
+    }
+
+    /// Why the device was lost, as wgpu reported it (its `DeviceLostReason`
+    /// and message); `None` while it is not lost.
+    pub fn device_lost_reason(&self) -> Option<String> {
+        self.loss.lost_reason()
     }
 
     /// The memory hints the device was requested with — for the shared
@@ -405,14 +356,14 @@ fn request_headless_device(
     );
     let (device, queue) = pollster::block_on(adapter.request_device(&descriptor))
         .map_err(|e| HeadlessError::RequestDevice(e.to_string()))?;
-    let device_lost = crate::gpu::watch_device_loss(&device);
+    let loss = watch_device_loss_reason(&device);
     Ok(HeadlessGpu {
         device: Arc::new(device),
         queue: Arc::new(queue),
         adapter_info: adapter.get_info(),
         adapter_limits: adapter.limits(),
         wgpu_adapter: adapter,
-        device_lost,
+        loss,
         memory_hints,
     })
 }
@@ -423,19 +374,26 @@ pub struct HeadlessTarget {
     queue: Arc<wgpu::Queue>,
     texture: wgpu::Texture,
     view: wgpu::TextureView,
+    /// The device's loss record when the target was made from a
+    /// [`HeadlessGpu`]: a known loss fails a wait at once, with its reason.
+    loss: Option<Arc<DeviceLoss>>,
+    /// How long a read-back (and a [`HeadlessFrame`]'s pacing) waits.
+    wait_budget: Duration,
 }
 
 impl HeadlessTarget {
     /// A `width` x `height` device-pixel target in [`HEADLESS_FORMAT`] on
     /// `gpu`.
     pub fn new(gpu: &HeadlessGpu, width: u32, height: u32) -> Self {
-        Self::with_format(
+        let mut target = Self::with_format(
             Arc::clone(&gpu.device),
             Arc::clone(&gpu.queue),
             HEADLESS_FORMAT,
             width,
             height,
-        )
+        );
+        target.loss = Some(Arc::clone(&gpu.loss));
+        target
     }
 
     /// A target in `format` on any device — for a caller whose
@@ -475,7 +433,48 @@ impl HeadlessTarget {
             queue,
             texture,
             view,
+            loss: None,
+            wait_budget: GPU_WAIT_BUDGET,
         }
+    }
+
+    /// Wait at most `budget` for the GPU in a read-back (and in the frame
+    /// pacing of a [`HeadlessFrame`] built on this target) before failing
+    /// with [`HeadlessError::GpuTimeout`]. Default [`crate::GPU_WAIT_BUDGET`].
+    pub fn with_wait_budget(mut self, budget: Duration) -> Self {
+        self.wait_budget = budget;
+        self
+    }
+
+    /// How long a wait on the GPU may take (see [`Self::with_wait_budget`]).
+    pub fn wait_budget(&self) -> Duration {
+        self.wait_budget
+    }
+
+    /// The same target settings (device-loss record, wait budget) on a new
+    /// texture of `width` x `height`.
+    fn resized(&self, width: u32, height: u32) -> Self {
+        let mut target = Self::with_format(
+            Arc::clone(&self.device),
+            Arc::clone(&self.queue),
+            self.format(),
+            width,
+            height,
+        );
+        target.loss = self.loss.clone();
+        target.wait_budget = self.wait_budget;
+        target
+    }
+
+    /// Wait at most the wait budget for the GPU to reach `index`.
+    fn wait_for(&self, index: wgpu::SubmissionIndex) -> Result<(), HeadlessError> {
+        crate::gpu_wait::wait_for_submission(
+            &self.device,
+            Some(index),
+            self.loss.as_deref(),
+            self.wait_budget,
+        )
+        .map_err(HeadlessError::from)
     }
 
     pub fn texture(&self) -> &wgpu::Texture {
@@ -497,7 +496,9 @@ impl HeadlessTarget {
 
     /// The target's pixels as RGBA8, `width * 4` bytes per row with no
     /// padding, top row first (the y-down order of a PNG or a screenshot).
-    /// Blocks until everything submitted to the device so far has rendered.
+    /// Blocks until everything submitted to the device so far has rendered,
+    /// for at most the wait budget ([`HeadlessError::GpuTimeout`] after it,
+    /// [`HeadlessError::DeviceLost`] on a lost device).
     pub fn read_rgba(&self) -> Result<Vec<u8>, HeadlessError> {
         let format = self.format();
         if !matches!(
@@ -509,13 +510,18 @@ impl HeadlessTarget {
         ) {
             return Err(HeadlessError::UnreadableFormat(format));
         }
-        crate::screenshot_readback::read_texture_rgba(
+        crate::screenshot_readback::read_texture_rgba_bounded(
             &self.device,
             &self.queue,
             &self.texture,
             format,
+            self.loss.as_deref(),
+            self.wait_budget,
         )
-        .map_err(|e| HeadlessError::Readback(e.to_string()))
+        .map_err(|e| match e {
+            ReadbackError::Wait(wait) => HeadlessError::from(wait),
+            other => HeadlessError::Readback(other.to_string()),
+        })
     }
 
     /// The target's pixels as an `agg_gui::Framebuffer`: RGBA8, bottom row
@@ -585,13 +591,13 @@ impl HeadlessFrame {
         if self.size() == crate::clamp_surface_size(width, height, max_dim) {
             return;
         }
-        self.target = HeadlessTarget::with_format(
-            Arc::clone(&self.target.device),
-            Arc::clone(&self.target.queue),
-            self.target.format(),
-            width,
-            height,
-        );
+        self.target = self.target.resized(width, height);
+    }
+
+    /// Wait at most `budget` for the GPU in this frame's pacing and
+    /// read-backs (see [`HeadlessTarget::with_wait_budget`]).
+    pub fn set_wait_budget(&mut self, budget: Duration) {
+        self.target.wait_budget = budget;
     }
 
     pub fn ctx(&self) -> &WgpuGfxCtx {
@@ -633,6 +639,11 @@ impl HeadlessFrame {
     /// up to that frame, other threads' included (the device may be
     /// [`HeadlessGpu::shared`]).
     ///
+    /// The wait is bounded by the target's wait budget
+    /// ([`crate::GPU_WAIT_BUDGET`] by default): when the GPU does not finish
+    /// the previous frame in time, or the device is lost, `render` logs it
+    /// (`log::warn!`) and returns; [`Self::try_render`] returns it instead.
+    ///
     /// Returns the submission index that ends this frame: everything the
     /// frame submitted (its 2-D commands and custom render passes) is done
     /// once the GPU has reached it, e.g. through
@@ -642,6 +653,33 @@ impl HeadlessFrame {
         clear: Color,
         paint: impl FnOnce(&mut WgpuGfxCtx),
     ) -> wgpu::SubmissionIndex {
+        let (index, waited) = self.render_frame(clear, paint);
+        if let Err(e) = waited {
+            log::warn!("waiting for the previous headless frame on the GPU: {e}");
+        }
+        index
+    }
+
+    /// [`Self::render`], failing when the wait for the previous frame does:
+    /// [`HeadlessError::GpuTimeout`] when the GPU did not finish it within
+    /// the wait budget, [`HeadlessError::DeviceLost`] (with wgpu's reason)
+    /// when the device is gone. This frame has been painted and submitted
+    /// either way. A harness that must not run on after a hung GPU uses this.
+    pub fn try_render(
+        &mut self,
+        clear: Color,
+        paint: impl FnOnce(&mut WgpuGfxCtx),
+    ) -> Result<wgpu::SubmissionIndex, HeadlessError> {
+        let (index, waited) = self.render_frame(clear, paint);
+        waited.map(|()| index)
+    }
+
+    /// One frame, and the outcome of the wait for the frame before it.
+    fn render_frame(
+        &mut self,
+        clear: Color,
+        paint: impl FnOnce(&mut WgpuGfxCtx),
+    ) -> (wgpu::SubmissionIndex, Result<(), HeadlessError>) {
         let (w, h) = self.target.size();
         self.ctx.reset(w as f32, h as f32);
         self.ctx.set_surface_texture(self.target.texture.clone());
@@ -658,22 +696,14 @@ impl HeadlessFrame {
     /// The frame may make several submissions (`end_frame`'s, and none at all
     /// when there was nothing to flush), so its end is marked with an empty
     /// submission, numbered after all of them; waiting on that index waits
-    /// for the whole frame.
-    fn pace(&mut self) -> wgpu::SubmissionIndex {
+    /// for the whole frame. The wait is bounded by the target's budget.
+    fn pace(&mut self) -> (wgpu::SubmissionIndex, Result<(), HeadlessError>) {
         let this_frame = self.target.queue.submit(std::iter::empty());
-        if let Some(previous) = self.previous.replace(this_frame.clone()) {
-            // Neither `PollError` can happen here: there is no timeout, and
-            // the index came from this queue. A lost device is reported
-            // through its device-lost callback (`HeadlessGpu::device_lost`),
-            // not here; log rather than fail a frame that already ran.
-            if let Err(e) = self.target.device.poll(wgpu::PollType::Wait {
-                submission_index: Some(previous),
-                timeout: None,
-            }) {
-                log::warn!("waiting for the previous headless frame on the GPU: {e}");
-            }
-        }
-        this_frame
+        let waited = match self.previous.replace(this_frame.clone()) {
+            Some(previous) => self.target.wait_for(previous),
+            None => Ok(()),
+        };
+        (this_frame, waited)
     }
 
     /// [`Self::render`] painting `app`: agg-gui-shell's `default_paint`
@@ -681,6 +711,15 @@ impl HeadlessFrame {
     /// at the frame's size, in logical pixels, before the first render).
     pub fn render_app(&mut self, clear: Color, app: &mut App) -> wgpu::SubmissionIndex {
         self.render(clear, |ctx| app.paint(ctx))
+    }
+
+    /// [`Self::try_render`] painting `app`, as [`Self::render_app`] does.
+    pub fn try_render_app(
+        &mut self,
+        clear: Color,
+        app: &mut App,
+    ) -> Result<wgpu::SubmissionIndex, HeadlessError> {
+        self.try_render(clear, |ctx| app.paint(ctx))
     }
 
     /// The last rendered frame as RGBA8, top row first — see

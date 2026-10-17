@@ -14,6 +14,7 @@
 //! [`WgpuGfxCtx::release_frame_texture`] drop the ctx's frame handles before
 //! the swap chain gets the frame back (required on DX12 — see `present`).
 
+use crate::gpu_wait::{wait_for_submission, DeviceLoss, GpuWaitError};
 use crate::WgpuGfxCtx;
 
 impl WgpuGfxCtx {
@@ -121,19 +122,58 @@ impl WgpuGfxCtx {
 /// swapped on the way out, so callers always get RGBA order; any other format
 /// is copied as is, so it must be 4 bytes per texel. A texture that was not
 /// created with `COPY_SRC` is refused with an error. Blocks on the device
-/// until the copy is mapped. Shared by [`WgpuGfxCtx::read_screenshot`] and
-/// [`crate::headless::HeadlessTarget::read_rgba`].
+/// until the copy is mapped, for at most [`crate::GPU_WAIT_BUDGET`]. Used by
+/// [`WgpuGfxCtx::read_screenshot`]; [`read_texture_rgba_bounded`] is the same
+/// copy with the caller's device-loss record and budget.
 pub(crate) fn read_texture_rgba(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     texture: &wgpu::Texture,
     format: wgpu::TextureFormat,
-) -> Result<Vec<u8>, wgpu::BufferAsyncError> {
+) -> Result<Vec<u8>, ReadbackError> {
+    read_texture_rgba_bounded(device, queue, texture, format, None, crate::GPU_WAIT_BUDGET)
+}
+
+/// Why [`read_texture_rgba_bounded`] returned no pixels.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum ReadbackError {
+    /// The texture was not created with `COPY_SRC`.
+    NotCopyable,
+    /// The GPU did not finish the copy: hung, lost, or the wait was refused.
+    Wait(GpuWaitError),
+    /// The copy finished but mapping its buffer failed.
+    Map(wgpu::BufferAsyncError),
+}
+
+impl std::fmt::Display for ReadbackError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NotCopyable => f.write_str("the texture was not created with COPY_SRC"),
+            Self::Wait(e) => e.fmt(f),
+            Self::Map(e) => write!(f, "mapping the read-back buffer failed: {e}"),
+        }
+    }
+}
+
+/// [`read_texture_rgba`] waiting at most `budget` for the copy, reporting a
+/// loss `loss` recorded (with its reason) instead of polling a lost device.
+/// Shared with [`crate::headless::HeadlessTarget::read_rgba`].
+///
+/// The wait is bounded because a GPU that hangs never finishes the copy, and
+/// an unbounded poll would park the caller for good (see `crate::gpu_wait`).
+pub(crate) fn read_texture_rgba_bounded(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    texture: &wgpu::Texture,
+    format: wgpu::TextureFormat,
+    loss: Option<&DeviceLoss>,
+    budget: std::time::Duration,
+) -> Result<Vec<u8>, ReadbackError> {
     // A texture without COPY_SRC cannot be read back: the copy would be a
     // validation error and the capture a blank or garbage image. Refuse it so
     // the caller reports a failed capture instead.
     if !texture.usage().contains(wgpu::TextureUsages::COPY_SRC) {
-        return Err(wgpu::BufferAsyncError);
+        return Err(ReadbackError::NotCopyable);
     }
     let size = texture.size();
     let (w, h) = (size.width, size.height);
@@ -191,10 +231,14 @@ pub(crate) fn read_texture_rgba(
     slice.map_async(wgpu::MapMode::Read, move |res| {
         let _ = sender.send(res);
     });
-    let _ = device.poll(wgpu::PollType::wait_indefinitely());
+    // A finished wait has run the map callback (wgpu fires it inside the
+    // poll), so the receive below never blocks; a failed one returns before
+    // it, leaving the callback to fire with an error when `staging` drops.
+    wait_for_submission(device, None, loss, budget).map_err(ReadbackError::Wait)?;
     receiver
         .recv()
-        .expect("map_async sender dropped before resolving")?;
+        .expect("map_async sender dropped before resolving")
+        .map_err(ReadbackError::Map)?;
 
     // Surface format may be Bgra8Unorm; PNG / JS expects RGBA so swap
     // R↔B per pixel as we copy.  Surface textures are Y-down, which
