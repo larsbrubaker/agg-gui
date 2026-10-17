@@ -50,6 +50,7 @@ pub mod multi_click;
 pub mod named;
 pub mod number_edit;
 pub mod on_screen_keyboard;
+pub mod opacity;
 pub mod performance;
 pub mod popup;
 pub mod primitives;
@@ -132,6 +133,7 @@ pub use named::Named;
 pub use number_edit::{
     NumberCommit, NumberEdit, NumberEditError, NumberEditOptions, NumberFormat, TextValueParser,
 };
+pub use opacity::Opacity;
 pub use performance::{
     paint_sparkline, shared_frame_history, shared_run_mode, FrameHistory, PerformanceView, RunMode,
     RunModeDesc, RunModeRow, SharedFrameHistory,

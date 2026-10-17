@@ -10,6 +10,23 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- `Opacity` widget: wraps one child and paints it at an opacity read on every paint from a shared
+  `Rc<Cell<f64>>` (`Opacity::new`) or a closure (`Opacity::from_fn`), so an animation drives a
+  fade without rebuilding the tree. At 1 it adds nothing (no layer); between 0 and 1 the subtree
+  renders through one compositing layer at that alpha and takes input as usual; at 0 it paints
+  nothing, its global overlays included, the pointer passes through to what is behind and keyboard
+  focus leaves it, while layout keeps its space.
+
+- `Widget::suppresses_paint()` (default `false`): while true the paint traversal skips the widget
+  and its whole subtree, inline and global overlays, without touching layout. `Opacity` uses it at
+  opacity 0.
+
+- `claim_web_shortcut(key)`, `release_web_shortcut(key)` and `is_web_shortcut_claimed(key)`: an app
+  claims more Ctrl/Cmd shortcuts (with or without Shift, never with Alt) from the browser, so the
+  web keyboard bridge `preventDefault()`s them after forwarding them; claiming `'s'` keeps "Save
+  Page As" from opening when the app saves. The clipboard and undo set (C, X, A, Z, Y) stays
+  claimed as before; nothing else changes until an app claims a key.
+
 - `ModalSheet::centred_room(available)`: the largest panel a centred sheet draws within a host of
   that size (the host less the edge margin on every side, never negative), and the margin itself
   as `modal_sheet::EDGE_MARGIN` (24). A host sizing something to match the panel, such as a

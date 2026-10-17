@@ -50,7 +50,8 @@ The app is built by a closure that runs *after* the GPU exists
 - **Input** — pointer events for mouse, pen and multi-touch, wheel (DOM deltas
   normalised to notches), pointer-leave, keyboard down/up and the clipboard
   bridge (only while the canvas has focus, with `with_keyboard_needs_focus`,
-  for a canvas embedded in a larger page), cursor icon, `touch-action: none`, and file drag-and-drop: a file
+  for a canvas embedded in a larger page; Ctrl/Cmd shortcuts the app handles
+  itself, such as Save, taken from the browser with `with_claimed_shortcut`), cursor icon, `touch-action: none`, and file drag-and-drop: a file
   drag over the canvas sends `App::on_file_drag_hover` / `on_file_drag_leave`,
   and a drop reads each file and sends names + bytes through
   `App::on_file_data_dropped` (`Event::FileDataDropped`).

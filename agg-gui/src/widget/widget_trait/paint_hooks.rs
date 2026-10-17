@@ -47,6 +47,21 @@ macro_rules! widget_paint_hooks {
             false
         }
 
+        /// Whether the paint traversal skips this widget and its whole subtree
+        /// right now: no `paint`, children, overlay or global overlay (an open
+        /// child popup included). Layout, the tree and hit testing are not
+        /// affected, so the widget keeps its space; a widget that also wants
+        /// no input says so through its own hit-test hooks.
+        /// [`Opacity`](crate::widgets::Opacity) at opacity 0 uses it, where a
+        /// fade has made the subtree invisible but must not move its
+        /// neighbours (which [`is_visible`](Self::is_visible) `false` would, as
+        /// containers drop invisible children from layout).
+        ///
+        /// Default: `false`.
+        fn suppresses_paint(&self) -> bool {
+            false
+        }
+
         /// Whether this widget renders into its own offscreen buffer before
         /// compositing into the parent.
         ///

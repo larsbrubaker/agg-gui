@@ -10,6 +10,10 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- `WebShellConfig::with_claimed_shortcut(key)` / `claimed_shortcuts`: Ctrl/Cmd shortcuts the app
+  handles itself and takes from the browser (`'s'` for Save, so "Save Page As" does not open),
+  applied at start through agg-gui's `claim_web_shortcut`. Empty by default.
+
 - `WebShellConfig::with_keyboard_needs_focus`: for a canvas embedded in a
   larger page, keys and the clipboard reach the app only while the canvas (or
   the shell's IME input) has focus, and a press on the canvas focuses it

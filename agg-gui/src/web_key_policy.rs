@@ -2,8 +2,54 @@
 //! `install_keyboard_listeners`) `preventDefault()`s after forwarding them
 //! to the app, and which keyups it forwards ([`HeldKeys`]). Pure logic with no DOM types, so it compiles and is tested
 //! on every target; only the wasm `web_adapter` calls it.
+//!
+//! An app claims more Ctrl/Cmd shortcuts from the browser with
+//! [`claim_web_shortcut`] (Ctrl/Cmd+S for its own Save, so the browser's
+//! "Save Page As" does not open). Claims are per thread, the browser's UI
+//! thread being the only one that sees key events.
+
+use std::cell::RefCell;
 
 use crate::event::{Key, Modifiers};
+
+std::thread_local! {
+    /// Lowercased keys an app claimed through [`claim_web_shortcut`].
+    static CLAIMED: RefCell<Vec<char>> = const { RefCell::new(Vec::new()) };
+}
+
+/// The keys every app gets: the clipboard and undo/redo set.
+const BUILT_IN_CLAIMS: [char; 5] = ['c', 'x', 'a', 'z', 'y'];
+
+/// Claim Ctrl/Cmd+`key` (with or without Shift) from the browser: the web
+/// keyboard bridge then `preventDefault()`s it after forwarding it to the
+/// app, so the browser's own action for it (Ctrl/Cmd+S "Save Page As",
+/// Ctrl/Cmd+Shift+S, Ctrl/Cmd+P print, ...) does not run. Claim only
+/// shortcuts the app handles. Alt combinations are never claimed (Alt+Left is
+/// history back; AltGr characters report Ctrl+Alt). Matching ignores case.
+/// Native builds have no browser, so a claim changes nothing there.
+pub fn claim_web_shortcut(key: char) {
+    let key = key.to_ascii_lowercase();
+    CLAIMED.with(|c| {
+        let mut c = c.borrow_mut();
+        if !c.contains(&key) {
+            c.push(key);
+        }
+    });
+}
+
+/// Give Ctrl/Cmd+`key` back to the browser after [`claim_web_shortcut`].
+/// The built-in clipboard and undo set (C, X, A, Z, Y) stays claimed.
+pub fn release_web_shortcut(key: char) {
+    let key = key.to_ascii_lowercase();
+    CLAIMED.with(|c| c.borrow_mut().retain(|k| *k != key));
+}
+
+/// Whether Ctrl/Cmd+`key` is claimed for the app: the built-in set or a
+/// [`claim_web_shortcut`] claim.
+pub fn is_web_shortcut_claimed(key: char) -> bool {
+    let key = key.to_ascii_lowercase();
+    BUILT_IN_CLAIMS.contains(&key) || CLAIMED.with(|c| c.borrow().contains(&key))
+}
 
 /// Whether a forwarded keydown should suppress the browser's default
 /// action.  The listeners sit at window level, so this must block only
@@ -12,7 +58,8 @@ use crate::event::{Key, Modifiers};
 /// leaving browser chrome usable: `Tab` focus-navigation, modified
 /// shortcuts like Ctrl+R / Cmd+L, and the F-keys stay with the browser.
 /// Ctrl/Cmd C, X, A, Z, Y are the app's clipboard/undo set and are
-/// claimed.  Alt combos (Alt+Left = history back, AltGr chars report
+/// claimed, as is any key an app claimed with [`claim_web_shortcut`].
+/// Alt combos (Alt+Left = history back, AltGr chars report
 /// ctrl+alt) are never suppressed.
 ///
 /// F1 is the one F-key claimed: desktop apps bind it to their own help,
@@ -26,9 +73,7 @@ use crate::event::{Key, Modifiers};
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 pub(crate) fn should_prevent_default(k: &Key, mods: Modifiers) -> bool {
     if mods.ctrl || mods.meta {
-        return matches!(k, Key::Char(c)
-            if matches!(c.to_ascii_lowercase(), 'c' | 'x' | 'a' | 'z' | 'y'))
-            && !mods.alt;
+        return matches!(k, Key::Char(c) if is_web_shortcut_claimed(*c)) && !mods.alt;
     }
     if mods.alt {
         return false;
@@ -163,5 +208,55 @@ mod tests {
         };
         assert!(should_prevent_default(&Key::Char('z'), cmd));
         assert!(!should_prevent_default(&Key::Char('r'), cmd));
+    }
+
+    fn ctrl() -> Modifiers {
+        Modifiers {
+            ctrl: true,
+            ..plain()
+        }
+    }
+
+    fn cmd_shift() -> Modifiers {
+        Modifiers {
+            meta: true,
+            shift: true,
+            ..plain()
+        }
+    }
+
+    #[test]
+    fn save_stays_with_the_browser_until_the_app_claims_it() {
+        release_web_shortcut('s');
+        assert!(!should_prevent_default(&Key::Char('s'), ctrl()));
+        claim_web_shortcut('S');
+        // Ctrl+S, Cmd+S and Shift+Cmd+S (the browser reports 'S') all claimed.
+        assert!(should_prevent_default(&Key::Char('s'), ctrl()));
+        let cmd = Modifiers {
+            meta: true,
+            ..plain()
+        };
+        assert!(should_prevent_default(&Key::Char('s'), cmd));
+        assert!(should_prevent_default(&Key::Char('S'), cmd_shift()));
+        // Never with Alt, and an unmodified 's' is plain typing either way.
+        let ctrl_alt = Modifiers {
+            alt: true,
+            ..ctrl()
+        };
+        assert!(!should_prevent_default(&Key::Char('s'), ctrl_alt));
+        // Other chrome shortcuts are untouched by the claim.
+        assert!(!should_prevent_default(&Key::Char('p'), ctrl()));
+        assert!(!should_prevent_default(&Key::Char('r'), ctrl()));
+        release_web_shortcut('s');
+        assert!(!should_prevent_default(&Key::Char('s'), ctrl()));
+        assert!(!should_prevent_default(&Key::Char('S'), cmd_shift()));
+    }
+
+    #[test]
+    fn releasing_a_built_in_key_keeps_the_clipboard_set() {
+        claim_web_shortcut('c');
+        release_web_shortcut('c');
+        assert!(should_prevent_default(&Key::Char('c'), ctrl()));
+        assert!(is_web_shortcut_claimed('Z'));
     }
 }

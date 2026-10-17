@@ -163,6 +163,9 @@ pub fn paint_subtree(widget: &mut dyn Widget, ctx: &mut dyn DrawCtx) {
 /// overlay pass. Deferred *descendants* (rare) still route through
 /// [`paint_subtree`] and thus keep deferring.
 pub(crate) fn paint_subtree_forced(widget: &mut dyn Widget, ctx: &mut dyn DrawCtx) {
+    if widget.suppresses_paint() {
+        return;
+    }
     if !widget.is_visible() {
         if paint_subtree_unified_backbuffer(widget, ctx, true) {
             return;
@@ -199,7 +202,7 @@ pub(crate) fn paint_subtree_forced(widget: &mut dyn Widget, ctx: &mut dyn DrawCt
 /// device pixels (effective scale and lift applied); use it only for
 /// device-pixel needs.
 pub fn paint_global_overlays(widget: &mut dyn Widget, ctx: &mut dyn DrawCtx) {
-    if !widget.is_visible() {
+    if !widget.is_visible() || widget.suppresses_paint() {
         return;
     }
     // The children's frame: the widget's child transform (a zoomed canvas)

@@ -71,6 +71,7 @@ agg-gui = { version = "0.5", features = ["winit-adapter", "clipboard"] }
 | `MarkdownView` | Markdown renderer: headings, paragraphs, lists, code blocks, images |
 | `MenuBar` / `PopupMenu` / `Tooltip` | Menu and transient overlay primitives; any widget also gets a hover tooltip via `with_tooltip(...)` |
 | `Conditional` | Show/hide a child from a shared bool — hidden children consume no space, margin, or gap |
+| `Opacity` | Paint a child at a shared, animatable opacity through one compositing layer; at 0 it paints nothing and takes no input but keeps its space |
 | `ReserveInset` | Marks edge chrome (rails, trays) so anchored overlays automatically avoid it |
 | `Separator` | Horizontal or vertical rule |
 | `Spacer` / `Padding` | Layout utility widgets |

@@ -38,6 +38,9 @@ mod lcd_gpu_composite_tests;
 mod lcd_layer_tint_readback_tests;
 #[path = "lcd_text_scale_readback_tests.rs"]
 mod lcd_text_scale_readback_tests;
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "opacity_headless_tests.rs"]
+mod opacity_headless_tests;
 #[path = "outline_text_baseline_tests.rs"]
 mod outline_text_baseline_tests;
 #[path = "radial_gradient_readback_tests.rs"]

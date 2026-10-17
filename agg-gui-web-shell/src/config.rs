@@ -180,6 +180,13 @@ pub struct WebShellConfig {
     /// on for a canvas embedded in a larger page, so the page's own keyboard
     /// scrolling, find and copy keep working while it has focus.
     pub keyboard_needs_focus: bool,
+    /// Ctrl/Cmd shortcuts (by key, with or without Shift) the app handles
+    /// itself and takes from the browser, beyond the clipboard and undo set
+    /// every app gets: `'s'` keeps the browser's "Save Page As" from opening
+    /// when the app saves. Applied at start through
+    /// [`agg_gui::claim_web_shortcut`], which an app can also call later.
+    /// Empty by default.
+    pub claimed_shortcuts: Vec<char>,
 }
 
 impl WebShellConfig {
@@ -202,6 +209,7 @@ impl WebShellConfig {
             fatal_panel_class: None,
             on_fatal: None,
             keyboard_needs_focus: false,
+            claimed_shortcuts: Vec::new(),
         }
     }
 
@@ -285,6 +293,24 @@ impl WebShellConfig {
         self.keyboard_needs_focus = on;
         self
     }
+
+    /// Claim Ctrl/Cmd+`key` for the app (see [`Self::claimed_shortcuts`]).
+    pub fn with_claimed_shortcut(mut self, key: char) -> Self {
+        if !self.claimed_shortcuts.contains(&key) {
+            self.claimed_shortcuts.push(key);
+        }
+        self
+    }
+
+    /// Hand [`Self::claimed_shortcuts`] to the keyboard bridge's policy.
+    /// Start-up calls it before the keyboard listeners go in.
+    // Only the wasm runtime calls this outside the tests.
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    pub(crate) fn apply_shortcut_claims(&self) {
+        for key in &self.claimed_shortcuts {
+            agg_gui::claim_web_shortcut(*key);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -349,11 +375,26 @@ mod tests {
         assert!(cfg.app_name.is_none() && cfg.fatal_message.is_none());
         assert!(cfg.fatal_panel_class.is_none() && cfg.on_fatal.is_none());
         assert!(!cfg.keyboard_needs_focus);
+        assert!(cfg.claimed_shortcuts.is_empty());
     }
 
     #[test]
     fn an_embedded_canvas_can_ask_for_keys_only_with_focus() {
         let cfg = WebShellConfig::new("c").with_keyboard_needs_focus(true);
         assert!(cfg.keyboard_needs_focus);
+    }
+
+    #[test]
+    fn a_claimed_save_shortcut_reaches_the_key_policy() {
+        assert!(!agg_gui::is_web_shortcut_claimed('s'));
+        let cfg = WebShellConfig::new("c")
+            .with_claimed_shortcut('s')
+            .with_claimed_shortcut('s');
+        assert_eq!(cfg.claimed_shortcuts, vec!['s']);
+        cfg.apply_shortcut_claims();
+        assert!(agg_gui::is_web_shortcut_claimed('s'));
+        assert!(agg_gui::is_web_shortcut_claimed('S'));
+        assert!(!agg_gui::is_web_shortcut_claimed('p'));
+        agg_gui::release_web_shortcut('s');
     }
 }

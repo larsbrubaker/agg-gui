@@ -116,6 +116,7 @@ mod modal_sheet_resize;
 mod modal_sheet_room;
 mod multi_touch_routing;
 mod on_screen_keyboard;
+mod opacity;
 pub(crate) mod paint_recorder;
 mod platform_multi_click;
 mod platform_surface_bounds_tests;

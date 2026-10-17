@@ -140,7 +140,8 @@ fn modifiers_of(e: &web_sys::KeyboardEvent) -> Modifiers {
 ///   quote don't scroll the page or trigger browser quick-find, but
 ///   browser chrome stays reachable: `Tab`, the F-keys other than F1
 ///   (the app's help key), and modified shortcuts other than the app's
-///   clipboard/undo set (Ctrl/Cmd C, X, A, Z, Y) keep their default
+///   clipboard/undo set (Ctrl/Cmd C, X, A, Z, Y) and the keys the app
+///   claimed with [`crate::claim_web_shortcut`] keep their default
 ///   action. The policy lives in `web_key_policy.rs`.
 ///
 /// Listeners live for the page lifetime (the closures are leaked — call

@@ -148,6 +148,7 @@ mod web_paste;
 /// Pure logic, compiled everywhere so its tests run natively; used by
 /// `web_adapter`.
 mod web_key_policy;
+pub use web_key_policy::{claim_web_shortcut, is_web_shortcut_claimed, release_web_shortcut};
 
 // Re-export the most commonly used types at the crate root.
 pub use app_state::{OsWindowHandle, OsWindowState};
@@ -236,7 +237,7 @@ pub use widgets::{
     HardBreak, HeaderInfo, HttpRemoteImageLoader, Hyperlink, ImageView, InspectorPanel,
     InspectorSavedState, Label, LabelAlign, MarkdownBlockKind, MarkdownTableCell, MarkdownView,
     MenuBar, MenuBarStrip, MenuEntry, MenuItem, MenuResponse, MenuSelection, MenuShortcut,
-    ModalSheet, NodeGlyph, NodeIcon, Padding, PerformanceView, Popup, PopupClickOutcome,
+    ModalSheet, NodeGlyph, NodeIcon, Opacity, Padding, PerformanceView, Popup, PopupClickOutcome,
     PopupCloseBehavior, PopupMenu, ProgressBar, QrView, RadioButton, RadioGroup, Rebuilder,
     RectAlign, RemoteImageDone, RemoteImageLoader, Resize, ResponsiveImageWidget, RichCommand,
     RichDoc, RichEditHandle, RichTextEdit, RichTextToolbar, RichTextView, RunMode, RunModeDesc,
