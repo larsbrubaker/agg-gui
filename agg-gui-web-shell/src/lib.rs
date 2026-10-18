@@ -12,6 +12,10 @@
 //!   [`RedrawPolicy::Continuous`] run modes, layout caching, and the
 //!   **first-paint guarantee** (the first frame always paints, even when
 //!   nothing requested a draw by the time the async GPU init resolved);
+//! - **frame pacing**: at most one presented frame waits on the GPU, so a
+//!   slow (software) GPU never builds a backlog that input and the page's
+//!   own scrolling wait behind; ticks keep running and a skipped redraw
+//!   paints as soon as the GPU catches up;
 //! - canvas backing-store sizing (`clientSize × devicePixelRatio`, with the
 //!   scale reduced uniformly when that would exceed the device's texture
 //!   limit) and DPR tracking every tick (browser zoom changes DPR without a
@@ -61,7 +65,7 @@
 //! `web_sys` are re-exported so an app's versions always match the shell's.
 
 // The crate-internal decision modules (dom_math, pointer, recovery, fatal,
-// most of policy) are consumed only by the wasm runtime; natively they are
+// frames_in_flight, most of policy) are consumed only by the wasm runtime; natively they are
 // exercised by the unit tests alone.
 #![cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 
@@ -73,6 +77,7 @@ mod fatal;
 // Native only: it paints on a headless GPU frame.
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod frame_clear_tests;
+mod frames_in_flight;
 mod host;
 mod pointer;
 mod policy;

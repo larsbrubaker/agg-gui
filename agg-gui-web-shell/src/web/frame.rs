@@ -1,13 +1,15 @@
 //! The `requestAnimationFrame` loop: per-tick canvas sizing and DPR sync,
-//! the paint decision ([`crate::policy`]), one painted frame, and the
-//! device-loss rebuild.
+//! the paint decision ([`crate::policy`], held back while the GPU is busy by
+//! [`crate::frames_in_flight`]), one painted frame, and the device-loss
+//! rebuild.
 //!
 //! Owns the GPU-side state ([`Painter`]) in its own thread-local; the app and
 //! host live in [`super`]'s cells. Order per tick mirrors the native shell's
 //! loop: size → sensors/fullscreen → `on_tick` → drain `agg_gui::ui_thread`
 //! → decide → (`on_frame` → `paint` → `end_frame` → `after_paint` → present →
 //! `after_present`) → `on_idle`. Every decision is delegated to a platform-neutral module
-//! (`dom_math::fit_backing`, `policy`, `recovery`) that is unit tested.
+//! (`dom_math::fit_backing`, `policy`, `frames_in_flight`, `recovery`) that is
+//! unit tested.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -24,6 +26,7 @@ use super::{lifecycle, mark_dirty, report_fatal, INPUT_SINCE_FRAME, POINTERS, PO
 use super::{platform, sensors, APP, CANVAS, CONFIG, CURSOR, DIRTY, FIRST_PAINT, HOST};
 use crate::dom_math::{fit_backing, sanitize_dpr};
 use crate::error::WebShellError;
+use crate::frames_in_flight::{tick_paint, FramesInFlight, TickPaint, MAX_FRAMES_IN_FLIGHT};
 use crate::host::{CanvasGeometry, Frame, WebShellControl, WebShellHost};
 use crate::policy::{policy_after_idle, wants_paint, GeometryTracker};
 use crate::recovery::{RebuildBackoff, RebuildVerdict};
@@ -57,6 +60,10 @@ thread_local! {
     static GPU: RefCell<GpuState> = const { RefCell::new(GpuState::Pending) };
     static GEOMETRY: RefCell<GeometryTracker> = const { RefCell::new(GeometryTracker::new()) };
     static BACKOFF: RefCell<RebuildBackoff> = const { RefCell::new(RebuildBackoff::new()) };
+    /// Presented frames the GPU has not finished; reset whenever a device is
+    /// installed, so a lost device's unfinished frames never block painting.
+    static IN_FLIGHT: RefCell<FramesInFlight> =
+        const { RefCell::new(FramesInFlight::new(MAX_FRAMES_IN_FLIGHT)) };
     /// The device's `max_texture_dimension_2d`; unbounded until the GPU is up.
     static MAX_DIM: std::cell::Cell<u32> = const { std::cell::Cell::new(u32::MAX) };
     /// Physical px per CSS px of the current backing store — the DPR, or less
@@ -76,6 +83,7 @@ fn new_ctx(gpu: &WebGpu) -> WgpuGfxCtx {
 
 pub(super) fn install_gpu(gpu: WebGpu) {
     MAX_DIM.with(|m| m.set(gpu.device.limits().max_texture_dimension_2d));
+    IN_FLIGHT.with(|f| f.borrow_mut().reset());
     let ctx = new_ctx(&gpu);
     GPU.with(|g| {
         *g.borrow_mut() = GpuState::Ready(Box::new(Painter {
@@ -187,23 +195,30 @@ fn tick() {
     let ready = GPU.with(|g| matches!(*g.borrow(), GpuState::Ready(_)));
     let mut painted = false;
     if ready {
-        let should = FIRST_PAINT.with(|gate| {
-            gate.should_paint_tick(resized, || {
-                let dirty = DIRTY.with(|d| d.get());
-                let policy = POLICY.with(|p| p.get());
-                super::with_app(|app| {
-                    wants_paint(
-                        policy,
-                        dirty,
-                        app.wants_draw(),
-                        app.next_draw_deadline(),
-                        web_time::Instant::now(),
-                    )
+        let decision = IN_FLIGHT.with(|f| {
+            tick_paint(&f.borrow(), || {
+                FIRST_PAINT.with(|gate| {
+                    gate.should_paint_tick(resized, || {
+                        let dirty = DIRTY.with(|d| d.get());
+                        let policy = POLICY.with(|p| p.get());
+                        super::with_app(|app| {
+                            wants_paint(
+                                policy,
+                                dirty,
+                                app.wants_draw(),
+                                app.next_draw_deadline(),
+                                web_time::Instant::now(),
+                            )
+                        })
+                        .unwrap_or(dirty)
+                    })
                 })
-                .unwrap_or(dirty)
             })
         });
-        if should {
+        if decision == TickPaint::WaitForGpu {
+            wait_for_gpu(resized);
+        }
+        if decision == TickPaint::Paint {
             painted = paint(w, h);
             // The paint re-resolved hover (`App::paint`), which can change it.
             super::sync_cursor(&canvas);
@@ -315,6 +330,35 @@ fn service_device_loss() -> bool {
     }
 }
 
+/// A tick with a redraw pending while the GPU still holds the frames allowed
+/// in flight: paint nothing. Every pending request stays as it is (the
+/// decision did not read it), so the first tick after the GPU finishes
+/// paints the latest state.
+fn wait_for_gpu(resized: bool) {
+    // A resize clears the canvas, and its flag lives only for this tick.
+    if resized {
+        mark_dirty();
+    }
+    GPU.with(|g| {
+        if let GpuState::Ready(p) = &*g.borrow() {
+            // WebGPU resolves completions on its own; wgpu's WebGL2 backend
+            // runs them only when the device is polled or a submit happens,
+            // and a waiting loop submits nothing.
+            let _ = p.gpu.device.poll(wgpu::PollType::Poll);
+        }
+    });
+}
+
+/// Count a presented frame until the GPU has finished every submission so
+/// far (the completion attaches to the queue's latest submission, which is
+/// this frame's last).
+fn track_in_flight(queue: &wgpu::Queue) {
+    let ticket = IN_FLIGHT.with(|f| f.borrow_mut().submitted());
+    queue.on_submitted_work_done(move || {
+        IN_FLIGHT.with(|f| f.borrow_mut().finished(ticket));
+    });
+}
+
 /// Paint one frame. Returns whether a frame was presented.
 fn paint(w: u32, h: u32) -> bool {
     let offscreen = CONFIG.with(|c| c.borrow().as_ref().is_some_and(|c| c.offscreen_scene));
@@ -407,6 +451,7 @@ fn paint(w: u32, h: u32) -> bool {
         // Releases the stashed texture (surface or SSAA resolve) before
         // presenting — see `WgpuGfxCtx::present`.
         p.ctx.present(surface_frame);
+        track_in_flight(&p.gpu.queue);
         p.last_duration = started.elapsed();
         PRESENTED.with(|c| c.set(true));
         with_app_host(|app, host| host.after_present(app, &frame));

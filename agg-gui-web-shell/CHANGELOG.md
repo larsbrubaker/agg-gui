@@ -100,6 +100,17 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Fixed
 
+- A slow GPU no longer builds a backlog of frames: the frame loop keeps at
+  most one presented frame on the GPU (counted until its
+  `onSubmittedWorkDone()` resolves) and, while that frame is unfinished,
+  skips painting and keeps the redraw pending, so the first tick after the
+  GPU catches up paints the latest state. Ticks, `on_tick` and input run at
+  the display rate throughout. On SwiftShader, dragging the camera of a 3D
+  view had two frames waiting and the browser's animation frames slowed to
+  about 2 a second (input handled as rarely); it now has none waiting and the
+  loop ticks at 60 a second. A real GPU (Metal) keeps the same frame rate.
+  The count starts again whenever a device is installed, so a frame the lost
+  device never finishes cannot stop painting after a rebuild.
 - Every frame starts from the theme's background: an area no widget paints
   shows the background, never the canvas's initial transparent black or an
   earlier frame's drawing.
