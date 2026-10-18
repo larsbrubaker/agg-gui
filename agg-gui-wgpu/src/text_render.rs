@@ -21,6 +21,7 @@ use agg_gui::color::Color;
 use agg_gui::draw_ctx::DrawCtx;
 use agg_gui::text::with_shaped_glyphs;
 
+use crate::texture_life::TextureLedger;
 use crate::{DrawCommand, LcdArcTextureEntry, WgpuGfxCtx};
 
 impl WgpuGfxCtx {
@@ -215,7 +216,16 @@ impl WgpuGfxCtx {
         if mask.len() < (mask_w as usize) * (mask_h as usize) * 3 {
             return;
         }
-        let (texture, view) = upload_lcd_texture(&self.device, &self.queue, mask, mask_w, mask_h);
+        let (texture, view) = upload_lcd_texture(
+            &mut self.textures,
+            &self.device,
+            &self.queue,
+            mask,
+            mask_w,
+            mask_h,
+        );
+        // One-shot: destroyed after this frame's submit.
+        self.textures.retire(&texture);
         self.push_lcd_mask_command(texture, view, mask_w, mask_h, src_color, dst_x, dst_y);
     }
 
@@ -462,9 +472,15 @@ impl WgpuGfxCtx {
                 (texture, view)
             }
             LcdCacheAction::Replace => {
-                let (texture, view) =
-                    upload_lcd_texture(&self.device, &self.queue, data.as_slice(), w, h);
-                self.lcd_arc_texture_cache.insert(
+                let (texture, view) = upload_lcd_texture(
+                    &mut self.textures,
+                    &self.device,
+                    &self.queue,
+                    data.as_slice(),
+                    w,
+                    h,
+                );
+                let replaced = self.lcd_arc_texture_cache.insert(
                     key,
                     LcdArcTextureEntry {
                         weak: Arc::downgrade(data),
@@ -475,6 +491,9 @@ impl WgpuGfxCtx {
                         version,
                     },
                 );
+                if let Some(old) = replaced {
+                    self.textures.retire(&old.texture);
+                }
                 (texture, view)
             }
         };
@@ -484,8 +503,14 @@ impl WgpuGfxCtx {
         // is live and about to be drawn). Once a frame: every cached text run draws through
         // here, so a sweep per call is O(runs²).
         if self.dead_sweeps.lcd_due() {
-            self.lcd_arc_texture_cache
-                .retain(|k, e| *k == key || e.weak.strong_count() != 0);
+            let textures = &mut self.textures;
+            self.lcd_arc_texture_cache.retain(|k, e| {
+                let keep = *k == key || e.weak.strong_count() != 0;
+                if !keep {
+                    textures.retire(&e.texture);
+                }
+                keep
+            });
         }
 
         result
@@ -582,26 +607,30 @@ fn rgb_to_rgba(rgb: &[u8], w: u32, h: u32) -> Vec<u8> {
 
 /// Upload a 3-channel LCD coverage plane into a fresh `Rgba8Unorm` texture.
 fn upload_lcd_texture(
+    textures: &mut TextureLedger,
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     rgb: &[u8],
     w: u32,
     h: u32,
 ) -> (Arc<wgpu::Texture>, wgpu::TextureView) {
-    let texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: None,
-        size: wgpu::Extent3d {
-            width: w,
-            height: h,
-            depth_or_array_layers: 1,
+    let texture = textures.create(
+        device,
+        &wgpu::TextureDescriptor {
+            label: None,
+            size: wgpu::Extent3d {
+                width: w,
+                height: h,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
         },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Rgba8Unorm,
-        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-        view_formats: &[],
-    });
+    );
     write_lcd_plane(queue, &texture, rgb, w, h);
     let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
     (Arc::new(texture), view)

@@ -33,25 +33,33 @@ impl WgpuGfxCtx {
             None => true,
         };
         if need_alloc {
-            let tex = self.device.create_texture(&wgpu::TextureDescriptor {
-                label: Some("screenshot_capture"),
-                size: wgpu::Extent3d {
-                    width: sw,
-                    height: sh,
-                    depth_or_array_layers: 1,
+            // The old capture (another size) may still be drawn by a frame's
+            // commands; it is destroyed after the next frame's submit.
+            if let Some((old, ..)) = self.capture_texture.take() {
+                self.textures.retire(&old);
+            }
+            let tex = self.textures.create(
+                &self.device,
+                &wgpu::TextureDescriptor {
+                    label: Some("screenshot_capture"),
+                    size: wgpu::Extent3d {
+                        width: sw,
+                        height: sh,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: self.surface_format,
+                    // Sampled by the screenshot widget (TEXTURE_BINDING),
+                    // written by `copy_texture_to_texture` (COPY_DST), and
+                    // read back to CPU on Save / Copy (COPY_SRC).
+                    usage: wgpu::TextureUsages::TEXTURE_BINDING
+                        | wgpu::TextureUsages::COPY_DST
+                        | wgpu::TextureUsages::COPY_SRC,
+                    view_formats: &[],
                 },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: self.surface_format,
-                // Sampled by the screenshot widget (TEXTURE_BINDING),
-                // written by `copy_texture_to_texture` (COPY_DST), and
-                // read back to CPU on Save / Copy (COPY_SRC).
-                usage: wgpu::TextureUsages::TEXTURE_BINDING
-                    | wgpu::TextureUsages::COPY_DST
-                    | wgpu::TextureUsages::COPY_SRC,
-                view_formats: &[],
-            });
+            );
             let view = tex.create_view(&wgpu::TextureViewDescriptor::default());
             self.capture_texture = Some((std::sync::Arc::new(tex), view, sw, sh));
         }

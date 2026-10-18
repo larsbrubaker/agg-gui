@@ -55,6 +55,9 @@ mod rotated_text_readback_tests;
 mod save_restore_readback_tests;
 #[path = "screenshot_scaled_tests.rs"]
 mod screenshot_scaled_tests;
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "texture_life_tests.rs"]
+mod texture_life_tests;
 #[path = "wgsl_browser_validation_tests.rs"]
 mod wgsl_browser_validation_tests;
 #[path = "wgsl_uniformity.rs"]

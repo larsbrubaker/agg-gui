@@ -58,6 +58,7 @@ use agg_gui::geometry::Rect;
 use wgpu::util::DeviceExt;
 
 use crate::pipelines::{TexUniforms, WgpuPipelines};
+use crate::texture_life::{TextureCounts, TextureLedger};
 
 /// Map a UI-facing "samples" choice to the linear render-target scale factor
 /// used when supersampling onto an oversized framebuffer.
@@ -104,6 +105,23 @@ pub struct SsaaFramebuffer {
     /// use [`Self::blit_downsample_4x_to`] instead — a single bilinear tap
     /// reads only 4 of the 16 source texels, losing half the AA benefit.
     blit_sampler: wgpu::Sampler,
+    /// Attachments this framebuffer made and let go (see `texture_life`):
+    /// a resize retires the old pair, the next [`Self::ensure_size`]
+    /// destroys it.
+    textures: TextureLedger,
+}
+
+impl Drop for SsaaFramebuffer {
+    /// A framebuffer is dropped between frames, with its widget (the frame
+    /// that last drew it submitted), so its attachments are destroyed now
+    /// rather than whenever the browser's garbage collector gets to them.
+    fn drop(&mut self) {
+        self.textures.retire(&self.color.0);
+        if let Some((depth, _)) = &self.depth {
+            self.textures.retire(depth);
+        }
+        // `textures` destroys what it holds when it drops, after this.
+    }
 }
 
 impl SsaaFramebuffer {
@@ -131,24 +149,34 @@ impl SsaaFramebuffer {
             mipmap_filter: wgpu::MipmapFilterMode::Nearest,
             ..Default::default()
         });
+        let mut textures = TextureLedger::default();
         let mut fb = Self {
-            color: alloc_color(device, w.max(1), h.max(1), format),
+            color: alloc_color(&mut textures, device, w.max(1), h.max(1), format),
             depth: None,
             format,
             with_depth,
             width: w.max(1),
             height: h.max(1),
             blit_sampler,
+            textures,
         };
         if with_depth {
-            fb.depth = Some(alloc_depth(device, fb.width, fb.height));
+            fb.depth = Some(alloc_depth(&mut fb.textures, device, fb.width, fb.height));
         }
         fb
     }
 
     /// Reallocate the attachments if `(w, h)` has changed since the last call.
     /// Cheap when the size is stable.
+    ///
+    /// Call it once a frame, before recording anything into the
+    /// framebuffer. Replaced attachments are destroyed explicitly (in the
+    /// browser a dropped texture's video memory is freed only by the garbage
+    /// collector), but not at once: the frame's encoder may not be submitted
+    /// yet. They are destroyed by the next call, by when the frame that last
+    /// drew them has been submitted.
     pub fn ensure_size(&mut self, device: &wgpu::Device, w: u32, h: u32) {
+        self.textures.destroy_retired();
         let w = w.max(1);
         let h = h.max(1);
         if w == self.width && h == self.height {
@@ -156,10 +184,22 @@ impl SsaaFramebuffer {
         }
         self.width = w;
         self.height = h;
-        self.color = alloc_color(device, w, h, self.format);
+        let color = alloc_color(&mut self.textures, device, w, h, self.format);
+        let old = std::mem::replace(&mut self.color, color);
+        self.textures.retire(&old.0);
         if self.with_depth {
-            self.depth = Some(alloc_depth(device, w, h));
+            let depth = alloc_depth(&mut self.textures, device, w, h);
+            if let Some((old, _)) = self.depth.replace(depth) {
+                self.textures.retire(&old);
+            }
         }
+    }
+
+    /// How many attachments this framebuffer has made, let go and
+    /// destroyed: it holds one colour target (and one depth target when
+    /// made with depth) whatever its resize history.
+    pub fn texture_counts(&self) -> TextureCounts {
+        self.textures.counts()
     }
 
     pub fn size(&self) -> (u32, u32) {
@@ -471,53 +511,65 @@ impl SsaaFramebuffer {
 }
 
 fn alloc_color(
+    textures: &mut TextureLedger,
     device: &wgpu::Device,
     w: u32,
     h: u32,
     format: wgpu::TextureFormat,
 ) -> (wgpu::Texture, wgpu::TextureView) {
-    let tex = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("ssaa_color"),
-        size: wgpu::Extent3d {
-            width: w,
-            height: h,
-            depth_or_array_layers: 1,
+    let tex = textures.create(
+        device,
+        &wgpu::TextureDescriptor {
+            label: Some("ssaa_color"),
+            size: wgpu::Extent3d {
+                width: w,
+                height: h,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            // `COPY_SRC` so this texture can serve as the source of a
+            // `copy_texture_to_texture` / `copy_texture_to_buffer` —
+            // specifically when `demo-wasm` uses an `SsaaFramebuffer` as the
+            // intermediate scene buffer behind the screenshot path.  Cost is
+            // a flag bit; backends that don't physically support COPY_SRC on
+            // a non-swap-chain texture are extinct in practice (wgpu's
+            // WebGL2 backend does support it on regular textures).
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
         },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format,
-        // `COPY_SRC` so this texture can serve as the source of a
-        // `copy_texture_to_texture` / `copy_texture_to_buffer` —
-        // specifically when `demo-wasm` uses an `SsaaFramebuffer` as the
-        // intermediate scene buffer behind the screenshot path.  Cost is
-        // a flag bit; backends that don't physically support COPY_SRC on
-        // a non-swap-chain texture are extinct in practice (wgpu's
-        // WebGL2 backend does support it on regular textures).
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-            | wgpu::TextureUsages::TEXTURE_BINDING
-            | wgpu::TextureUsages::COPY_SRC,
-        view_formats: &[],
-    });
+    );
     let view = tex.create_view(&wgpu::TextureViewDescriptor::default());
     (tex, view)
 }
 
-fn alloc_depth(device: &wgpu::Device, w: u32, h: u32) -> (wgpu::Texture, wgpu::TextureView) {
-    let tex = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("ssaa_depth"),
-        size: wgpu::Extent3d {
-            width: w,
-            height: h,
-            depth_or_array_layers: 1,
+fn alloc_depth(
+    textures: &mut TextureLedger,
+    device: &wgpu::Device,
+    w: u32,
+    h: u32,
+) -> (wgpu::Texture, wgpu::TextureView) {
+    let tex = textures.create(
+        device,
+        &wgpu::TextureDescriptor {
+            label: Some("ssaa_depth"),
+            size: wgpu::Extent3d {
+                width: w,
+                height: h,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Depth32Float,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
         },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Depth32Float,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-        view_formats: &[],
-    });
+    );
     let view = tex.create_view(&wgpu::TextureViewDescriptor::default());
     (tex, view)
 }

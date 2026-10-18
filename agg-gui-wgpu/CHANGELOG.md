@@ -10,6 +10,10 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- `WgpuGfxCtx::texture_counts` / `SsaaFramebuffer::texture_counts` (a
+  `TextureCounts` of textures made, waiting and destroyed) and
+  `WgpuGfxCtx::retire_texture`, which destroys a caller's texture after the
+  next frame's submit.
 - `WgpuGfxCtx::begin_overlay_frame`: start a frame that paints over the
   target's current pixels (no clear is queued, and `reset` adds none), for a
   pass drawn on top of a finished frame before it is presented.
@@ -28,6 +32,14 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Changed
 
+- Every texture the context replaces or lets go (evicted image and text
+  textures, retained layers rebuilt at a new size, screenshot targets,
+  per-frame gradient ramps and blend-mode copies, a resized `SsaaFramebuffer`'s
+  attachments, a resized `HeadlessFrame`'s target) is destroyed explicitly
+  after the submit that last used it, instead of waiting for the browser's
+  garbage collector, so a canvas resized every frame no longer runs a phone
+  out of GPU memory. Transient layers are pooled by size and reused frame to
+  frame, so steady frames make no layer textures.
 - Headless frame pacing, headless read-back, `WgpuGfxCtx::read_screenshot` and
   the blocking capture read-back wait at most their budget for the GPU instead
   of forever, so a GPU that hangs or loses its device fails the call (a

@@ -139,7 +139,7 @@ impl WgpuGfxCtx {
 
         let saved = self.capture_draw_state();
         let parent_clip = self.current_clip();
-        let (texture, view) = self.alloc_layer_texture(w, h);
+        let (texture, view) = self.transient_layer_texture(w, h);
 
         // Layer-local CTM: the parent CTM shifted by the layer origin.  Unlike
         // `push_layer_with_alpha_impl` we do NOT collapse it to a pure scale —

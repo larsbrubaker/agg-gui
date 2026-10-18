@@ -39,6 +39,7 @@
 use bytemuck::{Pod, Zeroable};
 
 use crate::shaders::SCALED_BLIT_WGSL;
+use crate::texture_life::TextureLedger;
 use crate::WgpuGfxCtx;
 
 /// Format of the small blit target, and therefore of the bytes handed back by
@@ -224,26 +225,40 @@ impl ScaledBlit {
     /// (Re-)allocate the destination texture when the requested output size
     /// changes, then hand back its view.  Thumbnail sizes are stable in
     /// practice, so this allocates once.
-    fn ensure_dst(&mut self, device: &wgpu::Device, w: u32, h: u32) -> &wgpu::TextureView {
+    fn ensure_dst(
+        &mut self,
+        textures: &mut TextureLedger,
+        device: &wgpu::Device,
+        w: u32,
+        h: u32,
+    ) -> &wgpu::TextureView {
         let need_alloc = match &self.dst {
             Some((_, _, dw, dh)) => *dw != w || *dh != h,
             None => true,
         };
         if need_alloc {
-            let texture = device.create_texture(&wgpu::TextureDescriptor {
-                label: Some("scaled_capture_dst"),
-                size: wgpu::Extent3d {
-                    width: w,
-                    height: h,
-                    depth_or_array_layers: 1,
+            // The old destination's copy was submitted with its capture; it
+            // is destroyed after the next frame's submit.
+            if let Some((old, ..)) = self.dst.take() {
+                textures.retire(&old);
+            }
+            let texture = textures.create(
+                device,
+                &wgpu::TextureDescriptor {
+                    label: Some("scaled_capture_dst"),
+                    size: wgpu::Extent3d {
+                        width: w,
+                        height: h,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: DST_FORMAT,
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+                    view_formats: &[],
                 },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: DST_FORMAT,
-                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-                view_formats: &[],
-            });
+            );
             let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
             self.dst = Some((texture, view, w, h));
         }
@@ -317,7 +332,9 @@ impl WgpuGfxCtx {
             .scaled_blit
             .as_mut()
             .expect("scaled blit resources just created");
-        let dst_view = blit.ensure_dst(&device, dst_w, dst_h).clone();
+        let dst_view = blit
+            .ensure_dst(&mut self.textures, &device, dst_w, dst_h)
+            .clone();
         let ub = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("scaled_blit_uniforms"),
             size: std::mem::size_of::<ScaledBlitUniforms>() as u64,

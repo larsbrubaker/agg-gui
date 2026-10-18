@@ -234,6 +234,7 @@ impl WgpuGfxCtx {
             &self.aa_step_bg1,
             &self.comp_op,
             self.surface_format,
+            &mut self.textures,
         );
         // Upload everything `prepare_all` staged in the arenas — one write
         // per chunk.  Must precede the `queue.submit` below; timed as part of
@@ -257,8 +258,14 @@ impl WgpuGfxCtx {
             .surface_texture
             .as_ref()
             .filter(|t| crate::comp_op::root_is_readable(t, self.viewport, self.surface_format));
-        let proxy = (reads_target && readable_root.is_none())
-            .then(|| crate::comp_op::alloc_proxy(&self.device, self.viewport, self.surface_format));
+        let proxy = (reads_target && readable_root.is_none()).then(|| {
+            crate::comp_op::alloc_proxy(
+                &self.device,
+                self.viewport,
+                self.surface_format,
+                &mut self.textures,
+            )
+        });
         let root = match &proxy {
             Some((texture, view)) => (view, Some(texture)),
             None => (surface_view, readable_root),
@@ -290,6 +297,11 @@ impl WgpuGfxCtx {
         let t_submit = web_time::Instant::now();
         self.queue.submit(std::iter::once(encoder.finish()));
         let submit_us = t_submit.elapsed().as_micros().min(u32::MAX as u128) as u32;
+        // Everything let go so far was last used by this frame or an earlier
+        // one, all submitted now: destroy it (see `texture_life`). Layer
+        // textures no frame asked for this time go with it.
+        self.layer_pool.end_frame(&mut self.textures);
+        self.textures.destroy_retired();
 
         self.last_end_frame_stats = LastEndFrameStats {
             prepare_us,

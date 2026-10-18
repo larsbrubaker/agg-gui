@@ -1,6 +1,6 @@
 //! Compositing layer support for the wgpu backend.
 //!
-//! Mirrors `demo-gl/src/ctx_core/layers.rs`.  Each `push_layer` allocates a
+//! Mirrors `demo-gl/src/ctx_core/layers.rs`.  Each `push_layer` takes a
 //! `wgpu::Texture` (with `RENDER_ATTACHMENT | TEXTURE_BINDING | COPY_SRC` —
 //! the copy is what lets a blend-mode draw read it, see `comp_op.rs`) that becomes
 //! the active draw target until the matching `pop_layer`.  On pop the layer
@@ -14,7 +14,9 @@
 //!   the SDF mask in `LAYER_FRAG` clips at composite time, with anti-aliased
 //!   edges built in (vs. the GL stencil path's binary edges + 1px feather).
 //! - Retained layers persist the `wgpu::Texture` across frames in
-//!   `retained_layers`, keyed by `u64` widget handle.
+//!   `retained_layers`, keyed by `u64` widget handle; one rebuilt at a new
+//!   size retires its old texture to the context's ledger (`texture_life.rs`).
+//! - Transient layers come from the context's size-keyed `LayerPool`.
 //! - A layer composites at whole parent pixels: the sub-pixel part of the
 //!   push-time translation is drawn into the layer's content instead
 //!   (`LayerPlacement`), so buffered content lands where direct drawing
@@ -171,31 +173,28 @@ impl WgpuGfxCtx {
 // ---------------------------------------------------------------------------
 
 impl WgpuGfxCtx {
-    /// Allocate a fresh transient layer texture.  Used for `push_layer` (and
-    /// transient retained-layer fallback).
+    /// Allocate a fresh layer texture, counted in the context's texture
+    /// ledger. Retained layers own theirs; transient ones come from
+    /// [`Self::transient_layer_texture`].
     pub(crate) fn alloc_layer_texture(
-        &self,
+        &mut self,
         w: u32,
         h: u32,
     ) -> (Arc<wgpu::Texture>, wgpu::TextureView) {
-        let texture = self.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("layer"),
-            size: wgpu::Extent3d {
-                width: w,
-                height: h,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: self.surface_format,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                | wgpu::TextureUsages::TEXTURE_BINDING
-                | wgpu::TextureUsages::COPY_SRC,
-            view_formats: &[],
-        });
-        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        (Arc::new(texture), view)
+        new_layer_texture(&mut self.textures, &self.device, self.surface_format, w, h)
+    }
+
+    /// A layer texture for this frame only (`push_layer`, a clip layer, a
+    /// blend-mode coverage layer): reused from the previous frame's when one
+    /// of the same size is free, so steady frames allocate none.
+    pub(crate) fn transient_layer_texture(
+        &mut self,
+        w: u32,
+        h: u32,
+    ) -> (Arc<wgpu::Texture>, wgpu::TextureView) {
+        let (textures, device, format) = (&mut self.textures, &self.device, self.surface_format);
+        self.layer_pool
+            .take(w, h, || new_layer_texture(textures, device, format, w, h))
     }
 
     /// Mark the innermost layer as fully covered by opaque content.
@@ -255,7 +254,10 @@ impl WgpuGfxCtx {
                 .unwrap_or(true);
             if need_new {
                 let (tex, vw) = self.alloc_layer_texture(w, h);
-                self.retained_layers.insert(
+                // The old texture (another size or sub-pixel phase) may still
+                // be drawn by this frame's earlier commands; it is destroyed
+                // after the frame's submit.
+                let old = self.retained_layers.insert(
                     key,
                     RetainedWgpuLayer {
                         texture: Arc::clone(&tex),
@@ -266,13 +268,16 @@ impl WgpuGfxCtx {
                         rounded_clip: None,
                     },
                 );
+                if let Some(old) = old {
+                    self.textures.retire(&old.texture);
+                }
                 (tex, vw)
             } else {
                 let entry = &self.retained_layers[&key];
                 (Arc::clone(&entry.texture), entry.view.clone())
             }
         } else {
-            self.alloc_layer_texture(w, h)
+            self.transient_layer_texture(w, h)
         };
 
         let rounded_clip =
@@ -407,6 +412,38 @@ impl WgpuGfxCtx {
         });
         true
     }
+}
+
+/// A layer texture: a colour attachment the composite samples, copyable so
+/// a blend-mode draw can read it (`comp_op.rs`).
+fn new_layer_texture(
+    textures: &mut crate::texture_life::TextureLedger,
+    device: &wgpu::Device,
+    format: wgpu::TextureFormat,
+    w: u32,
+    h: u32,
+) -> (Arc<wgpu::Texture>, wgpu::TextureView) {
+    let texture = textures.create(
+        device,
+        &wgpu::TextureDescriptor {
+            label: Some("layer"),
+            size: wgpu::Extent3d {
+                width: w,
+                height: h,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        },
+    );
+    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+    (Arc::new(texture), view)
 }
 
 #[cfg(test)]

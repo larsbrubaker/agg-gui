@@ -591,7 +591,11 @@ impl HeadlessFrame {
         if self.size() == crate::clamp_surface_size(width, height, max_dim) {
             return;
         }
-        self.target = self.target.resized(width, height);
+        let resized = self.target.resized(width, height);
+        let old = std::mem::replace(&mut self.target, resized);
+        // Destroyed after the next frame's submit rather than left to the
+        // browser's garbage collector (see `WgpuGfxCtx::retire_texture`).
+        self.ctx.retire_texture(old.texture);
     }
 
     /// Wait at most `budget` for the GPU in this frame's pacing and

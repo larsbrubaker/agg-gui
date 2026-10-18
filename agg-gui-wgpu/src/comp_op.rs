@@ -39,6 +39,7 @@ use agg_rust::color::Rgba8;
 use wgpu::util::DeviceExt;
 
 use crate::end_frame::{Prepared, PreparedSlice};
+use crate::texture_life::TextureLedger;
 use crate::{DrawCommand, WgpuGfxCtx};
 
 /// The composite shader (`comp_op.wgsl`).
@@ -208,7 +209,7 @@ impl WgpuGfxCtx {
             self.viewport.0.max(1.0) as u32,
             self.viewport.1.max(1.0) as u32,
         );
-        let (texture, view) = self.alloc_layer_texture(w, h);
+        let (texture, view) = self.transient_layer_texture(w, h);
         self.commands.push(DrawCommand::CompOpBegin {
             texture: Arc::clone(&texture),
             view: view.clone(),
@@ -243,21 +244,26 @@ pub(crate) fn prepare_end(
     parent_size: (u32, u32),
     uniform: &PreparedSlice,
     clip: Option<[i32; 4]>,
+    textures: &mut TextureLedger,
 ) -> Prepared {
-    let dest = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("comp_op_dest"),
-        size: wgpu::Extent3d {
-            width: parent_size.0.max(1),
-            height: parent_size.1.max(1),
-            depth_or_array_layers: 1,
+    // Lives for this frame only: destroyed after the frame's submit.
+    let dest = textures.create_for_frame(
+        device,
+        &wgpu::TextureDescriptor {
+            label: Some("comp_op_dest"),
+            size: wgpu::Extent3d {
+                width: parent_size.0.max(1),
+                height: parent_size.1.max(1),
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: format.remove_srgb_suffix(),
+            usage: wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
         },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: format.remove_srgb_suffix(),
-        usage: wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::TEXTURE_BINDING,
-        view_formats: &[],
-    });
+    );
     let dest_view = dest.create_view(&wgpu::TextureViewDescriptor::default());
     let bg = comp.bind_group(
         device,
@@ -373,23 +379,28 @@ pub(crate) fn alloc_proxy(
     device: &wgpu::Device,
     viewport: (f32, f32),
     format: wgpu::TextureFormat,
+    textures: &mut TextureLedger,
 ) -> (wgpu::Texture, wgpu::TextureView) {
-    let texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("comp_op_proxy"),
-        size: wgpu::Extent3d {
-            width: (viewport.0 as u32).max(1),
-            height: (viewport.1 as u32).max(1),
-            depth_or_array_layers: 1,
+    // Lives for this frame only: destroyed after the frame's submit.
+    let texture = textures.create_for_frame(
+        device,
+        &wgpu::TextureDescriptor {
+            label: Some("comp_op_proxy"),
+            size: wgpu::Extent3d {
+                width: (viewport.0 as u32).max(1),
+                height: (viewport.1 as u32).max(1),
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
         },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-            | wgpu::TextureUsages::TEXTURE_BINDING
-            | wgpu::TextureUsages::COPY_SRC,
-        view_formats: &[],
-    });
+    );
     let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
     (texture, view)
 }

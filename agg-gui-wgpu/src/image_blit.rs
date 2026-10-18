@@ -15,6 +15,7 @@ use std::sync::Arc;
 
 use agg_gui::framebuffer::premultiply_rgba_inplace;
 
+use crate::texture_life::TextureLedger;
 use crate::{ArcTextureEntry, DrawCommand, WgpuGfxCtx};
 
 /// Maximum entries in the slice-keyed texture cache before LRU eviction kicks in.
@@ -112,15 +113,23 @@ impl WgpuGfxCtx {
             self.texture_cache_order.push_back(key);
             (entry.0, entry.1)
         } else {
-            let (texture, view) =
-                upload_rgba_texture(&self.device, &self.queue, data, img_w, img_h);
+            let (texture, view) = upload_rgba_texture(
+                &mut self.textures,
+                &self.device,
+                &self.queue,
+                data,
+                img_w,
+                img_h,
+            );
             self.texture_cache
                 .insert(key, (Arc::clone(&texture), view.clone(), img_w, img_h));
             self.texture_cache_order.push_back(key);
             // LRU evict to cap.
             while self.texture_cache.len() > TEX_CACHE_MAX {
                 if let Some(old_key) = self.texture_cache_order.pop_front() {
-                    self.texture_cache.remove(&old_key);
+                    if let Some((old, ..)) = self.texture_cache.remove(&old_key) {
+                        self.textures.retire(&old);
+                    }
                 } else {
                     break;
                 }
@@ -174,8 +183,14 @@ impl WgpuGfxCtx {
         // Sweep dead entries (Arc dropped → weak.upgrade fails), once a frame: every `Label`
         // draws through here with a texture of its own, so a sweep per call is O(labels²).
         if self.dead_sweeps.arc_due() {
-            self.arc_texture_cache
-                .retain(|_, e| e.weak.strong_count() != 0);
+            let textures = &mut self.textures;
+            self.arc_texture_cache.retain(|_, e| {
+                let live = e.weak.strong_count() != 0;
+                if !live {
+                    textures.retire(&e.texture);
+                }
+                live
+            });
         }
 
         // Look up by pointer + verify via Weak::upgrade so a recycled pointer
@@ -194,9 +209,17 @@ impl WgpuGfxCtx {
         let (texture, view) = match existing {
             Some(t) => t,
             None => {
-                self.arc_texture_cache.remove(&key);
-                let (texture, view) =
-                    upload_rgba_texture(&self.device, &self.queue, data.as_slice(), img_w, img_h);
+                if let Some(stale) = self.arc_texture_cache.remove(&key) {
+                    self.textures.retire(&stale.texture);
+                }
+                let (texture, view) = upload_rgba_texture(
+                    &mut self.textures,
+                    &self.device,
+                    &self.queue,
+                    data.as_slice(),
+                    img_w,
+                    img_h,
+                );
                 self.arc_texture_cache.insert(
                     key,
                     ArcTextureEntry {
@@ -256,8 +279,14 @@ impl WgpuGfxCtx {
         let key = Arc::as_ptr(data) as *const u8 as usize;
 
         if self.dead_sweeps.arc_due() {
-            self.arc_texture_cache
-                .retain(|_, e| e.weak.strong_count() != 0);
+            let textures = &mut self.textures;
+            self.arc_texture_cache.retain(|_, e| {
+                let live = e.weak.strong_count() != 0;
+                if !live {
+                    textures.retire(&e.texture);
+                }
+                live
+            });
         }
 
         let existing = self
@@ -273,9 +302,17 @@ impl WgpuGfxCtx {
         let (texture, view) = match existing {
             Some(t) => t,
             None => {
-                self.arc_texture_cache.remove(&key);
-                let (texture, view) =
-                    upload_rgba_texture(&self.device, &self.queue, data.as_slice(), img_w, img_h);
+                if let Some(stale) = self.arc_texture_cache.remove(&key) {
+                    self.textures.retire(&stale.texture);
+                }
+                let (texture, view) = upload_rgba_texture(
+                    &mut self.textures,
+                    &self.device,
+                    &self.queue,
+                    data.as_slice(),
+                    img_w,
+                    img_h,
+                );
                 self.arc_texture_cache.insert(
                     key,
                     ArcTextureEntry {
@@ -344,6 +381,7 @@ pub(crate) fn should_use_mipmaps(w: u32, h: u32) -> bool {
 /// clean filtered result no matter how aggressively the call site
 /// downsamples — a 4× shrink samples mip 2, a 16× shrink samples mip 4, etc.
 fn upload_rgba_texture(
+    textures: &mut TextureLedger,
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     data: &[u8],
@@ -368,20 +406,23 @@ fn upload_rgba_texture(
         1
     };
 
-    let texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: None,
-        size: wgpu::Extent3d {
-            width: w,
-            height: h,
-            depth_or_array_layers: 1,
+    let texture = textures.create(
+        device,
+        &wgpu::TextureDescriptor {
+            label: None,
+            size: wgpu::Extent3d {
+                width: w,
+                height: h,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
         },
-        mip_level_count,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Rgba8Unorm,
-        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-        view_formats: &[],
-    });
+    );
 
     // Mip 0: the source bytes, full resolution.
     queue.write_texture(

@@ -21,8 +21,6 @@
 
 use std::sync::Arc;
 
-use wgpu::util::DeviceExt;
-
 use crate::buffer_arena::FrameArenas;
 use crate::comp_op::{self, CompOpGpu};
 use crate::end_frame::{Prepared, PreparedSlice};
@@ -30,6 +28,7 @@ use crate::pipelines::{
     AaTexUniforms, LayerUniforms, LcbUniforms, LcdUniforms, SolidUniforms, TexUniforms,
     WgpuPipelines,
 };
+use crate::texture_life::TextureLedger;
 use crate::{DrawCommand, LayerRoundedClip};
 
 /// Reinterpret a slice of `AaTexVertex` as raw bytes for upload.  The
@@ -55,6 +54,7 @@ pub(crate) fn prepare_all(
     aa_step_bg1: &Arc<wgpu::BindGroup>,
     comp_op: &CompOpGpu,
     format: wgpu::TextureFormat,
+    textures: &mut TextureLedger,
 ) -> Vec<Prepared> {
     let mut size_stack: Vec<(f32, f32)> = vec![viewport];
     let mut out: Vec<Prepared> = Vec::with_capacity(commands.len());
@@ -174,11 +174,10 @@ pub(crate) fn prepare_all(
                 u.resolution = [cur_vp.0, cur_vp.1];
                 let ub = alloc_uniform(device, arenas, bytemuck::bytes_of(&u));
                 // Ramp texture is a one-off per command (data depends on the
-                // gradient stops); textures aren't pooled here yet because
-                // they're already arena-allocated inside wgpu and cost less
-                // than per-call uniform/vertex buffer creation.
-                let ramp_tex = device.create_texture_with_data(
-                    queue,
+                // gradient stops), made for this frame and destroyed after its
+                // submit.
+                let ramp_tex = textures.create_for_frame(
+                    device,
                     &wgpu::TextureDescriptor {
                         label: None,
                         size: wgpu::Extent3d {
@@ -193,8 +192,25 @@ pub(crate) fn prepare_all(
                         usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
                         view_formats: &[],
                     },
-                    wgpu::util::TextureDataOrder::LayerMajor,
+                );
+                queue.write_texture(
+                    wgpu::TexelCopyTextureInfo {
+                        texture: &ramp_tex,
+                        mip_level: 0,
+                        origin: wgpu::Origin3d::ZERO,
+                        aspect: wgpu::TextureAspect::All,
+                    },
                     ramp,
+                    wgpu::TexelCopyBufferLayout {
+                        offset: 0,
+                        bytes_per_row: Some(crate::gradient::RAMP_W as u32 * 4),
+                        rows_per_image: Some(1),
+                    },
+                    wgpu::Extent3d {
+                        width: crate::gradient::RAMP_W as u32,
+                        height: 1,
+                        depth_or_array_layers: 1,
+                    },
                 );
                 let ramp_view = ramp_tex.create_view(&wgpu::TextureViewDescriptor::default());
                 let bg0 = mk_uniform_bg(device, &pipelines.gradient_bgl0, &ub);
@@ -566,6 +582,7 @@ pub(crate) fn prepare_all(
                     (parent_vp.0 as u32, parent_vp.1 as u32),
                     &ub,
                     *clip,
+                    textures,
                 ));
             }
 

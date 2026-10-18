@@ -176,6 +176,8 @@ mod sweep;
 pub use screenshot_scaled::RectInPixels;
 mod shaders;
 mod text_render;
+mod texture_life;
+pub use texture_life::TextureCounts;
 
 /// Every in-crate test module (see `test_modules.rs`).
 #[cfg(test)]
@@ -512,6 +514,12 @@ pub struct WgpuGfxCtx {
     /// to fork the renderer for instrumentation. All numbers are wall-clock
     /// microseconds; `command_count` is the number of `DrawCommand`s walked.
     pub(crate) last_end_frame_stats: LastEndFrameStats,
+
+    /// Every texture the context makes and lets go, destroyed explicitly
+    /// after the submit that last used it (see `texture_life`).
+    pub(crate) textures: texture_life::TextureLedger,
+    /// Transient layer textures, reused frame to frame by size.
+    pub(crate) layer_pool: texture_life::LayerPool,
 }
 
 /// Wall-clock breakdown of the most recent `WgpuGfxCtx::end_frame` call.
@@ -628,7 +636,26 @@ impl WgpuGfxCtx {
             aa_step_bg1,
             comp_op,
             last_end_frame_stats: LastEndFrameStats::default(),
+            textures: texture_life::TextureLedger::default(),
+            layer_pool: texture_life::LayerPool::default(),
         }
+    }
+
+    /// How many textures this context has made, let go and destroyed. A
+    /// context drawing the same frames over and over holds a steady number;
+    /// one whose `held` count keeps growing is keeping textures it no
+    /// longer uses.
+    pub fn texture_counts(&self) -> TextureCounts {
+        self.textures.counts()
+    }
+
+    /// Hand over a texture the caller no longer needs but that commands
+    /// already recorded this frame may still use; it is destroyed right
+    /// after the next frame's submit. Destroying explicitly matters in the
+    /// browser, where dropping a texture frees its video memory only when
+    /// the garbage collector gets to it.
+    pub fn retire_texture(&mut self, texture: wgpu::Texture) {
+        self.textures.retire_foreign(texture);
     }
 
     /// Wall-clock breakdown of the most recent `end_frame` flush. Returns
