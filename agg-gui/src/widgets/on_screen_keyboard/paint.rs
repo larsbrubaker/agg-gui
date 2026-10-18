@@ -73,18 +73,14 @@ pub(super) fn paint_key(
                 style.utility_font_size
             };
             ctx.set_font_size(font_size);
-            // Approximate text width: agg-gui's `measure_text` needs an
-            // active font set, which the host installs at startup. If
-            // none is set the text falls back to GSV outlines. Either
-            // way, we just need to draw "near the center" — exact
-            // centering can come once we wire up `measure_text` for
-            // real.
-            let approx_width = text.chars().count() as f64 * font_size * 0.55;
-            ctx.fill_text(
-                text,
-                center.x - approx_width / 2.0,
-                center.y - font_size * 0.3,
-            );
+            // Centre the label on its measured width. `measure_text` is
+            // `None` only when the context has no font, and then no text
+            // draws at all; the estimate just keeps the arithmetic whole.
+            let width = ctx
+                .measure_text(text)
+                .map(|m| m.width)
+                .unwrap_or(text.chars().count() as f64 * font_size * 0.55);
+            ctx.fill_text(text, center.x - width / 2.0, center.y - font_size * 0.3);
         }
         KeyCap::Glyph(glyph) => {
             paint_glyph(ctx, center, style, *glyph, text_color, active_layer);

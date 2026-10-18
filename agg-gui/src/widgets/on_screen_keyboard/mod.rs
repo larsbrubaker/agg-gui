@@ -95,6 +95,9 @@ pub enum KeyboardInputMode {
 /// startup; defaults to `false` so apps that haven't opted in (or
 /// desktop builds) see no behavior change.
 ///
+/// The key labels are drawn in the app's UI font, the one installed with
+/// [`crate::font_settings::set_system_font`].
+///
 /// Recommended pattern in a platform shell:
 /// ```ignore
 /// let profile = input_profile_from_hint(&user_agent, pointer_coarse);
@@ -300,10 +303,24 @@ pub fn paint_software_keyboard(ctx: &mut dyn DrawCtx, viewport: crate::geometry:
     let bottom_y = -hidden_offset;
     let panel = Rect::new(0.0, bottom_y, panel_width, panel_height);
 
+    // The keyboard paints after the whole widget tree, and every widget
+    // scopes the font it sets to its own save/restore, so the context
+    // reaches this point with no font (a GPU frame starts with none) and
+    // text drawn now would silently draw nothing. The key labels use the
+    // app's UI font, the one installed with
+    // `font_settings::set_system_font`; a host that installed none keeps
+    // whatever font it left on the context. The save/restore keeps the
+    // labels' font from leaking into anything painted later.
+    ctx.save();
+    if let Some(font) = crate::font_settings::current_system_font() {
+        ctx.set_font(font);
+    }
+
     paint_panel_background(ctx, panel, &style);
 
     // Lay out + paint keys, caching their hit rects for tap dispatch.
     let painted_keys = layout.paint(ctx, panel, &style, layer);
+    ctx.restore();
     with_state_mut(|s| s.last_painted_keys = painted_keys);
 }
 

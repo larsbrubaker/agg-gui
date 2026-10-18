@@ -39,6 +39,12 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Fixed
 
+- The on-screen keyboard's keys show their letters again: it paints after the widget tree with a
+  context that has no font (every widget scopes its font to its own save/restore, and a GPU frame
+  starts with none), so every text label drew nothing while the shapes and glyph keys showed. The
+  labels now use the app's UI font (`font_settings::set_system_font`) and are centred on their
+  measured width.
+
 - The web keyboard bridge delivers the keyup of every key whose keydown it delivered, even when
   the keyup targets a DOM editor or focus left the canvas in between, so no key stays held in the
   app.

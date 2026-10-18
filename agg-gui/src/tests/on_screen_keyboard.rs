@@ -518,3 +518,82 @@ fn synthetic_key_queue_drains_to_focused_field() {
     // tests (`text_field` module).
     assert_eq!(app.focused_widget_type_name(), Some("TextField"));
 }
+
+/// Paints `app` (keyboard up) on a fresh software frame and returns, for
+/// each letter key, how many pixels in its middle stand out from the key's
+/// face colour. A fresh context has no font, as a GPU frame starts.
+fn letter_label_pixels(app: &mut App, viewport: Size) -> Vec<(char, usize)> {
+    use crate::widgets::on_screen_keyboard::state::with_state_ref;
+    use crate::widgets::on_screen_keyboard::KeyAction;
+    let mut fb = crate::Framebuffer::new(viewport.width as u32, viewport.height as u32);
+    {
+        let mut ctx = crate::GfxCtx::new(&mut fb);
+        app.paint(&mut ctx);
+    }
+    let keys: Vec<_> = with_state_ref(|s| s.last_painted_keys.clone());
+    let (w, p) = (fb.width() as usize, fb.pixels());
+    let at = |x: f64, y: f64| {
+        let i = ((y as usize) * w + x as usize) * 4;
+        [p[i] as i32, p[i + 1] as i32, p[i + 2] as i32]
+    };
+    keys.iter()
+        .filter_map(|k| match k.action {
+            KeyAction::Char(c) if c.is_ascii_alphabetic() => Some((c, k.rect)),
+            _ => None,
+        })
+        .map(|(c, r)| {
+            // Just inside the left edge, half way up: face, never label.
+            let face = at(r.x + 3.0, r.y + r.height / 2.0);
+            let mut count = 0;
+            let (mut y, y1) = (r.y + r.height * 0.15, r.y + r.height * 0.85);
+            while y < y1 {
+                let (mut x, x1) = (r.x + r.width * 0.15, r.x + r.width * 0.85);
+                while x < x1 {
+                    let px = at(x, y);
+                    let diff = (0..3).map(|i| (px[i] - face[i]).abs()).max().unwrap_or(0);
+                    if diff >= 96 {
+                        count += 1;
+                    }
+                    x += 1.0;
+                }
+                y += 1.0;
+            }
+            (c, count)
+        })
+        .collect()
+}
+
+#[test]
+fn letter_keys_show_their_labels_in_the_system_font_after_the_tree_paints() {
+    let _guard = ProfileGuard::new();
+    fresh_state();
+    set_input_profile(InputProfile::MobileAndroid);
+    set_enabled(true);
+    let font = Arc::new(Font::from_slice(TEST_FONT).unwrap());
+    crate::font_settings::set_system_font(Some(Arc::clone(&font)));
+    for visuals in [
+        crate::theme::Visuals::light(),
+        crate::theme::Visuals::dark(),
+    ] {
+        let dark = visuals.is_dark();
+        crate::theme::set_visuals(visuals);
+        // The field sets its font inside its own save/restore, so the
+        // context reaches the keyboard with no font of its own.
+        let viewport = Size::new(412.0, 800.0);
+        let mut app = App::new(Box::new(TextField::new(Arc::clone(&font))));
+        app.layout(viewport);
+        app.on_key_down(crate::Key::Tab, Modifiers::default());
+        assert!(app.has_focus(), "the field takes focus");
+        test_hook::force_visible();
+        let labels = letter_label_pixels(&mut app, viewport);
+        assert_eq!(labels.len(), 26, "the letters page has 26 letter keys");
+        for (c, count) in labels {
+            assert!(
+                count >= 10,
+                "dark={dark}: the '{c}' key shows its letter ({count} label pixels)"
+            );
+        }
+    }
+    crate::font_settings::set_system_font(None);
+    crate::theme::set_visuals(crate::theme::Visuals::light());
+}
