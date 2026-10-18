@@ -8,8 +8,10 @@
 //! `keydown` into `Key::Char` (and `preventDefault`s it, so the input never
 //! receives the character). Only text that did *not* come through a key press
 //! is committed from here: finished compositions, dictation, an emoji picker.
-//! The input sits at the caret (`App::ime_cursor_area`) so the browser's
-//! candidate window opens beside the text being composed, and `inputmode=none`
+//! The input sits at the caret (`App::ime_cursor_area`), kept inside the
+//! window's visible area, so the browser's candidate window opens beside the
+//! text being composed and never scrolls the page to show the input; it is
+//! focused with `preventScroll`, and `inputmode=none`
 //! keeps phones from raising the system keyboard over agg-gui's own.
 //!
 //! [`sync`] runs every animation tick: it focuses the input while the app
@@ -185,10 +187,15 @@ pub(super) fn sync() {
                 (r.left(), r.top())
             })
             .unwrap_or((0.0, 0.0));
+            let height = (area.height / scale).max(1.0);
+            // Kept inside the window's visible area: the browser scrolls the page to show a
+            // focused text input outside it, and the caret of a field on a canvas taller than
+            // the window, or one the page has scrolled, can be anywhere.
+            let (view_w, view_h) = window_css_size();
             let placed = (
-                origin.0 + area.x / scale,
-                origin.1 + area.y / scale,
-                (area.height / scale).max(1.0),
+                (origin.0 + area.x / scale).clamp(0.0, (view_w - 2.0).max(0.0)),
+                (origin.1 + area.y / scale).clamp(0.0, (view_h - height).max(0.0)),
+                height,
             );
             if PLACED.with(|p| p.get()) != Some(placed) {
                 PLACED.with(|p| p.set(Some(placed)));
@@ -204,4 +211,15 @@ pub(super) fn sync() {
             let _ = input.focus_with_options(&options);
         }
     });
+}
+
+/// The window's layout viewport in CSS px (`innerWidth`, `innerHeight`).
+fn window_css_size() -> (f64, f64) {
+    let Some(window) = web_sys::window() else {
+        return (0.0, 0.0);
+    };
+    let size = |v: Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue>| {
+        v.ok().and_then(|v| v.as_f64()).unwrap_or(0.0)
+    };
+    (size(window.inner_width()), size(window.inner_height()))
 }

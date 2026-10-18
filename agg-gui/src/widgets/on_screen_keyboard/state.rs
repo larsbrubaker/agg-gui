@@ -73,6 +73,9 @@ pub struct KeyboardState {
     /// otherwise the keyboard panel slides down but the tree stays
     /// lifted, leaving an empty band where the keyboard used to be.
     pub dismiss_requested: bool,
+    /// Host opted in via [`super::set_resizes_layout`]: while the keyboard
+    /// is up the App lays the tree out in the room above it.
+    pub resizes_layout: bool,
 }
 
 /// Hold-to-repeat state captured the moment the user presses a
@@ -113,6 +116,7 @@ impl Default for KeyboardState {
             current_layer: Layer::Letters,
             last_painted_keys: Vec::new(),
             last_panel_height: None,
+            resizes_layout: false,
             pressed_key_index: None,
             captured_pointer: false,
             caps_lock: false,

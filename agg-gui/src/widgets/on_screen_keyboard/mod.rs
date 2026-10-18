@@ -168,6 +168,39 @@ pub fn target_panel_height(viewport_width: f64) -> f64 {
     })
 }
 
+/// Lay the tree out in the room above the keyboard while it is up, instead
+/// of lifting the whole tree to show the focused field (the default).
+///
+/// With this on, [`App::layout`](crate::widget::App::layout) gives the root
+/// the viewport less [`layout_room`]: the root's bottom edge sits on the
+/// keyboard's top, so a bottom-docked panel rests on the keyboard and the
+/// rest of the layout shrinks to fit, and the root's top stays on screen.
+/// The focused field's innermost scrolling ancestor then scrolls the field
+/// into view (`widget/keyboard_resize.rs`). When the keyboard goes away the
+/// layout returns to the whole viewport. Off by default.
+pub fn set_resizes_layout(on: bool) {
+    with_state_mut(|s| s.resizes_layout = on);
+    crate::animation::request_layout();
+}
+
+/// Whether [`set_resizes_layout`] is on.
+pub fn resizes_layout() -> bool {
+    with_state_ref(|s| s.resizes_layout)
+}
+
+/// The height the keyboard takes from the bottom of a `viewport` (logical)
+/// layout: its full panel height while it is up or sliding up, with the
+/// keyboard enabled and [`set_resizes_layout`] on; `0.0` otherwise. The
+/// layout takes the whole room at once rather than following the slide, so
+/// the tree is laid out once per show and once per hide.
+pub fn layout_room(viewport: crate::geometry::Size) -> f64 {
+    let up = with_state_ref(|s| s.enabled && s.resizes_layout && s.slide.target() > 0.5);
+    if !up {
+        return 0.0;
+    }
+    target_panel_height(viewport.width).clamp(0.0, viewport.height.max(0.0))
+}
+
 /// Called by [`App`](crate::widget::App) when the focused widget changes.
 /// Causes the keyboard to slide up / down by retargeting the slide tween.
 ///

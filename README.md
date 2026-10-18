@@ -146,7 +146,9 @@ directly.
 
 Input profiles detect touch devices and apply a recommended UX zoom; an in-canvas
 on-screen keyboard opens for focused text fields, with a keyboard-avoidance lift
-that keeps the field visible (re-validated against fresh bounds every layout).
+that keeps the field visible (re-validated against fresh bounds every layout), or,
+with `on_screen_keyboard::set_resizes_layout(true)`, a layout in the room above the
+keyboard that scrolls the focused field into view.
 `overlay_insets` tracks reserved screen edges (keyboard included automatically;
 wrap app chrome in `ReserveInset`), and `card::paint_anchored` measures,
 word-wraps, flips, and clamps anchored info cards so floating content never

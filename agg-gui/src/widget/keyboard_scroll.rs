@@ -59,6 +59,11 @@
 //!   [`paint_lifted_tree`] paints the tree AND drains the queues under
 //!   `translate(0, L)`, so root `(x, y)` shows on screen at `(x, y + L)`.
 //!   Producers never add or subtract the lift themselves.
+//! * A host that turns on
+//!   [`set_resizes_layout`](crate::widgets::on_screen_keyboard::set_resizes_layout)
+//!   gets the tree laid out above the keyboard instead: focus changes and
+//!   layouts hand over to `keyboard_resize.rs`, which sets the lift to the
+//!   keyboard's room and scrolls the focused field into view.
 //! * While lifted, the on-screen part of root space is
 //!   [`visible_root_rect`](crate::widget::visible_root_rect)
 //!   `= (0, −L, w, h)`; viewport clamps and flips done in root space use it.
@@ -312,7 +317,10 @@ pub(crate) fn notify_focus_change(
         None => (false, None, KeyboardInputMode::Text),
     };
     set_text_input_focused(accepts, existing_text.as_deref(), mode);
-    if accepts {
+    if super::keyboard_resize::active() {
+        // The next layout, in the keyboard's new room, places the field.
+        super::keyboard_resize::note_focus_change();
+    } else if accepts {
         ensure_focused_visible_above_keyboard(new_path, viewport_width, root);
     } else {
         // Focus left a text-input widget — slide the global lift back
@@ -344,6 +352,11 @@ pub(crate) fn relift_after_layout(
     root: &mut dyn Widget,
 ) {
     LIFTED_MODAL_FOCUS.with(|c| c.set(None));
+    if super::keyboard_resize::active() {
+        let viewport = crate::widget::current_viewport();
+        super::keyboard_resize::after_layout(focus, viewport, root);
+        return;
+    }
     if !crate::widgets::on_screen_keyboard::is_enabled() {
         return;
     }
@@ -368,6 +381,10 @@ pub(crate) fn ensure_focused_visible_above_keyboard(
     root: &mut dyn Widget,
 ) {
     LIFTED_MODAL_FOCUS.with(|c| c.set(None));
+    if super::keyboard_resize::active() {
+        super::keyboard_resize::note_focus_change();
+        return;
+    }
     let Some(path) = focus else {
         return;
     };
@@ -531,7 +548,7 @@ pub(crate) fn apply_lift_along_path(
 
 /// The widget at `path` under `root`; `None` when the path is stale (its
 /// widget or an ancestor was removed from the tree).
-fn mutable_widget_at_path<'a>(
+pub(crate) fn mutable_widget_at_path<'a>(
     root: &'a mut dyn Widget,
     path: &[usize],
 ) -> Option<&'a mut dyn Widget> {

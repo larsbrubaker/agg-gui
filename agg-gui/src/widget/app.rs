@@ -217,9 +217,13 @@ impl App {
                 ..crate::layout_props::Insets::default()
             });
         }
+        // With the keyboard-resized layout on, the root takes the room above
+        // the keyboard (`widget/keyboard_resize.rs`); otherwise all of it.
+        let room = crate::widgets::on_screen_keyboard::layout_room(logical);
+        let root_size = Size::new(logical.width, logical.height - room);
         self.root
-            .set_bounds(Rect::new(0.0, 0.0, logical.width, logical.height));
-        self.root.layout(logical);
+            .set_bounds(Rect::new(0.0, 0.0, root_size.width, root_size.height));
+        self.root.layout(root_size);
         // Layout is where containers adopt queued reorders; follow them.
         self.resolve_tracked_paths();
         self.apply_pending_focus();

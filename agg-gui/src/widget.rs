@@ -31,6 +31,7 @@ mod backbuffer;
 pub mod coords;
 mod event_observer;
 pub(crate) mod event_root;
+pub(crate) mod keyboard_resize;
 pub(crate) mod keyboard_scroll;
 mod named_target;
 mod paint;
