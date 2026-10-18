@@ -26,7 +26,10 @@
 //! made indistinguishable from a plain [`request_draw`], upholding the
 //! framework invariant that *anything needing a future draw eventually makes
 //! `wants_draw()` true by itself*.  Consumers re-arm during the ensuing paint,
-//! which keeps recurring timers alive.
+//! which keeps recurring timers alive.  A paint that happens *before* a
+//! deadline is due leaves it pending ([`clear_draw_request`] clears only a due
+//! one), so a deadline armed outside paint — the idle queue's next delayed
+//! action — is never lost to an unrelated frame.
 //!
 //! The host loop draws iff `wants_draw()` (now inclusive of due deadlines).
 //! Between draws it idles with `WaitUntil(peek_next_draw_deadline())`; no
@@ -463,6 +466,14 @@ pub fn async_state_epoch() -> u64 {
 /// widgets that still need a draw (animation in flight, focus blink, etc.)
 /// must re-arm during their draw, otherwise the loop goes idle.
 ///
+/// A scheduled deadline ([`request_draw_after`]) is cleared only once it is
+/// due on the UI clock: this paint serves it.  A *future* deadline stays.
+/// Requests made since the last paint but outside it — the idle queue's
+/// drain arming a draw for its next delayed action or interval, just before
+/// the paint — have no one to re-arm them, so dropping them here would leave
+/// a reactive host asleep with work still queued.  A deadline whose widget
+/// went away costs at most one extra frame, when it comes due.
+///
 /// Pending cross-thread async wakeups are *merged* first (advancing
 /// [`invalidation_epoch`] and [`async_state_epoch`]) and only then is the
 /// immediate flag cleared.  Merging — rather than just marking the counter
@@ -479,6 +490,20 @@ pub fn async_state_epoch() -> u64 {
 pub fn clear_draw_request() {
     pump_async_wakeup();
     NEEDS_DRAW.with(|c| c.set(false));
+    let now = crate::clock::now();
+    NEXT_DRAW_AT.with(|c| {
+        if c.get().is_some_and(|at| at <= now) {
+            c.set(None);
+        }
+    });
+}
+
+/// Clear every draw signal, a future scheduled deadline included: a clean
+/// slate for a test (or a host discarding its UI), where nothing pending may
+/// leak into what follows.  Painting uses [`clear_draw_request`], which keeps
+/// a future deadline.
+pub fn reset_draw_signals() {
+    clear_draw_request();
     NEXT_DRAW_AT.with(|c| c.set(None));
 }
 
@@ -535,8 +560,8 @@ pub fn peek_draw_signals() -> (bool, Option<Instant>) {
 /// intervening event that does not itself repaint cannot strand the scheduled
 /// wake (the reactive-host lost-wakeup bug).  The cell is cleared only when
 /// the deadline actually comes due — [`wants_draw`] promotes it to an
-/// immediate draw — or by [`clear_draw_request`] at the start of a paint,
-/// after which consumers re-arm.
+/// immediate draw — or by the [`clear_draw_request`] that starts a paint
+/// once it is due; consumers re-arm during that paint.
 ///
 /// The deadline is in UI-clock time ([`crate::clock`]); with the real clock
 /// (every shell) that is the wall clock.
@@ -639,153 +664,8 @@ impl Default for Tween {
 }
 
 #[cfg(test)]
-mod host_waker_tests {
-    //! Coverage for the reactive-host waker hook: a worker-thread
-    //! [`signal_async_state_change`] must be able to nudge a host parked in
-    //! `ControlFlow::Wait`.
-    //!
-    //! `HOST_WAKER` and the main queue's wakeup count (which these unbound test
-    //! threads signal and check) are process-global, and other tests in this crate call
-    //! `signal_async_state_change` concurrently — so
-    //! these tests serialize against each other with a local mutex, count
-    //! *their own* invocations rather than reading the global counter after
-    //! the fact, and assert with `>=` where a foreign signal could add more.
-    use super::*;
-    use std::sync::atomic::{AtomicU64, Ordering};
-
-    /// Serializes only these tests; unrelated tests may still signal in
-    /// parallel, which is why every assertion below tolerates extra fires.
-    static SERIAL: Mutex<()> = Mutex::new(());
-
-    fn serial() -> std::sync::MutexGuard<'static, ()> {
-        SERIAL.lock().unwrap_or_else(|p| p.into_inner())
-    }
-
-    #[test]
-    fn waker_fires_on_signal() {
-        let _guard = serial();
-        let fires = Arc::new(AtomicU64::new(0));
-        let seen = Arc::clone(&fires);
-        set_host_waker(move || {
-            seen.fetch_add(1, Ordering::AcqRel);
-        });
-
-        signal_async_state_change();
-        clear_host_waker();
-
-        assert!(
-            fires.load(Ordering::Acquire) >= 1,
-            "installed waker must run when any thread signals an async change"
-        );
-    }
-
-    #[test]
-    fn waker_sees_counter_already_bumped() {
-        let _guard = serial();
-        let before = crate::ui_thread::main_queue_wakeups();
-        let observed = Arc::new(AtomicU64::new(0));
-        let sink = Arc::clone(&observed);
-        set_host_waker(move || {
-            // Snapshot from inside the waker: the host is woken only after the
-            // bump is published, otherwise it would park again having seen
-            // nothing.
-            sink.store(crate::ui_thread::main_queue_wakeups(), Ordering::Release);
-        });
-
-        signal_async_state_change();
-        clear_host_waker();
-
-        assert!(
-            observed.load(Ordering::Acquire) > before,
-            "the counter must be bumped BEFORE the waker runs"
-        );
-    }
-
-    #[test]
-    fn replacing_the_waker_retires_the_old_one() {
-        let _guard = serial();
-        let old_fires = Arc::new(AtomicU64::new(0));
-        let old_sink = Arc::clone(&old_fires);
-        set_host_waker(move || {
-            old_sink.fetch_add(1, Ordering::AcqRel);
-        });
-
-        let new_fires = Arc::new(AtomicU64::new(0));
-        let new_sink = Arc::clone(&new_fires);
-        set_host_waker(move || {
-            new_sink.fetch_add(1, Ordering::AcqRel);
-        });
-        let old_baseline = old_fires.load(Ordering::Acquire);
-
-        signal_async_state_change();
-        clear_host_waker();
-
-        assert!(
-            new_fires.load(Ordering::Acquire) >= 1,
-            "the replacement waker runs"
-        );
-        assert_eq!(
-            old_fires.load(Ordering::Acquire),
-            old_baseline,
-            "the replaced waker no longer runs"
-        );
-    }
-
-    #[test]
-    fn clear_stops_the_waker() {
-        let _guard = serial();
-        let fires = Arc::new(AtomicU64::new(0));
-        let sink = Arc::clone(&fires);
-        set_host_waker(move || {
-            sink.fetch_add(1, Ordering::AcqRel);
-        });
-        clear_host_waker();
-        let baseline = fires.load(Ordering::Acquire);
-
-        signal_async_state_change();
-
-        assert_eq!(
-            fires.load(Ordering::Acquire),
-            baseline,
-            "a cleared waker must not run again"
-        );
-    }
-
-    #[test]
-    fn signal_from_a_worker_thread_wakes_the_host() {
-        let _guard = serial();
-        let fires = Arc::new(AtomicU64::new(0));
-        let sink = Arc::clone(&fires);
-        set_host_waker(move || {
-            sink.fetch_add(1, Ordering::AcqRel);
-        });
-
-        // The whole point of the hook: the signal originates off the main
-        // thread, where thread-local bumps are invisible to the host.
-        std::thread::spawn(signal_async_state_change)
-            .join()
-            .expect("worker thread signalled without panicking");
-        clear_host_waker();
-
-        assert!(
-            fires.load(Ordering::Acquire) >= 1,
-            "a worker-thread signal must reach the host waker"
-        );
-    }
-
-    #[test]
-    fn signalling_without_a_waker_is_a_no_op() {
-        let _guard = serial();
-        clear_host_waker();
-        // Must not panic and must still publish the cross-thread bump.
-        let before = crate::ui_thread::main_queue_wakeups();
-        signal_async_state_change();
-        assert!(
-            crate::ui_thread::main_queue_wakeups() > before,
-            "counter-only behaviour is unchanged when no waker is installed"
-        );
-    }
-}
+#[path = "animation_host_waker_tests.rs"]
+mod host_waker_tests;
 
 #[cfg(test)]
 #[path = "animation_scheduled_draw_tests.rs"]

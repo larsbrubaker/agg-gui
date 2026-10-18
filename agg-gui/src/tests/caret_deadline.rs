@@ -11,7 +11,8 @@
 //!   *non-destructively* and re-arms cleanly across successive boundaries, so a
 //!   shell that reads the deadline every idle iteration keeps arming the same
 //!   pending wake (the reactive-host lost-wakeup fix). The channel drains only
-//!   on a frame clear or when the deadline comes due (surfaced via `wants_draw`).
+//!   when the deadline comes due (surfaced via `wants_draw`, or served by the
+//!   paint that clears it) or on a reset; a paint before it is due keeps it.
 
 use super::*;
 use crate::text::Font;
@@ -115,12 +116,20 @@ fn loop_accessor_is_nondestructive_and_rearms_scheduled_channel() {
         "successive idle reads report the same pending deadline"
     );
 
-    // A frame clear (start of paint) drains the channel; the next frame re-arms
-    // the following boundary and the accessor serves it fresh.
+    // A frame clear (start of paint) before the deadline is due keeps it:
+    // a deadline armed outside paint has nobody to re-arm it.
     crate::animation::clear_draw_request();
+    assert_eq!(
+        app.next_draw_deadline(),
+        Some(first),
+        "a frame before the deadline is due keeps it"
+    );
+    // A reset drains the channel; the next frame re-arms the following
+    // boundary and the accessor serves it fresh.
+    crate::animation::reset_draw_signals();
     assert!(
         app.next_draw_deadline().is_none(),
-        "a frame clear drains the scheduled channel"
+        "a reset drains the scheduled channel"
     );
     crate::animation::request_draw_after(Duration::from_millis(500));
     let second = app
@@ -130,4 +139,32 @@ fn loop_accessor_is_nondestructive_and_rearms_scheduled_channel() {
         second >= first,
         "the re-armed deadline should be at or after the first"
     );
+}
+
+/// A deadline armed before a frame (the idle queue's drain does so for its
+/// next delayed action, just before the shell paints) is still pending after
+/// `App::paint`, so the host's next idle read wakes for it.
+#[test]
+fn a_deadline_armed_before_paint_survives_paint() {
+    let _clock = crate::clock::scoped_virtual(None);
+    let mut app = App::new(Box::new(Container::new().with_padding(4.0)));
+    app.layout(Size::new(100.0, 100.0));
+    crate::animation::reset_draw_signals();
+    crate::ui_thread::mark_current_thread_as_ui_thread_with_own_queue();
+    crate::ui_thread::run_on_idle_after(Duration::from_millis(250), || {});
+    // The tick's drain: nothing due yet, so it arms a timed draw.
+    crate::ui_thread::invoke_pending_actions();
+    let armed = app
+        .next_draw_deadline()
+        .expect("the drain arms a timed draw");
+    let mut fb = crate::framebuffer::Framebuffer::new(100, 100);
+    let mut ctx = crate::gfx_ctx::GfxCtx::new(&mut fb);
+    app.paint(&mut ctx);
+    assert_eq!(
+        app.next_draw_deadline(),
+        Some(armed),
+        "painting must not discard the deadline"
+    );
+    crate::ui_thread::reset_for_tests();
+    crate::animation::reset_draw_signals();
 }

@@ -78,10 +78,12 @@ impl Widget for Host {
 fn paint_and_check_armed(widget: &mut dyn Widget) -> bool {
     let mut fb = crate::framebuffer::Framebuffer::new(200, 200);
     let mut ctx = crate::gfx_ctx::GfxCtx::new(&mut fb);
-    crate::animation::clear_draw_request();
+    // A clean slate, so only what this paint arms is seen (a paint's own
+    // clear keeps a deadline that is not due yet).
+    crate::animation::reset_draw_signals();
     crate::widget::paint_subtree(widget, &mut ctx);
     let armed = crate::animation::peek_next_draw_deadline().is_some();
-    crate::animation::clear_draw_request();
+    crate::animation::reset_draw_signals();
     armed
 }
 

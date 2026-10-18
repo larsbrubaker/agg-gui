@@ -425,3 +425,61 @@ fn rust_only_an_interval_whose_tick_panics_keeps_running() {
     ui_thread::clear_interval(&interval);
     ui_thread::reset_for_tests();
 }
+
+/// `next_due` tells a loop that sleeps while idle when queued work needs a
+/// drain, read from the queue itself: now for work the next drain runs, the
+/// due time of a delayed action or interval, nothing once it has run. A
+/// paint in between (which consumes per-frame draw flags) changes nothing.
+#[test]
+fn rust_only_next_due_reports_when_queued_work_needs_a_drain() {
+    let _clock = clock::scoped_virtual(None);
+    let queue = own_queue();
+    assert_eq!(ui_thread::next_due(), None, "nothing queued");
+
+    // Posted mid-frame (during layout), after this frame's drain.
+    ui_thread::run_on_idle(|| {});
+    agg_gui::animation::clear_draw_request(); // what `App::paint` starts with
+    assert_eq!(ui_thread::next_due(), Some(clock::now()), "due at once");
+    ui_thread::invoke_pending_actions();
+    assert_eq!(ui_thread::next_due(), None, "ran");
+
+    let ran = Arc::new(AtomicBool::new(false));
+    let flag = Arc::clone(&ran);
+    ui_thread::run_on_idle_after(Duration::from_millis(300), move || {
+        flag.store(true, Ordering::SeqCst)
+    });
+    let due = clock::now() + Duration::from_millis(300);
+    ui_thread::invoke_pending_actions();
+    agg_gui::animation::clear_draw_request();
+    assert_eq!(
+        ui_thread::next_due(),
+        Some(due),
+        "the delayed action's time"
+    );
+    clock::advance(Duration::from_millis(299));
+    ui_thread::invoke_pending_actions();
+    assert!(!ran.load(Ordering::SeqCst), "not before its time");
+    clock::advance(Duration::from_millis(1));
+    assert_eq!(ui_thread::next_due(), Some(clock::now()), "due now");
+    ui_thread::invoke_pending_actions();
+    assert!(ran.load(Ordering::SeqCst), "runs exactly at its time");
+    assert_eq!(ui_thread::next_due(), None);
+
+    let interval = ui_thread::set_interval(|| {}, Duration::from_millis(100));
+    assert_eq!(
+        ui_thread::next_due(),
+        Some(clock::now() + Duration::from_millis(100)),
+        "an interval's next run"
+    );
+    ui_thread::clear_interval(&interval);
+    assert_eq!(ui_thread::next_due(), None, "a cleared interval");
+
+    // Delayed work queued from another thread is stamped by the next drain,
+    // so it needs that drain now.
+    let remote = queue.clone();
+    std::thread::spawn(move || remote.run_on_idle_after(Duration::from_secs(5), || {}))
+        .join()
+        .expect("poster thread");
+    assert_eq!(ui_thread::next_due(), Some(clock::now()));
+    queue.clear();
+}

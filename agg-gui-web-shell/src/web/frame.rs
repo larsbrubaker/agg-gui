@@ -199,6 +199,7 @@ fn decide() -> NextTick {
         dirty: DIRTY.with(|d| d.get()),
         app_wants_draw,
         next_draw_deadline,
+        idle_work_at: agg_gui::ui_thread::next_due(),
         pointer_held: !POINTERS.with(|p| p.borrow().is_idle()),
         gamepad_connected: agg_gui::gamepad::state().is_some(),
         input_held: super::input_held(),

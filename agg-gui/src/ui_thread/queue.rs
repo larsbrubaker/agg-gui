@@ -274,6 +274,32 @@ impl UiQueue {
             .count()
     }
 
+    /// When the earliest queued work is due on the calling thread's clock:
+    /// now for work the next drain runs (immediate actions, and delayed work
+    /// queued from another thread, which that drain stamps), otherwise the
+    /// earliest delayed action or interval. `None` when nothing is queued.
+    ///
+    /// A loop that sleeps while idle asks this directly rather than relying
+    /// on the draw request a post raises or the timed draw a drain arms:
+    /// both are per-frame draw flags that a paint in between may consume.
+    pub fn next_due(&self) -> Option<Instant> {
+        let now = crate::clock::now();
+        let pending = lock(&self.shared.pending);
+        if !pending.call_later.is_empty() {
+            return Some(now);
+        }
+        pending
+            .deferred
+            .iter()
+            .map(|(due, _)| *due)
+            .chain(pending.intervals.iter().map(|i| *lock(&i.next_run)))
+            .map(|due| match due {
+                DueAt::At(at) => at,
+                DueAt::After(_) => now,
+            })
+            .min()
+    }
+
     /// Drop everything queued and stop every interval.
     pub fn clear(&self) {
         let mut pending = lock(&self.shared.pending);

@@ -10,6 +10,14 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- `frame_demand`: a per-thread hook every draw, layout and idle-queue request
+  calls (`set_hook` / `notify`), so a shell whose loop sleeps while idle
+  wakes for requests made outside its loop. `ui_thread::next_due()` /
+  `UiQueue::next_due()`: when queued work needs a drain.
+  `animation::reset_draw_signals()`: clear every draw signal, a future
+  deadline included. `tilt::enable_requested()` /
+  `fullscreen::requested()`: peek at a pending request.
+
 - `Widget::modal_hover_passes_outside` (default `false`): a modal that answers `true` lets pointer
   moves outside its bounds hover the widgets under the pointer as usual, so a light-dismiss panel
   with no backdrop leaves the cursors beside it showing (a splitter's resize pointer), including
@@ -74,6 +82,12 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   unchanged (it owns every key).
 
 ### Fixed
+
+- A paint no longer discards a future scheduled draw: `clear_draw_request`
+  (which `App::paint` starts with) clears a `request_draw_after` deadline only
+  once it is due. The idle queue's drain arms a timed draw for its next
+  delayed action or interval just before the paint; dropping it left a
+  reactive host asleep with that work queued until the next input.
 
 - On-screen keyboard: a tapped key's preview goes 100 ms after the lift, and a held key's alternates
   open at 380 ms, even when nothing else repaints. `App::paint` clears every scheduled draw as a

@@ -17,6 +17,7 @@ fn settled(now: Instant) -> LoopDemand {
         dirty: false,
         app_wants_draw: false,
         next_draw_deadline: None,
+        idle_work_at: None,
         pointer_held: false,
         gamepad_connected: false,
         input_held: false,
@@ -48,6 +49,7 @@ fn every_reason_to_run_keeps_the_loop_running() {
         }),
         ("host asked for a tick", |d| d.tick_requested = true),
         ("deadline due", |d| d.next_draw_deadline = Some(d.now)),
+        ("idle work due", |d| d.idle_work_at = Some(d.now)),
     ];
     for (name, set) in reasons {
         let mut demand = settled(now);
@@ -200,4 +202,54 @@ fn the_timer_never_fires_before_its_deadline() {
         timer_delay_ms(now + Duration::from_secs(60 * 60 * 24 * 365), now),
         i32::MAX
     );
+}
+
+/// Idle-queue work posted during a tick's layout or paint (after that
+/// tick's drain) keeps the loop awake even though the paint consumed the
+/// draw request the post raised: the decision asks the queue itself.
+#[test]
+fn idle_work_posted_during_a_paint_keeps_the_loop_awake() {
+    let _clock = agg_gui::clock::scoped_virtual(None);
+    agg_gui::ui_thread::mark_current_thread_as_ui_thread_with_own_queue();
+    agg_gui::ui_thread::invoke_pending_actions(); // the tick's drain
+    agg_gui::ui_thread::run_on_idle(|| {}); // posted during layout
+    agg_gui::animation::clear_draw_request(); // `App::paint` starts here
+    let mut d = settled(agg_gui::clock::now());
+    d.idle_work_at = agg_gui::ui_thread::next_due();
+    assert_eq!(next_tick(&d), NextTick::Frame);
+    agg_gui::ui_thread::invoke_pending_actions();
+    assert_eq!(agg_gui::ui_thread::next_due(), None);
+    agg_gui::animation::reset_draw_signals();
+}
+
+/// A delayed action wakes the loop exactly when it is due: a timer for its
+/// time, then a frame (whose drain runs it), with or without a GPU.
+#[test]
+fn a_delayed_action_wakes_the_loop_exactly_when_due() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+    let _clock = agg_gui::clock::scoped_virtual(None);
+    agg_gui::ui_thread::mark_current_thread_as_ui_thread_with_own_queue();
+    let ran = Arc::new(AtomicBool::new(false));
+    let flag = Arc::clone(&ran);
+    let due = agg_gui::clock::now() + Duration::from_millis(400);
+    agg_gui::ui_thread::run_on_idle_after(Duration::from_millis(400), move || {
+        flag.store(true, Ordering::SeqCst)
+    });
+    agg_gui::ui_thread::invoke_pending_actions();
+    agg_gui::animation::clear_draw_request();
+    for can_paint in [true, false] {
+        let mut d = settled(agg_gui::clock::now());
+        d.can_paint = can_paint;
+        d.idle_work_at = agg_gui::ui_thread::next_due();
+        assert_eq!(next_tick(&d), NextTick::Timer(due), "can_paint {can_paint}");
+    }
+    agg_gui::clock::advance(Duration::from_millis(400));
+    let mut d = settled(agg_gui::clock::now());
+    d.idle_work_at = agg_gui::ui_thread::next_due();
+    assert_eq!(next_tick(&d), NextTick::Frame);
+    agg_gui::ui_thread::invoke_pending_actions();
+    assert!(ran.load(Ordering::SeqCst));
+    agg_gui::ui_thread::reset_for_tests();
+    agg_gui::animation::reset_draw_signals();
 }

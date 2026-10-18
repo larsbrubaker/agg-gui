@@ -171,3 +171,31 @@ fn rust_only_foreign_main_queue_signal_does_not_wake_an_unbound_thread() {
         "the pending deadline is untouched"
     );
 }
+
+/// A paint before a deadline is due keeps it; the paint that serves a due
+/// deadline clears it. Dropping a future deadline at every paint once lost
+/// the idle queue's timed draw for its next delayed action, armed by the
+/// drain just before the paint: a host that sleeps between frames never
+/// woke for that action.
+#[test]
+fn a_paint_keeps_a_future_deadline_and_clears_a_due_one() {
+    let _clock = crate::clock::scoped_virtual(None);
+    reset_draw_signals();
+    request_draw_after(Duration::from_millis(300));
+    let at = peek_next_draw_deadline().expect("armed");
+    clear_draw_request();
+    assert_eq!(peek_next_draw_deadline(), Some(at), "not due: kept");
+    crate::clock::advance(Duration::from_millis(300));
+    clear_draw_request();
+    assert_eq!(peek_next_draw_deadline(), None, "due: this paint serves it");
+}
+
+/// `reset_draw_signals` is the clean slate: a future deadline goes too.
+#[test]
+fn reset_clears_a_future_deadline() {
+    request_draw_after(Duration::from_secs(60));
+    request_draw();
+    reset_draw_signals();
+    assert_eq!(peek_next_draw_deadline(), None);
+    assert!(!wants_draw());
+}

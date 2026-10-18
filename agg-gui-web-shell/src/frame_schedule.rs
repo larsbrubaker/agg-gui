@@ -35,6 +35,11 @@ pub(crate) struct LoopDemand {
     /// `App::next_draw_deadline()`: the earliest scheduled draw (caret
     /// blink, tooltip delay, deferred idle work, an interval).
     pub next_draw_deadline: Option<Instant>,
+    /// `agg_gui::ui_thread::next_due()`: when queued idle work (an action,
+    /// a delayed action, an interval) needs a drain. Read from the queue, not
+    /// from the draw flags a post raises, because a paint later in the same
+    /// tick consumes those. Counts with or without a GPU: every tick drains.
+    pub idle_work_at: Option<Instant>,
     /// A mouse button or touch contact is held.
     pub pointer_held: bool,
     /// A gamepad is connected; pads have no events, so they are polled.
@@ -75,10 +80,10 @@ pub(crate) fn next_tick(d: &LoopDemand) -> NextTick {
         return NextTick::Frame;
     }
     let draw_at = d.next_draw_deadline.filter(|_| d.can_paint);
-    let deadline = match (draw_at, d.rebuild_at) {
-        (Some(a), Some(b)) => Some(a.min(b)),
-        (one, None) | (None, one) => one,
-    };
+    let deadline = [draw_at, d.idle_work_at, d.rebuild_at]
+        .into_iter()
+        .flatten()
+        .min();
     match deadline {
         Some(at) if at <= d.now => NextTick::Frame,
         Some(at) => NextTick::Timer(at),

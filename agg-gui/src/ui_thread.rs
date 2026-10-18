@@ -13,7 +13,9 @@
 //! parked native loop through the shell's waker and the web loop on its next
 //! tick), and each drain arms `request_draw_after` for the earliest deferred
 //! action or interval still pending, so a reactive loop sleeps exactly until
-//! it is due.
+//! it is due. A loop that stops iterating while idle (the browser shell's)
+//! also asks [`next_due`] directly, so queued work keeps it awake whatever a
+//! paint in between does to the draw flags.
 //!
 //! **Wakeups are per queue, so per UI thread.** Each queue counts the wakeups
 //! aimed at it, and [`crate::animation`] merges only the calling thread's
@@ -294,6 +296,13 @@ pub fn count() -> usize {
 /// come.
 pub fn count_expired() -> usize {
     current_queue().count_expired()
+}
+
+/// When the earliest work queued for the calling thread is due (see
+/// [`UiQueue::next_due`]); `None` when nothing is queued, or the thread is
+/// bound to no queue (nothing it could drain).
+pub fn next_due() -> Option<web_time::Instant> {
+    bound().and_then(|queue| queue.next_due())
 }
 
 /// Run `hook` on every drain, after the queued actions (an app's own
