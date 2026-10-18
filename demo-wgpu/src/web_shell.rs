@@ -52,6 +52,12 @@ impl<F: FnMut()> WebShellHost for OnTickHost<F> {
     fn on_tick(&mut self, _app: &mut App) {
         (self.0)();
     }
+
+    /// The closure was promised every animation frame and may poll anything,
+    /// so this host never lets the loop sleep.
+    fn wants_tick(&mut self, _app: &mut App) -> bool {
+        true
+    }
 }
 
 /// Request a repaint on the next animation frame.

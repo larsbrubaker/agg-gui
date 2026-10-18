@@ -291,6 +291,8 @@ async fn request_device(
                     "agg-gui-web-shell: GPU device lost ({reason:?}): {message}"
                 )));
                 flag.store(true, Ordering::Relaxed);
+                // The tick it wakes starts the rebuild.
+                super::schedule::wake();
             }
         });
     }

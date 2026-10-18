@@ -4,8 +4,12 @@
 //! Submodules:
 //! - [`gpu`] — async WebGPU/WebGL2 init on the canvas, surface acquire,
 //!   device-loss rebuild;
-//! - [`frame`] — the `requestAnimationFrame` loop: sizing, the paint
-//!   decision, and one painted frame;
+//! - [`frame`] — one tick of the frame loop: sizing, the paint decision,
+//!   one painted frame, and the end-of-tick decision to run on or sleep;
+//! - [`schedule`] — the `requestAnimationFrame` callback, the deadline timer
+//!   and [`request_tick`]: the loop sleeps while nothing needs a frame;
+//! - [`wake_sources`] — browser events that only wake the loop (canvas
+//!   resize, DPR change, fullscreen change, gamepad connected);
 //! - [`haptics`] — a vibrate tick when a finger's long press fires;
 //! - [`ime`] — the hidden input that carries browser input-method
 //!   composition and committed text to the focused text widget;
@@ -43,7 +47,11 @@ mod ime;
 mod input;
 mod lifecycle;
 mod platform;
+mod schedule;
 mod sensors;
+mod wake_sources;
+
+pub use schedule::request_tick;
 
 thread_local! {
     static APP: RefCell<Option<App>> = const { RefCell::new(None) };
@@ -94,10 +102,11 @@ fn sync_cursor(canvas: &web_sys::HtmlCanvasElement) {
     write_cursor(canvas, CURSOR.with(|c| c.borrow_mut().after_input()));
 }
 
-/// Request a repaint on the next animation frame. App exports call this after
-/// mutating state the widget tree reads.
+/// Request a repaint on the next animation frame (waking the loop if it is
+/// asleep). App exports call this after mutating state the widget tree reads.
 pub fn mark_dirty() {
     DIRTY.with(|c| c.set(true));
+    schedule::wake();
 }
 
 pub(crate) fn note_input() {
@@ -110,6 +119,8 @@ pub(crate) fn note_input() {
 /// through `App::wants_draw()`.
 pub(crate) fn note_input_without_repaint() {
     INPUT_SINCE_FRAME.with(|c| c.set(true));
+    // The tick it wakes paints only if the event changed something.
+    schedule::wake();
 }
 
 /// Whether a frame has been presented to the canvas since [`start`] — the
@@ -145,6 +156,11 @@ pub(crate) fn forward(event: ForwarderEvent) {
 /// this before anything else touches the app.
 pub(crate) fn deliver_held_input() {
     forward_or_hold(None);
+}
+
+/// Whether input waits for the next tick ([`deliver_held_input`]).
+pub(crate) fn input_held() -> bool {
+    HELD_INPUT.with(|held| !held.is_empty())
 }
 
 /// [`crate::held_input::forward_or_hold`] on the shell's app and held input.
@@ -213,7 +229,9 @@ type Builder =
 /// Synchronously: installs the panic hook, detects the client platform (so the
 /// widget tree is built against the right input profile / UX scale), sizes the
 /// canvas, installs input + lifecycle listeners, and starts the
-/// `requestAnimationFrame` loop. Asynchronously: brings up the GPU, then runs
+/// `requestAnimationFrame` loop, which sleeps whenever nothing needs a frame
+/// (see [`crate::frame_schedule`] for what keeps it running and the
+/// crate docs for how an app asks for frames). Asynchronously: brings up the GPU, then runs
 /// `build` — like the native shell, the app is built *after* the GPU exists so
 /// custom renderers can use the device. Input before that is dropped.
 ///
@@ -268,6 +286,7 @@ where
     lifecycle::install_resize();
     lifecycle::install_window_activation();
     lifecycle::install_webgl_context_lost(&canvas);
+    wake_sources::install(&canvas);
 
     let builder: Builder = Box::new(move |init| {
         build(init).map(|(app, host)| (app, Box::new(host) as Box<dyn WebShellHost>))
@@ -278,7 +297,7 @@ where
         }
     });
 
-    frame::start_raf_loop();
+    frame::start_frame_loop();
     Ok(())
 }
 

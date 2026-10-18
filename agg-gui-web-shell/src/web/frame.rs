@@ -1,31 +1,32 @@
-//! The `requestAnimationFrame` loop: per-tick canvas sizing and DPR sync,
-//! the paint decision ([`crate::policy`], held back while the GPU is busy by
-//! [`crate::frames_in_flight`]), one painted frame, and the device-loss
-//! rebuild.
+//! One tick of the frame loop: canvas sizing and DPR sync, the paint
+//! decision ([`crate::policy`], held back while the GPU is busy by
+//! [`crate::frames_in_flight`]), one painted frame, the device-loss rebuild,
+//! and the end-of-tick decision to run on or sleep ([`decide`], over
+//! [`crate::frame_schedule`]); [`super::schedule`] runs the ticks.
 //!
 //! Owns the GPU-side state ([`Painter`]) in its own thread-local; the app and
 //! host live in [`super`]'s cells. Order per tick mirrors the native shell's
 //! loop: size → sensors/fullscreen → `on_tick` → drain `agg_gui::ui_thread`
 //! → decide → (`on_frame` → `paint` → `end_frame` → `after_paint` → present →
-//! `after_present`) → `on_idle`. Every decision is delegated to a platform-neutral module
-//! (`dom_math::fit_backing`, `policy`, `frames_in_flight`, `recovery`) that is
-//! unit tested.
+//! `after_present`) → `on_idle` → run on or sleep. Every decision is delegated
+//! to a platform-neutral module (`dom_math::fit_backing`, `policy`,
+//! `frames_in_flight`, `recovery`, `frame_schedule`) that is unit tested.
 
 use std::cell::RefCell;
-use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
 use agg_gui::App;
 use agg_gui_wgpu::{SsaaFramebuffer, WgpuGfxCtx};
-use wasm_bindgen::closure::Closure;
-use wasm_bindgen::{JsCast, JsValue};
+use wasm_bindgen::JsValue;
 
 use super::gpu::{Acquire, WebGpu};
 use super::{lifecycle, mark_dirty, report_fatal, INPUT_SINCE_FRAME, POINTERS, POLICY, PRESENTED};
 use super::{platform, sensors, APP, CANVAS, CONFIG, CURSOR, DIRTY, FIRST_PAINT, HOST};
+use crate::config::RedrawPolicy;
 use crate::dom_math::{fit_backing, sanitize_dpr};
 use crate::error::WebShellError;
+use crate::frame_schedule::{next_tick, LoopDemand, NextTick};
 use crate::frames_in_flight::{
     tick_paint, Expired, FramesInFlight, TickPaint, MAX_FRAMES_IN_FLIGHT,
 };
@@ -147,36 +148,67 @@ pub(super) fn size_backing_store(canvas: &web_sys::HtmlCanvasElement) -> ((u32, 
     ((w, h), scale, changed)
 }
 
-/// Self-rescheduling `requestAnimationFrame` loop.
-pub(super) fn start_raf_loop() {
-    type RafSlot = Rc<RefCell<Option<Closure<dyn FnMut()>>>>;
-    fn schedule(cb: &RafSlot) {
-        let borrow = cb.borrow();
-        if let (Some(window), Some(closure)) = (web_sys::window(), borrow.as_ref()) {
-            let _ = window.request_animation_frame(closure.as_ref().unchecked_ref());
-        }
-    }
-    let cb: RafSlot = Rc::new(RefCell::new(None));
-    let cb_clone = Rc::clone(&cb);
-    *cb.borrow_mut() = Some(Closure::new(move || {
+/// Start the frame loop; it sleeps whenever [`decide`] finds nothing to do.
+pub(super) fn start_frame_loop() {
+    super::schedule::install(|| {
         tick();
-        schedule(&cb_clone);
-    }));
-    schedule(&cb);
+        decide()
+    });
 }
 
-/// Run `f` with the app and host, skipping when either is missing or borrowed.
-fn with_app_host(f: impl FnOnce(&mut App, &mut dyn WebShellHost)) {
+/// Run `f` with the app and host, skipping (`None`) when either is missing
+/// or borrowed.
+fn with_app_host<R>(f: impl FnOnce(&mut App, &mut dyn WebShellHost) -> R) -> Option<R> {
     APP.with(|a| {
         HOST.with(|h| {
             let (Ok(mut app), Ok(mut host)) = (a.try_borrow_mut(), h.try_borrow_mut()) else {
-                return;
+                return None;
             };
-            if let (Some(app), Some(host)) = (app.as_mut(), host.as_mut()) {
-                f(app, host.as_mut());
+            match (app.as_mut(), host.as_mut()) {
+                (Some(app), Some(host)) => Some(f(app, host.as_mut())),
+                _ => None,
             }
         })
+    })
+}
+
+/// After a tick: whether anything needs the next frame, a timer, or nothing.
+/// Reads the state itself rather than the tick's results, so it holds after
+/// a tick that returned early, and after work `on_idle` did.
+fn decide() -> NextTick {
+    let now = web_time::Instant::now();
+    let (can_paint, rebuild_at) = GPU.with(|g| match &*g.borrow() {
+        // A lost device is rebuilt by a tick once the backoff allows.
+        GpuState::Ready(p) if p.gpu.device_lost() => (
+            false,
+            Some(BACKOFF.with(|b| b.borrow().retry_at()).unwrap_or(now)),
+        ),
+        GpuState::Ready(_) => (true, None),
+        GpuState::Pending | GpuState::Rebuilding | GpuState::Failed => (false, None),
     });
+    let (app_wants_draw, next_draw_deadline) = super::with_app(|app| {
+        // `wants_draw` also promotes a deadline that has come due.
+        (app.wants_draw(), app.next_draw_deadline())
+    })
+    .unwrap_or((false, None));
+    let host_wants_tick = with_app_host(|app, host| host.wants_tick(app)).unwrap_or(false);
+    let demand = LoopDemand {
+        can_paint,
+        continuous: POLICY.with(|p| p.get()) == RedrawPolicy::Continuous,
+        first_paint_pending: !FIRST_PAINT.with(|g| g.has_painted()),
+        dirty: DIRTY.with(|d| d.get()),
+        app_wants_draw,
+        next_draw_deadline,
+        pointer_held: !POINTERS.with(|p| p.borrow().is_idle()),
+        gamepad_connected: agg_gui::gamepad::state().is_some(),
+        input_held: super::input_held(),
+        platform_request_pending: agg_gui::tilt::enable_requested()
+            || agg_gui::fullscreen::requested(),
+        tick_requested: super::schedule::take_tick_request() || host_wants_tick,
+        rebuild_at,
+        now,
+    };
+    next_tick(&demand)
 }
 
 fn tick() {
@@ -336,8 +368,11 @@ fn service_device_loss() -> bool {
                                 )));
                                 // Keep the dead device installed; the lost
                                 // flag is still set, so a tick after the
-                                // backoff retries the rebuild.
+                                // backoff retries the rebuild. The loop slept
+                                // while the rebuild ran: the tick this wakes
+                                // arms the backoff timer.
                                 install_gpu(gpu);
+                                super::schedule::wake();
                             }
                             RebuildVerdict::GiveUp => {
                                 fail(WebShellError::DeviceLost(err.to_string()))

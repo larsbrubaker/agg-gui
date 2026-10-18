@@ -58,6 +58,9 @@ pub(super) fn install_window_pointer_release() {
     };
     for event in ["pointerup", "mouseup", "pointercancel"] {
         listen(window.as_ref(), event, |e: web_sys::Event| {
+            // A tick after the release lets `on_idle` see the pointer idle
+            // (and the loop stop polling for it).
+            super::schedule::wake();
             if let Some(p) = e.dyn_ref::<web_sys::PointerEvent>() {
                 if PointerKind::from_dom(&p.pointer_type()) == PointerKind::Touch {
                     // A finger lifted (possibly off the canvas); its
@@ -148,6 +151,8 @@ pub(super) fn install_resize() {
 pub(super) fn install_webgl_context_lost(canvas: &web_sys::HtmlCanvasElement) {
     listen(canvas.as_ref(), "webglcontextlost", |_| {
         WEBGL_CONTEXT_LOST.with(|c| c.set(true));
+        // The tick it wakes reports the loss.
+        super::schedule::wake();
     });
 }
 

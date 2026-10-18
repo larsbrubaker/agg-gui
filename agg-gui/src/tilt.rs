@@ -26,11 +26,18 @@ static READ_Y: AtomicU64 = AtomicU64::new(0);
 /// never report enabled.
 pub fn request_enable() {
     ENABLE_PENDING.store(true, Ordering::Relaxed);
+    crate::frame_demand::notify();
 }
 
 /// Shell side: consume a pending enable request, if any.
 pub fn take_enable_request() -> bool {
     ENABLE_PENDING.swap(false, Ordering::Relaxed)
+}
+
+/// Shell side: whether a request is waiting, without consuming it — so a
+/// loop that sleeps while idle runs once more to serve it.
+pub fn enable_requested() -> bool {
+    ENABLE_PENDING.load(Ordering::Relaxed)
 }
 
 /// Shell side: report whether the sensor listener is live (permission
@@ -71,10 +78,27 @@ pub fn reading() -> Option<(f64, f64)> {
 mod tests {
     use super::*;
 
+    std::thread_local! {
+        static NOTIFIED: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+    }
+
+    fn count_notify() {
+        NOTIFIED.with(|c| c.set(c.get() + 1));
+    }
+
     #[test]
     fn request_reading_and_state_roundtrip() {
         assert!(!take_enable_request());
+        assert!(!enable_requested());
+        crate::frame_demand::set_hook(Some(count_notify));
         request_enable();
+        crate::frame_demand::set_hook(None);
+        assert_eq!(
+            NOTIFIED.with(|c| c.get()),
+            1,
+            "a request wakes a sleeping shell loop"
+        );
+        assert!(enable_requested(), "peeking does not consume");
         assert!(take_enable_request());
         assert!(!take_enable_request(), "request must coalesce and clear");
 

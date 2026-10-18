@@ -36,6 +36,11 @@ impl<E> HeldInput<E> {
         self.events.borrow().len()
     }
 
+    /// Whether nothing is waiting.
+    pub(crate) fn is_empty(&self) -> bool {
+        self.events.borrow().is_empty()
+    }
+
     fn push(&self, event: E) {
         self.events.borrow_mut().push_back(event);
     }

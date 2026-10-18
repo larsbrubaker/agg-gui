@@ -276,13 +276,16 @@ pub(crate) fn bump_local_async_state() {
     NEEDS_DRAW.with(|c| c.set(true));
     INVALIDATION_EPOCH.with(|c| c.set(c.get().wrapping_add(1)));
     ASYNC_STATE_EPOCH.with(|c| c.set(c.get().wrapping_add(1)));
+    crate::frame_demand::notify();
 }
 
-/// Run the installed host waker, if any, with its lock released.
+/// Run the installed host waker, if any, with its lock released, and the
+/// calling thread's frame-demand hook ([`crate::frame_demand`]).
 pub(crate) fn wake_host() {
     if let Some(waker) = host_waker() {
         waker();
     }
+    crate::frame_demand::notify();
 }
 
 /// Request that the host schedule another draw as soon as possible.
@@ -313,6 +316,7 @@ pub fn request_draw() {
 fn set_draw_request() {
     NEEDS_DRAW.with(|c| c.set(true));
     INVALIDATION_EPOCH.with(|c| c.set(c.get().wrapping_add(1)));
+    crate::frame_demand::notify();
 }
 
 /// Request a frame **without** advancing [`invalidation_epoch`].
@@ -338,6 +342,7 @@ fn set_draw_request() {
 pub fn request_draw_without_invalidation() {
     crate::draw_trace_log::record(crate::draw_trace_log::UNTAGGED_DRAW_REQUEST);
     NEEDS_DRAW.with(|c| c.set(true));
+    crate::frame_demand::notify();
 }
 
 /// Request another layout **and** paint pass.
@@ -506,6 +511,7 @@ pub fn request_draw_after(delay: Duration) {
         Some(existing) if existing <= when => {}
         _ => c.set(Some(when)),
     });
+    crate::frame_demand::notify();
 }
 
 /// Side-effect-free snapshot of the two draw signals for diagnostics.

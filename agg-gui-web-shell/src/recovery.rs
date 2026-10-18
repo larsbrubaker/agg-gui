@@ -47,6 +47,13 @@ impl RebuildBackoff {
         self.failures < MAX_REBUILD_ATTEMPTS && self.retry_at.is_none_or(|t| now >= t)
     }
 
+    /// When the next rebuild may start, while a failed one is backing off;
+    /// the frame loop sleeps until then.
+    pub(crate) fn retry_at(&self) -> Option<Instant> {
+        self.retry_at
+            .filter(|_| self.failures < MAX_REBUILD_ATTEMPTS)
+    }
+
     /// Record a failed rebuild at `now`.
     pub(crate) fn record_failure(&mut self, now: Instant) -> RebuildVerdict {
         self.failures += 1;
@@ -89,6 +96,7 @@ mod tests {
         assert!(delays.windows(2).all(|w| w[1] >= w[0]));
         assert!(delays.iter().all(|&d| d <= REBUILD_MAX_DELAY));
         assert!(!b.may_attempt(now + Duration::from_secs(3600)));
+        assert_eq!(b.retry_at(), None, "given up: nothing to wake for");
     }
 
     #[test]
@@ -99,6 +107,7 @@ mod tests {
             panic!("first failure retries");
         };
         assert!(!b.may_attempt(now + Duration::from_millis(16)));
+        assert_eq!(b.retry_at(), Some(now + d), "the loop sleeps until then");
         assert!(b.may_attempt(now + d));
     }
 

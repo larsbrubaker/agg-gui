@@ -14,7 +14,7 @@
 //! focused with `preventScroll`, and `inputmode=none`
 //! keeps phones from raising the system keyboard over agg-gui's own.
 //!
-//! [`sync`] runs every animation tick: it focuses the input while the app
+//! [`sync`] runs on every tick of the frame loop: it focuses the input while the app
 //! wants IME (`App::wants_ime`), moves it with the caret, and blurs it when
 //! focus leaves the text widget.
 

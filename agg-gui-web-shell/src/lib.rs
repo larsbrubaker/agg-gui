@@ -11,9 +11,11 @@
 //!   the app's own check of the adapter
 //!   ([`WebShellConfig::with_adapter_check`]) before the device is requested;
 //! - the `requestAnimationFrame` loop with [`RedrawPolicy::Reactive`] /
-//!   [`RedrawPolicy::Continuous`] run modes, layout caching, and the
+//!   [`RedrawPolicy::Continuous`] run modes, layout caching, the
 //!   **first-paint guarantee** (the first frame always paints, even when
-//!   nothing requested a draw by the time the async GPU init resolved);
+//!   nothing requested a draw by the time the async GPU init resolved), and
+//!   **idle sleep**: while nothing needs a frame the loop requests none, so
+//!   a settled page costs no CPU (see "Asking for frames");
 //! - **frame pacing**: two presented frames on the GPU at most, one on a GPU
 //!   whose frames take longer than 50 ms, so a slow (software) GPU never
 //!   builds a backlog that input and the page's own scrolling wait behind;
@@ -22,8 +24,9 @@
 //!   after at most 10 s;
 //! - canvas backing-store sizing (`clientSize × devicePixelRatio`, with the
 //!   scale reduced uniformly when that would exceed the device's texture
-//!   limit) and DPR tracking every tick (browser zoom changes DPR without a
-//!   resize event);
+//!   limit) and DPR tracking every tick, woken by a canvas `ResizeObserver`
+//!   and a `devicePixelRatio` media query (browser zoom and a move to
+//!   another monitor change DPR without a resize event);
 //! - DOM pointer (mouse / pen / multi-touch), wheel, context-menu, and
 //!   pointer-leave listeners; physical keyboard **plus the copy/cut/paste
 //!   clipboard bridge** via `agg_gui::web_adapter`;
@@ -52,6 +55,36 @@
 //!
 //! The app side mirrors `agg_gui_shell::ShellHost` method for method
 //! ([`WebShellHost`]), so native and web glue can share one host type.
+//!
+//! # Asking for frames
+//!
+//! The loop runs a tick for every animation frame only while something needs
+//! one; otherwise it sleeps until a wake, or until a single timer for the
+//! earliest scheduled draw. Nothing an app already does needs to change:
+//!
+//! - **Input** (pointer, wheel, keys, touch, IME composition, paste, file
+//!   drop, window focus and blur) wakes it; the tick paints if the event
+//!   changed something (`App::wants_draw`).
+//! - **Widgets and app code** ask through agg-gui: `animation::request_draw`
+//!   (and its tagged / no-invalidation forms), `request_layout`,
+//!   `request_draw_after` and per-widget draw deadlines (caret blink,
+//!   tooltips), `ui_thread::run_on_idle` / `run_on_idle_after` /
+//!   `set_interval`, `animation::signal_async_state_change`, `tilt` and
+//!   `fullscreen` requests. Made outside a tick (a fetch completion, a
+//!   promise, a `setTimeout`) they wake the loop through
+//!   `agg_gui::frame_demand`; made inside one, the end-of-tick decision sees
+//!   them. A running tween or glide re-requests a draw each frame, which keeps
+//!   the loop running until it settles.
+//! - **App exports** call [`mark_dirty`] (repaint) or [`request_tick`] (one
+//!   tick, no forced paint).
+//! - **A host that polls** something without an event in
+//!   [`WebShellHost::on_tick`] / `on_idle` returns `true` from
+//!   [`WebShellHost::wants_tick`] while it polls.
+//!
+//! The shell keeps the loop running itself while a mouse button or touch is
+//! held, a gamepad is connected, a frame has yet to be presented, or the
+//! policy is [`RedrawPolicy::Continuous`]; resize, DPR, visibility,
+//! fullscreen, gamepad-connect, device-loss and backoff timers wake it.
 //!
 //! # Targets
 //!
@@ -82,6 +115,7 @@ mod fatal;
 // Native only: it paints on a headless GPU frame.
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod frame_clear_tests;
+mod frame_schedule;
 mod frames_in_flight;
 mod held_input;
 mod host;
@@ -115,6 +149,6 @@ pub use wgpu;
 mod web;
 #[cfg(target_arch = "wasm32")]
 pub use web::{
-    has_presented, mark_dirty, redraw_policy, set_redraw_policy, start, with_app, with_canvas,
-    WebShellInit,
+    has_presented, mark_dirty, redraw_policy, request_tick, set_redraw_policy, start, with_app,
+    with_canvas, WebShellInit,
 };

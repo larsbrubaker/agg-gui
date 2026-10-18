@@ -10,6 +10,17 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- Idle sleep: the frame loop stops requesting animation frames while nothing
+  needs one (no repaint, draw or layout request, animation, held pointer,
+  connected gamepad, pending tilt or fullscreen request, or host poll), and
+  arms one `setTimeout` for the earliest scheduled draw instead of ticking
+  until it. Input, agg-gui requests made outside a tick (through the new
+  `agg_gui::frame_demand` hook), a canvas `ResizeObserver`, DPR and
+  fullscreen changes, `gamepadconnected`, visibility and device loss wake it.
+  `request_tick()` asks for one tick from an export; a host that polls in
+  `on_tick` returns `true` from the new `WebShellHost::wants_tick`, which
+  `demo-wgpu`'s deprecated `web_shell::start` wrapper does for its per-frame
+  closure.
 - The canvas's render context records its device's generation
   (`agg_gui_wgpu::next_device_generation`, taken anew for every device-loss
   rebuild), so custom render passes see

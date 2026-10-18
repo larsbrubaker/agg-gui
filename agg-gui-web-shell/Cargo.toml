@@ -78,6 +78,9 @@ web-sys = { version = "0.3.82", features = [
     "Blob",
     "Navigator",
     "MediaQueryList",
+    # Waking the sleeping frame loop when page layout resizes the canvas
+    # (web/wake_sources.rs)
+    "ResizeObserver",
     "Storage",
     # Device-tilt input (agg_gui::tilt plumbing)
     "DeviceOrientationEvent",

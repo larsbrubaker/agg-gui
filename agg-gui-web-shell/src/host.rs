@@ -4,8 +4,9 @@
 //! Deliberately shaped like `agg_gui_shell::ShellHost` (same method names and
 //! call order: `on_frame` → `paint` → `after_paint` → `on_idle`) so an app's
 //! native and web glue are near-identical. The web-only additions are
-//! [`WebShellHost::on_tick`] (every `requestAnimationFrame`, painted or not)
-//! and [`WebShellHost::on_page_hide`] (the browser's last chance to write,
+//! [`WebShellHost::on_tick`] (every tick of the frame loop, painted or not),
+//! [`WebShellHost::wants_tick`] (keep ticking while the host polls) and
+//! [`WebShellHost::on_page_hide`] (the browser's last chance to write,
 //! standing in for native `on_exit`). Platform-neutral: compiles natively.
 
 use std::time::Duration;
@@ -118,12 +119,24 @@ impl<'a> WebShellControl<'a> {
 ///   callback returns control (the next input event or frame tick), never
 ///   lost.
 pub trait WebShellHost {
-    /// Runs on **every** `requestAnimationFrame` tick, before the shell
-    /// drains `agg_gui::ui_thread`'s queued work and decides whether to
-    /// paint. The hook for polling app state that has no
-    /// event (a storage job pump, a wall clock); call [`crate::mark_dirty`]
-    /// (or `animation::request_draw`) to make the tick paint.
+    /// Runs on **every** tick of the frame loop, before the shell drains
+    /// `agg_gui::ui_thread`'s queued work and decides whether to paint; call
+    /// [`crate::mark_dirty`] (or `animation::request_draw`) to make the tick
+    /// paint. The loop sleeps while nothing needs a frame, so this does not
+    /// run sixty times a second on an idle page: a host polling state that
+    /// has no event (a storage job pump, a wall clock) returns `true` from
+    /// [`Self::wants_tick`] while it polls.
     fn on_tick(&mut self, _app: &mut App) {}
+
+    /// Whether the frame loop must keep ticking even though nothing asks for
+    /// a frame — `true` while the host polls something in [`Self::on_tick`]
+    /// or [`Self::on_idle`]. Asked at the end of every tick. A host that only
+    /// reacts to events and draw requests leaves the default, so an idle page
+    /// stops the loop. (From outside a callback, `request_tick` asks for one
+    /// tick.)
+    fn wants_tick(&mut self, _app: &mut App) -> bool {
+        false
+    }
 
     /// Runs at the start of every painted frame, before layout and paint.
     fn on_frame(&mut self, _app: &mut App, _frame: &Frame) {}

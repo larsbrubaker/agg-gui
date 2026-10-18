@@ -19,11 +19,18 @@ static ACTIVE: AtomicBool = AtomicBool::new(false);
 /// still toggle once.
 pub fn request_toggle() {
     PENDING.store(true, Ordering::Relaxed);
+    crate::frame_demand::notify();
 }
 
 /// Shell side: consume a pending toggle request, if any.
 pub fn take_request() -> bool {
     PENDING.swap(false, Ordering::Relaxed)
+}
+
+/// Shell side: whether a toggle is waiting, without consuming it — so a
+/// loop that sleeps while idle runs once more to serve it.
+pub fn requested() -> bool {
+    PENDING.load(Ordering::Relaxed)
 }
 
 /// Shell side: record the actual state after switching (or after the
@@ -41,11 +48,28 @@ pub fn is_active() -> bool {
 mod tests {
     use super::*;
 
+    std::thread_local! {
+        static NOTIFIED: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+    }
+
+    fn count_notify() {
+        NOTIFIED.with(|c| c.set(c.get() + 1));
+    }
+
     #[test]
     fn request_is_consumed_once_and_state_tracks() {
         assert!(!take_request());
+        assert!(!requested());
+        crate::frame_demand::set_hook(Some(count_notify));
         request_toggle();
         request_toggle();
+        crate::frame_demand::set_hook(None);
+        assert_eq!(
+            NOTIFIED.with(|c| c.get()),
+            2,
+            "each request wakes a sleeping shell loop"
+        );
+        assert!(requested(), "peeking does not consume");
         assert!(take_request(), "request should be pending");
         assert!(!take_request(), "request must coalesce and clear");
         set_active(true);

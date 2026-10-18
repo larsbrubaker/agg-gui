@@ -38,7 +38,9 @@
 //! - [`frame_policy`] / [`shell_input`] — what every shell (native, web,
 //!   headless test driver) decides around a frame (layout key, needs-layout,
 //!   whether to paint) and the input bookkeeping between OS events and the
-//!   [`App`] entry points ([`shell_input::InputForwarder`]).
+//!   [`App`] entry points ([`shell_input::InputForwarder`]);
+//!   [`frame_demand`] is how a shell whose loop sleeps while idle hears that
+//!   a request was made outside its loop.
 //! - [`theme`] — dark / light / system visuals read via `ctx.visuals()`.
 //! - [`overlay_insets`] + [`widgets::ReserveInset`] + [`card`] — safe-area
 //!   overlay placement: reserved screen edges (the on-screen keyboard
@@ -74,6 +76,7 @@ pub mod event;
 pub mod focus;
 pub mod font_settings;
 pub mod fonts;
+pub mod frame_demand;
 pub mod frame_policy;
 pub mod framebuffer;
 pub mod fullscreen;

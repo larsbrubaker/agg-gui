@@ -39,7 +39,6 @@ impl FirstPaintGate {
     }
 
     /// True once [`Self::mark_painted`] has run.
-    #[cfg(test)]
     pub(crate) fn has_painted(&self) -> bool {
         self.painted.get()
     }
