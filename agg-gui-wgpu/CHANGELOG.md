@@ -77,6 +77,18 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Fixed
 
+- LCD and gray text masks (and LCD backbuffers) larger than the GPU's
+  `max_texture_dimension_2d` are drawn in tiles instead of failing validation:
+  a single line a few thousand characters long no longer panics on wgpu's
+  default error handler or loses the frame. Text that fits is one tile, as
+  before.
+
+- Images larger than the GPU's limit are shrunk to fit before upload and still
+  cover their rectangle, drawing blurrier than the source.
+
+- Layers are held to the GPU's limit: content past it is not drawn, instead of
+  the layer failing validation.
+
 - A `reset` after `begin_frame` (as the shells' `default_paint` makes) keeps
   the frame's clear instead of dropping it with the queued commands, so a
   window frame starts from the theme's background rather than the surface's

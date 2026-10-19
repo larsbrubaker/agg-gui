@@ -39,6 +39,15 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Fixed
 
+- A wheel over a markdown code block or table that scrolls sideways passes its vertical part
+  to the page: the block takes only the sideways part, and only when the gesture is mostly
+  sideways. A Mac trackpad's vertical two-finger scroll carries a little sideways drift, and
+  over a wide block it used to scroll nothing.
+
+- A `ScrollView` at the bottom of a travel that ends on a half pixel keeps following growing
+  content under stick-to-bottom: the offset rounds to a whole pixel, half a pixel past the end,
+  which no longer counts as away from the bottom.
+
 - A `ScrollView` moves its content at once when input scrolls it (the wheel, a scrollbar drag
   or a click on the track, a middle-button pan, a keyboard lift, `scroll_rect_into_view`), not
   at the next layout: a press that arrives after such a scroll and before the next painted

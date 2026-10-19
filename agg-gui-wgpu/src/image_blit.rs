@@ -545,7 +545,7 @@ fn box_downsample(src: &[u8], src_w: u32, src_h: u32, dst_w: u32, dst_h: u32) ->
             let mut n = 0u32;
             for sy in sy0..sy1 {
                 for sx in sx0..sx1 {
-                    let i = ((sy * src_w + sx) * 4) as usize;
+                    let i = (sy as usize * src_w as usize + sx as usize) * 4;
                     r += src[i] as u32;
                     g += src[i + 1] as u32;
                     b += src[i + 2] as u32;
@@ -555,7 +555,7 @@ fn box_downsample(src: &[u8], src_w: u32, src_h: u32, dst_w: u32, dst_h: u32) ->
             }
             // `checked_div` is `None` only for an empty source block (n == 0),
             // which leaves that destination pixel transparent.
-            let di = ((dy * dst_w + dx) * 4) as usize;
+            let di = (dy as usize * dst_w as usize + dx as usize) * 4;
             for (k, sum) in [r, g, b, a].into_iter().enumerate() {
                 if let Some(avg) = sum.checked_div(n) {
                     dst[di + k] = avg as u8;
