@@ -14,6 +14,10 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   itself after the document's last block, so a view boxed by its own padding (a tooltip) has as
   much space under its last line as over its first. The default (`true`) keeps the gap, as before.
 
+- `MarkdownView::with_paragraph_spacing(lines)` and `DEFAULT_PARAGRAPH_SPACING` (0.65): the gap a
+  paragraph, heading or list leaves below itself, in lines of the body font, so a tooltip can keep
+  its help line right under the name (MatterCAD passes 0.25). The default is unchanged.
+
 - `MarkdownView::with_emphasis_color(color)` (and `emphasis_color()`): `*emphasis*` draws in that
   colour instead of the body text colour, so a secondary line such as a tooltip's help text reads
   as secondary; links keep the link colour. Without it emphasis draws as before.

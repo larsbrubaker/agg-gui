@@ -140,6 +140,11 @@ mod update_tests;
 mod wheel_tests;
 
 pub use alignment::MarkdownAlign;
+
+/// The gap a paragraph, heading or list leaves below itself, in lines of the
+/// body font, unless the view is given another
+/// ([`MarkdownView::with_paragraph_spacing`]).
+pub const DEFAULT_PARAGRAPH_SPACING: f64 = 0.65;
 use block_scroll::{
     clamp_block_offset, scrollbar_rect, scrollbar_thumb, BLOCK_SCROLLBAR_GAP, BLOCK_SCROLLBAR_H,
 };
@@ -430,6 +435,9 @@ pub struct MarkdownView {
     /// Whether the gap after a block is kept after the document's last block
     /// ([`MarkdownView::with_end_spacing`]).
     end_spacing: bool,
+    /// The gap after a block, in lines of its font
+    /// ([`MarkdownView::with_paragraph_spacing`]).
+    paragraph_spacing: f64,
     /// The icon image placeholders show (`placeholder_icon.rs`).
     link_placeholder_icon: Option<crate::icon_image::IconImage>,
 }
@@ -473,6 +481,7 @@ impl MarkdownView {
             colors: None,
             emphasis_color: None,
             end_spacing: true,
+            paragraph_spacing: DEFAULT_PARAGRAPH_SPACING,
             link_placeholder_icon: None,
         }
     }

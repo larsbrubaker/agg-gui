@@ -1,8 +1,9 @@
-//! Tests for two options a boxed view (a tooltip) uses:
+//! Tests for three options a boxed view (a tooltip) uses:
 //! [`MarkdownView::with_end_spacing`], which drops the gap after the
-//! document's last block so the view's padding is its only bottom inset, and
-//! [`MarkdownView::with_emphasis_color`], which draws `*emphasis*` in its own
-//! colour.
+//! document's last block so the view's padding is its only bottom inset,
+//! [`MarkdownView::with_paragraph_spacing`], which sets the gap between
+//! blocks, and [`MarkdownView::with_emphasis_color`], which draws
+//! `*emphasis*` in its own colour.
 
 use std::sync::Arc;
 
@@ -13,7 +14,7 @@ use crate::gfx_ctx::GfxCtx;
 use crate::text::{measure_text_metrics, Font};
 use crate::widget::Widget;
 
-use super::{LayoutItem, MarkdownColors, MarkdownView};
+use super::{LayoutItem, MarkdownColors, MarkdownView, DEFAULT_PARAGRAPH_SPACING};
 
 const TEST_FONT: &[u8] = include_bytes!("../../../../demo/assets/LiberationSans-Regular.ttf");
 
@@ -72,6 +73,25 @@ fn without_end_spacing_the_gap_between_paragraphs_stays() {
     let rows = lines(&view);
     let texts: Vec<bool> = rows.iter().map(|(_, _, text)| *text).collect();
     assert_eq!(texts, vec![true, false, true], "{rows:?}");
+}
+
+/// The height of the gap row between a two-paragraph document's paragraphs.
+fn paragraph_gap(view: MarkdownView) -> f64 {
+    let view = laid_out(view);
+    let rows = lines(&view);
+    assert_eq!(rows.len(), 4, "text, gap, text, end gap: {rows:?}");
+    assert!(!rows[1].2, "the second row is the gap: {rows:?}");
+    rows[1].1
+}
+
+#[test]
+fn paragraph_spacing_sets_the_gap_between_paragraphs() {
+    let text = "Fillet\n\n*At least 1 part must be selected*";
+    let line = measure_text_metrics(&font(), "", 14.0).line_height;
+    let default = paragraph_gap(MarkdownView::new(text, font()));
+    assert!((default - line * DEFAULT_PARAGRAPH_SPACING).abs() < 1e-9);
+    let tight = paragraph_gap(MarkdownView::new(text, font()).with_paragraph_spacing(0.25));
+    assert!((tight - line * 0.25).abs() < 1e-9, "{tight} vs {line}");
 }
 
 fn render(view: &mut MarkdownView) -> Framebuffer {

@@ -48,6 +48,15 @@ impl MarkdownView {
         self
     }
 
+    /// The gap every paragraph, heading and list leaves below itself, in lines
+    /// of the body font (default [`super::DEFAULT_PARAGRAPH_SPACING`]). A
+    /// tooltip passes about a quarter, so its help line sits right under the
+    /// name it explains.
+    pub fn with_paragraph_spacing(mut self, lines: f64) -> Self {
+        self.paragraph_spacing = lines;
+        self
+    }
+
     pub(super) fn layout_markdown(&mut self, available: Size) -> Size {
         let pad = self.padding;
         let viewport_w = crate::widget::current_viewport().width;
@@ -95,7 +104,7 @@ impl MarkdownView {
                         align: MarkdownAlign::Left,
                         level: 0,
                         y: 0.0,
-                        height: metrics.line_height * 0.65,
+                        height: metrics.line_height * self.paragraph_spacing,
                     });
                 }
                 super::ParagraphItem::Table {
