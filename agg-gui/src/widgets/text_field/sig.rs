@@ -13,6 +13,9 @@
 #[derive(Clone, PartialEq)]
 pub(super) struct TextFieldSig {
     pub(super) text: String,
+    // The hint an empty field shows: a shared placeholder cell can change it
+    // with nothing else in the field changing.
+    pub(super) placeholder: String,
     // The input-method composition shown inline (text and caret range).
     pub(super) preedit: Option<crate::ime::Preedit>,
     pub(super) cursor: usize,

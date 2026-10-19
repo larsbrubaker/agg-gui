@@ -54,6 +54,7 @@ mod ime;
 mod keyboard_mode;
 mod layout_builders;
 mod password;
+mod placeholder;
 mod pointer;
 mod sig;
 mod suggestions;
@@ -70,6 +71,8 @@ mod edit_field_state_color_tests;
 mod frame_tests;
 #[cfg(test)]
 mod inset_tests;
+#[cfg(test)]
+mod placeholder_tests;
 #[cfg(test)]
 mod replace_range_tests;
 #[cfg(test)]
@@ -162,6 +165,9 @@ pub struct TextField {
 
     // Content
     pub placeholder: String,
+    /// A shared hint read at every paint in place of `placeholder`; see
+    /// [`with_placeholder_cell`](Self::with_placeholder_cell).
+    placeholder_cell: Option<Rc<RefCell<String>>>,
 
     // Layout
     /// Inset of the text from the left and right edges; with
@@ -261,6 +267,7 @@ impl TextField {
             select_pivot: (0, 0),
             preedit: None,
             placeholder: String::new(),
+            placeholder_cell: None,
             padding: 8.0,
             text_insets: None,
             text_insets_cell: None,

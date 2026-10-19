@@ -204,6 +204,7 @@ impl Widget for TextField {
         let font = self.active_font();
         let sig = TextFieldSig {
             text: st.text.clone(),
+            placeholder: self.placeholder_text(),
             preedit: self.preedit.clone(),
             cursor: st.cursor,
             anchor: st.anchor,
@@ -327,7 +328,7 @@ impl Widget for TextField {
             } else {
                 Self::disabled_hint_color(hint)
             });
-            ctx.fill_text(&self.placeholder, text_x, baseline_y);
+            ctx.fill_text(&self.placeholder_text(), text_x, baseline_y);
         } else {
             ctx.set_fill_color(t.text_color_for(self.focused, self.hovered, v.text_color));
             ctx.fill_text(&text, text_x, baseline_y);
