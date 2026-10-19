@@ -94,6 +94,13 @@ pub struct HeadlessOptions {
     /// front are pure overhead, paid again by every process of a test runner
     /// that gives each test its own.
     pub memory_hints: GpuMemoryHints,
+    /// Features the device gets when the adapter offers them, as
+    /// [`crate::GpuConfig::optional_features`]: masked against the adapter's,
+    /// so an absent one degrades instead of failing the request. Default
+    /// empty. The shared device is made with the first call's features, so
+    /// every caller in a process should ask for the same ones (the ones its
+    /// window's device asks for).
+    pub optional_features: wgpu::Features,
 }
 
 impl Default for HeadlessOptions {
@@ -102,6 +109,7 @@ impl Default for HeadlessOptions {
             force_fallback_adapter: false,
             startup_budget: GPU_STARTUP_BUDGET,
             memory_hints: GpuMemoryHints::MemoryUsage,
+            optional_features: wgpu::Features::empty(),
         }
     }
 }
@@ -130,6 +138,13 @@ impl HeadlessOptions {
     /// [`HeadlessOptions::memory_hints`].
     pub fn with_memory_hints(mut self, hints: GpuMemoryHints) -> Self {
         self.memory_hints = hints;
+        self
+    }
+
+    /// Ask for `features` where the adapter offers them. See
+    /// [`HeadlessOptions::optional_features`].
+    pub fn with_optional_features(mut self, features: wgpu::Features) -> Self {
+        self.optional_features = features;
         self
     }
 }
@@ -229,9 +244,7 @@ impl HeadlessGpu {
         };
         shared
             .get_or_create(
-                move || {
-                    request_headless_device(options.force_fallback_adapter, options.memory_hints)
-                },
+                move || request_headless_device(options),
                 HEADLESS_LABEL,
                 options.startup_budget,
                 HeadlessError::CreationPanicked,
@@ -262,7 +275,7 @@ impl HeadlessGpu {
     /// is: it belongs to this one caller, so no later call could use it.
     pub fn create_with_options(options: HeadlessOptions) -> Result<HeadlessGpu, HeadlessError> {
         create_within_budget(
-            move || request_headless_device(options.force_fallback_adapter, options.memory_hints),
+            move || request_headless_device(options),
             HEADLESS_LABEL,
             options.startup_budget,
             BACKGROUND_THREAD_AVAILABLE,
@@ -331,10 +344,9 @@ impl HeadlessGpu {
 /// run under a start-up budget so a hung driver fails them with
 /// [`HeadlessError::StartupTimedOut`] instead of hanging them: `Gpu::new`'s
 /// requests, with no surface to be compatible with.
-fn request_headless_device(
-    force_fallback_adapter: bool,
-    memory_hints: GpuMemoryHints,
-) -> Result<HeadlessGpu, HeadlessError> {
+fn request_headless_device(options: HeadlessOptions) -> Result<HeadlessGpu, HeadlessError> {
+    let (force_fallback_adapter, memory_hints) =
+        (options.force_fallback_adapter, options.memory_hints);
     let mut desc = wgpu::InstanceDescriptor::new_without_display_handle();
     desc.backends = wgpu::Backends::PRIMARY;
     let instance = wgpu::Instance::new(desc);
@@ -350,7 +362,7 @@ fn request_headless_device(
     })?;
     let descriptor = crate::gpu::device_descriptor(
         HEADLESS_LABEL,
-        wgpu::Features::empty(),
+        options.optional_features,
         memory_hints,
         &adapter,
     );
