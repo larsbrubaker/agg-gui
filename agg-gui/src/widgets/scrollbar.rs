@@ -118,6 +118,14 @@ impl ScrollbarAxis {
         self.enabled && self.overflows(viewport)
     }
 
+    /// Whether the offset is at the far end of the travel. [`Self::clamp_offset`]
+    /// rounds to a whole pixel, so when the travel ends on a half pixel the
+    /// offset at the end sits half a pixel past it: anything within half a
+    /// pixel of the end, or beyond it, counts.
+    pub fn at_end(&self, viewport: f64) -> bool {
+        self.offset >= self.max_scroll(viewport) - 0.5
+    }
+
     pub fn clamp_offset(&mut self, viewport: f64) {
         self.offset = self.offset.clamp(0.0, self.max_scroll(viewport)).round();
     }

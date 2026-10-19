@@ -191,7 +191,7 @@ impl Widget for ScrollView {
             self.v.offset = self.v.max_scroll(vh);
         }
         self.clamp_offsets();
-        self.was_at_bottom = (self.v.max_scroll(vh) - self.v.offset).abs() < 0.5;
+        self.was_at_bottom = self.v.at_end(vh);
 
         // Publish offsets / max / viewport.
         if let Some(c) = &self.offset_cell {
@@ -318,7 +318,7 @@ impl Widget for ScrollView {
                 let used_y = *delta_y != 0.0 && self.v.offset != old_v;
                 let used_x = *delta_x != 0.0 && self.h.offset != old_h;
                 let (_, vh) = self.viewport();
-                self.was_at_bottom = (self.v.max_scroll(vh) - self.v.offset).abs() < 0.5;
+                self.was_at_bottom = self.v.at_end(vh);
                 self.publish_offsets();
                 if !used_x && !used_y {
                     return EventResult::Ignored;
@@ -353,7 +353,7 @@ impl Widget for ScrollView {
                     }
                     self.clamp_offsets();
                     let (_, vh) = self.viewport();
-                    self.was_at_bottom = (self.v.max_scroll(vh) - self.v.offset).abs() < 0.5;
+                    self.was_at_bottom = self.v.at_end(vh);
                     self.publish_offsets();
                     crate::animation::request_draw();
                     return EventResult::Consumed;
@@ -377,7 +377,7 @@ impl Widget for ScrollView {
                         .v
                         .drag_to(*pos, vh, self.style, self.v_scrollbar_geometry())
                     {
-                        self.was_at_bottom = (self.v.max_scroll(vh) - self.v.offset).abs() < 0.5;
+                        self.was_at_bottom = self.v.at_end(vh);
                         self.publish_offsets();
                         crate::animation::request_draw();
                     }

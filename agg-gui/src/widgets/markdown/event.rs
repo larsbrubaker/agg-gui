@@ -58,28 +58,18 @@ impl MarkdownView {
                 delta_y,
                 modifiers,
             } => {
-                if let Some((block_idx, viewport, content)) = self.point_over_scrollable_block(*pos)
-                {
-                    // Convention: positive delta_x = wheel-left =
-                    // see content to the LEFT = DECREASE offset.
-                    // Shift+wheel-y maps to horizontal with the same
-                    // sign rule.
-                    let delta = if delta_x.abs() > 1e-6 {
-                        -delta_x * 40.0
-                    } else if modifiers.shift {
-                        -delta_y * 40.0
-                    } else {
-                        0.0
-                    };
-                    if delta.abs() > 1e-6 {
-                        let old = self.block_scroll_offset(block_idx);
-                        if self.scroll_block_to(block_idx, old + delta, viewport, content) {
-                            crate::animation::request_draw();
-                        }
-                        return EventResult::Consumed;
-                    }
-                }
-                EventResult::Ignored
+                let Some((block_idx, viewport, content)) = self.point_over_scrollable_block(*pos)
+                else {
+                    return EventResult::Ignored;
+                };
+                self.wheel_over_block(
+                    block_idx,
+                    viewport,
+                    content,
+                    *delta_x,
+                    *delta_y,
+                    modifiers.shift,
+                )
             }
             Event::MouseDown {
                 pos,
@@ -163,6 +153,45 @@ impl MarkdownView {
                 }
             }
             _ => EventResult::Ignored,
+        }
+    }
+
+    /// A wheel over a block that scrolls sideways. The block takes only the
+    /// horizontal axis, and only when it is the gesture's main direction
+    /// (more sideways than vertical): a vertical two-finger trackpad scroll
+    /// carries a little sideways drift, and that must still scroll the page
+    /// the block sits in. A vertical part left over bubbles to the enclosing
+    /// scroll view, with the horizontal axis marked as taken. Shift turns a
+    /// purely vertical wheel sideways, and then the block takes all of it.
+    fn wheel_over_block(
+        &mut self,
+        block_idx: usize,
+        viewport: f64,
+        content: f64,
+        delta_x: f64,
+        delta_y: f64,
+        shift: bool,
+    ) -> EventResult {
+        let shifted = shift && delta_x == 0.0 && delta_y != 0.0;
+        let sideways = if shifted {
+            delta_y
+        } else if delta_x != 0.0 && delta_x.abs() > delta_y.abs() {
+            delta_x
+        } else {
+            return EventResult::Ignored;
+        };
+        // Convention: a positive sideways delta (wheel-left) shows the content
+        // to the left, which decreases the offset.
+        let old = self.block_scroll_offset(block_idx);
+        let target = old - sideways * crate::wheel::PIXELS_PER_NOTCH;
+        if self.scroll_block_to(block_idx, target, viewport, content) {
+            crate::animation::request_draw();
+        }
+        if shifted || delta_y == 0.0 {
+            EventResult::Consumed
+        } else {
+            crate::wheel_axes::take_wheel_axes(true, false);
+            EventResult::Ignored
         }
     }
 

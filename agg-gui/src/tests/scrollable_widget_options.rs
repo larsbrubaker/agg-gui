@@ -257,3 +257,42 @@ fn without_stick_to_bottom_growing_content_keeps_the_top_in_view() {
     set_content_height(&mut m, 300.0);
     assert_eq!(m.scroll.scroll_offset(), 0.0);
 }
+
+/// A travel ending on a half pixel (content 300.5 tall in a 100 tall view)
+/// puts the offset at the bottom half a pixel past the end, since the offset
+/// rounds to a whole pixel. That still counts as the bottom, so growing
+/// content keeps being followed, whether the reader got there by stick-to-
+/// bottom or by wheeling down.
+#[test]
+fn stick_to_bottom_follows_when_the_travel_ends_on_a_half_pixel() {
+    let (content, size) = Resizable::new(100.0, 50.0);
+    let mut scroll = ScrollView::new(Box::new(content)).with_stick_to_bottom(true);
+    lay_out(&mut scroll, 200.0, 100.0);
+    let mut m = Made {
+        scroll,
+        content: size,
+        h_offset: Rc::new(Cell::new(0.0)),
+        h_max: Rc::new(Cell::new(0.0)),
+    };
+
+    set_content_height(&mut m, 300.5);
+    assert_eq!(m.scroll.max_scroll_value(), 200.5);
+    assert_eq!(m.scroll.scroll_offset(), 201.0);
+    set_content_height(&mut m, 400.5);
+    assert_eq!(m.scroll.scroll_offset(), 301.0, "growth is followed");
+
+    // Scrolled away, then wheeled back down to the bottom.
+    m.scroll.set_scroll_offset(50.0);
+    set_content_height(&mut m, 500.5);
+    assert_eq!(m.scroll.scroll_offset(), 50.0);
+    let wheel_down = Event::MouseWheel {
+        pos: Point::new(50.0, 50.0),
+        delta_y: -100.0,
+        delta_x: 0.0,
+        modifiers: Modifiers::default(),
+    };
+    assert_eq!(m.scroll.on_event(&wheel_down), EventResult::Consumed);
+    assert_eq!(m.scroll.scroll_offset(), 401.0);
+    set_content_height(&mut m, 600.5);
+    assert_eq!(m.scroll.scroll_offset(), 501.0, "growth is followed again");
+}

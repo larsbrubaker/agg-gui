@@ -134,6 +134,8 @@ mod table_style;
 mod table_tests;
 #[cfg(test)]
 mod update_tests;
+#[cfg(test)]
+mod wheel_tests;
 
 pub use alignment::MarkdownAlign;
 use block_scroll::{
