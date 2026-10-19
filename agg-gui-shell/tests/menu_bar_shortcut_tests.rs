@@ -140,6 +140,40 @@ fn a_shortcut_without_command_is_shown_but_not_claimed() {
     assert_eq!(fired("r", 0), None);
 }
 
+/// A function key is shown with AppKit's function-key character (F1 is
+/// `NSF1FunctionKey`, the rest follow it) and, having no Command, is left to
+/// the window: pressing F1 runs the app's own handler once, never the menu
+/// item as well.
+#[test]
+fn function_keys_are_shown_with_appkit_characters_and_left_to_the_window() {
+    assert_eq!(shortcut_key_equivalent(&sc("F1")), eq("\u{F704}", 0));
+    assert_eq!(
+        shortcut_key_equivalent(&sc("Shift+F2")),
+        eq("\u{F705}", SHIFT)
+    );
+    assert_eq!(shortcut_key_equivalent(&sc("F24")), eq("\u{F71B}", 0));
+    let help = MenuItemModel {
+        role: MenuItemRole::Help,
+        ..MenuItemModel::new("Help").with_shortcut(sc("F1"))
+    };
+    assert_eq!(key_equivalent(&help), Some(eq("\u{F704}", 0)));
+    let shown = vec![help];
+    assert!(match_shortcut(&shown, "\u{F704}", 0).is_none());
+    assert!(match_shortcut(&shown, "\u{F704}", COMMAND).is_none());
+    // A number no key carries shows no key equivalent rather than a wrong
+    // one, and does not fall back to its role's chord.
+    let beyond = MenuItemModel {
+        role: MenuItemRole::OpenFile,
+        ..MenuItemModel::new("Open").with_shortcut(MenuShortcut {
+            key: ShortcutKey::F(36),
+            command: true,
+            shift: false,
+            alt: false,
+        })
+    };
+    assert_eq!(key_equivalent(&beyond), None);
+}
+
 #[test]
 fn hidden_or_disabled_shown_items_do_not_fire() {
     let enabled = Rc::new(Cell::new(false));

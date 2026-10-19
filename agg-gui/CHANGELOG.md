@@ -10,6 +10,12 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- `ShortcutKey::F(n)`: a menu shortcut can be a function key. `MenuShortcut::parse` reads `"F1"`
+  ... `"F24"` (either case; a lone `"F"` is still the letter), it matches `Key::F(n)`, and it is
+  written by its cap's name (`F1`, `⇧F2` on a Mac). agg-gui-shell's native menu bar shows it with
+  AppKit's function-key character; like every chord without Command it is shown but left to the
+  window. A crate that matches `ShortcutKey` exhaustively needs an arm for it.
+
 - `MarkdownView::with_end_spacing(false)`: drops the gap a paragraph, heading or list leaves below
   itself after the document's last block, so a view boxed by its own padding (a tooltip) has as
   much space under its last line as over its first. The default (`true`) keeps the gap, as before.

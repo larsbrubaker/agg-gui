@@ -112,6 +112,8 @@ mod tests {
             ShortcutKey::End,
             ShortcutKey::PageUp,
             ShortcutKey::PageDown,
+            ShortcutKey::F(1),
+            ShortcutKey::F(12),
         ];
         for key in keys {
             for bits in 0..8u8 {

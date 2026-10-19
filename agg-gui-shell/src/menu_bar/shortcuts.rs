@@ -39,6 +39,19 @@ mod function_key {
     pub const END: char = '\u{F72B}';
     pub const PAGE_UP: char = '\u{F72C}';
     pub const PAGE_DOWN: char = '\u{F72D}';
+    /// `NSF1FunctionKey`; F2 ... F35 follow it in order.
+    pub const F1: u32 = 0xF704;
+    /// The highest function key AppKit has a character for (`NSF35FunctionKey`).
+    pub const LAST_F: u8 = 35;
+
+    /// The character AppKit gives function key `n`, or `None` for a number no
+    /// key carries.
+    pub fn f(n: u8) -> Option<char> {
+        (1..=LAST_F)
+            .contains(&n)
+            .then(|| char::from_u32(F1 + u32::from(n) - 1))
+            .flatten()
+    }
 }
 
 /// `NSBackspaceCharacter`: the key equivalent AppKit draws as ⌫.
@@ -51,7 +64,9 @@ const KEYPAD_ENTER: char = '\u{3}';
 const BACK_TAB: char = '\u{19}';
 
 /// The key equivalent `shortcut` is shown with: letters lower case (Shift is
-/// in the mask, as AppKit wants), named keys as AppKit's characters.
+/// in the mask, as AppKit wants), named keys as AppKit's characters.  A
+/// function key AppKit has no character for gets an empty key, which an
+/// `NSMenuItem` reads as no key equivalent.
 pub fn shortcut_key_equivalent(shortcut: &MenuShortcut) -> KeyEquivalent {
     use function_key as fk;
     let key = match shortcut.key {
@@ -71,6 +86,7 @@ pub fn shortcut_key_equivalent(shortcut: &MenuShortcut) -> KeyEquivalent {
         ShortcutKey::End => fk::END.to_string(),
         ShortcutKey::PageUp => fk::PAGE_UP.to_string(),
         ShortcutKey::PageDown => fk::PAGE_DOWN.to_string(),
+        ShortcutKey::F(n) => fk::f(n).map(String::from).unwrap_or_default(),
     };
     let mut flags = 0;
     if shortcut.command {
@@ -90,13 +106,16 @@ pub fn shortcut_key_equivalent(shortcut: &MenuShortcut) -> KeyEquivalent {
 
 /// The key equivalent `item` is shown with: its own shortcut, else its
 /// role's Command chord ([`key_equivalent_for`]), else none.  Separators and
-/// submenus have none.
+/// submenus have none, and neither has an item whose own shortcut is a key
+/// AppKit cannot show (it does not fall back to its role's chord, which
+/// would show a key the item does not answer).
 pub fn key_equivalent(item: &MenuItemModel) -> Option<KeyEquivalent> {
     if item.is_separator || item.sub_menu_items.is_some() {
         return None;
     }
     if let Some(shortcut) = &item.shortcut {
-        return Some(shortcut_key_equivalent(shortcut));
+        let eq = shortcut_key_equivalent(shortcut);
+        return (!eq.key.is_empty()).then_some(eq);
     }
     let chord = key_equivalent_for(item.role);
     (!chord.is_empty()).then(|| KeyEquivalent {

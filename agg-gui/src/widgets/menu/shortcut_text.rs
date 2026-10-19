@@ -129,11 +129,11 @@ impl MenuShortcut {
 impl ShortcutKey {
     /// Apple's symbols for a named key, preferred first (the rest are
     /// fallbacks when a font lacks the first).  Empty for characters and for
-    /// keys a Mac labels by name (Insert, Space): those use
-    /// [`Self::plain_text`].
+    /// keys a Mac labels by name (Insert, Space, the function keys, whose caps
+    /// read "F1"): those use [`Self::plain_text`].
     fn mac_symbols(self) -> &'static [&'static str] {
         match self {
-            Self::Char(_) | Self::Insert | Self::Space => &[],
+            Self::Char(_) | Self::Insert | Self::Space | Self::F(_) => &[],
             Self::Delete => &["\u{2326}"],    // ⌦ forward delete
             Self::Backspace => &["\u{232B}"], // ⌫
             Self::Enter => &["\u{21A9}", "\u{23CE}"], // ↩, else ⏎
@@ -168,6 +168,7 @@ impl ShortcutKey {
             Self::End => "End".into(),
             Self::PageUp => "PageUp".into(),
             Self::PageDown => "PageDown".into(),
+            Self::F(n) => format!("F{n}"),
         }
     }
 }
@@ -277,6 +278,41 @@ mod tests {
         assert!(sc("Space").matches(&Key::Char(' '), Modifiers::default()));
         assert!(sc("Down").matches(&Key::ArrowDown, Modifiers::default()));
         assert!(!sc("Down").matches(&Key::ArrowUp, Modifiers::default()));
+    }
+
+    /// A function key is written by the name on its cap on every platform,
+    /// after the modifiers in that platform's form, and matches only its own
+    /// key; a lone "F" is still the letter.
+    #[test]
+    fn function_keys_render_by_name_and_match_their_key() {
+        use crate::event::{Key, Modifiers};
+        assert_eq!(sc("F1").key, ShortcutKey::F(1));
+        assert_eq!(sc("f24").key, ShortcutKey::F(24));
+        assert_eq!(sc("F").key, ShortcutKey::Char('F'));
+        assert!(MenuShortcut::parse("F25").is_none());
+        assert!(MenuShortcut::parse("F0").is_none());
+        for p in [Platform::MacOS, Platform::Windows, Platform::Linux] {
+            assert_eq!(sc("F1").display_text_for(p), "F1");
+        }
+        assert_eq!(
+            sc("Shift+F2").display_text_for(Platform::MacOS),
+            "\u{21E7}F2"
+        );
+        assert_eq!(
+            sc("Shift+F2").display_text_for(Platform::Windows),
+            "Shift+F2"
+        );
+        let font = Font::from_slice(CASCADIA).expect("font parses");
+        assert_eq!(sc("F1").display_text_for_font(Platform::MacOS, &font), "F1");
+        let item = MenuItem::action("Help", "help").shortcut("F1");
+        assert_eq!(item.accelerator, Some(sc("F1")));
+        assert_eq!(
+            item.shortcut_text_for(Platform::MacOS).as_deref(),
+            Some("F1")
+        );
+        assert!(sc("F2").matches(&Key::F(2), Modifiers::default()));
+        assert!(!sc("F2").matches(&Key::F(1), Modifiers::default()));
+        assert!(!sc("F2").matches(&Key::Char('F'), Modifiers::default()));
     }
 
     /// The Mac glyph form is only used when the drawing font can render it.

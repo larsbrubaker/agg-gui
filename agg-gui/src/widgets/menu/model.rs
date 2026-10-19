@@ -344,6 +344,9 @@ pub enum ShortcutKey {
     End,
     PageUp,
     PageDown,
+    /// A function key, `F(1)` ... `F(24)` (the number printed on the key),
+    /// as [`Key::F`] reports it.  Written `"F1"` ... `"F24"`.
+    F(u8),
 }
 
 impl MenuShortcut {
@@ -382,6 +385,10 @@ impl MenuShortcut {
                 "end" => key = Some(ShortcutKey::End),
                 "pageup" | "pgup" => key = Some(ShortcutKey::PageUp),
                 "pagedown" | "pgdn" => key = Some(ShortcutKey::PageDown),
+                // "F1" ... "F24" (either case); a lone "F" is the letter.
+                lower if function_key_number(lower).is_some() => {
+                    key = function_key_number(lower).map(ShortcutKey::F);
+                }
                 _ => {
                     let mut chars = token.chars();
                     let ch = chars.next()?;
@@ -435,7 +442,18 @@ impl ShortcutKey {
             | (Self::End, Key::End)
             | (Self::PageUp, Key::PageUp)
             | (Self::PageDown, Key::PageDown) => true,
+            (Self::F(expected), Key::F(actual)) => expected == *actual,
             _ => false,
         }
+    }
+}
+
+/// The number of the function key a lower-case shortcut token names
+/// (`"f1"` ... `"f24"`), the same spelling [`Key::function_key_from_name`]
+/// accepts for key events.
+fn function_key_number(lower: &str) -> Option<u8> {
+    match Key::function_key_from_name(&lower.to_ascii_uppercase())? {
+        Key::F(n) => Some(n),
+        _ => None,
     }
 }
