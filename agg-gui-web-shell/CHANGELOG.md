@@ -111,9 +111,14 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   under 5 with two in flight; with one they stay at 60 (309 mouse moves
   handled in 8 s against 16). A real GPU (Metal) paints 57-60 frames a second
   with any limit. A frame whose completion is overdue (four times the
-  slowest recent frame, at least a second) stops being waited for, with one
-  console warning, and the count starts again whenever a device is
-  installed, so a lost or wedged GPU cannot stop painting for good.
+  slowest recent frame, between 1 and 10 s) stops being waited for, with one
+  console warning per stall, and teaches the wait, so a GPU slower than a
+  second a frame is treated as slow rather than stalled from its second
+  frame on. Each frame's time is its own time on the GPU (from when the frame
+  ahead of it finished), and a slow device goes back to two in flight only
+  below 35 ms, so the limit does not switch every frame. The count and the
+  learned frame times start again whenever a device is installed, so a lost
+  or wedged GPU cannot stop painting for good.
 - Every frame starts from the theme's background: an area no widget paints
   shows the background, never the canvas's initial transparent black or an
   earlier frame's drawing.

@@ -26,7 +26,9 @@ use super::{lifecycle, mark_dirty, report_fatal, INPUT_SINCE_FRAME, POINTERS, PO
 use super::{platform, sensors, APP, CANVAS, CONFIG, CURSOR, DIRTY, FIRST_PAINT, HOST};
 use crate::dom_math::{fit_backing, sanitize_dpr};
 use crate::error::WebShellError;
-use crate::frames_in_flight::{tick_paint, FramesInFlight, TickPaint, MAX_FRAMES_IN_FLIGHT};
+use crate::frames_in_flight::{
+    tick_paint, Expired, FramesInFlight, TickPaint, MAX_FRAMES_IN_FLIGHT,
+};
 use crate::host::{CanvasGeometry, Frame, WebShellControl, WebShellHost};
 use crate::policy::{policy_after_idle, wants_paint, GeometryTracker};
 use crate::recovery::{RebuildBackoff, RebuildVerdict};
@@ -356,22 +358,24 @@ fn wait_for_gpu(resized: bool) {
 fn track_in_flight(queue: &wgpu::Queue) {
     let ticket = IN_FLIGHT.with(|f| f.borrow_mut().submitted(web_time::Instant::now()));
     queue.on_submitted_work_done(move || {
-        IN_FLIGHT.with(|f| f.borrow_mut().finished(ticket, web_time::Instant::now()));
+        let recovered =
+            IN_FLIGHT.with(|f| f.borrow_mut().finished(ticket, web_time::Instant::now()));
+        if recovered {
+            web_sys::console::info_1(&JsValue::from_str(
+                "agg-gui-web-shell: the GPU is finishing frames again",
+            ));
+        }
     });
 }
 
 /// Stops waiting for frames whose completion is long overdue
-/// ([`FramesInFlight::expire`]), with one warning for each, so a completion
-/// that never arrives cannot stop painting for good.
+/// ([`FramesInFlight::expire`]), so a completion that never arrives cannot
+/// stop painting for good. Warns once per stall, however long it lasts.
 fn expire_stalled_frames() {
-    let (expired, waited) = IN_FLIGHT.with(|f| {
-        let mut f = f.borrow_mut();
-        let waited = f.stall_wait();
-        (f.expire(web_time::Instant::now()), waited)
-    });
-    for _ in 0..expired {
+    let expired = IN_FLIGHT.with(|f| f.borrow_mut().expire(web_time::Instant::now()));
+    if let Expired::StallStarted(waited) = expired {
         web_sys::console::warn_1(&JsValue::from_str(&format!(
-            "agg-gui-web-shell: a frame's GPU work did not report finishing within {waited:?}; \
+            "agg-gui-web-shell: the GPU did not report finishing a frame within {waited:?}; \
              painting on without waiting for it"
         )));
     }

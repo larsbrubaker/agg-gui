@@ -16,7 +16,8 @@
 //!   whose frames take longer than 50 ms, so a slow (software) GPU never
 //!   builds a backlog that input and the page's own scrolling wait behind;
 //!   ticks keep running, a skipped redraw paints as soon as the GPU catches
-//!   up, and a frame whose completion never arrives stops being waited for;
+//!   up, and a frame whose completion never arrives stops being waited for
+//!   after at most 10 s;
 //! - canvas backing-store sizing (`clientSize × devicePixelRatio`, with the
 //!   scale reduced uniformly when that would exceed the device's texture
 //!   limit) and DPR tracking every tick (browser zoom changes DPR without a
