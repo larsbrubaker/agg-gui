@@ -88,6 +88,20 @@ impl MarkdownView {
         }
     }
 
+    /// Draws emphasised (`*italic*`) text in `color` instead of the body text
+    /// colour, so a secondary line such as a tooltip's help text reads as
+    /// secondary. Links keep the link colour. A view given none draws
+    /// emphasis in the text colour, as it always has.
+    pub fn with_emphasis_color(mut self, color: Color) -> Self {
+        self.emphasis_color = Some(color);
+        self
+    }
+
+    /// The colour emphasised text draws in, if the view was given one.
+    pub fn emphasis_color(&self) -> Option<Color> {
+        self.emphasis_color
+    }
+
     /// The view's own colours, if it was given any.
     pub fn colors(&self) -> Option<MarkdownColors> {
         self.colors

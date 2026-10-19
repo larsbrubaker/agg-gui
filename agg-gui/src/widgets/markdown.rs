@@ -88,6 +88,8 @@ mod cell_links;
 mod clipboard_selection_tests;
 mod colors;
 mod emphasis;
+#[cfg(test)]
+mod end_spacing_tests;
 mod event;
 #[cfg(test)]
 mod extension_tests;
@@ -422,6 +424,12 @@ pub struct MarkdownView {
     html_theme: HtmlStyleTheme,
     /// The view's own theme colours; `None` draws in the app's visuals.
     colors: Option<MarkdownColors>,
+    /// The colour emphasised (italic) text draws in
+    /// ([`MarkdownView::with_emphasis_color`]); `None` draws it as body text.
+    emphasis_color: Option<crate::color::Color>,
+    /// Whether the gap after a block is kept after the document's last block
+    /// ([`MarkdownView::with_end_spacing`]).
+    end_spacing: bool,
     /// The icon image placeholders show (`placeholder_icon.rs`).
     link_placeholder_icon: Option<crate::icon_image::IconImage>,
 }
@@ -463,6 +471,8 @@ impl MarkdownView {
             matching_text: None,
             html_theme: HtmlStyleTheme::default(),
             colors: None,
+            emphasis_color: None,
+            end_spacing: true,
             link_placeholder_icon: None,
         }
     }

@@ -39,6 +39,15 @@ impl MarkdownView {
         self.max_line_w
     }
 
+    /// Whether the gap every paragraph, heading and list leaves below itself is
+    /// also kept after the document's last block (default `true`). A view
+    /// boxed by its own padding, such as a tooltip, passes `false`, so the
+    /// space under its last line equals the space over its first.
+    pub fn with_end_spacing(mut self, keep: bool) -> Self {
+        self.end_spacing = keep;
+        self
+    }
+
     pub(super) fn layout_markdown(&mut self, available: Size) -> Size {
         let pad = self.padding;
         let viewport_w = crate::widget::current_viewport().width;
@@ -49,7 +58,14 @@ impl MarkdownView {
         };
         let max_w = (wrap_w - pad * 2.0).max(1.0);
 
-        let paragraphs = self.parse_paragraphs();
+        let mut paragraphs = self.parse_paragraphs();
+        if !self.end_spacing {
+            // The gap a block leaves below itself separates it from the next
+            // block; after the last one the view's padding is the only inset.
+            while matches!(paragraphs.last(), Some(super::ParagraphItem::Spacer)) {
+                paragraphs.pop();
+            }
+        }
         let mut laid_out = Vec::new();
         let mut block_idx = 0usize;
         // Widest text row (indent + its content), C#'s `ParagraphX.MaxLineWidth`.

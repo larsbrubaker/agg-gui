@@ -10,6 +10,14 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- `MarkdownView::with_end_spacing(false)`: drops the gap a paragraph, heading or list leaves below
+  itself after the document's last block, so a view boxed by its own padding (a tooltip) has as
+  much space under its last line as over its first. The default (`true`) keeps the gap, as before.
+
+- `MarkdownView::with_emphasis_color(color)` (and `emphasis_color()`): `*emphasis*` draws in that
+  colour instead of the body text colour, so a secondary line such as a tooltip's help text reads
+  as secondary; links keep the link colour. Without it emphasis draws as before.
+
 - `Opacity` widget: wraps one child and paints it at an opacity read on every paint from a shared
   `Rc<Cell<f64>>` (`Opacity::new`) or a closure (`Opacity::from_fn`), so an animation drives a
   fade without rebuilding the tree. At 1 it adds nothing (no layer); between 0 and 1 the subtree

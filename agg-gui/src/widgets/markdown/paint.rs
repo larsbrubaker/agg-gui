@@ -129,10 +129,10 @@ impl MarkdownView {
                                             );
                                             ctx.fill();
                                         }
-                                        ctx.set_fill_color(if link.is_some() {
-                                            colors.link
-                                        } else {
-                                            colors.text
+                                        ctx.set_fill_color(match (link, self.emphasis_color) {
+                                            (Some(_), _) => colors.link,
+                                            (None, Some(c)) if run_style.italic => c,
+                                            (None, _) => colors.text,
                                         });
                                         let text_x = if *code {
                                             tx + x + self.font_size * 0.35
