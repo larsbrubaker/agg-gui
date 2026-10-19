@@ -75,16 +75,17 @@ pub(crate) fn after_layout(focus: Option<&[usize]>, viewport: Size, root: &mut d
         .is_some_and(|w| w.accepts_text_input())
         && reveal_in_innermost_scroller(root, path)
     {
-        // The scroller moves its content at its next layout.
+        // The scroller has moved its content; the next layout lays out what
+        // the move brought into view.
         crate::animation::request_layout();
     }
 }
 
 /// Ask the focused widget's ancestors, innermost first, to scroll its rect
 /// into view; the first that scrolls takes it. Returns whether one did.
-/// Outer scrollers are not asked: the inner one's move only shows in its
-/// children's bounds at the next layout, so an outer one would act on
-/// stale positions.
+/// Outer scrollers are not asked: the inner one's scroll already put the
+/// field in view inside it, and an outer one scrolling as well would move
+/// the field further than needed.
 fn reveal_in_innermost_scroller(root: &mut dyn Widget, path: &[usize]) -> bool {
     for depth in (0..path.len()).rev() {
         let (ancestor, below) = path.split_at(depth);

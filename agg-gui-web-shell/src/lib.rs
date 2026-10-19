@@ -12,10 +12,11 @@
 //!   [`RedrawPolicy::Continuous`] run modes, layout caching, and the
 //!   **first-paint guarantee** (the first frame always paints, even when
 //!   nothing requested a draw by the time the async GPU init resolved);
-//! - **frame pacing**: at most one presented frame waits on the GPU, so a
-//!   slow (software) GPU never builds a backlog that input and the page's
-//!   own scrolling wait behind; ticks keep running and a skipped redraw
-//!   paints as soon as the GPU catches up;
+//! - **frame pacing**: two presented frames on the GPU at most, one on a GPU
+//!   whose frames take longer than 50 ms, so a slow (software) GPU never
+//!   builds a backlog that input and the page's own scrolling wait behind;
+//!   ticks keep running, a skipped redraw paints as soon as the GPU catches
+//!   up, and a frame whose completion never arrives stops being waited for;
 //! - canvas backing-store sizing (`clientSize × devicePixelRatio`, with the
 //!   scale reduced uniformly when that would exceed the device's texture
 //!   limit) and DPR tracking every tick (browser zoom changes DPR without a

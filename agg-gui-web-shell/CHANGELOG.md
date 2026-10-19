@@ -100,17 +100,20 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Fixed
 
-- A slow GPU no longer builds a backlog of frames: the frame loop keeps at
-  most one presented frame on the GPU (counted until its
-  `onSubmittedWorkDone()` resolves) and, while that frame is unfinished,
-  skips painting and keeps the redraw pending, so the first tick after the
-  GPU catches up paints the latest state. Ticks, `on_tick` and input run at
-  the display rate throughout. On SwiftShader, dragging the camera of a 3D
-  view had two frames waiting and the browser's animation frames slowed to
-  about 2 a second (input handled as rarely); it now has none waiting and the
-  loop ticks at 60 a second. A real GPU (Metal) keeps the same frame rate.
-  The count starts again whenever a device is installed, so a frame the lost
-  device never finishes cannot stop painting after a rebuild.
+- A slow GPU no longer builds a backlog of frames: the frame loop counts each
+  presented frame until its `onSubmittedWorkDone()` resolves and keeps at
+  most two on the GPU, one while the device's recent frames take longer than
+  50 ms. While the GPU is full it skips painting and keeps the redraw
+  pending, so the first tick after the GPU catches up paints the latest
+  state. Ticks, `on_tick` and input run at the display rate throughout. On
+  SwiftShader at device scale 3, dragging the camera of a 3D view had the
+  browser's animation frames slow to about 2 a second without a limit and
+  under 5 with two in flight; with one they stay at 60 (309 mouse moves
+  handled in 8 s against 16). A real GPU (Metal) paints 57-60 frames a second
+  with any limit. A frame whose completion is overdue (four times the
+  slowest recent frame, at least a second) stops being waited for, with one
+  console warning, and the count starts again whenever a device is
+  installed, so a lost or wedged GPU cannot stop painting for good.
 - Every frame starts from the theme's background: an area no widget paints
   shows the background, never the canvas's initial transparent black or an
   earlier frame's drawing.

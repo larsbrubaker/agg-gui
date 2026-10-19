@@ -32,7 +32,8 @@ impl Widget for ScrollView {
     ///
     /// In Y-up screen space, increasing `v.offset` by `D` shifts this
     /// scroll view's child upward by `D` pixels (see the formula
-    /// `child_y = height - content + offset` in [`layout`]).  We clamp by
+    /// `child_y = height - content + offset` in `place_child`, which moves
+    /// the child at once).  We clamp by
     /// the remaining slack so we never scroll past the bottom of the
     /// content, and a negative `amount` reverses (used to release
     /// the auto-scroll when focus leaves the text field).

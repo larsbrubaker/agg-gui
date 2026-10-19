@@ -37,9 +37,10 @@ The app is built by a closure that runs *after* the GPU exists
   only when they change something) or continuous; layout skipped when nothing
   feeding it changed; the first frame is always painted, and
   `has_presented()` / the `after_present` hook tell the page when it is on
-  screen. At most one presented frame waits on the GPU: on a slow GPU a
-  redraw waits for the last frame to finish instead of queueing behind it,
-  so input and the page's own scrolling never lag behind a backlog.
+  screen. At most two presented frames are on the GPU, and one on a GPU
+  whose frames take longer than 50 ms: there a redraw waits for the last
+  frame to finish instead of queueing behind it, so input and the page's own
+  scrolling never lag behind a backlog.
 - **Sizing** — canvas backing store = CSS size × `devicePixelRatio`, re-synced
   every tick (browser zoom changes DPR without a resize event); when that
   would exceed the GPU's texture limit the scale is reduced uniformly and

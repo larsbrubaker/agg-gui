@@ -195,6 +195,7 @@ fn tick() {
     let ready = GPU.with(|g| matches!(*g.borrow(), GpuState::Ready(_)));
     let mut painted = false;
     if ready {
+        expire_stalled_frames();
         let decision = IN_FLIGHT.with(|f| {
             tick_paint(&f.borrow(), || {
                 FIRST_PAINT.with(|gate| {
@@ -353,10 +354,27 @@ fn wait_for_gpu(resized: bool) {
 /// far (the completion attaches to the queue's latest submission, which is
 /// this frame's last).
 fn track_in_flight(queue: &wgpu::Queue) {
-    let ticket = IN_FLIGHT.with(|f| f.borrow_mut().submitted());
+    let ticket = IN_FLIGHT.with(|f| f.borrow_mut().submitted(web_time::Instant::now()));
     queue.on_submitted_work_done(move || {
-        IN_FLIGHT.with(|f| f.borrow_mut().finished(ticket));
+        IN_FLIGHT.with(|f| f.borrow_mut().finished(ticket, web_time::Instant::now()));
     });
+}
+
+/// Stops waiting for frames whose completion is long overdue
+/// ([`FramesInFlight::expire`]), with one warning for each, so a completion
+/// that never arrives cannot stop painting for good.
+fn expire_stalled_frames() {
+    let (expired, waited) = IN_FLIGHT.with(|f| {
+        let mut f = f.borrow_mut();
+        let waited = f.stall_wait();
+        (f.expire(web_time::Instant::now()), waited)
+    });
+    for _ in 0..expired {
+        web_sys::console::warn_1(&JsValue::from_str(&format!(
+            "agg-gui-web-shell: a frame's GPU work did not report finishing within {waited:?}; \
+             painting on without waiting for it"
+        )));
+    }
 }
 
 /// Paint one frame. Returns whether a frame was presented.
