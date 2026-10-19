@@ -216,19 +216,7 @@ impl Widget for ScrollView {
         }
 
         // Position child inside the widget.
-        if let Some(child) = self.children.first_mut() {
-            // The vertical viewport is the TOP `vh` of the view (a Solid
-            // horizontal bar takes the bottom), so the content's top is
-            // measured from the view's top, not from `vh`.
-            let child_y = self.bounds.height - self.v.content + self.v.offset;
-            let child_x = -self.h.offset;
-            child.set_bounds(Rect::new(
-                child_x.round(),
-                child_y.round(),
-                if self.h.enabled { self.h.content } else { vw },
-                self.v.content,
-            ));
-        }
+        self.place_child();
 
         // A changed offset is a scroll: tell the subtree, so an unclipped
         // overlay tied to a child's position (a caret suggestion list) can
@@ -389,9 +377,7 @@ impl Widget for ScrollView {
                         .drag_to(*pos, vh, self.style, self.v_scrollbar_geometry())
                     {
                         self.was_at_bottom = (self.v.max_scroll(vh) - self.v.offset).abs() < 0.5;
-                        if let Some(c) = &self.offset_cell {
-                            c.set(self.v.offset);
-                        }
+                        self.publish_offsets();
                         crate::animation::request_draw();
                     }
                     return EventResult::Consumed;
@@ -401,9 +387,7 @@ impl Widget for ScrollView {
                         .h
                         .drag_to(*pos, vw, self.style, self.h_scrollbar_geometry())
                     {
-                        if let Some(c) = &self.h_offset_cell {
-                            c.set(self.h.offset);
-                        }
+                        self.publish_offsets();
                         crate::animation::request_draw();
                     }
                     return EventResult::Consumed;
@@ -459,9 +443,7 @@ impl Widget for ScrollView {
                         .v
                         .page_at(*pos, vh, self.style, self.v_scrollbar_geometry())
                     {
-                        if let Some(c) = &self.offset_cell {
-                            c.set(self.v.offset);
-                        }
+                        self.publish_offsets();
                         // Offset changed — visible scroll.
                         crate::animation::request_draw();
                     }
@@ -477,9 +459,7 @@ impl Widget for ScrollView {
                         .h
                         .page_at(*pos, vw, self.style, self.h_scrollbar_geometry())
                     {
-                        if let Some(c) = &self.h_offset_cell {
-                            c.set(self.h.offset);
-                        }
+                        self.publish_offsets();
                         crate::animation::request_draw();
                     }
                     return EventResult::Consumed;

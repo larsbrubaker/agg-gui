@@ -660,12 +660,34 @@ impl ScrollView {
         self.h.clamp_offset(vw);
     }
 
-    fn publish_offsets(&self) {
+    /// Publishes the offsets to their cells and moves the content to them.
+    /// Every scroll between layouts comes through here (a wheel, a drag,
+    /// a keyboard lift), so the content's place follows the scroll at once:
+    /// layout runs with the next painted frame, and on a slow GPU many input
+    /// events arrive before it, each of which must land on what the scroll
+    /// put under the pointer.
+    fn publish_offsets(&mut self) {
         if let Some(c) = &self.offset_cell {
             c.set(self.v.offset);
         }
         if let Some(c) = &self.h_offset_cell {
             c.set(self.h.offset);
+        }
+        self.place_child();
+    }
+
+    /// Puts the content where the offsets show it, at the size the last
+    /// layout measured. The vertical viewport is the TOP `vh` of the view (a
+    /// Solid horizontal bar takes the bottom), so the content's top is
+    /// measured from the view's top, not from `vh`.
+    fn place_child(&mut self) {
+        let (vw, _) = self.viewport();
+        let width = if self.h.enabled { self.h.content } else { vw };
+        let child_y = self.bounds.height - self.v.content + self.v.offset;
+        let child_x = -self.h.offset;
+        let height = self.v.content;
+        if let Some(child) = self.children.first_mut() {
+            child.set_bounds(Rect::new(child_x.round(), child_y.round(), width, height));
         }
     }
 

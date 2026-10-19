@@ -39,6 +39,12 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Fixed
 
+- A `ScrollView` moves its content as soon as it scrolls (a wheel, a bar drag or page click,
+  a middle-button pan, a keyboard lift), not at the next layout: a press that arrives after
+  a scroll and before the next painted frame lands on what the scroll put under the pointer,
+  and widget lookups report where the scroll put a row. On a slow GPU the next frame (and
+  with it layout) can be many input events away.
+
 - The on-screen keyboard's keys show their letters again: it paints after the widget tree with a
   context that has no font (every widget scopes its font to its own save/restore, and a GPU frame
   starts with none), so every text label drew nothing while the shapes and glyph keys showed. The
