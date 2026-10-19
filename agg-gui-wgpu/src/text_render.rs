@@ -14,6 +14,10 @@
 //! dual-source-blending GPU feature which is not universally available
 //! (notably on the WebGL2 wgpu backend) and matches the WASM path of the GL
 //! backend.
+//!
+//! A plane larger than the device's texture limit (a single line thousands
+//! of characters long) is uploaded as several tiles (`lcd_tiles.rs`) and
+//! drawn as one quad per tile.
 
 use std::sync::Arc;
 
@@ -21,7 +25,7 @@ use agg_gui::color::Color;
 use agg_gui::draw_ctx::DrawCtx;
 use agg_gui::text::with_shaped_glyphs;
 
-use crate::texture_life::TextureLedger;
+use crate::lcd_tiles::{upload_lcd_tiles, write_lcd_tiles, LcdTile};
 use crate::{DrawCommand, LcdArcTextureEntry, WgpuGfxCtx};
 
 impl WgpuGfxCtx {
@@ -216,17 +220,20 @@ impl WgpuGfxCtx {
         if mask.len() < (mask_w as usize) * (mask_h as usize) * 3 {
             return;
         }
-        let (texture, view) = upload_lcd_texture(
+        let tiles = upload_lcd_tiles(
             &mut self.textures,
             &self.device,
             &self.queue,
             mask,
             mask_w,
             mask_h,
+            self.max_texture_dim,
         );
-        // One-shot: destroyed after this frame's submit.
-        self.textures.retire(&texture);
-        self.push_lcd_mask_command(texture, view, mask_w, mask_h, src_color, dst_x, dst_y);
+        for tile in tiles.iter() {
+            // One-shot: destroyed after this frame's submit.
+            self.textures.retire(&tile.texture);
+            self.push_lcd_mask_command(tile, src_color, dst_x, dst_y);
+        }
     }
 
     /// Arc-keyed `draw_lcd_mask` — caches the uploaded texture on the `Arc`'s
@@ -250,8 +257,10 @@ impl WgpuGfxCtx {
         // Masks are immutable, content-addressed CPU rasters — they never
         // mutate in place, so pass `version == 0` to select Arc-identity
         // verification (see `lcd_arc_get_or_upload`).
-        let (texture, view) = self.lcd_arc_get_or_upload(mask, 0, mask_w, mask_h);
-        self.push_lcd_mask_command(texture, view, mask_w, mask_h, src_color, dst_x, dst_y);
+        let tiles = self.lcd_arc_get_or_upload(mask, 0, mask_w, mask_h);
+        for tile in tiles.iter() {
+            self.push_lcd_mask_command(tile, src_color, dst_x, dst_y);
+        }
     }
 
     /// Composite a two-plane LCD backbuffer (colour + alpha planes, both Y-down
@@ -282,8 +291,8 @@ impl WgpuGfxCtx {
         // (`Arc::make_mut`) keeps each plane's buffer address stable while
         // bumping the version, so the cache reuses the texture allocation and
         // re-uploads only when the content actually changed.
-        let (color_tex, color_view) = self.lcd_arc_get_or_upload(color, content_version, w, h);
-        let (alpha_tex, alpha_view) = self.lcd_arc_get_or_upload(alpha, content_version, w, h);
+        let color_tiles = self.lcd_arc_get_or_upload(color, content_version, w, h);
+        let alpha_tiles = self.lcd_arc_get_or_upload(alpha, content_version, w, h);
 
         // Snap both corners to the integer pixel grid — subpixel phase pattern
         // only valid at 1:1 texel-to-pixel mapping.  BOTH corners must run
@@ -298,66 +307,70 @@ impl WgpuGfxCtx {
         let bl_y = (dst_x * ctm.shy + dst_y * ctm.sy + ctm.ty).round();
         let tr_x = (far_x * ctm.sx + far_y * ctm.shx + ctm.tx).round();
         let tr_y = (far_x * ctm.shy + far_y * ctm.sy + ctm.ty).round();
+        let (span_x, span_y) = (tr_x - bl_x, tr_y - bl_y);
 
-        // Cached planes are top-row-first (Y-down image storage), so v=1 at
-        // bl (visually-bottom row of the quad samples the last row of data).
-        let verts: [f32; 16] = [
-            bl_x as f32,
-            bl_y as f32,
-            0.0,
-            1.0,
-            tr_x as f32,
-            bl_y as f32,
-            1.0,
-            1.0,
-            tr_x as f32,
-            tr_y as f32,
-            1.0,
-            0.0,
-            bl_x as f32,
-            tr_y as f32,
-            0.0,
-            0.0,
-        ];
-        self.commands.push(DrawCommand::LcbMask {
-            verts,
-            color_tex,
-            color_view,
-            alpha_tex,
-            alpha_view,
-            clip: self.current_clip(),
-            global_alpha: self.global_alpha as f32,
-            // Over a still-transparent layer the 3-pass premultiplied blit
-            // leaves the layer's alpha at 0 (it only writes colour); flatten
-            // to a single alpha-writing pass so the pop composite is
-            // correct. Where the destination is already opaque the 3-pass
-            // subpixel blit is correct as-is, so keep it.
-            flatten: !self.text_dst_is_opaque(),
-        });
+        // Both planes have the same size, so their tiles pair up one to one.
+        for (ct, at) in color_tiles.iter().zip(alpha_tiles.iter()) {
+            // Each tile covers its share of the quad. Cached planes are
+            // top-row-first (Y-down image storage), so a tile's first row is
+            // its top edge, and v=1 at its bottom edge samples its last row.
+            // Tiles that share an edge compute it the same way, so no seam
+            // opens between them.
+            let left = (bl_x + span_x * ct.x as f64 / w as f64).round();
+            let right = (bl_x + span_x * (ct.x + ct.w) as f64 / w as f64).round();
+            let top = (tr_y - span_y * ct.y as f64 / h as f64).round();
+            let bottom = (tr_y - span_y * (ct.y + ct.h) as f64 / h as f64).round();
+            let verts: [f32; 16] = [
+                left as f32,
+                bottom as f32,
+                0.0,
+                1.0,
+                right as f32,
+                bottom as f32,
+                1.0,
+                1.0,
+                right as f32,
+                top as f32,
+                1.0,
+                0.0,
+                left as f32,
+                top as f32,
+                0.0,
+                0.0,
+            ];
+            self.commands.push(DrawCommand::LcbMask {
+                verts,
+                color_tex: Arc::clone(&ct.texture),
+                color_view: ct.view.clone(),
+                alpha_tex: Arc::clone(&at.texture),
+                alpha_view: at.view.clone(),
+                clip: self.current_clip(),
+                global_alpha: self.global_alpha as f32,
+                // Over a still-transparent layer the 3-pass premultiplied blit
+                // leaves the layer's alpha at 0 (it only writes colour); flatten
+                // to a single alpha-writing pass so the pop composite is
+                // correct. Where the destination is already opaque the 3-pass
+                // subpixel blit is correct as-is, so keep it.
+                flatten: !self.text_dst_is_opaque(),
+            });
+        }
     }
 
-    /// Build the LCD-mask quad verts and push the draw command.
+    /// Build one mask tile's quad verts and push its draw command. The mask's
+    /// origin is `(dst_x, dst_y)`; the tile sits at its own texel offset
+    /// from it.
     ///
     /// Origin is snapped to the integer pixel grid for the same reason as
     /// `draw_lcd_backbuffer_arc_impl`: LCD coverage encodes a phased subpixel
     /// pattern at 1:1 texel-to-pixel resolution.
-    // Each argument is a distinct drawing/geometry input; a struct would only rename them.
-    #[allow(clippy::too_many_arguments)]
-    fn push_lcd_mask_command(
-        &mut self,
-        texture: Arc<wgpu::Texture>,
-        view: wgpu::TextureView,
-        mask_w: u32,
-        mask_h: u32,
-        src_color: Color,
-        dst_x: f64,
-        dst_y: f64,
-    ) {
+    fn push_lcd_mask_command(&mut self, tile: &LcdTile, src_color: Color, dst_x: f64, dst_y: f64) {
         let ctm = *self.ctm();
-        let bl_x = (dst_x * ctm.sx + dst_y * ctm.shx + ctm.tx).round();
-        let bl_y = (dst_x * ctm.shy + dst_y * ctm.sy + ctm.ty).round();
-        let tr_x = bl_x + mask_w as f64;
-        let tr_y = bl_y + mask_h as f64;
+        let origin_x = (dst_x * ctm.sx + dst_y * ctm.shx + ctm.tx).round();
+        let origin_y = (dst_x * ctm.shy + dst_y * ctm.sy + ctm.ty).round();
+        let bl_x = origin_x + tile.x as f64;
+        let bl_y = origin_y + tile.y as f64;
+        let tr_x = bl_x + tile.w as f64;
+        let tr_y = bl_y + tile.h as f64;
 
         // Mask rows are Y-up so v=0 maps to the bottom row.
         let verts: [f32; 16] = [
@@ -386,8 +399,8 @@ impl WgpuGfxCtx {
 
         self.commands.push(DrawCommand::LcdMask {
             verts,
-            texture,
-            view,
+            texture: Arc::clone(&tile.texture),
+            view: tile.view.clone(),
             color,
             clip: self.current_clip(),
             // See `LcbMask.flatten` above — over a transparent layer render
@@ -416,7 +429,7 @@ impl WgpuGfxCtx {
         version: u64,
         w: u32,
         h: u32,
-    ) -> (Arc<wgpu::Texture>, wgpu::TextureView) {
+    ) -> Arc<[LcdTile]> {
         // Key on the byte buffer, NOT `Arc::as_ptr`: `Arc::make_mut` relocates
         // the control block on every in-place edit but leaves the buffer put.
         let key = data.as_ref().as_ptr() as usize;
@@ -449,52 +462,54 @@ impl WgpuGfxCtx {
                     .get_mut(&key)
                     .expect("Reuse implies a present entry");
                 e.weak = Arc::downgrade(data);
-                (Arc::clone(&e.texture), e.view.clone())
+                Arc::clone(&e.tiles)
             }
             LcdCacheAction::Rewrite => {
                 // Same allocation, changed content: overwrite the existing
                 // texture's pixels (full-plane write; row-granular upload is a
                 // possible later optimization).
-                let (texture, view) = {
-                    let e = self
+                let tiles = Arc::clone(
+                    &self
                         .lcd_arc_texture_cache
                         .get(&key)
-                        .expect("Rewrite implies a present entry");
-                    (Arc::clone(&e.texture), e.view.clone())
-                };
-                write_lcd_plane(&self.queue, &texture, data.as_slice(), w, h);
+                        .expect("Rewrite implies a present entry")
+                        .tiles,
+                );
+                write_lcd_tiles(&self.queue, &tiles, data.as_slice(), w);
                 let e = self
                     .lcd_arc_texture_cache
                     .get_mut(&key)
                     .expect("Rewrite implies a present entry");
                 e.weak = Arc::downgrade(data);
                 e.version = version;
-                (texture, view)
+                tiles
             }
             LcdCacheAction::Replace => {
-                let (texture, view) = upload_lcd_texture(
+                let tiles = upload_lcd_tiles(
                     &mut self.textures,
                     &self.device,
                     &self.queue,
                     data.as_slice(),
                     w,
                     h,
+                    self.max_texture_dim,
                 );
                 let replaced = self.lcd_arc_texture_cache.insert(
                     key,
                     LcdArcTextureEntry {
                         weak: Arc::downgrade(data),
-                        texture: Arc::clone(&texture),
-                        view: view.clone(),
+                        tiles: Arc::clone(&tiles),
                         w,
                         h,
                         version,
                     },
                 );
                 if let Some(old) = replaced {
-                    self.textures.retire(&old.texture);
+                    for tile in old.tiles.iter() {
+                        self.textures.retire(&tile.texture);
+                    }
                 }
-                (texture, view)
+                tiles
             }
         };
 
@@ -507,7 +522,9 @@ impl WgpuGfxCtx {
             self.lcd_arc_texture_cache.retain(|k, e| {
                 let keep = *k == key || e.weak.strong_count() != 0;
                 if !keep {
-                    textures.retire(&e.texture);
+                    for tile in e.tiles.iter() {
+                        textures.retire(&tile.texture);
+                    }
                 }
                 keep
             });
@@ -588,76 +605,4 @@ pub(crate) fn lcd_cache_decide(
             }
         }
     }
-}
-
-/// Convert tightly-packed RGB8 to RGBA8 (alpha=255).  GPUs don't support
-/// 3-byte texture formats; the LCD pipeline shaders sample `.rgb` so the
-/// padded alpha byte is harmless.
-fn rgb_to_rgba(rgb: &[u8], w: u32, h: u32) -> Vec<u8> {
-    let n = (w as usize) * (h as usize);
-    let mut out = Vec::with_capacity(n * 4);
-    for i in 0..n {
-        out.push(rgb[i * 3]);
-        out.push(rgb[i * 3 + 1]);
-        out.push(rgb[i * 3 + 2]);
-        out.push(255);
-    }
-    out
-}
-
-/// Upload a 3-channel LCD coverage plane into a fresh `Rgba8Unorm` texture.
-fn upload_lcd_texture(
-    textures: &mut TextureLedger,
-    device: &wgpu::Device,
-    queue: &wgpu::Queue,
-    rgb: &[u8],
-    w: u32,
-    h: u32,
-) -> (Arc<wgpu::Texture>, wgpu::TextureView) {
-    let texture = textures.create(
-        device,
-        &wgpu::TextureDescriptor {
-            label: None,
-            size: wgpu::Extent3d {
-                width: w,
-                height: h,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Unorm,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        },
-    );
-    write_lcd_plane(queue, &texture, rgb, w, h);
-    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-    (Arc::new(texture), view)
-}
-
-/// Write a 3-channel LCD coverage plane into an existing `Rgba8Unorm` texture
-/// (RGB→RGBA expanded).  Shared by the fresh-upload and in-place-rewrite paths;
-/// the caller guarantees `texture`'s dimensions match `(w, h)`.
-fn write_lcd_plane(queue: &wgpu::Queue, texture: &wgpu::Texture, rgb: &[u8], w: u32, h: u32) {
-    let rgba = rgb_to_rgba(rgb, w, h);
-    queue.write_texture(
-        wgpu::TexelCopyTextureInfo {
-            texture,
-            mip_level: 0,
-            origin: wgpu::Origin3d::ZERO,
-            aspect: wgpu::TextureAspect::All,
-        },
-        &rgba,
-        wgpu::TexelCopyBufferLayout {
-            offset: 0,
-            bytes_per_row: Some(w * 4),
-            rows_per_image: Some(h),
-        },
-        wgpu::Extent3d {
-            width: w,
-            height: h,
-            depth_or_array_layers: 1,
-        },
-    );
 }

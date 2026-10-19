@@ -164,6 +164,7 @@ mod gradient;
 mod image_blit;
 mod layer_mask;
 mod layers;
+mod lcd_tiles;
 pub mod pipelines;
 mod primitives;
 mod saved_paint_state;
@@ -235,8 +236,9 @@ pub(crate) struct ArcTextureEntry {
 /// via the stored `weak` (those buffers never relocate).
 pub(crate) struct LcdArcTextureEntry {
     pub(crate) weak: Weak<Vec<u8>>,
-    pub(crate) texture: Arc<wgpu::Texture>,
-    pub(crate) view: wgpu::TextureView,
+    /// The plane's textures, more than one when the plane is larger than the
+    /// device allows on a side (`lcd_tiles.rs`).
+    pub(crate) tiles: Arc<[lcd_tiles::LcdTile]>,
     pub(crate) w: u32,
     pub(crate) h: u32,
     pub(crate) version: u64,
@@ -387,6 +389,11 @@ pub struct WgpuGfxCtx {
     /// [`sweep::DeadEntrySweeps`]): the sweep is O(entries), and a text-heavy page makes a few
     /// thousand lookups a frame.
     pub(crate) dead_sweeps: sweep::DeadEntrySweeps,
+    /// The device's `max_texture_dimension_2d`: no texture sized from
+    /// content (an LCD text plane, an image) asks for more on a side, since a
+    /// larger request is a validation error that wgpu's default handler
+    /// turns into a panic. Tests lower it to exercise the split.
+    pub(crate) max_texture_dim: u32,
 
     // ── layer stack (wired in Phase 8) ────────────────────────────────────────
     pub(crate) layer_stack: Vec<WgpuLayerEntry>,
@@ -583,6 +590,7 @@ impl WgpuGfxCtx {
         }));
         let aa_step_texture = Arc::new(aa_step_texture);
         let comp_op = comp_op::CompOpGpu::new(&device, surface_format);
+        let max_texture_dim = device.limits().max_texture_dimension_2d;
 
         Self {
             device,
@@ -596,6 +604,7 @@ impl WgpuGfxCtx {
             arc_texture_cache: HashMap::new(),
             lcd_arc_texture_cache: HashMap::new(),
             dead_sweeps: sweep::DeadEntrySweeps::default(),
+            max_texture_dim,
             layer_stack: Vec::new(),
             retained_layers: HashMap::new(),
             fill_color: Color::rgba(0.0, 0.0, 0.0, 1.0),

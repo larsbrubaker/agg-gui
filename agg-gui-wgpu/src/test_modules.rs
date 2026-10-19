@@ -40,6 +40,8 @@ mod lcd_gpu_composite_tests;
 mod lcd_layer_tint_readback_tests;
 #[path = "lcd_text_scale_readback_tests.rs"]
 mod lcd_text_scale_readback_tests;
+#[path = "lcd_tiles_readback_tests.rs"]
+mod lcd_tiles_readback_tests;
 #[cfg(not(target_arch = "wasm32"))]
 #[path = "opacity_headless_tests.rs"]
 mod opacity_headless_tests;
@@ -58,6 +60,8 @@ mod screenshot_scaled_tests;
 #[cfg(not(target_arch = "wasm32"))]
 #[path = "texture_life_tests.rs"]
 mod texture_life_tests;
+#[path = "texture_limit_readback_tests.rs"]
+mod texture_limit_readback_tests;
 #[path = "wgsl_browser_validation_tests.rs"]
 mod wgsl_browser_validation_tests;
 #[path = "wgsl_uniformity.rs"]

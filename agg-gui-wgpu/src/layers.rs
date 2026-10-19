@@ -65,7 +65,12 @@ struct LayerPlacement {
     size: (u32, u32),
 }
 
-fn layer_placement(t: &TransAffine, width: f64, height: f64) -> LayerPlacement {
+/// The placement of a layer `width` x `height` pushed under `t`. Neither
+/// side of the texture is over `max_dim`, the device's
+/// `max_texture_dimension_2d` (a larger request is a validation error):
+/// content of a layer larger than that, past `max_dim` pixels from its
+/// origin, is cut off rather than taking the frame down.
+fn layer_placement(t: &TransAffine, width: f64, height: f64, max_dim: u32) -> LayerPlacement {
     let (sx, sy) = layer_scale_from_transform(t);
     let origin = (t.tx.floor(), t.ty.floor());
     let frac = (t.tx - origin.0, t.ty - origin.1);
@@ -73,6 +78,7 @@ fn layer_placement(t: &TransAffine, width: f64, height: f64) -> LayerPlacement {
     // Grow only when the remainder carries content past the unshifted size.
     let w = ((width * sx + frac.0).ceil().max(1.0) as i32).max(w) as u32;
     let h = ((height * sy + frac.1).ceil().max(1.0) as i32).max(h) as u32;
+    let (w, h) = (w.min(max_dim.max(1)), h.min(max_dim.max(1)));
     LayerPlacement {
         origin,
         frac,
@@ -239,7 +245,7 @@ impl WgpuGfxCtx {
         // Snapshot the parent's active scissor BEFORE the layer resets clip
         // state — the composite blit on pop must be clipped to it.
         let parent_clip = self.current_clip();
-        let placement = layer_placement(self.ctm(), width, height);
+        let placement = layer_placement(self.ctm(), width, height, self.max_texture_dim);
         let (origin_x, origin_y) = placement.origin;
         let (frac_x, frac_y) = placement.frac;
         let (scale_x, scale_y) = placement.scale;
@@ -384,7 +390,7 @@ impl WgpuGfxCtx {
         height: f64,
         alpha: f64,
     ) -> bool {
-        let placement = layer_placement(self.ctm(), width, height);
+        let placement = layer_placement(self.ctm(), width, height, self.max_texture_dim);
         let (w, h) = placement.size;
         let Some(retained) = self.retained_layers.get(&key) else {
             return false;
@@ -483,16 +489,29 @@ mod tests {
     fn rust_only_layer_placement_keeps_the_sub_pixel_translation_in_the_content() {
         let mut t = TransAffine::new_scaling(1.5, 1.5);
         t.multiply(&TransAffine::new_translation(4.5, 3.25));
-        let p = layer_placement(&t, 190.0, 80.0);
+        let p = layer_placement(&t, 190.0, 80.0, 16384);
         assert_eq!(p.origin, (4.0, 3.0));
         assert_eq!(p.frac, (0.5, 0.25));
         // 285 + 0.5 and 120 + 0.25 physical pixels, rounded out.
         assert_eq!(p.size, (286, 121));
         // A whole-pixel translation keeps the plain size.
-        let p = layer_placement(&TransAffine::new_translation(7.0, 2.0), 11.0, 7.0);
+        let p = layer_placement(&TransAffine::new_translation(7.0, 2.0), 11.0, 7.0, 16384);
         assert_eq!(
             (p.origin, p.frac, p.size),
             ((7.0, 2.0), (0.0, 0.0), (11, 7))
         );
+    }
+
+    #[test]
+    fn a_layer_larger_than_the_texture_limit_is_held_to_it() {
+        let p = layer_placement(
+            &TransAffine::new_translation(3.0, 1.0),
+            40000.0,
+            80.0,
+            16384,
+        );
+        assert_eq!(p.size, (16384, 80));
+        let p = layer_placement(&TransAffine::new_scaling(2.0, 2.0), 30.0, 9000.0, 16384);
+        assert_eq!(p.size, (60, 16384));
     }
 }

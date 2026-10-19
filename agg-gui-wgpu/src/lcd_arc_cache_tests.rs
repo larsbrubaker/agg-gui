@@ -180,8 +180,8 @@ fn gpu_same_buffer_same_version_reuses_texture() {
     let mut ctx = test_ctx(device, queue);
 
     let data = Arc::new(vec![50u8; 4 * 4 * 3]);
-    let (tex1, _) = ctx.lcd_arc_get_or_upload(&data, 10, 4, 4);
-    let (tex2, _) = ctx.lcd_arc_get_or_upload(&data, 10, 4, 4);
+    let tex1 = Arc::clone(&ctx.lcd_arc_get_or_upload(&data, 10, 4, 4)[0].texture);
+    let tex2 = Arc::clone(&ctx.lcd_arc_get_or_upload(&data, 10, 4, 4)[0].texture);
     assert!(
         Arc::ptr_eq(&tex1, &tex2),
         "same content version must reuse the exact texture allocation"
@@ -200,7 +200,7 @@ fn gpu_version_bump_after_make_mut_reuses_allocation() {
     let mut ctx = test_ctx(device, queue);
 
     let mut data = Arc::new(vec![0u8; 4 * 4 * 3]);
-    let (tex1, _) = ctx.lcd_arc_get_or_upload(&data, 100, 4, 4);
+    let tex1 = Arc::clone(&ctx.lcd_arc_get_or_upload(&data, 100, 4, 4)[0].texture);
     let addr1 = data.as_ref().as_ptr() as usize;
 
     // Cache now holds a Weak → make_mut relocates the control block, buffer put.
@@ -210,7 +210,7 @@ fn gpu_version_bump_after_make_mut_reuses_allocation() {
     let addr2 = data.as_ref().as_ptr() as usize;
     assert_eq!(addr1, addr2, "buffer address must survive the edit");
 
-    let (tex2, _) = ctx.lcd_arc_get_or_upload(&data, 101, 4, 4);
+    let tex2 = Arc::clone(&ctx.lcd_arc_get_or_upload(&data, 101, 4, 4)[0].texture);
     assert!(
         Arc::ptr_eq(&tex1, &tex2),
         "a version bump must overwrite the existing allocation, not recreate it"
@@ -228,8 +228,8 @@ fn gpu_different_dims_new_texture() {
 
     let small = Arc::new(vec![7u8; 4 * 4 * 3]);
     let big = Arc::new(vec![7u8; 8 * 8 * 3]);
-    let (t_small, _) = ctx.lcd_arc_get_or_upload(&small, 20, 4, 4);
-    let (t_big, _) = ctx.lcd_arc_get_or_upload(&big, 21, 8, 8);
+    let t_small = Arc::clone(&ctx.lcd_arc_get_or_upload(&small, 20, 4, 4)[0].texture);
+    let t_big = Arc::clone(&ctx.lcd_arc_get_or_upload(&big, 21, 8, 8)[0].texture);
     assert!(
         !Arc::ptr_eq(&t_small, &t_big),
         "different-sized planes must get their own textures"
@@ -246,8 +246,8 @@ fn gpu_mask_same_arc_reuses_texture() {
     let mut ctx = test_ctx(device, queue);
 
     let mask = Arc::new(vec![9u8; 4 * 4 * 3]);
-    let (m1, _) = ctx.lcd_arc_get_or_upload(&mask, 0, 4, 4);
-    let (m2, _) = ctx.lcd_arc_get_or_upload(&mask, 0, 4, 4);
+    let m1 = Arc::clone(&ctx.lcd_arc_get_or_upload(&mask, 0, 4, 4)[0].texture);
+    let m2 = Arc::clone(&ctx.lcd_arc_get_or_upload(&mask, 0, 4, 4)[0].texture);
     assert!(
         Arc::ptr_eq(&m1, &m2),
         "an unchanged mask Arc must reuse its texture with no upload"

@@ -8,7 +8,8 @@
 //!   `Label` backbuffers; one GPU upload per unique raster, lifetime tied to
 //!   the `Arc<Vec<u8>>` strong-count via a `Weak` sentinel.
 //!
-//! Images arrive straight-alpha and are uploaded premultiplied; see
+//! Images arrive straight-alpha and are uploaded premultiplied, shrunk to
+//! fit when larger than the device's texture limit; see
 //! [`upload_rgba_texture`].
 
 use std::sync::Arc;
@@ -120,6 +121,7 @@ impl WgpuGfxCtx {
                 data,
                 img_w,
                 img_h,
+                self.max_texture_dim,
             );
             self.texture_cache
                 .insert(key, (Arc::clone(&texture), view.clone(), img_w, img_h));
@@ -219,6 +221,7 @@ impl WgpuGfxCtx {
                     data.as_slice(),
                     img_w,
                     img_h,
+                    self.max_texture_dim,
                 );
                 self.arc_texture_cache.insert(
                     key,
@@ -312,6 +315,7 @@ impl WgpuGfxCtx {
                     data.as_slice(),
                     img_w,
                     img_h,
+                    self.max_texture_dim,
                 );
                 self.arc_texture_cache.insert(
                     key,
@@ -387,6 +391,7 @@ fn upload_rgba_texture(
     data: &[u8],
     w: u32,
     h: u32,
+    max_dim: u32,
 ) -> (Arc<wgpu::Texture>, wgpu::TextureView) {
     let premultiplied;
     let data = if data.chunks_exact(4).all(|px| px[3] == 255) {
@@ -396,6 +401,19 @@ fn upload_rgba_texture(
         premultiply_rgba_inplace(&mut copy);
         premultiplied = copy;
         premultiplied.as_slice()
+    };
+    // An image larger than the device allows on a side is box-filtered down
+    // to fit (premultiplied, so transparent texels add nothing), keeping its
+    // aspect: a larger texture request is a validation error. Every blit
+    // samples the whole texture over the image's quad, so it draws in the
+    // same place, at the most detail the GPU can hold.
+    let fitted;
+    let (data, w, h) = match fit_within(w, h, max_dim) {
+        Some((fit_w, fit_h)) => {
+            fitted = box_downsample(data, w, h, fit_w, fit_h);
+            (fitted.as_slice(), fit_w, fit_h)
+        }
+        None => (data, w, h),
     };
     let with_mipmaps = should_use_mipmaps(w, h);
     let mip_level_count = if with_mipmaps {
@@ -487,6 +505,21 @@ fn upload_rgba_texture(
 
     let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
     (Arc::new(texture), view)
+}
+
+/// The size `(w, h)` shrinks to so neither side is over `max_dim`, keeping
+/// the aspect ratio; `None` when it already fits.
+pub(crate) fn fit_within(w: u32, h: u32, max_dim: u32) -> Option<(u32, u32)> {
+    let max_dim = max_dim.max(1);
+    let longest = w.max(h);
+    if longest <= max_dim {
+        return None;
+    }
+    let scale = max_dim as f64 / longest as f64;
+    // Each side scales to at most `max_dim` (the longest lands on it
+    // exactly), so the casts stay in range.
+    let side = |v: u32| ((v as f64 * scale).round() as u32).clamp(1, max_dim);
+    Some((side(w), side(h)))
 }
 
 /// Box-filter a source RGBA8 image to the given target size, averaging
