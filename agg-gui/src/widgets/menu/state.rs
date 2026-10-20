@@ -73,7 +73,7 @@ pub struct PopupMenuState {
     /// Scroll offset of each scrolling level, keyed by its path prefix
     /// (`state_scroll.rs`).  Cleared on open and close.
     pub(super) scroll_offsets: Vec<(Vec<usize>, f64)>,
-    /// A scroll bar drag in progress (`state_scroll.rs`).
+    /// A scroll bar or finger drag in progress (`state_scroll.rs`).
     scroll_drag: Option<scroll::ScrollDrag>,
     /// Each level's safe triangle toward its open submenu (`state_aim.rs`).
     aim: aim::AimWedges,
@@ -330,7 +330,9 @@ impl PopupMenuState {
             // layer offers it as a middle press): the gesture is a drag, not
             // a tap, so it neither picks the row under it nor dismisses the
             // menu.  Taken so `App` does not press the row instead (agg-sharp
-            // `CancelledReleaseTests.AMenuItemIsNotSelected`).
+            // `CancelledReleaseTests.AMenuItemIsNotSelected`).  On a panel
+            // that scrolls, `handle_scroll_bar` has already taken it to
+            // scroll the rows with the finger; this is a panel that fits.
             Event::MouseDown {
                 pos,
                 button: MouseButton::Middle,

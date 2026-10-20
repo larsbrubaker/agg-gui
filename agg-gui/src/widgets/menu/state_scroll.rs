@@ -1,5 +1,5 @@
-//! Scrolling an overflowing popup panel: the wheel, the scroll bar and the
-//! keyboard highlight, on [`PopupMenuState`].
+//! Scrolling an overflowing popup panel: the wheel, the scroll bar, a finger
+//! drag and the keyboard highlight, on [`PopupMenuState`].
 //!
 //! `geometry.rs` / `overflow.rs` decide which panels scroll and clamp each
 //! stored offset into range; this file stores the offsets (one per level,
@@ -18,13 +18,35 @@ use super::PopupMenuState;
 /// Logical px one wheel notch scrolls, as the combo box and scroll views.
 const WHEEL_STEP: f64 = 40.0;
 
-/// A scroll bar drag in progress: the level, the pointer y at the press and
-/// the offset then.
+/// A drag scrolling one level: the level, what is dragged, the pointer y at
+/// the press and the offset then.
 #[derive(Clone, Debug, PartialEq)]
 pub(in super::super) struct ScrollDrag {
     prefix: Vec<usize>,
+    by: DragBy,
     grab_y: f64,
     start_offset: f64,
+}
+
+/// What a [`ScrollDrag`] holds, which decides how the pointer's travel maps
+/// to the offset and which release ends it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum DragBy {
+    /// The scroll bar's thumb, under the left button: the thumb follows the
+    /// pointer, so the rows move the other way, scaled by content / track.
+    Bar,
+    /// A finger on the rows (the touch layer's middle press): the rows
+    /// follow the finger one for one, as a phone's lists do.
+    Finger,
+}
+
+impl DragBy {
+    fn button(self) -> MouseButton {
+        match self {
+            DragBy::Bar => MouseButton::Left,
+            DragBy::Finger => MouseButton::Middle,
+        }
+    }
 }
 
 impl PopupMenuState {
@@ -76,6 +98,14 @@ impl PopupMenuState {
         EventResult::Consumed
     }
 
+    /// True while a finger drag is scrolling a panel, so hosts route its
+    /// events to the menu rather than to a widget row under the finger.
+    pub(in super::super) fn is_finger_scrolling(&self) -> bool {
+        self.scroll_drag
+            .as_ref()
+            .is_some_and(|drag| drag.by == DragBy::Finger)
+    }
+
     /// Bring the highlighted row fully into its panel with the least
     /// movement (C# `ScrollableWidget.ScrollIntoView`'s minimum scroll); a
     /// row already in view leaves the panel where it is.
@@ -106,9 +136,15 @@ impl PopupMenuState {
         }
     }
 
-    /// Scroll bar dragging: a left press on a panel's scroll bar strip
-    /// starts it, moves drag the rows, the release ends it.  Returns `None`
-    /// for events this does not take.
+    /// Drag scrolling.  A left press on a panel's scroll bar strip starts a
+    /// thumb drag; a finger drag that starts on a panel that scrolls (the
+    /// touch layer offers it as a middle press with
+    /// [`crate::touch_emulation::touch_pan_travel`] set) moves the rows with
+    /// the finger.  Moves scroll, clamped to the panel's range as the wheel
+    /// is; the release of the pressed button, or a lost capture, ends it.
+    /// A finger drag never picks a row: its press, moves and release are all
+    /// taken here.  Returns `None` for events this does not take, which
+    /// leaves a finger drag on a panel that fits to `handle_event`.
     pub(super) fn handle_scroll_bar(
         &mut self,
         items: &[MenuEntry],
@@ -126,9 +162,29 @@ impl PopupMenuState {
                 let scroll = layout.scroll.filter(|s| contains(s.bar, *pos))?;
                 self.scroll_drag = Some(ScrollDrag {
                     prefix: layout.path_prefix.clone(),
+                    by: DragBy::Bar,
                     grab_y: pos.y,
                     start_offset: scroll.offset,
                 });
+                Some(EventResult::Consumed)
+            }
+            Event::MouseDown {
+                pos,
+                button: MouseButton::Middle,
+                ..
+            } if crate::touch_emulation::touch_pan_travel().is_some() => {
+                let layouts = self.layouts(items, viewport);
+                let layout = layouts.iter().rev().find(|l| contains(l.rect, *pos))?;
+                let scroll = layout.scroll?;
+                self.scroll_drag = Some(ScrollDrag {
+                    prefix: layout.path_prefix.clone(),
+                    by: DragBy::Finger,
+                    grab_y: pos.y,
+                    start_offset: scroll.offset,
+                });
+                // The finger is scrolling, not choosing.
+                self.hover_path = None;
+                crate::animation::request_draw();
                 Some(EventResult::Consumed)
             }
             Event::MouseMove { pos } => {
@@ -139,19 +195,33 @@ impl PopupMenuState {
                     return None;
                 };
                 let scroll = layout.scroll?;
-                let h = layout.rect.height.max(1.0);
-                // The thumb spans h * h / content of an h tall track, so a
-                // pointer move of d moves the rows d * content / h.
-                let next = (drag.start_offset + (drag.grab_y - pos.y) * scroll.content_height / h)
-                    .clamp(0.0, scroll.max_offset(layout.rect.height));
+                let moved = match drag.by {
+                    DragBy::Bar => {
+                        let h = layout.rect.height.max(1.0);
+                        // The thumb spans h * h / content of an h tall track,
+                        // so a pointer move of d moves the rows d * content / h.
+                        (drag.grab_y - pos.y) * scroll.content_height / h
+                    }
+                    // Y-up: a finger moving up carries the rows up, showing
+                    // the ones below (a larger offset).
+                    DragBy::Finger => pos.y - drag.grab_y,
+                };
+                let next =
+                    (drag.start_offset + moved).clamp(0.0, scroll.max_offset(layout.rect.height));
                 self.set_scroll_offset(&drag.prefix, next);
                 crate::animation::request_draw();
                 Some(EventResult::Consumed)
             }
-            Event::MouseUp {
-                button: MouseButton::Left,
-                ..
-            } => self.scroll_drag.take().map(|_| EventResult::Consumed),
+            Event::MouseUp { button, .. }
+                if self
+                    .scroll_drag
+                    .as_ref()
+                    .is_some_and(|drag| drag.by.button() == *button) =>
+            {
+                self.scroll_drag = None;
+                Some(EventResult::Consumed)
+            }
+            Event::MouseCaptureLost => self.scroll_drag.take().map(|_| EventResult::Consumed),
             _ => None,
         }
     }

@@ -158,13 +158,16 @@ impl PopupMenu {
     }
 
     pub fn handle_event(&mut self, event: &Event, viewport: Size) -> (EventResult, MenuResponse) {
-        if self.state.open && !self.row_widgets.is_empty() {
+        // A finger scrolling the rows passes over widget rows without
+        // working them: the whole drag is the menu's.
+        let finger_scrolling = self.state.is_finger_scrolling();
+        if self.state.open && !self.row_widgets.is_empty() && !finger_scrolling {
             let layouts = self.state.layouts(&self.items, viewport);
             if let Some(result) = self.row_widgets.route(&self.items, &layouts, event) {
                 return (result, MenuResponse::None);
             }
         }
-        if self.state.open && !self.row_widgets.is_empty() {
+        if self.state.open && !self.row_widgets.is_empty() && !finger_scrolling {
             let hover = self.state.hover_path.clone();
             if let Some(result) = self
                 .row_widgets
@@ -289,6 +292,8 @@ mod tests_chrome;
 mod tests_conformance;
 #[cfg(test)]
 mod tests_conformance_2;
+#[cfg(test)]
+mod tests_finger_scroll;
 #[cfg(test)]
 mod tests_fit;
 #[cfg(test)]
