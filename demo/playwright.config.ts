@@ -5,7 +5,7 @@ import { defineConfig, devices } from "@playwright/test";
 // which fails wgpu's shader validation on the demo's 'solid' vertex pipeline
 // and kills WASM init before the first frame paints.  Real Chrome routes
 // WebGL2 through ANGLE and compiles the wgpu-generated shaders cleanly.
-// GitHub-hosted ubuntu-latest ships Google Chrome pre-installed, so deploy
+// GitHub-hosted ubuntu-26.04 ships Google Chrome pre-installed, so deploy
 // CI just needs Playwright's OS deps (`playwright install-deps chrome`).
 const CHROME_USE = {
   ...devices["Desktop Chrome"],

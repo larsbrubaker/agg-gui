@@ -16,24 +16,24 @@ jobs:
   # workspace target (tests and demos included); the SVG fixtures are needed
   # because demo-ui embeds sample files from them at compile time.
   lint:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     defaults:
       run:
         working-directory: agg-gui
     steps:
       - name: Checkout agg-gui
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           path: agg-gui
 
       - name: Checkout agg-rust
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: larsbrubaker/agg-rust
           path: agg-rust
 
       - name: Checkout tess2-rust
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: larsbrubaker/tess2-rust
           path: tess2-rust
@@ -45,7 +45,7 @@ jobs:
         run: rustup toolchain install
 
       - name: Cache cargo
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
@@ -63,24 +63,24 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
 
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     defaults:
       run:
         working-directory: agg-gui
     steps:
       - name: Checkout agg-gui
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           path: agg-gui
 
       - name: Checkout agg-rust
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: larsbrubaker/agg-rust
           path: agg-rust
 
       - name: Checkout tess2-rust
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: larsbrubaker/tess2-rust
           path: tess2-rust
@@ -92,7 +92,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Cache cargo
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
@@ -140,18 +140,18 @@ jobs:
         working-directory: agg-gui
     steps:
       - name: Checkout agg-gui
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           path: agg-gui
 
       - name: Checkout agg-rust
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: larsbrubaker/agg-rust
           path: agg-rust
 
       - name: Checkout tess2-rust
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: larsbrubaker/tess2-rust
           path: tess2-rust
@@ -160,7 +160,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Cache cargo
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
@@ -172,24 +172,24 @@ jobs:
         run: cargo check -p agg-gui --features clipboard
 
   build-wasm:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     defaults:
       run:
         working-directory: agg-gui
     steps:
       - name: Checkout agg-gui
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           path: agg-gui
 
       - name: Checkout agg-rust
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: larsbrubaker/agg-rust
           path: agg-rust
 
       - name: Checkout tess2-rust
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: larsbrubaker/tess2-rust
           path: tess2-rust

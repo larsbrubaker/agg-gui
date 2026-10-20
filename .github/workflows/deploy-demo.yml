@@ -18,24 +18,24 @@ jobs:
   # Checks agg-gui out into `agg-gui/` with its path-dependency siblings
   # (agg-rust, tess2-rust) next to it, as ci.yml does.
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     defaults:
       run:
         working-directory: agg-gui
     steps:
       - name: Checkout agg-gui
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           path: agg-gui
 
       - name: Checkout agg-rust
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: larsbrubaker/agg-rust
           path: agg-rust
 
       - name: Checkout tess2-rust
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: larsbrubaker/tess2-rust
           path: tess2-rust
@@ -64,14 +64,14 @@ jobs:
         run: cd demo && bun run build
 
       - name: Upload built site as artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: demo-dist
           path: agg-gui/demo/dist
           retention-days: 1
 
       - name: Upload pages artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v5
         with:
           path: agg-gui/demo/dist
 
@@ -83,9 +83,9 @@ jobs:
   # broken clipboard chords) cannot ship to GitHub Pages.
   test:
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Bun
         uses: oven-sh/setup-bun@v2
@@ -93,14 +93,14 @@ jobs:
       - name: Install demo dependencies
         run: cd demo && bun install
 
-      # `playwright.config.ts` uses `channel: "chrome"`.  ubuntu-latest ships
+      # `playwright.config.ts` uses `channel: "chrome"`.  ubuntu-26.04 ships
       # Google Chrome pre-installed, so we only need Playwright's CLI
       # dependencies (no separate browser download).
       - name: Install Playwright dependencies
         run: cd demo && bunx playwright install-deps chrome
 
       - name: Download built site
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: demo-dist
           # The dev server (bun run dev) reads from demo/public, so place
@@ -118,18 +118,18 @@ jobs:
 
       - name: Upload screenshot artifact on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: failed-screenshot
           path: demo/tests/snapshots/
 
   deploy:
     needs: test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5

@@ -26,24 +26,24 @@ on:
 
 jobs:
   publish:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     defaults:
       run:
         working-directory: agg-gui
     steps:
       - name: Checkout agg-gui
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           path: agg-gui
 
       - name: Checkout agg-rust
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: larsbrubaker/agg-rust
           path: agg-rust
 
       - name: Checkout tess2-rust
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: larsbrubaker/tess2-rust
           path: tess2-rust
