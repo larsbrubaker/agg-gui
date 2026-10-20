@@ -159,9 +159,10 @@ renders under sibling chrome or off-screen.
 The core crate owns its event, cursor, clipboard, font, device-scale, screenshot,
 and platform types. Optional adapters map winit input types into `agg-gui`. On
 WASM, `web_adapter::install_keyboard_listeners` gives any shell physical-keyboard
-typing plus the copy/cut/paste clipboard bridge (a pasted picture included:
-`clipboard::get_image_rgba` reads it natively through `arboard` with the
-`clipboard` feature, and in the browser from the paste event). Natively the
+typing plus the copy/cut/paste clipboard bridge (a pasted picture and HTML
+included: `clipboard::get_image_rgba` and `clipboard::get_html` read them
+natively through `arboard` with the `clipboard` feature, and in the browser
+from the paste event). Natively the
 `clipboard` feature reaches the system clipboard only after the app calls
 `clipboard::use_system_clipboard()`, which `agg_gui_shell::run` does at
 startup; until then copy and paste use an in-process clipboard, so test

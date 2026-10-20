@@ -56,7 +56,7 @@ pub mod animation;
 pub mod app_state;
 pub mod card;
 pub mod clipboard;
-/// How a browser `paste` event becomes a paste (text, picture, or both).
+/// How a browser `paste` event becomes a paste (text, HTML, picture, or all).
 /// Pure logic, compiled for tests too so it is checked natively; used by
 /// `web_paste`.
 #[cfg(any(test, target_arch = "wasm32"))]
@@ -140,7 +140,7 @@ pub mod winit_adapter;
 #[cfg(target_arch = "wasm32")]
 pub mod web_adapter;
 
-/// The browser `paste` listener `web_adapter` installs (text and pictures).
+/// The browser `paste` listener `web_adapter` installs (text, HTML and pictures).
 #[cfg(target_arch = "wasm32")]
 mod web_paste;
 

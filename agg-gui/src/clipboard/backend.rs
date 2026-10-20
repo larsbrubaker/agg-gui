@@ -257,8 +257,8 @@ mod browser {
         crate::wasm_clipboard::write_system(plain_text, Some(html_text));
     }
 
-    /// The HTML of this page's latest copy (a paste carries text and
-    /// pictures only, and clears it).
+    /// The `text/html` of the latest paste, or of this page's own latest
+    /// copy when that came after it.
     pub(in crate::clipboard) fn get_html() -> Option<String> {
         crate::wasm_clipboard::get_html()
     }

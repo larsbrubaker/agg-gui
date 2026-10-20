@@ -2,13 +2,14 @@
 //! behind `web_paste`'s DOM listener, kept free of `web_sys` so they are
 //! unit-tested on every target.
 //!
-//! A paste event carries plain text (`clipboardData.getData("text/plain")`)
-//! and a list of items (`clipboardData.items`), each with a `kind`
+//! A paste event carries plain text (`clipboardData.getData("text/plain")`),
+//! often an HTML flavour (`getData("text/html")`: rich text, or an app's own
+//! payload riding next to its text) and a list of items (`clipboardData.items`), each with a `kind`
 //! (`"string"` or `"file"`) and a MIME `type`. A copied picture is a
 //! `"file"` item of an `image/*` type. Text can be handed to the app at
 //! once; a picture must first be decoded, which the browser does
 //! asynchronously so no frame waits on it. The paste is then delivered as
-//! one unit (text and picture together, one synthesized `Ctrl+V`) when the
+//! one unit (text, HTML and picture together, one synthesized `Ctrl+V`) when the
 //! decode finishes, unless a newer paste came in meanwhile: only the newest
 //! paste is ever delivered, so a slow decode can't land after, and
 //! overwrite, the paste that followed it.
@@ -37,14 +38,16 @@ fn is_image_mime(mime: &str) -> bool {
 pub(crate) enum PastePlan {
     /// Nothing the app can paste: the event is left to the browser.
     Ignore,
-    /// Text only: deliver it now.
-    Text(String),
-    /// Decode the picture in item `index`, then hand the outcome and `text`
-    /// to [`PasteSequencer::finish`] with `ticket`.
+    /// Text (and maybe HTML), no picture: deliver it now. `html` is empty
+    /// when the paste carried none.
+    Text { text: String, html: String },
+    /// Decode the picture in item `index`, then hand the outcome, `text` and
+    /// `html` to [`PasteSequencer::finish`] with `ticket`.
     DecodeImage {
         index: usize,
         ticket: u64,
         text: String,
+        html: String,
     },
 }
 
@@ -54,6 +57,8 @@ pub(crate) enum PastePlan {
 pub(crate) struct PasteDelivery {
     /// The pasted plain text, empty when there was none.
     pub text: String,
+    /// The pasted HTML flavour, empty when there was none.
+    pub html: String,
     pub image: Option<ClipboardImage>,
 }
 
@@ -64,21 +69,29 @@ pub(crate) struct PasteSequencer {
 }
 
 impl PasteSequencer {
-    /// Plan a new paste event carrying `text` and, when one of its items is a
-    /// picture, that item's index. Every paste supersedes any picture still
-    /// decoding for an earlier one, even one with nothing to paste
-    /// ([`PastePlan::Ignore`]): the user's latest paste wins, so an earlier
-    /// picture never lands after it.
-    pub(crate) fn plan(&mut self, text: String, image_index: Option<usize>) -> PastePlan {
+    /// Plan a new paste event carrying `text`, `html` (each empty when the
+    /// paste has none) and, when one of its items is a picture, that item's
+    /// index. Every paste supersedes any picture still decoding for an
+    /// earlier one, even one with nothing to paste ([`PastePlan::Ignore`]):
+    /// the user's latest paste wins, so an earlier picture never lands after
+    /// it. A paste with HTML but no plain text is still delivered: the HTML
+    /// alone can be what the app pastes.
+    pub(crate) fn plan(
+        &mut self,
+        text: String,
+        html: String,
+        image_index: Option<usize>,
+    ) -> PastePlan {
         self.latest += 1;
         match image_index {
             Some(index) => PastePlan::DecodeImage {
                 index,
                 ticket: self.latest,
                 text,
+                html,
             },
-            None if text.is_empty() => PastePlan::Ignore,
-            None => PastePlan::Text(text),
+            None if text.is_empty() && html.is_empty() => PastePlan::Ignore,
+            None => PastePlan::Text { text, html },
         }
     }
 
@@ -89,12 +102,13 @@ impl PasteSequencer {
         &self,
         ticket: u64,
         text: String,
+        html: String,
         image: Option<ClipboardImage>,
     ) -> Option<PasteDelivery> {
-        if ticket != self.latest || (image.is_none() && text.is_empty()) {
+        if ticket != self.latest || (image.is_none() && text.is_empty() && html.is_empty()) {
             return None;
         }
-        Some(PasteDelivery { text, image })
+        Some(PasteDelivery { text, html, image })
     }
 }
 
@@ -105,6 +119,28 @@ mod tests {
 
     fn pixel() -> ClipboardImage {
         ClipboardImage::new(1, 1, vec![10, 20, 30, 255]).expect("1x1 RGBA")
+    }
+
+    /// Plan a paste that is expected to wait for a picture decode, returning
+    /// its ticket, text and HTML.
+    fn decoding(
+        sequencer: &mut PasteSequencer,
+        text: &str,
+        html: &str,
+        index: usize,
+    ) -> (u64, String, String) {
+        match sequencer.plan(text.to_string(), html.to_string(), Some(index)) {
+            PastePlan::DecodeImage {
+                index: planned,
+                ticket,
+                text,
+                html,
+            } => {
+                assert_eq!(planned, index, "the picture item is the one decoded");
+                (ticket, text, html)
+            }
+            other => panic!("a picture item is decoded first, planned {other:?}"),
+        }
     }
 
     #[test]
@@ -142,33 +178,60 @@ mod tests {
     fn text_paste_is_delivered_at_once() {
         let mut sequencer = PasteSequencer::default();
         assert_eq!(
-            sequencer.plan("hello".to_string(), None),
-            PastePlan::Text("hello".to_string())
+            sequencer.plan("hello".to_string(), String::new(), None),
+            PastePlan::Text {
+                text: "hello".to_string(),
+                html: String::new(),
+            }
+        );
+    }
+
+    #[test]
+    fn text_paste_keeps_its_html_flavour() {
+        let mut sequencer = PasteSequencer::default();
+        assert_eq!(
+            sequencer.plan(
+                "part".to_string(),
+                "<span data-part=\"AAEC\">part</span>".to_string(),
+                None
+            ),
+            PastePlan::Text {
+                text: "part".to_string(),
+                html: "<span data-part=\"AAEC\">part</span>".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn html_only_paste_is_delivered() {
+        let mut sequencer = PasteSequencer::default();
+        assert_eq!(
+            sequencer.plan(String::new(), "<b>rich</b>".to_string(), None),
+            PastePlan::Text {
+                text: String::new(),
+                html: "<b>rich</b>".to_string(),
+            }
         );
     }
 
     #[test]
     fn empty_paste_is_left_to_the_browser() {
         let mut sequencer = PasteSequencer::default();
-        assert_eq!(sequencer.plan(String::new(), None), PastePlan::Ignore);
+        assert_eq!(
+            sequencer.plan(String::new(), String::new(), None),
+            PastePlan::Ignore
+        );
     }
 
     #[test]
-    fn picture_paste_waits_for_its_decode_and_keeps_its_text() {
+    fn picture_paste_waits_for_its_decode_and_keeps_its_text_and_html() {
         let mut sequencer = PasteSequencer::default();
-        let PastePlan::DecodeImage {
-            index,
-            ticket,
-            text,
-        } = sequencer.plan("caption".to_string(), Some(2))
-        else {
-            panic!("a picture item is decoded first");
-        };
-        assert_eq!((index, text.as_str()), (2, "caption"));
+        let (ticket, text, html) = decoding(&mut sequencer, "caption", "<img alt=caption>", 2);
         assert_eq!(
-            sequencer.finish(ticket, text, Some(pixel())),
+            sequencer.finish(ticket, text, html, Some(pixel())),
             Some(PasteDelivery {
                 text: "caption".to_string(),
+                html: "<img alt=caption>".to_string(),
                 image: Some(pixel()),
             })
         );
@@ -177,14 +240,12 @@ mod tests {
     #[test]
     fn picture_alone_is_delivered_with_empty_text() {
         let mut sequencer = PasteSequencer::default();
-        let PastePlan::DecodeImage { ticket, text, .. } = sequencer.plan(String::new(), Some(0))
-        else {
-            panic!("a picture item is decoded first");
-        };
+        let (ticket, text, html) = decoding(&mut sequencer, "", "", 0);
         assert_eq!(
-            sequencer.finish(ticket, text, Some(pixel())),
+            sequencer.finish(ticket, text, html, Some(pixel())),
             Some(PasteDelivery {
                 text: String::new(),
+                html: String::new(),
                 image: Some(pixel()),
             })
         );
@@ -193,15 +254,26 @@ mod tests {
     #[test]
     fn failed_decode_still_pastes_the_text() {
         let mut sequencer = PasteSequencer::default();
-        let PastePlan::DecodeImage { ticket, text, .. } =
-            sequencer.plan("words".to_string(), Some(0))
-        else {
-            panic!("a picture item is decoded first");
-        };
+        let (ticket, text, html) = decoding(&mut sequencer, "words", "", 0);
         assert_eq!(
-            sequencer.finish(ticket, text, None),
+            sequencer.finish(ticket, text, html, None),
             Some(PasteDelivery {
                 text: "words".to_string(),
+                html: String::new(),
+                image: None,
+            })
+        );
+    }
+
+    #[test]
+    fn failed_decode_still_pastes_the_html() {
+        let mut sequencer = PasteSequencer::default();
+        let (ticket, text, html) = decoding(&mut sequencer, "", "<i>only</i>", 0);
+        assert_eq!(
+            sequencer.finish(ticket, text, html, None),
+            Some(PasteDelivery {
+                text: String::new(),
+                html: "<i>only</i>".to_string(),
                 image: None,
             })
         );
@@ -210,61 +282,47 @@ mod tests {
     #[test]
     fn failed_decode_without_text_pastes_nothing() {
         let mut sequencer = PasteSequencer::default();
-        let PastePlan::DecodeImage { ticket, text, .. } = sequencer.plan(String::new(), Some(0))
-        else {
-            panic!("a picture item is decoded first");
-        };
-        assert_eq!(sequencer.finish(ticket, text, None), None);
+        let (ticket, text, html) = decoding(&mut sequencer, "", "", 0);
+        assert_eq!(sequencer.finish(ticket, text, html, None), None);
     }
 
     #[test]
     fn newer_paste_supersedes_a_picture_still_decoding() {
         let mut sequencer = PasteSequencer::default();
-        let PastePlan::DecodeImage { ticket, text, .. } = sequencer.plan(String::new(), Some(0))
-        else {
-            panic!("a picture item is decoded first");
-        };
+        let (ticket, text, html) = decoding(&mut sequencer, "", "<p>old</p>", 0);
         assert_eq!(
-            sequencer.plan("later".to_string(), None),
-            PastePlan::Text("later".to_string())
+            sequencer.plan("later".to_string(), String::new(), None),
+            PastePlan::Text {
+                text: "later".to_string(),
+                html: String::new(),
+            }
         );
-        assert_eq!(sequencer.finish(ticket, text, Some(pixel())), None);
+        assert_eq!(sequencer.finish(ticket, text, html, Some(pixel())), None);
     }
 
     #[test]
     fn empty_paste_also_supersedes_a_picture_still_decoding() {
         let mut sequencer = PasteSequencer::default();
-        let PastePlan::DecodeImage { ticket, text, .. } = sequencer.plan(String::new(), Some(0))
-        else {
-            panic!("a picture item is decoded first");
-        };
-        assert_eq!(sequencer.plan(String::new(), None), PastePlan::Ignore);
-        assert_eq!(sequencer.finish(ticket, text, Some(pixel())), None);
+        let (ticket, text, html) = decoding(&mut sequencer, "", "", 0);
+        assert_eq!(
+            sequencer.plan(String::new(), String::new(), None),
+            PastePlan::Ignore
+        );
+        assert_eq!(sequencer.finish(ticket, text, html, Some(pixel())), None);
     }
 
     #[test]
     fn only_the_newest_of_two_picture_pastes_is_delivered() {
         let mut sequencer = PasteSequencer::default();
-        let PastePlan::DecodeImage {
-            ticket: first,
-            text: first_text,
-            ..
-        } = sequencer.plan(String::new(), Some(0))
-        else {
-            panic!("a picture item is decoded first");
-        };
-        let PastePlan::DecodeImage {
-            ticket: second,
-            text: second_text,
-            ..
-        } = sequencer.plan(String::new(), Some(0))
-        else {
-            panic!("a picture item is decoded first");
-        };
+        let (first, first_text, first_html) = decoding(&mut sequencer, "", "", 0);
+        let (second, second_text, second_html) = decoding(&mut sequencer, "", "", 0);
         // The second decode may finish first; the first must not land after it.
         assert!(sequencer
-            .finish(second, second_text, Some(pixel()))
+            .finish(second, second_text, second_html, Some(pixel()))
             .is_some());
-        assert_eq!(sequencer.finish(first, first_text, Some(pixel())), None);
+        assert_eq!(
+            sequencer.finish(first, first_text, first_html, Some(pixel())),
+            None
+        );
     }
 }

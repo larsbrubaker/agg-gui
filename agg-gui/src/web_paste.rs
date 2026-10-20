@@ -1,8 +1,9 @@
 //! The browser `paste` listener that `web_adapter::install_keyboard_listeners`
-//! installs: it carries the system clipboard's text and picture into the
-//! in-process clipboard (`wasm_clipboard`) and then synthesizes `Ctrl+V`, so
-//! the focused widget's paste handler reads them through
-//! `clipboard::get_text` and `clipboard::get_image_rgba`.
+//! installs: it carries the system clipboard's text, HTML and picture into
+//! the in-process clipboard (`wasm_clipboard`) and then synthesizes `Ctrl+V`,
+//! so the focused widget's paste handler reads them through
+//! `clipboard::get_text`, `clipboard::get_html` and
+//! `clipboard::get_image_rgba`.
 //!
 //! The decisions (which item is a picture, when to deliver, which of several
 //! overlapping pastes wins) live in `clipboard_paste`, tested natively; this
@@ -42,6 +43,9 @@ pub(crate) fn install(
                 return;
             };
             let text = data.get_data("text/plain").unwrap_or_default();
+            // Read now, with the text: the event's DataTransfer is emptied
+            // once this handler returns.
+            let html = data.get_data("text/html").unwrap_or_default();
             let items = data.items();
             let kinds: Vec<(String, String)> = (0..items.length())
                 .filter_map(|i| items.get(i))
@@ -52,17 +56,18 @@ pub(crate) fn install(
                     .iter()
                     .map(|(kind, mime)| (kind.as_str(), mime.as_str())),
             );
-            let plan = sequencer.borrow_mut().plan(text, image_index);
+            let plan = sequencer.borrow_mut().plan(text, html, image_index);
             match plan {
                 PastePlan::Ignore => {}
-                PastePlan::Text(text) => {
+                PastePlan::Text { text, html } => {
                     e.prevent_default();
-                    deliver(&on_key, &text, None);
+                    deliver(&on_key, &text, &html, None);
                 }
                 PastePlan::DecodeImage {
                     index,
                     ticket,
                     text,
+                    html,
                 } => {
                     e.prevent_default();
                     // Take the file now: the event's DataTransfer is emptied
@@ -78,9 +83,9 @@ pub(crate) fn install(
                             Some(file) => decode(&file).await,
                             None => None,
                         };
-                        let delivery = sequencer.borrow().finish(ticket, text, image);
+                        let delivery = sequencer.borrow().finish(ticket, text, html, image);
                         if let Some(delivery) = delivery {
-                            deliver(&on_key, &delivery.text, delivery.image);
+                            deliver(&on_key, &delivery.text, &delivery.html, delivery.image);
                         }
                     });
                 }
@@ -92,8 +97,8 @@ pub(crate) fn install(
 
 /// Fill the in-process clipboard with the paste, then synthesize `Ctrl+V` so
 /// the focused widget's paste handler runs against it.
-fn deliver(on_key: &OnKey, text: &str, image: Option<ClipboardImage>) {
-    crate::wasm_clipboard::set_paste(text, image);
+fn deliver(on_key: &OnKey, text: &str, html: &str, image: Option<ClipboardImage>) {
+    crate::wasm_clipboard::set_paste_rich(text, html, image);
     let mods = Modifiers {
         ctrl: true,
         ..Modifiers::default()

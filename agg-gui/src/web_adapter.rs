@@ -281,8 +281,8 @@ pub fn install_keyboard_listeners_while(
     }
 
     // --- paste ---------------------------------------------------------------
-    // Capture the system clipboard's text (and picture, decoded off the
-    // frame) into the in-process buffers, then synthesize Ctrl+V so the
+    // Capture the system clipboard's text, HTML (and picture, decoded off
+    // the frame) into the in-process buffers, then synthesize Ctrl+V so the
     // focused widget's paste handler runs against them (`web_paste`).
     crate::web_paste::install(&window, on_key, belongs);
 }

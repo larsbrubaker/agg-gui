@@ -1,10 +1,11 @@
 //! WASM-specific in-process clipboard buffer.
 //!
 //! Because `arboard` (the native clipboard crate) does not work in a browser
-//! context, WASM clipboard operations use thread-local buffers (text, HTML
-//! and a pasted picture) as the in-process clipboard.
+//! context, WASM clipboard operations use a thread-local
+//! [`Contents`](crate::clipboard::Contents) (text, HTML and a pasted picture,
+//! one copy or paste at a time) as the in-process clipboard.
 //! `web_adapter::install_keyboard_listeners` (or the JS harness in
-//! `demo-wasm`) bridges them to the browser's system clipboard:
+//! `demo-wasm`) bridges it to the browser's system clipboard:
 //!
 //! * **Copy / Cut**: `clipboard::set_text` / `set_rich_text` write the copy
 //!   here and also hand it to the browser's asynchronous Clipboard API
@@ -18,9 +19,10 @@
 //! * **Paste**: the JS `paste` DOM event handler reads the system clipboard text
 //!   from `event.clipboardData` and writes it here via `wasm_clipboard_set()`;
 //!   it then synthesises a Ctrl+V key event so Rust's paste handler picks it up.
-//!   A pasted picture is decoded by `web_paste` and stored with the text
-//!   through [`set_paste`] before that Ctrl+V, so the paste handler reads it
-//!   through `clipboard::get_image_rgba`.
+//!   `web_paste` does the same with the paste's text, its `text/html` and its
+//!   decoded picture, stored together through [`set_paste_rich`] before that
+//!   Ctrl+V, so the paste handler reads them through `clipboard::get_text`,
+//!   `clipboard::get_html` and `clipboard::get_image_rgba`.
 //!
 //! This module is compiled only when `target_arch = "wasm32"`.
 
@@ -29,12 +31,10 @@ use std::cell::{Cell, RefCell};
 use wasm_bindgen::{JsCast, JsValue};
 use web_sys::js_sys::{Array, Object, Reflect};
 
-use crate::clipboard::ClipboardImage;
+use crate::clipboard::{ClipboardImage, Contents};
 
 thread_local! {
-    static BUFFER: RefCell<String> = const { RefCell::new(String::new()) };
-    static HTML_BUFFER: RefCell<String> = const { RefCell::new(String::new()) };
-    static IMAGE_BUFFER: RefCell<Option<ClipboardImage>> = const { RefCell::new(None) };
+    static CONTENTS: RefCell<Contents> = RefCell::new(Contents::default());
     /// Counts the app's copies ([`set`], [`set_rich`]), so the keyboard bridge
     /// can tell whether a copy chord copied anything.
     static GENERATION: Cell<u64> = const { Cell::new(0) };
@@ -50,65 +50,60 @@ fn note_copy() {
     GENERATION.with(|g| g.set(g.get().wrapping_add(1)));
 }
 
-/// Read the current clipboard buffer.  Returns `None` when the buffer is empty.
-pub fn get() -> Option<String> {
-    BUFFER.with(|b| {
-        let s = b.borrow();
-        if s.is_empty() {
-            None
-        } else {
-            Some(s.clone())
-        }
-    })
+/// A non-empty flavour, `None` for an absent or empty one.
+fn non_empty(flavour: &Option<String>) -> Option<String> {
+    flavour.as_ref().filter(|s| !s.is_empty()).cloned()
 }
 
-/// Read the current HTML clipboard buffer. Returns `None` when empty.
+/// Read the current clipboard buffer.  Returns `None` when the buffer is empty.
+pub fn get() -> Option<String> {
+    CONTENTS.with(|c| non_empty(&c.borrow().text))
+}
+
+/// Read the current HTML clipboard buffer: the app's latest rich copy, or the
+/// `text/html` of the latest paste when that came after it. Returns `None`
+/// when empty.
 pub fn get_html() -> Option<String> {
-    HTML_BUFFER.with(|b| {
-        let s = b.borrow();
-        if s.is_empty() {
-            None
-        } else {
-            Some(s.clone())
-        }
-    })
+    CONTENTS.with(|c| non_empty(&c.borrow().html))
 }
 
 /// The picture of the latest paste, `None` when it carried none or text has
 /// been copied since.
 pub fn get_image() -> Option<ClipboardImage> {
-    IMAGE_BUFFER.with(|b| b.borrow().clone())
+    CONTENTS.with(|c| c.borrow().image.clone())
 }
 
 /// Whether the latest paste left a picture, without copying it.
 pub fn has_image() -> bool {
-    IMAGE_BUFFER.with(|b| b.borrow().is_some())
+    CONTENTS.with(|c| c.borrow().image.is_some())
 }
 
 /// Overwrite the clipboard buffer with `text` (dropping any HTML and
 /// picture).
 pub fn set(text: &str) {
     note_copy();
-    BUFFER.with(|b| *b.borrow_mut() = text.to_string());
-    HTML_BUFFER.with(|b| b.borrow_mut().clear());
-    IMAGE_BUFFER.with(|b| *b.borrow_mut() = None);
+    CONTENTS.with(|c| c.borrow_mut().put_text(text));
 }
 
 /// Overwrite the clipboard buffers with plain text and rendered HTML
 /// (dropping any picture).
 pub fn set_rich(text: &str, html: &str) {
     note_copy();
-    BUFFER.with(|b| *b.borrow_mut() = text.to_string());
-    HTML_BUFFER.with(|b| *b.borrow_mut() = html.to_string());
-    IMAGE_BUFFER.with(|b| *b.borrow_mut() = None);
+    CONTENTS.with(|c| c.borrow_mut().put_rich_text(text, html));
 }
 
 /// Overwrite the clipboard buffers with what a browser paste carried: its
-/// plain text (empty when none) and its decoded picture.
+/// plain text (empty when none) and its decoded picture, with no HTML.
 pub fn set_paste(text: &str, image: Option<ClipboardImage>) {
-    BUFFER.with(|b| *b.borrow_mut() = text.to_string());
-    HTML_BUFFER.with(|b| b.borrow_mut().clear());
-    IMAGE_BUFFER.with(|b| *b.borrow_mut() = image);
+    set_paste_rich(text, "", image);
+}
+
+/// Overwrite the clipboard buffers with what a browser paste carried: its
+/// plain text, its `text/html` (each empty when none) and its decoded
+/// picture. A paste without HTML clears the HTML of any earlier copy or
+/// paste, so it can't be read along with this paste's text.
+pub fn set_paste_rich(text: &str, html: &str, image: Option<ClipboardImage>) {
+    CONTENTS.with(|c| c.borrow_mut().put_paste(text, html, image));
 }
 
 /// Hand a copy to the system clipboard through the browser's asynchronous

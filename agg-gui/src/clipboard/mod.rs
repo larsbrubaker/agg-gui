@@ -12,9 +12,9 @@
 //!
 //! WASM builds use the in-process clipboard (`wasm_clipboard`) that
 //! `web_adapter::install_keyboard_listeners` bridges to the browser's
-//! `copy` / `cut` / `paste` events; a pasted picture arrives through the
-//! `paste` event (`web_paste`), so in the browser [`get_image_rgba`] answers
-//! the picture of the latest paste.
+//! `copy` / `cut` / `paste` events; a paste's text, HTML and picture arrive
+//! through the `paste` event (`web_paste`), so in the browser [`get_text`],
+//! [`get_html`] and [`get_image_rgba`] answer what the latest paste carried.
 //!
 //! [`simulate`] swaps in an in-process clipboard for the calling thread (C#
 //! agg-sharp's `Clipboard.SetSystemClipboard(new SimulatedClipboard())`), so
@@ -85,22 +85,24 @@ impl ClipboardImage {
 
 /// What an in-process clipboard holds. Like a system clipboard it holds one
 /// copy at a time: writing text drops the HTML and the picture, writing rich
-/// text drops the picture, and writing a picture drops the text and HTML.
+/// text drops the picture, writing a picture drops the text and HTML, and a
+/// paste replaces all three with what it carried. The browser's clipboard
+/// (`wasm_clipboard`) keeps one of these too.
 #[derive(Clone, Debug, Default)]
-struct Contents {
-    text: Option<String>,
-    html: Option<String>,
-    image: Option<ClipboardImage>,
+pub(crate) struct Contents {
+    pub(crate) text: Option<String>,
+    pub(crate) html: Option<String>,
+    pub(crate) image: Option<ClipboardImage>,
 }
 
 impl Contents {
-    fn put_text(&mut self, text: &str) {
+    pub(crate) fn put_text(&mut self, text: &str) {
         self.text = Some(text.to_string());
         self.html = None;
         self.image = None;
     }
 
-    fn put_rich_text(&mut self, plain_text: &str, html_text: &str) {
+    pub(crate) fn put_rich_text(&mut self, plain_text: &str, html_text: &str) {
         self.text = Some(plain_text.to_string());
         self.html = Some(html_text.to_string());
         self.image = None;
@@ -110,6 +112,17 @@ impl Contents {
         self.text = None;
         self.html = None;
         self.image = Some(image);
+    }
+
+    /// Hold what a paste from outside the program carried: its plain text
+    /// and HTML (each empty when the paste had none) and its picture. All
+    /// three are replaced, so a paste without HTML leaves no HTML from an
+    /// earlier copy or paste to be read with its text.
+    #[cfg(any(test, target_arch = "wasm32"))]
+    pub(crate) fn put_paste(&mut self, text: &str, html: &str, image: Option<ClipboardImage>) {
+        self.text = (!text.is_empty()).then(|| text.to_string());
+        self.html = (!html.is_empty()).then(|| html.to_string());
+        self.image = image;
     }
 }
 
@@ -221,10 +234,18 @@ pub fn set_rich_text(plain_text: &str, html_text: &str) {
 
 /// Read the HTML flavour of the clipboard: what the last rich-text copy
 /// ([`set_rich_text`]) wrote, `None` when the clipboard holds plain text only,
-/// a picture, or nothing.  Natively, after [`use_system_clipboard`], this is
-/// the system clipboard's HTML (whatever program copied it); in the browser,
-/// the HTML of this page's latest copy (a paste delivers only text and
-/// pictures).
+/// a picture, or nothing. Read it next to [`get_text`] when pasting: the two
+/// always come from the same copy.
+///
+/// Natively, after [`use_system_clipboard`], this is the system clipboard's
+/// HTML, whatever program copied it: on macOS the pasteboard's HTML type, on
+/// Windows the fragment of the "HTML Format" (the part between its
+/// `StartFragment` / `EndFragment` offsets, without the header), on Linux the
+/// X11 `text/html` target (a Wayland session answers through XWayland). In the
+/// browser it is the `text/html` of the latest `paste` event (read in the
+/// paste handler its synthesized `Ctrl+V` runs), or of this page's own latest
+/// copy when that came after it; a paste without HTML clears it. Before
+/// [`use_system_clipboard`] and under [`simulate`] it is the in-process HTML.
 pub fn get_html() -> Option<String> {
     if let Some(html) = SIMULATED.with(|slot| slot.borrow().as_ref().map(|c| c.html.clone())) {
         return html;
@@ -302,7 +323,7 @@ pub fn has_image() -> bool {
 mod tests {
     use super::{
         get_html, get_image_rgba, get_text, has_image, html_fragment_for_clipboard, set_image_rgba,
-        set_rich_text, set_text, simulate, ClipboardImage,
+        set_rich_text, set_text, simulate, ClipboardImage, Contents,
     };
 
     const RED_THEN_CLEAR: [u8; 8] = [255, 0, 0, 255, 0, 0, 0, 0];
@@ -420,6 +441,45 @@ mod tests {
         assert_eq!(get_image_rgba(), None, "rich text replaces the picture");
         set_text("plain");
         assert_eq!(get_html(), None, "plain text replaces the HTML");
+    }
+
+    #[test]
+    fn paste_with_html_reads_back_both_flavours() {
+        let mut contents = Contents::default();
+        contents.put_paste("part", "<span data-part=\"AAEC\">part</span>", None);
+        assert_eq!(contents.text.as_deref(), Some("part"));
+        assert_eq!(
+            contents.html.as_deref(),
+            Some("<span data-part=\"AAEC\">part</span>")
+        );
+        assert_eq!(contents.image, None);
+    }
+
+    #[test]
+    fn paste_without_html_drops_the_html_of_an_earlier_copy() {
+        // An old payload must never be pasted along with new, unrelated text.
+        let mut contents = Contents::default();
+        contents.put_rich_text("old", "<b data-part=\"old\">old</b>");
+        contents.put_paste("new words", "", None);
+        assert_eq!(contents.text.as_deref(), Some("new words"));
+        assert_eq!(contents.html, None);
+        contents.put_paste("first", "<i>first</i>", None);
+        contents.put_paste("second", "", None);
+        assert_eq!(contents.html, None, "nor of an earlier paste");
+    }
+
+    #[test]
+    fn paste_replaces_everything_and_empty_flavours_read_as_none() {
+        let mut contents = Contents::default();
+        let picture = ClipboardImage::new(2, 1, RED_THEN_CLEAR.to_vec()).expect("2x1 RGBA");
+        contents.put_paste("", "", Some(picture.clone()));
+        assert_eq!(contents.text, None, "a paste without text has none");
+        assert_eq!(contents.html, None);
+        assert_eq!(contents.image, Some(picture));
+        contents.put_paste("", "<p>html only</p>", None);
+        assert_eq!(contents.text, None);
+        assert_eq!(contents.html.as_deref(), Some("<p>html only</p>"));
+        assert_eq!(contents.image, None, "the earlier picture is gone");
     }
 
     #[test]
