@@ -191,6 +191,7 @@ impl App {
     /// widget tree lays out in logical (device-independent) units.  Call once
     /// per frame before [`paint`][Self::paint].
     pub fn layout(&mut self, viewport: Size) {
+        self.tick_long_press();
         // Snapshot BEFORE laying out: a signal arriving mid-layout is then
         // treated as post-layout and earns a follow-up frame (see `paint`).
         self.layout_async_state_epoch = Some(crate::animation::async_state_epoch());
@@ -347,10 +348,12 @@ impl App {
             ctx.scale(scale, scale);
             super::keyboard_scroll::paint_lifted_tree(self.root.as_mut(), ctx, viewport, lift);
             crate::widgets::on_screen_keyboard::paint_software_keyboard(ctx, viewport);
+            self.paint_long_press_cue(ctx);
             ctx.restore();
         } else {
             super::keyboard_scroll::paint_lifted_tree(self.root.as_mut(), ctx, viewport, lift);
             crate::widgets::on_screen_keyboard::paint_software_keyboard(ctx, viewport);
+            self.paint_long_press_cue(ctx);
         }
     }
 

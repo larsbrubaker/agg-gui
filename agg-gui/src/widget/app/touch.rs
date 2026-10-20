@@ -9,10 +9,17 @@
 //! and falls back to a left press when no `ScrollView` takes it
 //! (`touch_drag_press`). Platform shells therefore forward raw touches ONLY —
 //! synthesizing mouse events shell-side would double-fire them.
+//!
+//! The long press ([`crate::touch_emulation::long_press`]) needs time to
+//! pass with no input: `layout` polls the emulator every frame
+//! (`tick_long_press`), and `paint` keeps a wake-up armed for the next
+//! moment that matters, publishes the cue and draws the default ring
+//! (`paint_long_press_cue`), so an idle app still fires on time.
 
 use super::super::keyboard_scroll;
+use crate::draw_ctx::DrawCtx;
 use crate::event::{Modifiers, MouseButton};
-use crate::touch_emulation::EmuCmd;
+use crate::touch_emulation::{long_press, EmuCmd, LongPressCue, LONG_PRESS_CUE_DELAY};
 use crate::widget::App;
 
 impl App {
@@ -32,6 +39,16 @@ impl App {
             .touch_mouse_emu
             .on_start(device, id, screen_x, screen_y);
         self.apply_emu_cmds(cmds);
+        // A finger on the on-screen keyboard types its key when it lifts,
+        // however long it was held.
+        if crate::widgets::on_screen_keyboard::contains_point(self.flip_y(screen_x, screen_y)) {
+            self.touch_mouse_emu.cancel_long_press();
+        }
+        // Wake an idle app when the hold's cue is due; each paint after
+        // that re-arms until the long press fires or the finger lets go.
+        if self.touch_mouse_emu.long_press_deadline().is_some() {
+            crate::animation::request_draw_after(LONG_PRESS_CUE_DELAY);
+        }
     }
     pub fn on_touch_move(
         &mut self,
@@ -76,6 +93,18 @@ impl App {
     /// so widgets can tell these synthetic events apart from real mouse
     /// input via [`crate::touch_state::last_touch_event_age`].
     fn apply_emu_cmds(&mut self, cmds: Vec<EmuCmd>) {
+        long_press::while_emulating(|| self.replay_emu_cmds(cmds));
+        if let Some((x, y)) = self.touch_mouse_emu.take_long_press() {
+            let at = self.flip_y(x, y);
+            long_press::notify(LongPressCue {
+                x: at.x,
+                y: at.y,
+                progress: 1.0,
+            });
+        }
+    }
+
+    fn replay_emu_cmds(&mut self, cmds: Vec<EmuCmd>) {
         for cmd in cmds {
             match cmd {
                 EmuCmd::MouseMove(x, y) => self.on_mouse_move(x, y),
@@ -103,6 +132,55 @@ impl App {
         if !self.has_captured_pointer() {
             self.touch_mouse_emu.press_instead();
             self.on_mouse_down(x, y, MouseButton::Left, Modifiers::default());
+        }
+    }
+
+    /// Fire a long press that has come due (start of every layout, so the
+    /// menu it opens is laid out in the same frame).
+    pub(super) fn tick_long_press(&mut self) {
+        let cmds = self.touch_mouse_emu.poll();
+        if !cmds.is_empty() {
+            // The right click is the finger's doing: widgets that tell
+            // touch-synthesised presses apart by the age of the last touch
+            // event (the menus) must see it as fresh.
+            crate::touch_state::note_touch_event();
+            self.apply_emu_cmds(cmds);
+        }
+    }
+
+    /// Publish the pending long press's cue, draw the default ring, and keep
+    /// the frames coming: continuously while the ring fills, otherwise one
+    /// wake-up when the cue is due. Runs inside `paint`, after the draw
+    /// request was cleared and with `ctx` in logical Y-up coordinates.
+    pub(super) fn paint_long_press_cue(&mut self, ctx: &mut dyn DrawCtx) {
+        let cue = self
+            .touch_mouse_emu
+            .long_press_progress()
+            .map(|((x, y), progress)| {
+                let at = self.flip_y(x, y);
+                LongPressCue {
+                    x: at.x,
+                    y: at.y,
+                    progress,
+                }
+            });
+        long_press::publish_cue(cue);
+        match (cue, self.touch_mouse_emu.long_press_deadline()) {
+            (Some(cue), _) => {
+                if long_press::long_press_ring_drawn() {
+                    long_press::paint_ring(ctx, cue);
+                }
+                // The ring is an overlay painted fresh every frame: no
+                // retained widget changed, so no cache invalidates.
+                crate::animation::request_draw_without_invalidation();
+            }
+            (None, Some(deadline)) => {
+                let cue_at =
+                    deadline - crate::touch_emulation::LONG_PRESS_DELAY + LONG_PRESS_CUE_DELAY;
+                let wait = cue_at.saturating_duration_since(crate::clock::now());
+                crate::animation::request_draw_after(wait);
+            }
+            (None, None) => {}
         }
     }
 

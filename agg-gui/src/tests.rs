@@ -168,6 +168,7 @@ mod tool_tip_device_scale;
 mod tool_tip_placement;
 mod tooltip_lines_keys;
 mod tooltip_window_hover;
+mod touch_long_press;
 mod touch_pan_fixtures;
 mod touch_scroll;
 mod touch_tap_tolerance;

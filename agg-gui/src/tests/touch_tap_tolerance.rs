@@ -1,8 +1,10 @@
 //! agg-sharp `TouchTapToleranceTests` (Tests/Agg.Tests/Agg.UI/
-//! TouchTapToleranceTests.cs): a finger's tap tolerance is 8 points, so it
-//! scales with the display scale. On a devicePixelRatio 3.5 phone 8 device
-//! pixels is about 2 CSS pixels, and ordinary finger jitter turned every tap
-//! into a drag, so buttons outside a scroll area never clicked.
+//! TouchTapToleranceTests.cs): a finger's tap tolerance is a number of
+//! points ([`crate::TOUCH_SCROLL_THRESHOLD`], 10, which is also the long
+//! press's slop), so it scales with the display scale. On a
+//! devicePixelRatio 3.5 phone a fixed 8 device pixels is about 2 CSS pixels,
+//! and ordinary finger jitter turned every tap into a drag, so buttons
+//! outside a scroll area never clicked.
 //!
 //! C#'s `SystemWindow.SetDisplayScale` is agg-gui's
 //! [`crate::set_device_scale`]. C# lays the window out in device pixels;

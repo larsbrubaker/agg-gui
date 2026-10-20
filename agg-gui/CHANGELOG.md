@@ -10,6 +10,18 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- Long press: a finger held still for `LONG_PRESS_DELAY` (500 ms) within `LONG_PRESS_SLOP` of where
+  it went down, with no second finger, is a right press and release at the touch-down point, so
+  every widget that opens a context menu on a right click opens it on a long press. The finger is
+  then spent (its moves and lift emit nothing); a shorter tap is still a left click and a drag is
+  still a drag. An idle app is woken for it. While the hold fills, `long_press_cue()` gives the
+  point (logical, Y-up) and progress from `LONG_PRESS_CUE_DELAY` (150 ms), and `App::paint` draws
+  a thin accent-coloured ring around the finger (`set_long_press_ring_drawn(false)` leaves the
+  drawing to the app). `last_press_was_touch()` says whether the latest press came from a finger,
+  and `on_long_press(listener)` is told each time one fires (agg-gui-web-shell vibrates for
+  10 ms there). A hold on the on-screen keyboard types its key instead. `TouchMouseEmu` gains
+  `poll`, `long_press_deadline`, `long_press_progress`, `take_long_press` and `cancel_long_press`.
+
 - `ShortcutKey::F(n)`: a menu shortcut can be a function key. `MenuShortcut::parse` reads `"F1"`
   ... `"F24"` (either case; a lone `"F"` is still the letter), it matches `Key::F(n)`, and it is
   written by its cap's name (`F1`, `⇧F2` on a Mac). agg-gui-shell's native menu bar shows it with
@@ -85,6 +97,9 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   app.
 
 ### Changed
+
+- `TOUCH_SCROLL_THRESHOLD`, the finger's tap tolerance, is 10 points (was 8). It is also the long
+  press's slop, so a held finger that drifts never starts a scroll; a tap may now wobble 10 points.
 
 - The rich editor's formatting toolbar draws vector icons (`toolbar_icons`) instead of Font Awesome
   glyphs: one stroke thickness for the whole set, every straight edge on a whole device pixel at

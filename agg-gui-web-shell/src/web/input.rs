@@ -148,8 +148,14 @@ pub(super) fn install_pointer_listeners(canvas: &web_sys::HtmlCanvasElement, nee
     // recogniser, per-finger registry, primary-finger mouse emulation); only
     // mouse/pen take the direct mouse path — synthesising mouse events for
     // touch here would double-fire them. `touch-action: none` stops the
-    // browser panning/zooming the page out from under the app.
-    let _ = canvas.style().set_property("touch-action", "none");
+    // browser panning/zooming the page out from under the app. A held
+    // finger is the app's long press (a right click), so the browser must
+    // not answer it too: no callout or magnifier, no text selection.
+    let style = canvas.style();
+    let _ = style.set_property("touch-action", "none");
+    let _ = style.set_property("-webkit-touch-callout", "none");
+    let _ = style.set_property("-webkit-user-select", "none");
+    let _ = style.set_property("user-select", "none");
     let target: &web_sys::EventTarget = canvas.as_ref();
 
     {

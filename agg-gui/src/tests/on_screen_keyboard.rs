@@ -597,3 +597,53 @@ fn letter_keys_show_their_labels_in_the_system_font_after_the_tree_paints() {
     crate::font_settings::set_system_font(None);
     crate::theme::set_visuals(crate::theme::Visuals::light());
 }
+
+/// A finger held on a key types it when it lifts: the keyboard is no place
+/// for the long press's right click, which would swallow the key.
+#[test]
+fn holding_a_key_with_a_finger_still_types_it_when_the_finger_lifts() {
+    use crate::touch_state::{TouchDeviceId, TouchId};
+    use crate::widgets::on_screen_keyboard::state::with_state_ref;
+    use crate::widgets::on_screen_keyboard::KeyAction;
+    let _guard = ProfileGuard::new();
+    fresh_state();
+    let _clock = crate::clock::scoped_virtual(None);
+    crate::set_device_scale(1.0);
+    set_input_profile(InputProfile::MobileAndroid);
+    set_enabled(true);
+    let font = Arc::new(Font::from_slice(TEST_FONT).unwrap());
+    let viewport = Size::new(412.0, 800.0);
+    let mut app = App::new(Box::new(TextField::new(Arc::clone(&font))));
+    app.layout(viewport);
+    app.on_key_down(crate::Key::Tab, Modifiers::default());
+    test_hook::force_visible();
+    let frame = |app: &mut App| {
+        app.layout(viewport);
+        let mut fb = crate::Framebuffer::new(viewport.width as u32, viewport.height as u32);
+        let mut ctx = crate::GfxCtx::new(&mut fb);
+        app.paint(&mut ctx);
+    };
+    frame(&mut app);
+    let key = with_state_ref(|s| s.last_painted_keys.clone())
+        .into_iter()
+        .find(|k| matches!(k.action, KeyAction::Char('q' | 'Q')))
+        .expect("the letters page has a Q key");
+    let (x, y) = (
+        key.rect.x + key.rect.width / 2.0,
+        viewport.height - (key.rect.y + key.rect.height / 2.0),
+    );
+    let (dev, finger) = (TouchDeviceId(0), TouchId(1));
+    app.on_touch_start(dev, finger, x, y, None);
+    for _ in 0..6 {
+        crate::clock::advance(std::time::Duration::from_millis(100));
+        frame(&mut app);
+    }
+    app.on_touch_end(dev, finger);
+    let text = app
+        .root_mut()
+        .as_any_mut()
+        .and_then(|a| a.downcast_mut::<TextField>())
+        .expect("the root is the field")
+        .text();
+    assert_eq!(text.to_ascii_lowercase(), "q", "the held key typed once");
+}

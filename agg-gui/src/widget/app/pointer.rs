@@ -142,6 +142,7 @@ impl App {
         stated: bool,
     ) {
         crate::event::begin_press(clicks, stated);
+        crate::touch_emulation::long_press::note_press();
         self.on_modifiers_changed(mods);
         self.resolve_tracked_paths();
         let screen = self.flip_y(screen_x, screen_y);

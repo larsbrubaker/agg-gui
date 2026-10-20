@@ -6,6 +6,7 @@
 //!   device-loss rebuild;
 //! - [`frame`] — the `requestAnimationFrame` loop: sizing, the paint
 //!   decision, and one painted frame;
+//! - [`haptics`] — a vibrate tick when a finger's long press fires;
 //! - [`ime`] — the hidden input that carries browser input-method
 //!   composition and committed text to the focused text widget;
 //! - [`input`] — canvas pointer / wheel / context-menu listeners;
@@ -36,6 +37,7 @@ use crate::policy::FirstPaintGate;
 mod file_drop;
 mod frame;
 mod gpu;
+mod haptics;
 mod ime;
 mod input;
 mod lifecycle;
@@ -235,6 +237,7 @@ where
     config.apply_shortcut_claims();
     input::install_keyboard(&canvas, config.keyboard_needs_focus);
     input::install_pointer_listeners(&canvas, config.keyboard_needs_focus);
+    haptics::install();
     file_drop::install_file_drop_listeners(&canvas);
     lifecycle::install_window_pointer_release();
     lifecycle::install_page_hide();
