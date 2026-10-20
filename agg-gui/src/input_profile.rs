@@ -99,8 +99,11 @@ pub fn is_mobile_touch() -> bool {
 }
 
 /// The signal the UI **sizing policy** consults to decide whether
-/// interactive targets must meet the touch minimum (see
-/// [`crate::widgets::menu::effective_metrics`]).
+/// interactive targets that stay on screen (the menu bar's titles) must
+/// meet the touch minimum (see [`crate::widgets::menu::effective_metrics`]).
+/// Popup menus decide per opening instead, from the press that opened them
+/// ([`crate::widgets::menu::geometry::popup_touch_sized`]), so a menu the
+/// mouse opens on a touchscreen laptop keeps the style's rows.
 ///
 /// True when EITHER:
 /// - the platform declared a mobile-touch profile ([`is_mobile_touch`]) —
@@ -110,9 +113,9 @@ pub fn is_mobile_touch() -> bool {
 ///   ([`crate::touch_state::touch_seen_this_session`]) — a runtime fallback
 ///   for shells that *forgot* to call [`set_input_profile`] /
 ///   [`crate::ux_scale::set_ux_scale`] (which has happened in real apps).
-///   Without it, such a phone would ship desktop-sized (26 CSS-px) menus;
-///   with it, the first touch flips the latch and the menus can never stay
-///   accidentally tiny.
+///   Without it, such a phone would ship a desktop-sized (26 CSS-px) menu
+///   bar; with it, the first touch flips the latch and the bar can never
+///   stay accidentally tiny.
 ///
 /// Deliberately distinct from [`is_mobile_touch`]: that one drives the
 /// on-screen keyboard and other "no physical keyboard" features, which must

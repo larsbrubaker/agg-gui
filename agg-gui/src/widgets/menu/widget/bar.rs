@@ -19,7 +19,9 @@ use crate::text::Font;
 use crate::widget::{current_viewport, BackbufferCache, Widget};
 
 use super::super::fit_width::MenuWidth;
-use super::super::geometry::{contains, effective_metrics, item_at_path, DEFAULT_FONT_SIZE};
+use super::super::geometry::{
+    contains, effective_metrics, item_at_path, metrics_for, DEFAULT_FONT_SIZE,
+};
 use super::super::paint::{bar_button_text_color, paint_menu_bar_button_bg, MenuStyle};
 use super::super::state::{MenuAnchorKind, MenuResponse};
 use super::labels::BarLabels;
@@ -31,9 +33,10 @@ pub struct MenuBar {
     children: Vec<Box<dyn Widget>>,
     font: Arc<Font>,
     /// Explicit caller override from [`MenuBar::with_font_size`].  `None`
-    /// means "auto": the size tracks [`effective_metrics`] so touch menus
-    /// grow their text in lock-step with their rows.  An explicit override
-    /// always wins (the caller knows best).
+    /// means "auto": the titles' size tracks [`effective_metrics`] and the
+    /// open popup's tracks its own sizing ([`Self::popup_font_size`]), so
+    /// touch-sized menus grow their text in lock-step with their rows.  An
+    /// explicit override always wins (the caller knows best).
     font_size: Option<f64>,
     menus: Vec<TopMenu>,
     pub(super) open_index: Option<usize>,
@@ -217,8 +220,18 @@ impl MenuBar {
     /// Keep the popup's fit-width measuring font in step with the font it
     /// paints with, so hit-testing matches the painted panels.
     fn sync_popup_measure(&mut self) {
-        let (font, size) = (self.active_font(), self.effective_font_size());
+        let (font, size) = (self.active_font(), self.popup_font_size());
         self.popup.set_measure_font(font, size);
+    }
+
+    /// The text size of the open popup: an explicit
+    /// [`with_font_size`](Self::with_font_size) override wins; otherwise it
+    /// grows with the popup's rows when the press that opened it was a
+    /// finger's ([`super::super::PopupMenuState::touch_sized`]), so a menu the
+    /// mouse opens keeps desktop text even while the bar is touch-sized.
+    fn popup_font_size(&self) -> f64 {
+        self.font_size
+            .unwrap_or_else(|| metrics_for(self.popup.state.touch_sized()).default_font_size)
     }
 
     /// Resolve the text size the bar / its popup should use this frame.
@@ -250,6 +263,12 @@ impl MenuBar {
     pub fn set_menus(&mut self, menus: Vec<TopMenu>) {
         self.menus = menus;
         self.cache.invalidate();
+    }
+
+    /// The popup the bar opens its menus in, to inspect the open menu (its
+    /// rows and whether it is sized for a finger).
+    pub fn popup(&self) -> &PopupMenu {
+        &self.popup
     }
 
     /// Read-only access to the configured top-level menus.  Mainly for
@@ -303,8 +322,10 @@ impl MenuBar {
                 MenuAnchorKind::Context,
             ),
         };
-        self.sync_popup_measure();
         self.popup.state.open_at(anchor, kind);
+        // After `open_at`: the measure's text size follows the sizing the
+        // opening press chose.
+        self.sync_popup_measure();
         // A horizontal bar's title reaches the bar's height past the
         // anchor, so a menu that flips to the other side clears it.
         let span = match self.orientation {
@@ -355,6 +376,13 @@ impl MenuBar {
         for step in 1..len {
             let next = (current as isize + delta * step).rem_euclid(len) as usize;
             if self.open_menu(next) {
+                // The keyboard opened this one, so it is sized for the
+                // mouse (unless the device is a phone or tablet), whatever
+                // the press before it was.
+                self.popup
+                    .state
+                    .set_touch_sized(crate::input_profile::is_mobile_touch());
+                self.sync_popup_measure();
                 break;
             }
         }
@@ -734,7 +762,7 @@ impl Widget for MenuBar {
 
     fn paint_global_overlay(&mut self, ctx: &mut dyn DrawCtx) {
         let font = self.active_font();
-        let font_size = self.effective_font_size();
+        let font_size = self.popup_font_size();
         // The popup runs bar-local; knowing where the bar sits in root space
         // lets its menus flip and scroll against the window
         // (`overflow.rs`).  The overlay ctx is positioned at the bar's (0, 0).

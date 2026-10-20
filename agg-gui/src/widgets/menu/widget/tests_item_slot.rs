@@ -47,6 +47,7 @@ const SLOT: MenuIconSlot = MenuIconSlot {
 fn reset_env() {
     crate::input_profile::set_input_profile(crate::input_profile::InputProfile::Desktop);
     crate::touch_state::clear_last_touch_event_for_testing();
+    crate::touch_emulation::long_press::set_last_press_was_touch_for_testing(false);
     crate::ux_scale::set_ux_scale(1.0);
     crate::device_scale::set_device_scale(1.0);
 }
@@ -142,7 +143,8 @@ fn keyboard_selects_and_activates_a_tall_row() {
 fn own_row_height_is_still_touch_floored() {
     let _guard = crate::input_profile::profile_test_lock();
     reset_env();
-    crate::touch_state::note_touch_event();
+    // A finger's press opens the menu, so it is sized for touch.
+    crate::touch_emulation::long_press::set_last_press_was_touch_for_testing(true);
     let mut menu = PopupMenu::new(vec![
         MenuEntry::Item(MenuItem::action("Short", "s").row_height(30.0)),
         MenuEntry::Item(MenuItem::action("Tall", "t").row_height(60.0)),

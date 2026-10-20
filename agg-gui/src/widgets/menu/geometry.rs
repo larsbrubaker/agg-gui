@@ -36,7 +36,7 @@ pub const TOUCH_MIN: f64 = 44.0;
 pub(crate) const MARGIN: f64 = 4.0;
 
 /// The concrete menu metrics for the current frame.  Desktop values are the
-/// bare constants; on a touch device they grow so every interactive target
+/// bare constants; sized for touch they grow so every interactive target
 /// clears [`TOUCH_MIN`] painted px.  Hit-testing and painting BOTH derive
 /// from this single struct (via [`stack_layout`] / the bar layout), so a
 /// grown popup can never have paint and hit rects disagree.
@@ -51,14 +51,39 @@ pub struct MenuMetrics {
     /// Gap every popup keeps from the window edge ([`MARGIN`] unless a
     /// [`super::MenuStyle::window_margin`] replaces it; `0.0` is flush).
     pub window_margin: f64,
+    /// The height (logical px) every item row is floored at: the touch
+    /// minimum when these metrics are sized for a finger, `0.0` (no floor)
+    /// when sized for the mouse.  Rows with their own height
+    /// ([`MenuItem::row_height`]) are floored at it too.
+    pub touch_row_min: f64,
 }
 
-/// Effective menu metrics for the current frame.
+/// Effective menu metrics for the current frame, for the chrome that stays
+/// on screen (the menu bar's height, its titles' text size): sized for touch
+/// once [`crate::input_profile::touch_ui_active`] holds (a phone or tablet
+/// profile, or any touch this session), since the next press on the bar may
+/// be a finger's.  A popup sizes itself by the press that opened it instead
+/// ([`popup_touch_sized`], [`metrics_for`]).
+pub fn effective_metrics() -> MenuMetrics {
+    metrics_for(crate::input_profile::touch_ui_active())
+}
+
+/// Whether a popup menu opening now is sized for a finger: always under a
+/// phone or tablet input profile, otherwise when the press that opened it
+/// was a finger's (a tap or a long press,
+/// [`crate::touch_emulation::last_press_was_touch`]).  A menu the mouse
+/// opens gets the style's own rows every time, even on a touchscreen laptop
+/// that was touched a moment ago.  [`super::PopupMenuState`] asks once, as it
+/// opens, and its submenus keep that answer.
+pub fn popup_touch_sized() -> bool {
+    crate::input_profile::is_mobile_touch() || crate::touch_emulation::last_press_was_touch()
+}
+
+/// Menu metrics sized for the mouse (`touch == false`) or for a finger.
 ///
-/// When [`crate::input_profile::touch_ui_active`] is false these equal the
-/// desktop constants EXACTLY (bit-identical — desktop behaviour is
-/// unchanged).  When it is true, interactive heights are floored at
-/// `TOUCH_MIN` *painted* px.
+/// Sized for the mouse these equal the desktop constants EXACTLY.  Sized
+/// for a finger, interactive heights are floored at `TOUCH_MIN` *painted*
+/// px.
 ///
 /// The paint transform multiplies logical px by
 /// `effective_scale = device_scale * ux_scale`, and `device_scale` maps
@@ -70,7 +95,7 @@ pub struct MenuMetrics {
 /// double-scaled.  Width and default font size grow in lock-step with the
 /// row so the popup keeps its desktop proportions, just larger; separators
 /// stay thin because they are not tappable.
-pub fn effective_metrics() -> MenuMetrics {
+pub fn metrics_for(touch: bool) -> MenuMetrics {
     let base = MenuMetrics {
         row_h: ROW_H,
         sep_h: SEP_H,
@@ -79,8 +104,9 @@ pub fn effective_metrics() -> MenuMetrics {
         menu_w: MENU_W,
         default_font_size: crate::font_settings::default_font_size_or(DEFAULT_FONT_SIZE),
         window_margin: MARGIN,
+        touch_row_min: 0.0,
     };
-    if !crate::input_profile::touch_ui_active() {
+    if !touch {
         return base;
     }
     // `set_ux_scale` only debug-asserts positivity, so a release-mode
@@ -101,6 +127,7 @@ pub fn effective_metrics() -> MenuMetrics {
         menu_w: MENU_W * grow,
         default_font_size: base.default_font_size * grow,
         window_margin: MARGIN,
+        touch_row_min: min_logical,
     }
 }
 
@@ -182,31 +209,45 @@ pub fn stack_layout_with_width(
     )
 }
 
-/// [`effective_metrics`] with the item row height replaced by `row_h`
-/// (desktop logical px, a [`super::MenuStyle::row_h`]).  On touch the row is
-/// still floored at the touch minimum.  `row_h == ROW_H` returns
-/// [`effective_metrics`] unchanged.
+/// The metrics a popup opening now gets ([`popup_touch_sized`]) with the
+/// item row height replaced by `row_h`; see [`metrics_with_row_h_for`].
 pub fn metrics_with_row_h(row_h: f64) -> MenuMetrics {
-    let mut m = effective_metrics();
+    metrics_with_row_h_for(popup_touch_sized(), row_h)
+}
+
+/// [`metrics_for`] `touch` with the item row height replaced by `row_h`
+/// (desktop logical px, a [`super::MenuStyle::row_h`]).  Sized for touch the
+/// row is still floored at the touch minimum.  `row_h == ROW_H` returns
+/// [`metrics_for`] unchanged.
+pub fn metrics_with_row_h_for(touch: bool, row_h: f64) -> MenuMetrics {
+    let mut m = metrics_for(touch);
     if row_h == ROW_H || !row_h.is_finite() || row_h <= 0.0 {
         return m;
     }
-    m.row_h = if crate::input_profile::touch_ui_active() {
-        row_h.max(TOUCH_MIN / crate::ux_scale::ux_scale().max(0.01))
-    } else {
-        row_h
-    };
+    m.row_h = row_h.max(m.touch_row_min);
     m
 }
 
-/// [`metrics_with_row_h`] with the separator row height replaced by `sep_h`
-/// and the window margin by `window_margin` (a [`super::MenuStyle`]'s
+/// The metrics a popup opening now gets ([`popup_touch_sized`]) under a
+/// style's row and separator heights and window margin; see
+/// [`metrics_with_style_for`].
+pub fn metrics_with_style(row_h: f64, sep_h: f64, window_margin: f64) -> MenuMetrics {
+    metrics_with_style_for(popup_touch_sized(), row_h, sep_h, window_margin)
+}
+
+/// [`metrics_with_row_h_for`] with the separator row height replaced by
+/// `sep_h` and the window margin by `window_margin` (a [`super::MenuStyle`]'s
 /// [`super::MenuSeparatorStyle::row_height`] and
 /// [`super::MenuStyle::window_margin`]).  Separators are not tappable, so
-/// `sep_h` is not touch-floored.  Non-finite or negative values keep this
-/// frame's defaults.
-pub fn metrics_with_style(row_h: f64, sep_h: f64, window_margin: f64) -> MenuMetrics {
-    let mut m = metrics_with_row_h(row_h);
+/// `sep_h` is not touch-floored.  Non-finite or negative values keep the
+/// defaults.
+pub fn metrics_with_style_for(
+    touch: bool,
+    row_h: f64,
+    sep_h: f64,
+    window_margin: f64,
+) -> MenuMetrics {
+    let mut m = metrics_with_row_h_for(touch, row_h);
     if sep_h.is_finite() && sep_h >= 0.0 {
         m.sep_h = sep_h;
     }
@@ -423,27 +464,16 @@ pub fn item_at(items: &[MenuEntry], idx: usize) -> Option<&MenuItem> {
 
 /// Height of one entry's row: separators are thin, widget rows take their
 /// own height, an item with a [`MenuItem::row_height`] takes that (floored
-/// at the touch minimum on touch), every other item takes the (possibly
-/// touch-grown) row height.
+/// at the metrics' [`MenuMetrics::touch_row_min`], as the style's row is),
+/// every other item takes the (possibly touch-grown) row height.
 pub fn entry_height(entry: &MenuEntry, m: &MenuMetrics) -> f64 {
     match entry {
         MenuEntry::Item(item) => match (item.widget_row, item.row_height) {
             (Some(w), _) => w.height,
-            (None, Some(h)) if h.is_finite() && h > 0.0 => item_row_height(h),
+            (None, Some(h)) if h.is_finite() && h > 0.0 => h.max(m.touch_row_min),
             _ => m.row_h,
         },
         MenuEntry::Separator => m.sep_h,
-    }
-}
-
-/// An item's own row height `h` for this frame: `h` on desktop, floored at
-/// the touch minimum (in logical px) on touch, as [`metrics_with_row_h`]
-/// floors the style's.
-fn item_row_height(h: f64) -> f64 {
-    if crate::input_profile::touch_ui_active() {
-        h.max(TOUCH_MIN / crate::ux_scale::ux_scale().max(0.01))
-    } else {
-        h
     }
 }
 

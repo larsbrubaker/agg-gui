@@ -31,6 +31,7 @@ fn test_font() -> Arc<Font> {
 fn reset_env() {
     set_input_profile(InputProfile::Desktop);
     crate::touch_state::clear_last_touch_event_for_testing();
+    crate::touch_emulation::long_press::set_last_press_was_touch_for_testing(false);
     crate::ux_scale::set_ux_scale(1.0);
     crate::device_scale::set_device_scale(1.0);
     reset_menu_style();
@@ -126,7 +127,8 @@ fn row_height_option_sets_item_rows_and_panel_height() {
 fn row_height_is_still_touch_floored() {
     let _guard = profile_test_lock();
     reset_env();
-    crate::touch_state::note_touch_event();
+    // A finger's press opens the menu, so it is sized for touch.
+    crate::touch_emulation::long_press::set_last_press_was_touch_for_testing(true);
     let style = MenuStyle {
         row_h: 28.0,
         ..MenuStyle::default()

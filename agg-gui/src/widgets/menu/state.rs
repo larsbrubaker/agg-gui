@@ -8,8 +8,8 @@ use crate::geometry::{Point, Size};
 
 use super::fit_width::{FitMeasure, MenuWidth, FIT_MIN_W};
 use super::geometry::{
-    hit_test, item_at_path, metrics_with_style, stack_layout_placed, MenuHit, MenuMetrics,
-    PopupLayout, MARGIN, ROW_H, SEP_H,
+    hit_test, item_at_path, metrics_with_style_for, popup_touch_sized, stack_layout_placed,
+    MenuHit, MenuMetrics, PopupLayout, MARGIN, ROW_H, SEP_H,
 };
 use super::model::{MenuEntry, MenuSelection};
 use super::overflow::StackPlacement;
@@ -60,6 +60,9 @@ pub struct PopupMenuState {
     min_width: f64,
     /// Desktop item-row height (logical px); see [`super::MenuStyle::row_h`].
     row_h: f64,
+    /// Whether this opening is sized for a finger, decided by the press that
+    /// opened it; see [`Self::touch_sized`].
+    touch_sized: bool,
     /// Separator row height (logical px); see [`super::MenuSeparatorStyle`].
     sep_h: f64,
     /// Gap kept from the window edge; see [`super::MenuStyle::window_margin`].
@@ -100,6 +103,7 @@ impl Default for PopupMenuState {
             fit_measure: None,
             min_width: FIT_MIN_W,
             row_h: ROW_H,
+            touch_sized: false,
             sep_h: SEP_H,
             window_margin: MARGIN,
             anchor_span: 0.0,
@@ -112,10 +116,15 @@ impl Default for PopupMenuState {
 }
 
 impl PopupMenuState {
+    /// Open the menu at `anchor`.  Its rows are sized by the press that
+    /// opened it ([`popup_touch_sized`]): finger-sized after a tap or a long
+    /// press (or always under a phone or tablet profile), the style's own
+    /// rows after a mouse press.  Its submenus keep that size.
     pub fn open_at(&mut self, anchor: Point, anchor_kind: MenuAnchorKind) {
         self.anchor = anchor;
         self.anchor_kind = anchor_kind;
         self.open = true;
+        self.touch_sized = popup_touch_sized();
         self.open_path.clear();
         self.scroll_offsets.clear();
         self.scroll_drag = None;
@@ -209,6 +218,20 @@ impl PopupMenuState {
         self.row_h
     }
 
+    /// Whether this opening has finger-sized rows (floored at the touch
+    /// minimum, with the width and the default text size grown to match).
+    /// [`Self::open_at`] decides it from the opening press.
+    pub fn touch_sized(&self) -> bool {
+        self.touch_sized
+    }
+
+    /// Size the open menu for a finger (`true`) or for the mouse, for a host
+    /// that opened it some other way than by a press, e.g. from the keyboard.
+    /// Lasts until the next [`Self::open_at`].
+    pub fn set_touch_sized(&mut self, touch_sized: bool) {
+        self.touch_sized = touch_sized;
+    }
+
     /// Set the separator row height (logical px, never touch-grown).  The
     /// default is [`SEP_H`].
     pub fn set_separator_height(&mut self, sep_h: f64) {
@@ -240,7 +263,8 @@ impl PopupMenuState {
         if !self.open {
             return Vec::new();
         }
-        let m = metrics_with_style(self.row_h, self.sep_h, self.window_margin);
+        let m =
+            metrics_with_style_for(self.touch_sized, self.row_h, self.sep_h, self.window_margin);
         let scroll = |prefix: &[usize]| self.scroll_offset(prefix);
         let placement = StackPlacement {
             anchor_span: self.anchor_span,

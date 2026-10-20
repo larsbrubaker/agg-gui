@@ -16,8 +16,8 @@
 //!     unless an app turns it off ([`set_long_press_ring_drawn`]), draws as
 //!     a thin ring filling around the finger ([`paint_ring`]);
 //!   - whether the latest press came from a finger
-//!     ([`last_press_was_touch`]), so a menu opened by it can use
-//!     finger-sized rows;
+//!     ([`last_press_was_touch`]), so a menu opened by it gets
+//!     finger-sized rows and a menu the mouse opens does not;
 //!   - listeners told when a long press fires ([`on_long_press`]), which is
 //!     where a shell plays a haptic tick.
 //!
@@ -95,8 +95,9 @@ pub fn long_press_ring_drawn() -> bool {
 }
 
 /// Whether the most recent mouse press was made by a finger: a tap, a
-/// touch drag's press or a long press's right click. A menu opened from
-/// that press can lay itself out for fingers (taller rows). A real mouse
+/// touch drag's press or a long press's right click. A popup menu opened
+/// from that press lays itself out for fingers (taller rows,
+/// [`crate::widgets::menu::geometry::popup_touch_sized`]). A real mouse
 /// press clears it.
 pub fn last_press_was_touch() -> bool {
     LAST_PRESS_FROM_TOUCH.with(|c| c.get())
@@ -115,6 +116,13 @@ pub(crate) fn while_emulating<R>(f: impl FnOnce() -> R) -> R {
 /// for every press).
 pub(crate) fn note_press() {
     let from_touch = EMULATING.with(|c| c.get());
+    LAST_PRESS_FROM_TOUCH.with(|c| c.set(from_touch));
+}
+
+/// Mark the latest press as a finger's or not, as `App` does for each press
+/// it dispatches, for tests that open a menu without an `App`.
+#[cfg(test)]
+pub(crate) fn set_last_press_was_touch_for_testing(from_touch: bool) {
     LAST_PRESS_FROM_TOUCH.with(|c| c.set(from_touch));
 }
 

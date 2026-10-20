@@ -1,7 +1,8 @@
 //! Popup width policy: the fixed default width or a content-fitted width.
 //!
 //! [`MenuWidth::Fixed`] (the default) keeps every popup at
-//! [`super::geometry::MENU_W`] (touch-grown by [`super::effective_metrics`]).
+//! [`super::geometry::MENU_W`] (grown when a finger opened the popup,
+//! [`super::geometry::metrics_for`]).
 //! [`MenuWidth::FitContent`] sizes each popup level — root and every cascaded
 //! submenu independently — to its widest row's natural width, the way
 //! agg-sharp's `PopupMenu` sizes itself (`HAnchor.Fit` over rows that are
@@ -57,7 +58,7 @@ pub const FIT_MIN_W: f64 = 156.0;
 /// How wide a popup menu is.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum MenuWidth {
-    /// Every popup is [`super::MENU_W`] wide (touch-grown on touch devices).
+    /// Every popup is [`super::MENU_W`] wide (grown when sized for touch).
     #[default]
     Fixed,
     /// Each popup is as wide as its widest row's natural width.
