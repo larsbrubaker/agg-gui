@@ -14,7 +14,7 @@
 //! [`install_keyboard_listeners_while`] instead, so the keyboard and
 //! clipboard are the app's only while it has focus and the page's otherwise.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use wasm_bindgen::closure::Closure;
@@ -134,15 +134,20 @@ fn modifiers_of(e: &web_sys::KeyboardEvent) -> Modifiers {
 ///   the text and any picture in [`crate::wasm_clipboard`] and then
 ///   synthesizes the `Ctrl+V` through `on_key` itself (after the picture
 ///   has decoded, when there is one).
-/// - `copy` / `cut` publish the [`crate::wasm_clipboard`] buffer (already
-///   written by the widget's Ctrl+C/X handler) to the system clipboard.
+/// - Bare `Ctrl/Cmd+C` and `Ctrl/Cmd+X` keydowns are forwarded and never
+///   `preventDefault()`ed: the browser's copy or cut command then fires
+///   `copy` / `cut`, which publish the [`crate::wasm_clipboard`] buffer
+///   (already written by the widget's Ctrl+C/X handler) to the system
+///   clipboard. When the handler copied nothing, the event is left to the
+///   browser, so the system clipboard keeps what it held.
 /// - Typing/navigation keys are `preventDefault()`ed so space / arrows /
 ///   quote don't scroll the page or trigger browser quick-find, but
 ///   browser chrome stays reachable: `Tab`, the F-keys other than F1
 ///   (the app's help key), and modified shortcuts other than the app's
-///   clipboard/undo set (Ctrl/Cmd C, X, A, Z, Y) and the keys the app
-///   claimed with [`crate::claim_web_shortcut`] keep their default
-///   action. The policy lives in `web_key_policy.rs`.
+///   clipboard/undo set (Ctrl/Cmd A, Z, Y and the Shift variants of C
+///   and X) and the keys the app claimed with
+///   [`crate::claim_web_shortcut`] keep their default action. The policy
+///   lives in `web_key_policy.rs`.
 ///
 /// Listeners live for the page lifetime (the closures are leaked — call
 /// this once at startup).
@@ -170,16 +175,22 @@ pub fn install_keyboard_listeners_while(
     let belongs: Belongs = Rc::new(belongs);
     let on_key: crate::web_paste::OnKey = Rc::new(RefCell::new(on_key));
     let held = Rc::new(RefCell::new(crate::web_key_policy::HeldKeys::default()));
+    // Whether the latest keydown was a copy or cut chord that copied
+    // nothing (`false` after any other keydown): its copy / cut event then
+    // must not publish an older copy over what the system clipboard holds.
+    let chord_copied_nothing = Rc::new(Cell::new(false));
 
     // --- keydown -----------------------------------------------------------
     let down_cb = {
         let on_key = Rc::clone(&on_key);
         let belongs = Rc::clone(&belongs);
         let held = Rc::clone(&held);
+        let chord_copied_nothing = Rc::clone(&chord_copied_nothing);
         Closure::<dyn FnMut(web_sys::KeyboardEvent)>::new(move |e: web_sys::KeyboardEvent| {
             if !belongs() {
                 return;
             }
+            chord_copied_nothing.set(false);
             // Mid-composition keys (`isComposing`, or keyCode 229 "Process" on
             // the browsers that report the key before the composition) belong
             // to the input method; its result arrives as composition events.
@@ -201,7 +212,12 @@ pub fn install_keyboard_listeners_while(
                 e.prevent_default();
             }
             held.borrow_mut().pressed(&physical_key(&e));
+            let copies = crate::web_key_policy::runs_browser_clipboard_command(&k, mods);
+            let before = crate::wasm_clipboard::generation();
             (on_key.borrow_mut())(k, mods, true);
+            if copies {
+                chord_copied_nothing.set(crate::wasm_clipboard::generation() == before);
+            }
         })
     };
     let _ = window.add_event_listener_with_callback("keydown", down_cb.as_ref().unchecked_ref());
@@ -230,14 +246,21 @@ pub fn install_keyboard_listeners_while(
     // --- copy / cut ----------------------------------------------------------
     // The focused widget's Ctrl+C / Ctrl+X handler has already written the
     // selection into the in-process buffer by the time the DOM clipboard
-    // event fires; publish it to the system clipboard.
+    // event fires; publish it to the system clipboard. Setting the event's
+    // data and cancelling it makes the browser copy that data instead of
+    // the page's selection.
     for event_name in ["copy", "cut"] {
         let belongs = Rc::clone(&belongs);
+        let chord_copied_nothing = Rc::clone(&chord_copied_nothing);
         let cb = Closure::<dyn FnMut(web_sys::ClipboardEvent)>::new(
             move |e: web_sys::ClipboardEvent| {
                 // The page's own selection is copied while the app is not
                 // the keyboard's owner.
                 if !belongs() {
+                    return;
+                }
+                // A copy chord with nothing selected copies nothing.
+                if chord_copied_nothing.replace(false) {
                     return;
                 }
                 let Some(text) = crate::wasm_clipboard::get() else {

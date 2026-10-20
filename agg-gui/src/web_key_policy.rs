@@ -17,7 +17,10 @@ std::thread_local! {
     static CLAIMED: RefCell<Vec<char>> = const { RefCell::new(Vec::new()) };
 }
 
-/// The keys every app gets: the clipboard and undo/redo set.
+/// The keys every app gets: the clipboard and undo/redo set. Bare
+/// Ctrl/Cmd+C and Ctrl/Cmd+X are the exception
+/// ([`runs_browser_clipboard_command`]): only their Shift variants are
+/// cancelled.
 const BUILT_IN_CLAIMS: [char; 5] = ['c', 'x', 'a', 'z', 'y'];
 
 /// Claim Ctrl/Cmd+`key` (with or without Shift) from the browser: the web
@@ -25,7 +28,9 @@ const BUILT_IN_CLAIMS: [char; 5] = ['c', 'x', 'a', 'z', 'y'];
 /// app, so the browser's own action for it (Ctrl/Cmd+S "Save Page As",
 /// Ctrl/Cmd+Shift+S, Ctrl/Cmd+P print, ...) does not run. Claim only
 /// shortcuts the app handles. Alt combinations are never claimed (Alt+Left is
-/// history back; AltGr characters report Ctrl+Alt). Matching ignores case.
+/// history back; AltGr characters report Ctrl+Alt), and neither are bare
+/// Ctrl/Cmd+C and Ctrl/Cmd+X, whose browser copy and cut commands carry the
+/// app's copy to the system clipboard. Matching ignores case.
 /// Native builds have no browser, so a claim changes nothing there.
 pub fn claim_web_shortcut(key: char) {
     let key = key.to_ascii_lowercase();
@@ -38,7 +43,8 @@ pub fn claim_web_shortcut(key: char) {
 }
 
 /// Give Ctrl/Cmd+`key` back to the browser after [`claim_web_shortcut`].
-/// The built-in clipboard and undo set (C, X, A, Z, Y) stays claimed.
+/// The built-in clipboard and undo set (A, Z, Y and Shift+C, Shift+X) stays
+/// claimed.
 pub fn release_web_shortcut(key: char) {
     let key = key.to_ascii_lowercase();
     CLAIMED.with(|c| c.borrow_mut().retain(|k| *k != key));
@@ -57,10 +63,12 @@ pub fn is_web_shortcut_claimed(key: char) -> bool {
 /// `'` / `/` open Firefox quick-find, Backspace navigates back) while
 /// leaving browser chrome usable: `Tab` focus-navigation, modified
 /// shortcuts like Ctrl+R / Cmd+L, and the F-keys stay with the browser.
-/// Ctrl/Cmd C, X, A, Z, Y are the app's clipboard/undo set and are
-/// claimed, as is any key an app claimed with [`claim_web_shortcut`].
-/// Alt combos (Alt+Left = history back, AltGr chars report
-/// ctrl+alt) are never suppressed.
+/// Ctrl/Cmd A, Z, Y and the Shift variants of C and X are the app's
+/// clipboard/undo set and are claimed, as is any key an app claimed with
+/// [`claim_web_shortcut`]. Bare Ctrl/Cmd+C and Ctrl/Cmd+X are still
+/// forwarded to the app but never suppressed
+/// ([`runs_browser_clipboard_command`]). Alt combos (Alt+Left = history
+/// back, AltGr chars report ctrl+alt) are never suppressed.
 ///
 /// F1 is the one F-key claimed: desktop apps bind it to their own help,
 /// and the browser's F1 (opening the browser's help page in a new tab)
@@ -72,6 +80,9 @@ pub fn is_web_shortcut_claimed(key: char) -> bool {
 // Only the wasm `web_adapter` calls this outside the tests.
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 pub(crate) fn should_prevent_default(k: &Key, mods: Modifiers) -> bool {
+    if runs_browser_clipboard_command(k, mods) {
+        return false;
+    }
     if mods.ctrl || mods.meta {
         return matches!(k, Key::Char(c) if is_web_shortcut_claimed(*c)) && !mods.alt;
     }
@@ -96,6 +107,21 @@ pub(crate) fn should_prevent_default(k: &Key, mods: Modifiers) -> bool {
                 | Key::Enter
         ),
     }
+}
+
+/// Whether the keydown is a bare Ctrl/Cmd+C or Ctrl/Cmd+X (no Shift, no Alt),
+/// the chords that run the browser's copy and cut commands. The app's handler
+/// copies into the in-process clipboard on the keydown, and the command's
+/// `copy` / `cut` event that follows hands that copy to the system clipboard
+/// (`web_adapter`'s copy / cut listener). Cancelling the keydown would cancel
+/// the command too, so the event would never fire.
+// Only the wasm `web_adapter` calls this outside the tests.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+pub(crate) fn runs_browser_clipboard_command(k: &Key, mods: Modifiers) -> bool {
+    (mods.ctrl || mods.meta)
+        && !mods.shift
+        && !mods.alt
+        && matches!(k, Key::Char(c) if matches!(c.to_ascii_lowercase(), 'c' | 'x'))
 }
 
 /// The physical keys whose keydown went to the app and whose keyup has not
@@ -252,11 +278,56 @@ mod tests {
         assert!(!should_prevent_default(&Key::Char('S'), cmd_shift()));
     }
 
+    fn cmd() -> Modifiers {
+        Modifiers {
+            meta: true,
+            ..plain()
+        }
+    }
+
+    /// Cancelling a bare copy or cut keydown cancels the browser's copy or
+    /// cut command, so its `copy` / `cut` event never fires and the app's
+    /// copy never reaches the system clipboard.
+    #[test]
+    fn bare_copy_and_cut_run_the_browser_command() {
+        for key in ['c', 'x', 'C', 'X'] {
+            assert!(
+                !should_prevent_default(&Key::Char(key), ctrl()),
+                "Ctrl+{key}"
+            );
+            assert!(!should_prevent_default(&Key::Char(key), cmd()), "Cmd+{key}");
+        }
+        // Claiming them does not bring the cancel back.
+        claim_web_shortcut('c');
+        claim_web_shortcut('X');
+        assert!(!should_prevent_default(&Key::Char('c'), cmd()));
+        assert!(!should_prevent_default(&Key::Char('x'), ctrl()));
+        release_web_shortcut('c');
+        release_web_shortcut('x');
+    }
+
+    #[test]
+    fn shifted_copy_and_cut_stay_claimed() {
+        // Ctrl+Shift+C is the browser's element inspector.
+        let ctrl_shift = Modifiers {
+            shift: true,
+            ..ctrl()
+        };
+        assert!(should_prevent_default(&Key::Char('C'), ctrl_shift));
+        assert!(should_prevent_default(&Key::Char('X'), cmd_shift()));
+        // Alt combinations stay with the browser, as for every key.
+        let cmd_alt = Modifiers { alt: true, ..cmd() };
+        assert!(!should_prevent_default(&Key::Char('c'), cmd_alt));
+    }
+
     #[test]
     fn releasing_a_built_in_key_keeps_the_clipboard_set() {
+        claim_web_shortcut('z');
+        release_web_shortcut('z');
+        assert!(should_prevent_default(&Key::Char('z'), ctrl()));
         claim_web_shortcut('c');
         release_web_shortcut('c');
-        assert!(should_prevent_default(&Key::Char('c'), ctrl()));
+        assert!(is_web_shortcut_claimed('C'));
         assert!(is_web_shortcut_claimed('Z'));
     }
 }

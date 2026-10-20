@@ -7,7 +7,9 @@
 //!   parallel tests never share (or reach) a clipboard;
 //! - native without the feature: no clipboard (reads find nothing);
 //! - the browser: `wasm_clipboard`, bridged to the page's copy / cut / paste
-//!   events by `web_adapter`.
+//!   events by `web_adapter`; a copy is also handed to the browser's
+//!   asynchronous Clipboard API, so one made without a copy event (a menu's
+//!   Copy) reaches the system clipboard too.
 //!
 //! `router.rs` holds the routing decision these share; `mod.rs` the public API.
 
@@ -247,10 +249,12 @@ mod browser {
 
     pub(in crate::clipboard) fn set_text(text: &str) {
         crate::wasm_clipboard::set(text);
+        crate::wasm_clipboard::write_system(text, None);
     }
 
     pub(in crate::clipboard) fn set_rich_text(plain_text: &str, html_text: &str) {
         crate::wasm_clipboard::set_rich(plain_text, html_text);
+        crate::wasm_clipboard::write_system(plain_text, Some(html_text));
     }
 
     /// The HTML of this page's latest copy (a paste carries text and
