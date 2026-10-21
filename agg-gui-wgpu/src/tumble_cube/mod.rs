@@ -89,6 +89,9 @@ struct CubeGpu {
     faces_version: Option<u64>,
     state: Option<gpu::GpuState>,
     framebuffer: Option<SsaaFramebuffer>,
+    /// How many times the faces have been uploaded, for tests: each upload builds six mip chains
+    /// on the CPU and writes them, so one more than needed costs a frame.
+    face_uploads: u64,
 }
 
 impl WgpuCustomRender for CubeGpu {
@@ -98,14 +101,19 @@ impl WgpuCustomRender for CubeGpu {
         let ph = ctx.screen_rect.height.round().max(1.0) as u32 * SSAA;
         if !matches!(&self.state, Some(s) if s.format == ctx.surface_format) {
             self.state = Some(gpu::GpuState::new(ctx.device, ctx.surface_format));
-            // A rebuilt state has blank textures: re-upload.
-            self.faces_version = None;
+            // A rebuilt state has blank textures: re-upload. Faces handed over for this render
+            // fill them below, so their version stays; forgetting it would upload the same faces
+            // again on the next paint.
+            if self.pending_faces.is_none() {
+                self.faces_version = None;
+            }
         }
         let Some(state) = self.state.as_mut() else {
             return;
         };
         if let Some(faces) = self.pending_faces.take() {
             state.upload_faces(ctx.queue, &faces);
+            self.face_uploads += 1;
         }
         match &mut self.framebuffer {
             Some(fb) => fb.ensure_size(ctx.device, pw, ph),

@@ -2,7 +2,8 @@
 //!
 //! They prove MatterCAD's scene module compiles and binds against our
 //! layout, and that the GPU cube agrees with agg-gui's software renderer
-//! (same camera, lighting and textures).  Like the other readback tests
+//! (same camera, lighting and textures), and that its faces are uploaded
+//! once, not again on the paint after the first.  Like the other readback tests
 //! they pass trivially when no GPU adapter is available.
 
 use std::cell::RefCell;
@@ -93,4 +94,36 @@ fn gpu_cube_matches_the_software_render() {
         compared > 20,
         "the cube must cover the middle of the widget"
     );
+}
+
+#[test]
+fn the_faces_are_uploaded_once_across_frames() {
+    let Some((device, queue)) = try_device() else {
+        return;
+    };
+    let target = Target::new(Arc::clone(&device), Arc::clone(&queue), SIZE, SIZE);
+    let mut ctx = WgpuGfxCtx::new(
+        device,
+        queue,
+        wgpu::TextureFormat::Rgba8Unorm,
+        SIZE as f32,
+        SIZE as f32,
+    );
+    let renderer = WgpuTumbleCubeRenderer::new();
+    let shared = Rc::clone(&renderer.shared);
+    let cam = Rc::new(RefCell::new(FixedCamera(math::look_at(
+        [0.4, 1.0, -0.6],
+        [0.0, 0.0, 1.0],
+    ))));
+    let mut cube = TumbleCube::new(cam).with_gpu_renderer(Box::new(renderer));
+    cube.layout(Size::new(SIZE as f64, SIZE as f64));
+    // The first frame makes the GPU state and uploads the faces; the next ones, with the faces
+    // unchanged, upload nothing.
+    for _ in 0..3 {
+        ctx.reset(SIZE as f32, SIZE as f32);
+        ctx.clear(Color::rgba(0.0, 1.0, 0.0, 1.0));
+        cube.paint(&mut ctx);
+        ctx.flush_to_surface(&target.view);
+    }
+    assert_eq!(shared.borrow().face_uploads, 1);
 }
