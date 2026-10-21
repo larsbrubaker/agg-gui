@@ -34,6 +34,9 @@ const ROOM: Size = Size {
 
 #[test]
 fn defaults_unchanged_without_overrides() {
+    // Menu metrics follow the process-wide input profile, which keyboard
+    // tests switch to a phone's; hold the profile lock while reading them.
+    let _profile = crate::input_profile::profile_test_lock();
     clear_default_font_size();
     set_line_box(LineBox::Standard);
     let f = font();
@@ -53,6 +56,7 @@ fn defaults_unchanged_without_overrides() {
 
 #[test]
 fn default_font_size_applies_to_widgets_built_after_it() {
+    let _profile = crate::input_profile::profile_test_lock();
     let f = font();
     set_default_font_size(12.0);
 
