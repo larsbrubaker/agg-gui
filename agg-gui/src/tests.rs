@@ -119,6 +119,7 @@ mod modal_sheet_room;
 mod multi_touch_routing;
 mod on_screen_keyboard;
 mod on_screen_keyboard_longpress;
+mod on_screen_keyboard_preview;
 mod on_screen_keyboard_touch;
 mod on_screen_keyboard_zoom;
 mod opacity;

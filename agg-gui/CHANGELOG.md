@@ -69,6 +69,15 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Fixed
 
+- On-screen keyboard: a tapped key's preview goes 100 ms after the lift, and a held key's alternates
+  open at 380 ms, even when nothing else repaints. `App::paint` clears every scheduled draw as a
+  frame starts, and the wakes the press and lift asked for were cleared by the very frame they
+  also asked for, so an idle shell slept until the next caret blink or other repaint (the preview
+  stayed up for up to a second on a phone). The keyboard now asks again on every paint until the
+  moment passes. On the Gboard keyboard the letter preview is a circle 1.4 key widths across,
+  centred over the key, with a soft shadow (`Style::preview_shadow`); the iPhone balloon is
+  unchanged.
+
 - A wheel over a markdown code block or table that scrolls sideways passes its vertical part
   to the page: the block takes only the sideways part, and only when the gesture is mostly
   sideways. A Mac trackpad's vertical two-finger scroll carries a little sideways drift, and

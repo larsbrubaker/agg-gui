@@ -336,33 +336,57 @@ pub(super) fn paint_chevron(
     ctx.stroke();
 }
 
-/// The bubble the phone shows over a pressed letter, so the finger doesn't
-/// hide which key it is on: the letter, larger, on a raised key face just
-/// above the pressed key.
+/// The bubble Gboard shows over a pressed letter, so the finger doesn't
+/// hide which key it is on: the letter, larger, on a round face with a soft
+/// shadow just above the pressed key. One letter fits a circle 1.4 key
+/// widths across, centred over the key; a label too wide for it stretches
+/// the circle into a pill of the same height.
 pub(super) fn paint_preview(ctx: &mut dyn DrawCtx, key: Rect, text: &str, style: &Style) {
-    let width = key.width + style.key_h_gap * 2.0;
-    let height = key.height * 1.1;
+    let size = style.letter_font_size * 1.35;
+    ctx.set_font_size(size);
+    let text_w = ctx
+        .measure_text(text)
+        .map(|m| m.width)
+        .unwrap_or(size * 0.55);
+    let height = key.width * PREVIEW_DIAMETER_KEYS;
+    let radius = height / 2.0;
+    // Room for the label with a radius-sized cap at each end.
+    let width = height.max(text_w + radius);
     let x = key.x + key.width / 2.0 - width / 2.0;
     let y = key.y + key.height + style.key_v_gap * 0.5;
-    let radius = style.key_corner_radius * 1.4;
-    ctx.set_fill_color(style.panel_top_border);
-    ctx.begin_path();
-    ctx.rounded_rect(x - 1.0, y - 1.5, width + 2.0, height + 2.5, radius + 1.0);
-    ctx.fill();
+    paint_preview_shadow(ctx, Rect::new(x, y, width, height), style);
     ctx.set_fill_color(style.preview_bg);
     ctx.begin_path();
     ctx.rounded_rect(x, y, width, height, radius);
     ctx.fill();
-    let size = style.letter_font_size * 1.35;
-    ctx.set_font_size(size);
     ctx.set_fill_color(style.key_face_text);
-    let w = ctx
-        .measure_text(text)
-        .map(|m| m.width)
-        .unwrap_or(size * 0.55);
     ctx.fill_text(
         text,
-        x + width / 2.0 - w / 2.0,
+        x + width / 2.0 - text_w / 2.0,
         y + height / 2.0 - size * 0.3,
     );
+}
+
+/// The Gboard preview's diameter, in key widths.
+const PREVIEW_DIAMETER_KEYS: f64 = 1.4;
+
+/// A soft shadow under the preview's `face`: faint rings that grow past its
+/// edge, a little lower than the face so it reads as raised above the keys.
+fn paint_preview_shadow(ctx: &mut dyn DrawCtx, face: Rect, style: &Style) {
+    const RINGS: usize = 4;
+    const SPREAD: f64 = 3.0;
+    const DROP: f64 = 1.5;
+    ctx.set_fill_color(style.preview_shadow);
+    for ring in (1..=RINGS).rev() {
+        let grow = SPREAD * ring as f64 / RINGS as f64;
+        ctx.begin_path();
+        ctx.rounded_rect(
+            face.x - grow,
+            face.y - DROP - grow,
+            face.width + grow * 2.0,
+            face.height + grow * 2.0,
+            face.height / 2.0 + grow,
+        );
+        ctx.fill();
+    }
 }

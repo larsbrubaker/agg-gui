@@ -57,6 +57,9 @@ pub struct Style {
     /// Face of the preview bubble shown over a pressed letter (and of the
     /// long-press alternates popup).
     pub preview_bg: Color,
+    /// One ring of the soft shadow under the Gboard preview bubble; the
+    /// rings overlap, so it darkens towards the bubble's edge.
+    pub preview_shadow: Color,
     /// The highlighted alternate's fill in the long-press popup, and its
     /// letter.
     pub alt_highlight_bg: Color,
@@ -144,6 +147,7 @@ fn ios(dark: bool) -> Style {
         return_key_text: Color::from_rgb8(0xFF, 0xFF, 0xFF),
         return_key_bg_pressed: Color::from_rgb8(0x00, 0x57, 0xBE),
         preview_bg: Color::from_rgb8(0xFE, 0xFE, 0xFE),
+        preview_shadow: Color::from_rgba8(0, 0, 0, 0x10),
         alt_highlight_bg: Color::from_rgb8(0x00, 0x7A, 0xFF),
         alt_highlight_text: Color::from_rgb8(0xFF, 0xFF, 0xFF),
         alt_dim: Color::from_rgba8(0, 0, 0, 0),
@@ -203,6 +207,7 @@ fn android(dark: bool) -> Style {
         return_key_text: Color::from_rgb8(0x3F, 0x48, 0x54),
         return_key_bg_pressed: Color::from_rgb8(0x93, 0xB8, 0xE4),
         preview_bg: Color::from_rgb8(0xFF, 0xFF, 0xFF),
+        preview_shadow: Color::from_rgba8(0, 0, 0, 0x10),
         // The dynamic theme's primary, as on the phone's popup.
         alt_highlight_bg: Color::from_rgb8(0x8D, 0x4E, 0x2A),
         alt_highlight_text: Color::from_rgb8(0xFF, 0xFF, 0xFF),
@@ -228,6 +233,7 @@ fn android(dark: bool) -> Style {
         return_key_text: Color::from_rgb8(0x20, 0x2A, 0x38),
         return_key_bg_pressed: Color::from_rgb8(0x84, 0xAC, 0xDE),
         preview_bg: Color::from_rgb8(0x4A, 0x44, 0x3F),
+        preview_shadow: Color::from_rgba8(0, 0, 0, 0x30),
         alt_highlight_bg: Color::from_rgb8(0xFF, 0xB6, 0x8F),
         alt_highlight_text: Color::from_rgb8(0x3A, 0x1A, 0x08),
         alt_dim: Color::from_rgba8(0x21, 0x1E, 0x1C, 0x99),
@@ -262,6 +268,7 @@ fn neutral(dark: bool) -> Style {
         return_key_text: Color::from_rgb8(0xFF, 0xFF, 0xFF),
         return_key_bg_pressed: Color::from_rgb8(0x2B, 0x66, 0xD0),
         preview_bg: Color::from_rgb8(0x44, 0x46, 0x55),
+        preview_shadow: Color::from_rgba8(0, 0, 0, 0x30),
         alt_highlight_bg: Color::from_rgb8(0x3B, 0x82, 0xF6),
         alt_highlight_text: Color::from_rgb8(0xFF, 0xFF, 0xFF),
         alt_dim: Color::from_rgba8(0x18, 0x18, 0x22, 0x99),
@@ -281,6 +288,7 @@ fn neutral(dark: bool) -> Style {
         util_key_bg_pressed: Color::from_rgb8(0xAF, 0xB3, 0xC0),
         util_key_text: Color::from_rgb8(0x14, 0x15, 0x1C),
         preview_bg: Color::from_rgb8(0xFF, 0xFF, 0xFF),
+        preview_shadow: Color::from_rgba8(0, 0, 0, 0x10),
         alt_dim: Color::from_rgba8(0xE6, 0xE8, 0xEE, 0x99),
         ..base
     }

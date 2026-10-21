@@ -92,6 +92,29 @@ pub(super) fn drawn_pressed(s: &KeyboardState) -> Option<usize> {
     })
 }
 
+/// Keep the app's wake-ups for the keyboard's own timed changes: the moment
+/// a released key's linger ends and the moment a held key's alternates are
+/// due. Nothing else changes the screen then, so without a scheduled draw a
+/// host that sleeps while idle (the web and desktop shells) left the
+/// preview up, or the alternates closed, until some unrelated repaint.
+/// `App::paint` clears every scheduled draw as each frame starts, so the
+/// wake the press or lift asked for is gone after the frame it also asked
+/// for; called on every paint, this asks again until the moment passes.
+pub(super) fn rearm_timed_wakes() {
+    let now = crate::clock::now();
+    let due = with_state_ref(|s| {
+        [
+            s.linger.map(|(_, until)| until),
+            s.hold.map(|h| h.pressed_at + LONG_PRESS_DELAY),
+        ]
+    });
+    for when in due.into_iter().flatten() {
+        if when > now {
+            crate::animation::request_draw_after(when - now);
+        }
+    }
+}
+
 /// The keyboard family the active input profile draws.
 fn family() -> LayoutFamily {
     LayoutFamily::for_profile(crate::input_profile::current_input_profile())

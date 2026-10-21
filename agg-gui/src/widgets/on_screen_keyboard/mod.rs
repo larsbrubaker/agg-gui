@@ -449,6 +449,7 @@ pub fn paint_software_keyboard(ctx: &mut dyn DrawCtx, viewport: crate::geometry:
     // A key held long enough opens its alternates before the keys are laid
     // out again.
     pointer::tick_long_press(&style, viewport.width);
+    pointer::rearm_timed_wakes();
     let layer = with_state_ref(|s| s.current_layer);
     let layout = Layout::for_profile(layer, profile);
     let paint_state = with_state_ref(|s| layout_paint::PaintState {
