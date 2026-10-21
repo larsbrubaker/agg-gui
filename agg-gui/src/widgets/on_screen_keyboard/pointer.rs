@@ -5,14 +5,18 @@
 //! file stays focused. Every point of the panel belongs to a key: the hit
 //! areas come from [`super::hit`], so a touch in a gap types the nearest
 //! key, and a finger sliding across the keys types the one under it when
-//! it lifts, as on the phone's own keyboard.
+//! it lifts, as on the phone's own keyboard. Holding a key with long-press
+//! alternates opens them (`alternates.rs`): the finger then picks one by
+//! sliding along the popup's row and types it by lifting.
 
 use crate::event::{Key, Modifiers, MouseButton};
 use crate::geometry::Point;
 
+use super::alternates::{alternates_for, AlternatesPopup, LONG_PRESS_DELAY};
 use super::events::push_synthetic_key;
-use super::layouts::Layer;
-use super::state::{self, with_state_mut, with_state_ref};
+use super::layouts::{Layer, LayoutFamily};
+use super::state::{self, with_state_mut, with_state_ref, HoldState, KeyboardState};
+use super::style::Style;
 use super::{dismiss, is_visible, key};
 // ---------------------------------------------------------------------------
 // Pointer routing
@@ -53,6 +57,9 @@ pub fn handle_software_keyboard_mouse_down(
     with_state_mut(|s| {
         s.pressed_key_index = hit;
         s.captured_pointer = true;
+        s.alternates = None;
+        s.linger = None;
+        s.hold = hold_for(s, hit);
         // Register a hold-to-repeat tracker if the pressed key supports
         // it (currently Backspace only).
         s.key_repeat = hit.and_then(|i| {
@@ -72,6 +79,39 @@ pub fn handle_software_keyboard_mouse_down(
     true
 }
 
+/// How long a released key stays lit with its preview.
+pub(super) const PRESS_LINGER: std::time::Duration = std::time::Duration::from_millis(100);
+
+/// The key drawn pressed: the one under the finger, else one released
+/// less than [`PRESS_LINGER`] ago.
+pub(super) fn drawn_pressed(s: &KeyboardState) -> Option<usize> {
+    s.pressed_key_index.or_else(|| {
+        s.linger
+            .filter(|(_, until)| crate::clock::now() < *until)
+            .map(|(i, _)| i)
+    })
+}
+
+/// The keyboard family the active input profile draws.
+fn family() -> LayoutFamily {
+    LayoutFamily::for_profile(crate::input_profile::current_input_profile())
+}
+
+/// A long-press timer for painted key `hit` when it has alternates, armed
+/// so the app wakes when the popup is due.
+fn hold_for(s: &KeyboardState, hit: Option<usize>) -> Option<HoldState> {
+    let index = hit?;
+    let key::KeyAction::Char(c) = s.last_painted_keys.get(index)?.action else {
+        return None;
+    };
+    alternates_for(c, family())?;
+    crate::animation::request_draw_after(LONG_PRESS_DELAY);
+    Some(HoldState {
+        key_index: index,
+        pressed_at: crate::clock::now(),
+    })
+}
+
 /// Handle a pointer-move while the keyboard is interactive. Returns
 /// `true` if the keyboard wants to keep the pointer captured.
 ///
@@ -83,6 +123,21 @@ pub fn handle_software_keyboard_mouse_move(pos: Point) -> bool {
     if !captured {
         return false;
     }
+    // With the alternates open the finger picks along their row.
+    let tracked = with_state_mut(|s| match s.alternates.as_mut() {
+        Some(popup) => {
+            let before = popup.highlighted;
+            popup.track(pos);
+            if popup.highlighted != before {
+                crate::animation::request_draw();
+            }
+            true
+        }
+        None => false,
+    });
+    if tracked {
+        return true;
+    }
     let new_hit = if contains_point(pos) {
         find_key_at(pos)
     } else {
@@ -91,6 +146,8 @@ pub fn handle_software_keyboard_mouse_move(pos: Point) -> bool {
     with_state_mut(|s| {
         if s.pressed_key_index != new_hit {
             s.pressed_key_index = new_hit;
+            // A finger that moved to another key starts its long press over.
+            s.hold = hold_for(s, new_hit);
             crate::animation::request_draw();
         }
     });
@@ -110,7 +167,31 @@ pub fn handle_software_keyboard_mouse_up(
     if !captured {
         return false;
     }
+    // Lifting with the alternates open types the highlighted one (or
+    // nothing, away from the row) and nothing else.
+    let popup = with_state_mut(|s| {
+        let popup = s.alternates.take()?;
+        s.pressed_key_index = None;
+        s.captured_pointer = false;
+        s.key_repeat = None;
+        s.hold = None;
+        Some(popup)
+    });
+    if let Some(popup) = popup {
+        // The highlight is where the last move left it: a finger that never
+        // moved types the default, wherever the row had to sit.
+        let _ = pos;
+        if button == MouseButton::Left {
+            if let Some(c) = popup.chosen() {
+                with_state_mut(|s| s.last_shift_tap = None);
+                type_char(c, modifiers);
+            }
+        }
+        crate::animation::request_draw();
+        return true;
+    }
     let pressed = with_state_mut(|s| {
+        s.hold = None;
         let p = s.pressed_key_index.take();
         s.captured_pointer = false;
         let repeat_fired = s
@@ -135,9 +216,38 @@ pub fn handle_software_keyboard_mouse_up(
         if !repeated_here {
             commit_key_press(end, modifiers);
         }
+        // A character key stays lit with its preview a moment after the
+        // lift, so even a quick tap shows which key it typed. (A key that
+        // pages the keyboard doesn't: its index means another key now.)
+        let typed_char = with_state_mut(|s| {
+            let is_char = s
+                .last_painted_keys
+                .get(end)
+                .is_some_and(|k| matches!(k.action, key::KeyAction::Char(_)));
+            if is_char {
+                s.linger = Some((end, crate::clock::now() + PRESS_LINGER));
+            }
+            is_char
+        });
+        if typed_char {
+            crate::animation::request_draw_after(PRESS_LINGER);
+        }
     }
     crate::animation::request_draw();
     true
+}
+
+/// Let go of the pressed key without typing it (the platform cancelled the
+/// touch): closes the alternates and stops a repeat.
+pub fn cancel_press() {
+    with_state_mut(|s| {
+        s.pressed_key_index = None;
+        s.captured_pointer = false;
+        s.key_repeat = None;
+        s.hold = None;
+        s.alternates = None;
+    });
+    crate::animation::request_draw();
 }
 
 /// The key that owns `pos`: the one whose hit area (see [`super::hit`])
@@ -160,22 +270,7 @@ fn commit_key_press(index: usize, modifiers: Modifiers) {
         with_state_mut(|s| s.last_shift_tap = None);
     }
     match painted.action {
-        key::KeyAction::Char(c) => {
-            let mut mods = modifiers;
-            let was_shifted = with_state_ref(|s| s.current_layer == Layer::Shifted);
-            if was_shifted {
-                mods.shift = true;
-            }
-            push_synthetic_key(Key::Char(c), mods);
-            // One-shot shift: drop back to base layer after a single
-            // character — unless caps lock is engaged, in which case
-            // stay in Shifted.
-            with_state_mut(|s| {
-                if s.current_layer == Layer::Shifted && !s.caps_lock {
-                    s.current_layer = Layer::Letters;
-                }
-            });
-        }
+        key::KeyAction::Char(c) => type_char(c, modifiers),
         key::KeyAction::Backspace => push_synthetic_key(Key::Backspace, modifiers),
         key::KeyAction::Enter => {
             push_synthetic_key(Key::Enter, modifiers);
@@ -187,6 +282,64 @@ fn commit_key_press(index: usize, modifiers: Modifiers) {
         key::KeyAction::Dismiss => dismiss(),
     }
     crate::animation::request_draw();
+}
+
+/// Type `c` (a key's character or one of its alternates) with Shift held
+/// while the keyboard is shifted, then drop a one-shot Shift.
+fn type_char(c: char, modifiers: Modifiers) {
+    let mut mods = modifiers;
+    let was_shifted = with_state_ref(|s| s.current_layer == Layer::Shifted);
+    if was_shifted {
+        mods.shift = true;
+    }
+    push_synthetic_key(Key::Char(c), mods);
+    // One-shot shift: drop back to base layer after a single
+    // character — unless caps lock is engaged, in which case
+    // stay in Shifted.
+    with_state_mut(|s| {
+        if s.current_layer == Layer::Shifted && !s.caps_lock {
+            s.current_layer = Layer::Letters;
+        }
+    });
+    crate::animation::request_draw();
+}
+
+/// Open the held key's alternates once it has been held for
+/// [`LONG_PRESS_DELAY`]. Called once per paint (before the keys are laid
+/// out again, so the held key's face is the last painted one); the press
+/// armed a wake-up for the moment the popup is due. `width` is the
+/// viewport's, which the popup stays inside.
+pub(super) fn tick_long_press(style: &Style, width: f64) {
+    let family = family();
+    let opened = with_state_mut(|s| {
+        let hold = s.hold?;
+        if !s.captured_pointer || s.pressed_key_index != Some(hold.key_index) {
+            s.hold = None;
+            return None;
+        }
+        if crate::clock::since(hold.pressed_at) < LONG_PRESS_DELAY {
+            return None;
+        }
+        s.hold = None;
+        let painted = s.last_painted_keys.get(hold.key_index)?;
+        let key::KeyAction::Char(c) = painted.action else {
+            return None;
+        };
+        let alternates = alternates_for(c, family)?;
+        s.alternates = Some(AlternatesPopup::open(
+            hold.key_index,
+            painted.rect,
+            alternates,
+            (style.key_h_gap, style.key_v_gap),
+            // The popup's frame reaches a little past its row.
+            8.0,
+            width - 8.0,
+        ));
+        Some(())
+    });
+    if opened.is_some() {
+        crate::animation::request_draw();
+    }
 }
 
 /// Apply a layer-switch action with special handling for the Shift

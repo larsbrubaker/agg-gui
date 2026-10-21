@@ -1,7 +1,8 @@
 //! Keyboard-input methods on [`App`] — key down / up routing through the
 //! modal path, the focused widget, focus traversal, unconsumed-key
 //! accelerators, the root-level default / cancel action and finally the
-//! legacy global handler. Split out of `app.rs` (800-line guardrail);
+//! legacy global handler, and the on-screen keyboard's synthesized keys.
+//! Split out of `app.rs` (800-line guardrail);
 //! pointer input lives in `pointer.rs`, wheel routing stays in `app.rs`.
 
 use crate::event::{Event, EventResult, Key, Modifiers};
@@ -131,5 +132,25 @@ impl App {
         if let Some(path) = self.focus.clone() {
             dispatch_event(&mut self.root, &path, &event, Point::ORIGIN);
         }
+    }
+
+    /// Pump pending synthetic keys back through [`Self::on_key_down`]
+    /// AND apply any pending dismiss request — the close key on the
+    /// keyboard panel clears focus, which then drops the
+    /// keyboard-aware screen lift via `notify_focus_change`.
+    pub(super) fn drain_keyboard_synthetic_keys(&mut self) {
+        let pending = crate::widgets::on_screen_keyboard::drain_synthetic_keys();
+        for (key, mods) in pending {
+            self.on_key_down(key, mods);
+        }
+        if crate::widgets::on_screen_keyboard::take_dismiss_request() {
+            self.set_focus(None);
+        }
+    }
+
+    /// Test-only mirror of the end-of-event-loop drain.
+    #[cfg(test)]
+    pub fn drain_keyboard_events_for_test(&mut self) {
+        self.drain_keyboard_synthetic_keys();
     }
 }

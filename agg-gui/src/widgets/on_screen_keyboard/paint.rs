@@ -11,9 +11,10 @@ use crate::color::Color;
 use crate::draw_ctx::DrawCtx;
 use crate::geometry::{Point, Rect};
 
+use super::key::KeyAction;
 use super::key::{KeyCap, KeyGlyph};
 use super::layout_paint::PaintState;
-use super::layouts::{KeyKind, KeySpec, Layer};
+use super::layouts::{KeyKind, KeySpec, Layer, LayoutFamily};
 use super::style::Style;
 
 /// Paint one key: its face, and `cap` (the label for the keyboard's
@@ -35,6 +36,16 @@ pub(super) fn paint_key(
         (KeyKind::Utility, true) => (style.util_key_bg_pressed, style.key_face_text_pressed),
         (KeyKind::Return, false) => (style.return_key_bg, style.return_key_text),
         (KeyKind::Return, true) => (style.return_key_bg_pressed, style.return_key_text),
+    };
+    // iOS lights the Shift key (a letter-key face, dark arrow) while upper
+    // case is on.
+    let ios_shift_lit = state.family == LayoutFamily::Ios
+        && state.layer == Layer::Shifted
+        && matches!(spec.action, KeyAction::Switch(Layer::Letters));
+    let (bg, text_color) = if ios_shift_lit {
+        (style.key_face_bg, style.key_face_text)
+    } else {
+        (bg, text_color)
     };
 
     // Gboard corner keys are pills; everything else uses the shared radius.
@@ -73,37 +84,52 @@ pub(super) fn paint_key(
             if text.is_empty() {
                 return; // blank spacebar
             }
-            let font_size = if matches!(spec.kind, KeyKind::Letter) && text.chars().count() == 1 {
-                style.letter_font_size
-            } else {
-                style.utility_font_size
-            };
+            let font_size = cap_font_size(ctx, text, spec.kind, rect, style);
             ctx.set_font_size(font_size);
-            // Centre the label on its measured width. `measure_text` is
-            // `None` only when the context has no font, and then no text
-            // draws at all; the estimate just keeps the arithmetic whole.
-            let measure = |ctx: &mut dyn DrawCtx, size: f64| {
-                ctx.measure_text(text)
-                    .map(|m| m.width)
-                    .unwrap_or(text.chars().count() as f64 * size * 0.55)
-            };
-            let mut width = measure(ctx, font_size);
-            // A label wider than its key ("1234" on a one-letter key)
-            // shrinks to fit rather than spill over its neighbours.
-            let room = rect.width - 6.0;
-            let font_size = if width > room && width > 0.0 {
-                let fitted = font_size * room / width;
-                ctx.set_font_size(fitted);
-                width = measure(ctx, fitted);
-                fitted
-            } else {
-                font_size
-            };
+            // `measure_text` is `None` only when the context has no font,
+            // and then no text draws at all; the estimate just keeps the
+            // arithmetic whole.
+            let width = ctx
+                .measure_text(text)
+                .map(|m| m.width)
+                .unwrap_or(text.chars().count() as f64 * font_size * 0.55);
             ctx.fill_text(text, center.x - width / 2.0, center.y - font_size * 0.3);
         }
         KeyCap::Glyph(glyph) => {
             paint_glyph(ctx, center, style, *glyph, text_color, state);
         }
+    }
+}
+
+/// The font size a key's text label draws at. Every one-character label
+/// (letters, digits, symbols) uses the one letter size, so the row reads
+/// evenly whatever each glyph's width; only a word ("?123", "space",
+/// "return") shrinks, as a whole, when it is wider than its key.
+pub(super) fn cap_font_size(
+    ctx: &mut dyn DrawCtx,
+    text: &str,
+    kind: KeyKind,
+    rect: Rect,
+    style: &Style,
+) -> f64 {
+    let single = text.chars().count() == 1;
+    if single && matches!(kind, KeyKind::Letter) {
+        return style.letter_font_size;
+    }
+    let size = style.utility_font_size;
+    if single {
+        return size;
+    }
+    ctx.set_font_size(size);
+    let width = ctx
+        .measure_text(text)
+        .map(|m| m.width)
+        .unwrap_or(text.chars().count() as f64 * size * 0.55);
+    let room = rect.width - style.key_h_gap;
+    if width > room && width > 0.0 {
+        size * room / width
+    } else {
+        size
     }
 }
 
@@ -250,18 +276,55 @@ fn paint_glyph(
             ctx.close_path();
             ctx.fill();
         }
+        KeyGlyph::Emoji => paint_smiley(ctx, center, r * 1.15),
     }
 }
 
-/// The hide-keyboard chevron below the keys: a small downward chevron on
-/// the panel (no key face), with a round highlight while pressed.
-pub(super) fn paint_chevron(ctx: &mut dyn DrawCtx, face: Rect, pressed: bool, style: &Style) {
+/// An outlined smiling face of radius `r`: the iPhone's emoji key.
+fn paint_smiley(ctx: &mut dyn DrawCtx, center: Point, r: f64) {
+    ctx.set_line_width(1.6);
+    ctx.begin_path();
+    ctx.circle(center.x, center.y, r);
+    ctx.stroke();
+    let eye = r * 0.13;
+    for dx in [-0.35, 0.35] {
+        ctx.begin_path();
+        ctx.circle(center.x + r * dx, center.y + r * 0.28, eye);
+        ctx.fill();
+    }
+    ctx.begin_path();
+    ctx.move_to(center.x - r * 0.5, center.y - r * 0.12);
+    ctx.quad_to(
+        center.x,
+        center.y - r * 0.75,
+        center.x + r * 0.5,
+        center.y - r * 0.12,
+    );
+    ctx.stroke();
+}
+
+/// The key in the strip below the keys, drawn on the panel with no key
+/// face and a round highlight while pressed: Gboard's small downward
+/// hide-keyboard chevron, or the iPhone's emoji face.
+pub(super) fn paint_chevron(
+    ctx: &mut dyn DrawCtx,
+    face: Rect,
+    glyph: KeyGlyph,
+    pressed: bool,
+    style: &Style,
+) {
     let center = Point::new(face.x + face.width / 2.0, face.y + face.height / 2.0);
     if pressed {
         ctx.set_fill_color(style.util_key_bg_pressed);
         ctx.begin_path();
         ctx.circle(center.x, center.y, face.width.min(face.height) / 2.0);
         ctx.fill();
+    }
+    if matches!(glyph, KeyGlyph::Emoji) {
+        ctx.set_stroke_color(style.util_key_text);
+        ctx.set_fill_color(style.util_key_text);
+        paint_smiley(ctx, center, face.height * 0.32);
+        return;
     }
     let r = face.height * 0.18;
     ctx.set_stroke_color(style.util_key_text);

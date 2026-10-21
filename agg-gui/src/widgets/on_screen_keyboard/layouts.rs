@@ -7,9 +7,46 @@
 //! AZERTY, an emoji picker) is a data change here: define a new
 //! [`Layer`] variant and return a `Layout` from [`Layout::for_layer`].
 //! The paint pass (`layout_paint.rs`) and hit-tester don't change.
+//!
+//! Each input profile picks its family of pages ([`LayoutFamily`]): Android
+//! and every other profile get these Gboard pages; an iPhone
+//! ([`InputProfile::MobileIOS`]) gets the iOS keyboard from
+//! `layouts_ios.rs` (no number row, `123` / `#+=` pages).
 
 use super::key::{KeyAction, KeyCap, KeyGlyph};
 use super::style::Style;
+use crate::input_profile::InputProfile;
+
+/// Which platform's keyboard a [`Layout`] draws: its pages, the Enter key's
+/// label, the key preview and the long-press popup's look.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LayoutFamily {
+    /// Google's Gboard (Android, and the default for every other profile):
+    /// a number row above the letters, Enter drawn as an icon, the hide
+    /// chevron below the keys.
+    Gboard,
+    /// The iPhone keyboard: no number row, `123` / `#+=` pages, Enter
+    /// labelled with a word, the emoji key below the keys and no hide key.
+    Ios,
+}
+
+impl LayoutFamily {
+    /// The keyboard family an input profile's users expect.
+    pub fn for_profile(profile: InputProfile) -> Self {
+        match profile {
+            InputProfile::MobileIOS => LayoutFamily::Ios,
+            InputProfile::MobileAndroid | InputProfile::MobileOther | InputProfile::Desktop => {
+                LayoutFamily::Gboard
+            }
+        }
+    }
+
+    /// Whether the letters page has its own row of digits (Gboard). Without
+    /// one, holding a top-row letter offers its digit (see `alternates.rs`).
+    pub fn has_number_row(self) -> bool {
+        self == LayoutFamily::Gboard
+    }
+}
 
 /// Which layer of the keyboard is currently visible.
 ///
@@ -63,9 +100,21 @@ pub(super) enum KeyKind {
 /// hit-test layer-aware logic share a single source of truth.
 pub struct Layout {
     pub(super) rows: Vec<Vec<KeySpec>>,
+    /// The platform this layout draws.
+    pub(super) family: LayoutFamily,
 }
 
 impl Layout {
+    /// The layout for `layer` on the keyboard `profile`'s users expect:
+    /// the iOS pages on an iPhone, the Gboard pages everywhere else.
+    pub fn for_profile(layer: Layer, profile: InputProfile) -> Self {
+        match LayoutFamily::for_profile(profile) {
+            LayoutFamily::Gboard => Self::for_layer(layer),
+            LayoutFamily::Ios => super::layouts_ios::ios_layer(layer),
+        }
+    }
+
+    /// The Gboard layout for `layer` (see [`Layout::for_profile`]).
     pub fn for_layer(layer: Layer) -> Self {
         match layer {
             Layer::Letters => letters_layer(false),
@@ -93,7 +142,7 @@ impl Layout {
 // Key constructors
 // ---------------------------------------------------------------------------
 
-fn key(c: char) -> KeySpec {
+pub(super) fn key(c: char) -> KeySpec {
     KeySpec {
         width_units: 1.0,
         cap: KeyCap::Text(c.to_string()),
@@ -103,7 +152,7 @@ fn key(c: char) -> KeySpec {
     }
 }
 
-fn wide_key(c: char, width_units: f64) -> KeySpec {
+pub(super) fn wide_key(c: char, width_units: f64) -> KeySpec {
     KeySpec {
         width_units,
         ..key(c)
@@ -112,7 +161,7 @@ fn wide_key(c: char, width_units: f64) -> KeySpec {
 
 /// A character key with the light-blue utility face (Gboard paints the
 /// `,` / `.` keys and the numpad operator strip this way).
-fn util_char(c: char, width_units: f64) -> KeySpec {
+pub(super) fn util_char(c: char, width_units: f64) -> KeySpec {
     KeySpec {
         width_units,
         kind: KeyKind::Utility,
@@ -120,7 +169,7 @@ fn util_char(c: char, width_units: f64) -> KeySpec {
     }
 }
 
-fn util_text(label: &str, action: KeyAction, width_units: f64) -> KeySpec {
+pub(super) fn util_text(label: &str, action: KeyAction, width_units: f64) -> KeySpec {
     KeySpec {
         width_units,
         cap: KeyCap::Text(label.to_string()),
@@ -130,7 +179,7 @@ fn util_text(label: &str, action: KeyAction, width_units: f64) -> KeySpec {
     }
 }
 
-fn util_glyph(glyph: KeyGlyph, action: KeyAction, width_units: f64) -> KeySpec {
+pub(super) fn util_glyph(glyph: KeyGlyph, action: KeyAction, width_units: f64) -> KeySpec {
     KeySpec {
         width_units,
         cap: KeyCap::Glyph(glyph),
@@ -140,7 +189,7 @@ fn util_glyph(glyph: KeyGlyph, action: KeyAction, width_units: f64) -> KeySpec {
     }
 }
 
-fn spacer(width_units: f64) -> KeySpec {
+pub(super) fn spacer(width_units: f64) -> KeySpec {
     KeySpec {
         width_units,
         cap: KeyCap::Text(String::new()),
@@ -158,7 +207,7 @@ fn mode_pill(label: &str, target: Layer) -> KeySpec {
     }
 }
 
-fn space_bar(width_units: f64) -> KeySpec {
+pub(super) fn space_bar(width_units: f64) -> KeySpec {
     KeySpec {
         width_units,
         // Gboard's spacebar is blank (no "space" label).
@@ -179,7 +228,7 @@ fn enter_key() -> KeySpec {
     }
 }
 
-fn backspace(width_units: f64) -> KeySpec {
+pub(super) fn backspace(width_units: f64) -> KeySpec {
     util_glyph(KeyGlyph::Backspace, KeyAction::Backspace, width_units)
 }
 
@@ -265,7 +314,10 @@ fn letters_layer(shifted: bool) -> Layout {
         enter_key(),
     ]);
 
-    Layout { rows }
+    Layout {
+        rows,
+        family: LayoutFamily::Gboard,
+    }
 }
 
 /// Gboard's `?123` page.
@@ -298,7 +350,10 @@ fn symbols_layer() -> Layout {
         enter_key(),
     ]);
 
-    Layout { rows }
+    Layout {
+        rows,
+        family: LayoutFamily::Gboard,
+    }
 }
 
 /// Gboard's `=\<` page.
@@ -327,7 +382,10 @@ fn symbols_shift_layer() -> Layout {
         enter_key(),
     ]);
 
-    Layout { rows }
+    Layout {
+        rows,
+        family: LayoutFamily::Gboard,
+    }
 }
 
 /// Phone-style number pad: operator strip on the left, digit grid in
@@ -383,7 +441,10 @@ fn numpad_layer() -> Layout {
         ],
     ];
 
-    Layout { rows }
+    Layout {
+        rows,
+        family: LayoutFamily::Gboard,
+    }
 }
 
 #[cfg(test)]

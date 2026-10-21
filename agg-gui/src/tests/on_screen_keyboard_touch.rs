@@ -29,15 +29,26 @@ const PHONE: Size = Size {
 
 /// Holds the input-profile lock for a test and puts the shared keyboard
 /// state back when it ends.
-struct Phone {
+pub(super) struct Phone {
     _lock: std::sync::MutexGuard<'static, ()>,
-    app: App,
+    pub(super) app: App,
+    pub(super) size: Size,
 }
 
 impl Phone {
     /// A phone-sized app whose only widget is `root`, focused, with the
     /// Android keyboard up and painted once.
-    fn new(root: Box<dyn Widget>, dark: bool) -> Self {
+    pub(super) fn new(root: Box<dyn Widget>, dark: bool) -> Self {
+        Self::with(root, dark, InputProfile::MobileAndroid, PHONE)
+    }
+
+    /// [`Phone::new`] on the `profile` keyboard in a `size` viewport.
+    pub(super) fn with(
+        root: Box<dyn Widget>,
+        dark: bool,
+        profile: InputProfile,
+        size: Size,
+    ) -> Self {
         let lock = crate::input_profile::profile_test_lock();
         osk::dismiss();
         test_hook::reset();
@@ -45,7 +56,7 @@ impl Phone {
         crate::widget::keyboard_scroll::reset_lift_for_test();
         crate::ux_scale::set_ux_scale(1.0);
         crate::set_device_scale(1.0);
-        set_input_profile(InputProfile::MobileAndroid);
+        set_input_profile(profile);
         crate::theme::set_visuals(if dark {
             crate::theme::Visuals::dark()
         } else {
@@ -53,18 +64,22 @@ impl Phone {
         });
         osk::set_enabled(true);
         let mut app = App::new(root);
-        app.layout(PHONE);
+        app.layout(size);
         app.on_key_down(Key::Tab, Modifiers::default());
         assert!(app.has_focus(), "the field takes focus");
         test_hook::force_visible();
-        let mut phone = Phone { _lock: lock, app };
+        let mut phone = Phone {
+            _lock: lock,
+            app,
+            size,
+        };
         phone.paint();
         phone
     }
 
-    fn paint(&mut self) -> crate::Framebuffer {
-        self.app.layout(PHONE);
-        let mut fb = crate::Framebuffer::new(PHONE.width as u32, PHONE.height as u32);
+    pub(super) fn paint(&mut self) -> crate::Framebuffer {
+        self.app.layout(self.size);
+        let mut fb = crate::Framebuffer::new(self.size.width as u32, self.size.height as u32);
         {
             let mut ctx = crate::GfxCtx::new(&mut fb);
             self.app.paint(&mut ctx);
@@ -84,41 +99,41 @@ impl Drop for Phone {
     }
 }
 
-fn font() -> Arc<Font> {
+pub(super) fn font() -> Arc<Font> {
     Arc::new(Font::from_slice(TEST_FONT).unwrap())
 }
 
-fn field() -> Box<dyn Widget> {
+pub(super) fn field() -> Box<dyn Widget> {
     Box::new(TextField::new(font()))
 }
 
-fn keys() -> Vec<PaintedKey> {
+pub(super) fn keys() -> Vec<PaintedKey> {
     with_state_ref(|s| s.last_painted_keys.clone())
 }
 
-fn panel_height() -> f64 {
+pub(super) fn panel_height() -> f64 {
     with_state_ref(|s| s.last_panel_height.expect("the keyboard painted"))
 }
 
-fn key_of(action: &str) -> PaintedKey {
+pub(super) fn key_of(action: &str) -> PaintedKey {
     keys()
         .into_iter()
         .find(|k| format!("{:?}", k.action) == action)
         .unwrap_or_else(|| panic!("the keyboard shows {action}"))
 }
 
-fn char_key(c: char) -> PaintedKey {
+pub(super) fn char_key(c: char) -> PaintedKey {
     key_of(&format!("{:?}", KeyAction::Char(c)))
 }
 
 /// What a touch at `pos` (Y-up) hits, as the key's action text.
-fn owner(pos: Point) -> String {
+pub(super) fn owner(pos: Point) -> String {
     let i = test_hook::key_at(pos).unwrap_or_else(|| panic!("{pos:?} belongs to a key"));
     format!("{:?}", keys()[i].action)
 }
 
 /// Press at `down`, slide through `moves`, lift at `up` (all Y-up).
-fn touch(down: Point, moves: &[Point], up: Point) -> Vec<Key> {
+pub(super) fn touch(down: Point, moves: &[Point], up: Point) -> Vec<Key> {
     let m = Modifiers::default();
     assert!(osk::handle_software_keyboard_mouse_down(
         down,
@@ -132,7 +147,7 @@ fn touch(down: Point, moves: &[Point], up: Point) -> Vec<Key> {
     drain_synthetic_keys().into_iter().map(|(k, _)| k).collect()
 }
 
-fn center(r: Rect) -> Point {
+pub(super) fn center(r: Rect) -> Point {
     Point::new(r.x + r.width / 2.0, r.y + r.height / 2.0)
 }
 
@@ -242,7 +257,7 @@ fn a_finger_sliding_across_the_keys_types_the_key_it_lifts_on() {
     assert!(touch(q, &[above], above).is_empty());
 }
 
-fn letter_caps() -> String {
+pub(super) fn letter_caps() -> String {
     keys()
         .iter()
         .filter_map(|k| match (&k.action, &k.cap) {

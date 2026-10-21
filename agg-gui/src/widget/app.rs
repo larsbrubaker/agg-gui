@@ -76,6 +76,13 @@ pub struct App {
     /// its commands are replayed through `on_mouse_*` so shells only
     /// ever forward raw touches.  See [`crate::touch_emulation`].
     touch_mouse_emu: crate::touch_emulation::TouchMouseEmu,
+    /// The finger typing on the on-screen keyboard and where it last was
+    /// (logical, Y-up); it bypasses the mouse emulation (`app/touch.rs`).
+    keyboard_touch: Option<(
+        crate::touch_state::TouchDeviceId,
+        crate::touch_state::TouchId,
+        Point,
+    )>,
     /// A trackpad's pinch and rotate as two virtual fingers, fed into
     /// `touch_state` on their own device. See `app/pinch.rs`.
     trackpad_fingers: crate::trackpad_pinch_fingers::TrackpadPinchFingers,
@@ -115,6 +122,7 @@ impl App {
             global_key_handler: None,
             touch_state: crate::touch_state::TouchState::new(),
             touch_mouse_emu: crate::touch_emulation::TouchMouseEmu::new(),
+            keyboard_touch: None,
             trackpad_fingers: crate::trackpad_pinch_fingers::TrackpadPinchFingers::new(
                 crate::trackpad_pinch_fingers::TRACKPAD_FINGER_RADIUS,
             ),
@@ -373,26 +381,6 @@ impl App {
             || crate::animation::wants_draw()
             || crate::widgets::on_screen_keyboard::needs_draw()
             || super::keyboard_scroll::is_lift_animating()
-    }
-
-    /// Pump pending synthetic keys back through [`Self::on_key_down`]
-    /// AND apply any pending dismiss request — the close key on the
-    /// keyboard panel clears focus, which then drops the
-    /// keyboard-aware screen lift via `notify_focus_change`.
-    fn drain_keyboard_synthetic_keys(&mut self) {
-        let pending = crate::widgets::on_screen_keyboard::drain_synthetic_keys();
-        for (key, mods) in pending {
-            self.on_key_down(key, mods);
-        }
-        if crate::widgets::on_screen_keyboard::take_dismiss_request() {
-            self.set_focus(None);
-        }
-    }
-
-    /// Test-only mirror of the end-of-event-loop drain.
-    #[cfg(test)]
-    pub fn drain_keyboard_events_for_test(&mut self) {
-        self.drain_keyboard_synthetic_keys();
     }
 
     /// Earliest scheduled draw deadline across the visible widget tree.

@@ -54,14 +54,52 @@ pub struct Style {
     pub return_key_bg: Color,
     pub return_key_text: Color,
     pub return_key_bg_pressed: Color,
-    /// Face of the preview bubble shown over a pressed letter.
+    /// Face of the preview bubble shown over a pressed letter (and of the
+    /// long-press alternates popup).
     pub preview_bg: Color,
+    /// The highlighted alternate's fill in the long-press popup, and its
+    /// letter.
+    pub alt_highlight_bg: Color,
+    pub alt_highlight_text: Color,
+    /// Laid over the keys while the alternates popup is open (Gboard dims
+    /// the rest of the keyboard; transparent where the platform doesn't).
+    pub alt_dim: Color,
 }
 
 impl Style {
     /// Pick the style appropriate for the active input profile and the
     /// app theme currently installed via [`crate::theme::set_visuals`].
+    ///
+    /// The metrics are the platform keyboard's own, in dp / pt (CSS
+    /// pixels): the keyboard draws at the phone keyboard's size whatever
+    /// UX zoom ([`crate::ux_scale`]) the app's widgets use, so they are
+    /// divided by the zoom here, and the paint's zoom scales them back.
     pub fn for_profile(profile: InputProfile) -> Self {
+        Self::for_profile_unzoomed(profile).unzoomed(crate::ux_scale::ux_scale())
+    }
+
+    /// The metrics divided by the UX `zoom`, so that drawn at that zoom
+    /// they are the platform's sizes.
+    fn unzoomed(self, zoom: f64) -> Self {
+        let k = if zoom > 1e-6 { 1.0 / zoom } else { 1.0 };
+        Self {
+            panel_padding_horizontal: self.panel_padding_horizontal * k,
+            panel_padding_top: self.panel_padding_top * k,
+            panel_padding_bottom: self.panel_padding_bottom * k,
+            row_height: self.row_height * k,
+            key_h_gap: self.key_h_gap * k,
+            key_v_gap: self.key_v_gap * k,
+            key_corner_radius: self.key_corner_radius * k,
+            bottom_strip_height: self.bottom_strip_height * k,
+            key_shadow_offset_y: self.key_shadow_offset_y * k,
+            letter_font_size: self.letter_font_size * k,
+            utility_font_size: self.utility_font_size * k,
+            ..self
+        }
+    }
+
+    /// [`Style::for_profile`] before the UX zoom is taken out.
+    fn for_profile_unzoomed(profile: InputProfile) -> Self {
         let dark = crate::theme::current_visuals().is_dark();
         match profile {
             InputProfile::MobileIOS => ios(dark),
@@ -76,24 +114,29 @@ impl Style {
 
 fn ios(dark: bool) -> Style {
     let base = Style {
+        // iPhone metrics (points, on a 390 pt wide phone): 3 pt side
+        // margins, keys 33 pt wide on 6 pt gaps and 42 pt tall on a 54 pt
+        // row pitch, 5 pt corners and a 1 pt shadow; below the keys, the
+        // row that holds the emoji key. The home-indicator inset below
+        // that is the host's (Safari's own toolbar covers it in a browser).
         panel_bg: Color::from_rgb8(0xD1, 0xD5, 0xDB), // iOS light gray tray
-        panel_top_border: Color::from_rgba8(0, 0, 0, 0x33),
-        panel_padding_horizontal: 4.0,
+        panel_top_border: Color::from_rgba8(0, 0, 0, 0x22),
+        panel_padding_horizontal: 3.0,
         panel_padding_top: 8.0,
-        panel_padding_bottom: 18.0, // home-indicator safe area
-        row_height: 44.0,
+        panel_padding_bottom: 4.0,
+        row_height: 42.0,
         key_h_gap: 6.0,
-        key_v_gap: 10.0,
+        key_v_gap: 12.0,
         key_corner_radius: 5.0,
-        bottom_strip_height: 30.0,
+        bottom_strip_height: 44.0,
         key_face_bg: Color::from_rgb8(0xFE, 0xFE, 0xFE),
         key_face_bg_pressed: Color::from_rgb8(0xBC, 0xC0, 0xC9),
         key_face_text: Color::from_rgb8(0x10, 0x10, 0x18),
         key_face_text_pressed: Color::from_rgb8(0x10, 0x10, 0x18),
         key_shadow: Color::from_rgba8(0, 0, 0, 0x4D),
         key_shadow_offset_y: -1.0, // Y-up: shadow paints below = -Y
-        letter_font_size: 22.0,
-        utility_font_size: 15.0,
+        letter_font_size: 23.0,
+        utility_font_size: 16.0,
         util_key_bg: Color::from_rgb8(0xAB, 0xB0, 0xBC),
         util_key_bg_pressed: Color::from_rgb8(0xFE, 0xFE, 0xFE),
         util_key_text: Color::from_rgb8(0x10, 0x10, 0x18),
@@ -101,6 +144,9 @@ fn ios(dark: bool) -> Style {
         return_key_text: Color::from_rgb8(0xFF, 0xFF, 0xFF),
         return_key_bg_pressed: Color::from_rgb8(0x00, 0x57, 0xBE),
         preview_bg: Color::from_rgb8(0xFE, 0xFE, 0xFE),
+        alt_highlight_bg: Color::from_rgb8(0x00, 0x7A, 0xFF),
+        alt_highlight_text: Color::from_rgb8(0xFF, 0xFF, 0xFF),
+        alt_dim: Color::from_rgba8(0, 0, 0, 0),
     };
     if !dark {
         return base;
@@ -119,6 +165,7 @@ fn ios(dark: bool) -> Style {
         return_key_bg: Color::from_rgb8(0x0A, 0x84, 0xFF), // iOS dark system blue
         return_key_bg_pressed: Color::from_rgb8(0x06, 0x5F, 0xBD),
         preview_bg: Color::from_rgb8(0x68, 0x68, 0x6B),
+        alt_highlight_bg: Color::from_rgb8(0x0A, 0x84, 0xFF),
         ..base
     }
 }
@@ -156,6 +203,10 @@ fn android(dark: bool) -> Style {
         return_key_text: Color::from_rgb8(0x3F, 0x48, 0x54),
         return_key_bg_pressed: Color::from_rgb8(0x93, 0xB8, 0xE4),
         preview_bg: Color::from_rgb8(0xFF, 0xFF, 0xFF),
+        // The dynamic theme's primary, as on the phone's popup.
+        alt_highlight_bg: Color::from_rgb8(0x8D, 0x4E, 0x2A),
+        alt_highlight_text: Color::from_rgb8(0xFF, 0xFF, 0xFF),
+        alt_dim: Color::from_rgba8(0xFB, 0xEA, 0xDF, 0x99),
     };
     if !dark {
         return base;
@@ -177,6 +228,9 @@ fn android(dark: bool) -> Style {
         return_key_text: Color::from_rgb8(0x20, 0x2A, 0x38),
         return_key_bg_pressed: Color::from_rgb8(0x84, 0xAC, 0xDE),
         preview_bg: Color::from_rgb8(0x4A, 0x44, 0x3F),
+        alt_highlight_bg: Color::from_rgb8(0xFF, 0xB6, 0x8F),
+        alt_highlight_text: Color::from_rgb8(0x3A, 0x1A, 0x08),
+        alt_dim: Color::from_rgba8(0x21, 0x1E, 0x1C, 0x99),
         ..base
     }
 }
@@ -208,6 +262,9 @@ fn neutral(dark: bool) -> Style {
         return_key_text: Color::from_rgb8(0xFF, 0xFF, 0xFF),
         return_key_bg_pressed: Color::from_rgb8(0x2B, 0x66, 0xD0),
         preview_bg: Color::from_rgb8(0x44, 0x46, 0x55),
+        alt_highlight_bg: Color::from_rgb8(0x3B, 0x82, 0xF6),
+        alt_highlight_text: Color::from_rgb8(0xFF, 0xFF, 0xFF),
+        alt_dim: Color::from_rgba8(0x18, 0x18, 0x22, 0x99),
     };
     if dark {
         return base;
@@ -224,6 +281,7 @@ fn neutral(dark: bool) -> Style {
         util_key_bg_pressed: Color::from_rgb8(0xAF, 0xB3, 0xC0),
         util_key_text: Color::from_rgb8(0x14, 0x15, 0x1C),
         preview_bg: Color::from_rgb8(0xFF, 0xFF, 0xFF),
+        alt_dim: Color::from_rgba8(0xE6, 0xE8, 0xEE, 0x99),
         ..base
     }
 }

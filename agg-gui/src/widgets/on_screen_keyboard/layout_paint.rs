@@ -1,6 +1,7 @@
 //! The paint pass of a keyboard [`Layout`]: places every key, gives each its
-//! hit area, draws the keys, the hide-keyboard chevron below them, and the
-//! preview bubble over a pressed letter.
+//! hit area, draws the keys, the key in the strip below them (Gboard's
+//! hide-keyboard chevron, the iPhone's emoji key), the preview over a
+//! pressed letter and the long-press alternates popup.
 //!
 //! Split out of [`super::layouts`] so the layout tables stay pure data. The
 //! hit areas come from [`super::hit`]; one key's look from [`super::paint`].
@@ -9,15 +10,17 @@
 use crate::draw_ctx::DrawCtx;
 use crate::geometry::Rect;
 
+use super::alternates::AlternatesPopup;
+use super::alternates_paint::{paint_alternates, paint_ios_balloon};
 use super::enter_action::EnterAction;
 use super::hit::assign_row_hits;
 use super::key::{KeyAction, KeyCap, KeyGlyph, PaintedKey};
-use super::layouts::{KeyKind, KeySpec, Layer, Layout};
+use super::layouts::{KeyKind, KeySpec, Layer, Layout, LayoutFamily};
 use super::paint::{paint_chevron, paint_key, paint_preview};
 use super::style::Style;
 
 /// What the paint pass needs to know about the keyboard's state.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub(super) struct PaintState {
     /// The visible layer (decides Shift's look).
     pub layer: Layer,
@@ -27,6 +30,35 @@ pub(super) struct PaintState {
     pub pressed: Option<usize>,
     /// What Enter does in the focused field (the Enter key's icon).
     pub enter: EnterAction,
+    /// The platform the layout draws (Enter's label, Shift's look, the
+    /// preview and popup style).
+    pub family: LayoutFamily,
+    /// The open long-press alternates popup.
+    pub alternates: Option<AlternatesPopup>,
+}
+
+/// The Enter key's cap and colours for what Enter does: Gboard draws an
+/// icon; iOS writes a word, on its blue key for the actions that finish
+/// something (done, search, go, send) and on a grey function key otherwise.
+fn enter_cap(family: LayoutFamily, action: EnterAction) -> (KeyCap, KeyKind) {
+    if family == LayoutFamily::Gboard {
+        return (KeyCap::Glyph(KeyGlyph::for_enter(action)), KeyKind::Return);
+    }
+    let (word, blue) = match action {
+        EnterAction::Newline => ("return", false),
+        EnterAction::Done => ("done", true),
+        EnterAction::Search => ("search", true),
+        EnterAction::Go => ("go", true),
+        EnterAction::Send => ("send", true),
+        EnterAction::Next => ("next", false),
+        EnterAction::Previous => ("previous", false),
+    };
+    let kind = if blue {
+        KeyKind::Return
+    } else {
+        KeyKind::Utility
+    };
+    (KeyCap::Text(word.to_string()), kind)
 }
 
 impl Layout {
@@ -82,12 +114,16 @@ impl Layout {
         let mut painted = Vec::with_capacity(faces.iter().map(Vec::len).sum::<usize>() + 1);
         for ((row_faces, row_specs), row_hits) in faces.iter().zip(&specs).zip(&hits) {
             for ((face, spec), hit) in row_faces.iter().zip(row_specs).zip(row_hits) {
-                let cap = match spec.kind {
-                    KeyKind::Return => KeyCap::Glyph(KeyGlyph::for_enter(state.enter)),
-                    _ => spec.cap.clone(),
+                let (cap, kind) = match spec.kind {
+                    KeyKind::Return => enter_cap(state.family, state.enter),
+                    kind => (spec.cap.clone(), kind),
+                };
+                let drawn = KeySpec {
+                    kind,
+                    ..(*spec).clone()
                 };
                 let pressed = state.pressed == Some(painted.len());
-                paint_key(ctx, *face, spec, &cap, pressed, style, state);
+                paint_key(ctx, *face, &drawn, &cap, pressed, style, state);
                 painted.push(PaintedKey {
                     rect: *face,
                     hit: *hit,
@@ -97,15 +133,27 @@ impl Layout {
             }
         }
 
+        // The strip key: Gboard's hide chevron; the iPhone's emoji key,
+        // which opens the symbols page until there is an emoji page.
         if let Some((face, hit)) = chevron {
             let pressed = state.pressed == Some(painted.len());
-            paint_chevron(ctx, face, pressed, style);
+            let (action, glyph) = match state.family {
+                LayoutFamily::Gboard => (KeyAction::Dismiss, KeyGlyph::DismissDown),
+                LayoutFamily::Ios => (KeyAction::Switch(Layer::Symbols), KeyGlyph::Emoji),
+            };
+            paint_chevron(ctx, face, glyph, pressed, style);
             painted.push(PaintedKey {
                 rect: face,
                 hit,
-                action: KeyAction::Dismiss,
-                cap: KeyCap::Glyph(KeyGlyph::DismissDown),
+                action,
+                cap: KeyCap::Glyph(glyph),
             });
+        }
+
+        // The alternates popup replaces the preview while it is open.
+        if let Some(popup) = &state.alternates {
+            paint_alternates(ctx, panel, popup, style, state.family);
+            return painted;
         }
 
         // The preview bubble paints last so it sits over the row above.
@@ -117,7 +165,10 @@ impl Layout {
                 .is_some_and(|s| s.kind == KeyKind::Letter);
             if let (true, KeyCap::Text(text)) = (previewed, &key.cap) {
                 if text.chars().count() == 1 {
-                    paint_preview(ctx, key.rect, text, style);
+                    match state.family {
+                        LayoutFamily::Gboard => paint_preview(ctx, key.rect, text, style),
+                        LayoutFamily::Ios => paint_ios_balloon(ctx, panel, key.rect, text, style),
+                    }
                 }
             }
         }

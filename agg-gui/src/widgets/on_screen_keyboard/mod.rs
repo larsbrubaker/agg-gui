@@ -64,14 +64,28 @@
 //!   the middle row's half-key offset, the bottom row, light and dark colours
 //!   (met for Android, measured off a Gboard screenshot: one key pitch per
 //!   width unit, 15 dp margins, 45 dp keys, the hide chevron below the keys;
-//!   open: the symbol pages have one row fewer than the letters, so the
-//!   keyboard's height changes with the page, where Gboard's stays put);
+//!   met for the iPhone (`layouts_ios.rs`): no number row, 3 pt margins,
+//!   33 x 42 pt keys on a 54 pt row pitch, white letter keys and grey
+//!   function keys with a 1 pt shadow on the grey tray, Shift lit white
+//!   while upper case is on, `123 · space · return`, the emoji key below the
+//!   keys, and the pressed key growing into a balloon; open: Gboard's symbol
+//!   pages have one row fewer than its letters, so its height changes with
+//!   the page, where Gboard's stays put);
 //! - show letters in the case Shift will type, with Shift and Caps Lock as on
 //!   the phone, and label Enter with what it does (Done, Search, Next, Go)
 //!   (met: a field says what Enter does and whether it holds sentences with
-//!   [`TextInputHints`]; one-line fields open in lower case);
+//!   [`TextInputHints`]; one-line fields open in lower case; Gboard draws the
+//!   action as an icon, the iPhone as a word on a blue key for done, search,
+//!   go and send);
 //! - offer the long-press alternates (accents, digits) and the symbol, number
-//!   and emoji pages (open: long-press alternates and the emoji page);
+//!   and emoji pages (met for alternates, `alternates.rs`: Gboard's accent
+//!   sets, a top-row letter's digit where there is no number row, currency,
+//!   dashes and curly quotes, in each platform's popup style; open: the emoji
+//!   page. The iPhone's emoji key opens the symbols page until it exists,
+//!   so the key the user expects is there and does something useful);
+//! - let the user put the keyboard away (Gboard: the chevron below the keys;
+//!   the iPhone has no hide key, and as there a tap outside the field takes
+//!   its focus and the keyboard with it);
 //! - add no latency, repeat a held Backspace, and never lose a tap to a drag or
 //!   a long press;
 //! - tell the app its exact height the moment it changes, so the app lays out
@@ -114,11 +128,12 @@
 //!
 //! - Gboard-style US-QWERTY pages (see `docs/Android Keyboard/`):
 //!   letters with a number row, `?123` symbols, `=\<` extended
-//!   symbols, and a numeric pad for numeric fields.
-//! - Tap and slide to type, a preview bubble over the pressed letter,
-//!   hold-to-repeat Backspace, Shift / Caps Lock, and an Enter key drawn
-//!   as the field's action. No long-press alternates or predictive bar
-//!   yet — the module is structured to grow into those without a rewrite.
+//!   symbols, and a numeric pad for numeric fields; on an iPhone the iOS
+//!   pages (`layouts_ios.rs`), picked per input profile
+//!   ([`layouts::Layout::for_profile`]).
+//! - Tap and slide to type, a preview over the pressed letter, long-press
+//!   alternates, hold-to-repeat Backspace, Shift / Caps Lock, and an Enter
+//!   key drawn as the field's action. No predictive bar yet.
 //! - Layout-driven painting via [`layouts::Layout`] so adding a new
 //!   layer or layout is a data change, not a code change.
 
@@ -126,12 +141,15 @@ use crate::draw_ctx::DrawCtx;
 use crate::geometry::Rect;
 use crate::input_profile::current_input_profile;
 
+pub mod alternates;
+mod alternates_paint;
 pub mod enter_action;
 pub mod events;
 mod hit;
 pub mod key;
 mod layout_paint;
 pub mod layouts;
+mod layouts_ios;
 mod paint;
 mod pointer;
 pub mod state;
@@ -141,8 +159,8 @@ pub use enter_action::{EnterAction, TextInputHints};
 use layouts::{Layer, Layout};
 use pointer::tick_key_repeat;
 pub use pointer::{
-    contains_point, handle_software_keyboard_mouse_down, handle_software_keyboard_mouse_move,
-    handle_software_keyboard_mouse_up,
+    cancel_press, contains_point, handle_software_keyboard_mouse_down,
+    handle_software_keyboard_mouse_move, handle_software_keyboard_mouse_up,
 };
 use state::{with_state_mut, with_state_ref};
 use style::Style;
@@ -237,7 +255,7 @@ pub fn target_panel_height(viewport_width: f64) -> f64 {
         }
         let style = Style::for_profile(current_input_profile());
         let layer = s.current_layer;
-        let layout = Layout::for_layer(layer);
+        let layout = Layout::for_profile(layer, current_input_profile());
         let computed = layout.compute_panel_height(viewport_width, &style);
         // Fall back to the last painted height in the (theoretical)
         // case where the layout function returns a degenerate 0 —
@@ -426,14 +444,21 @@ pub fn paint_software_keyboard(ctx: &mut dyn DrawCtx, viewport: crate::geometry:
         return;
     }
 
-    let style = Style::for_profile(current_input_profile());
+    let profile = current_input_profile();
+    let style = Style::for_profile(profile);
+    // A key held long enough opens its alternates before the keys are laid
+    // out again.
+    pointer::tick_long_press(&style, viewport.width);
+    let layer = with_state_ref(|s| s.current_layer);
+    let layout = Layout::for_profile(layer, profile);
     let paint_state = with_state_ref(|s| layout_paint::PaintState {
         layer: s.current_layer,
         caps_lock: s.caps_lock,
-        pressed: s.pressed_key_index,
+        pressed: pointer::drawn_pressed(s),
         enter: s.hints.enter_action,
+        family: layout.family,
+        alternates: s.alternates.clone(),
     });
-    let layout = Layout::for_layer(paint_state.layer);
 
     // Compute panel rect. The fully-extended height is determined by the
     // layout (rows + paddings); we then slide it up from off-screen by
@@ -548,5 +573,28 @@ pub(crate) mod test_hook {
     /// lookup a touch uses.
     pub fn key_at(pos: crate::geometry::Point) -> Option<usize> {
         super::pointer::find_key_at(pos)
+    }
+
+    /// The font size painted key `key`'s text label draws at, by the
+    /// paint pass's own rule (a letter key for alphabetic characters).
+    pub fn cap_font_size(key: &super::key::PaintedKey) -> Option<f64> {
+        let super::key::KeyCap::Text(text) = &key.cap else {
+            return None;
+        };
+        let kind = match key.action {
+            super::key::KeyAction::Char(c) if c.is_alphanumeric() => {
+                super::layouts::KeyKind::Letter
+            }
+            _ => super::layouts::KeyKind::Utility,
+        };
+        let style = Style::for_profile(current_input_profile());
+        let mut fb = crate::Framebuffer::new(4, 4);
+        let mut ctx = crate::GfxCtx::new(&mut fb);
+        if let Some(font) = crate::font_settings::current_system_font() {
+            ctx.set_font(font);
+        }
+        Some(super::paint::cap_font_size(
+            &mut ctx, text, kind, key.rect, &style,
+        ))
     }
 }

@@ -15,6 +15,14 @@
 //! tap), and only a finger's lift — not a second finger landing, not a
 //! cancel — may throw the content.
 //!
+//! A finger that lands on the on-screen keyboard is the keyboard's alone:
+//! it presses its key the moment it lands, slides across the keys and types
+//! when it lifts, straight through the keyboard's pointer handlers. The
+//! mouse emulation would hold a tap's press back until the lift (it can't
+//! tell a tap from a pan before then), so the pressed key, its preview,
+//! the long-press alternates and Backspace's repeat would never show, and
+//! a slide would become a pan that types nothing.
+//!
 //! The long press ([`crate::touch_emulation::long_press`]) needs time to
 //! pass with no input: `layout` polls the emulator every frame
 //! (`tick_long_press`), and `paint` keeps a wake-up armed for the next
@@ -40,15 +48,13 @@ impl App {
         self.touch_state.on_start(device, id, pos, force);
         crate::touch_points::publish(self.touch_state.active_points());
         crate::touch_state::note_touch_event();
+        if self.keyboard_touch_start(device, id, screen_x, screen_y) {
+            return;
+        }
         let cmds = self
             .touch_mouse_emu
             .on_start(device, id, screen_x, screen_y);
         self.apply_emu_cmds(cmds);
-        // A finger on the on-screen keyboard types its key when it lifts,
-        // however long it was held.
-        if crate::widgets::on_screen_keyboard::contains_point(self.flip_y(screen_x, screen_y)) {
-            self.touch_mouse_emu.cancel_long_press();
-        }
         // A finger on content that is still flinging stops it, and is not a
         // tap on whatever row the fling carried under it.
         if crate::touch_emulation::fling::catch_at(pos) {
@@ -72,6 +78,9 @@ impl App {
         self.touch_state.on_move(device, id, pos, force);
         crate::touch_points::publish(self.touch_state.active_points());
         crate::touch_state::note_touch_event();
+        if self.keyboard_touch_move(device, id, screen_x, screen_y) {
+            return;
+        }
         let cmds = self.touch_mouse_emu.on_move(device, id, screen_x, screen_y);
         self.apply_emu_cmds(cmds);
     }
@@ -83,6 +92,9 @@ impl App {
         self.touch_state.on_end_or_cancel(device, id);
         crate::touch_points::publish(self.touch_state.active_points());
         crate::touch_state::note_touch_event();
+        if self.keyboard_touch_end(device, id, true) {
+            return;
+        }
         let cmds = self.touch_mouse_emu.on_end(device, id);
         // The finger lifting is the one release that may fling a pan.
         crate::touch_emulation::fling::while_lifting(|| self.apply_emu_cmds(cmds));
@@ -95,8 +107,84 @@ impl App {
         self.touch_state.on_end_or_cancel(device, id);
         crate::touch_points::publish(self.touch_state.active_points());
         crate::touch_state::note_touch_event();
+        if self.keyboard_touch_end(device, id, false) {
+            return;
+        }
         let cmds = self.touch_mouse_emu.on_cancel(device, id);
         self.apply_emu_cmds(cmds);
+    }
+
+    /// A finger landing on the on-screen keyboard presses the key under it
+    /// and is the keyboard's until it lifts. A second finger on the keyboard
+    /// first types the key the first one is on, as a fast typist's fingers
+    /// overlap. `false` when the finger is not on the keyboard.
+    fn keyboard_touch_start(
+        &mut self,
+        device: crate::touch_state::TouchDeviceId,
+        id: crate::touch_state::TouchId,
+        screen_x: f64,
+        screen_y: f64,
+    ) -> bool {
+        use crate::widgets::on_screen_keyboard as osk;
+        let at = self.flip_y(screen_x, screen_y);
+        if !osk::contains_point(at) {
+            return false;
+        }
+        if let Some((d, i, _)) = self.keyboard_touch {
+            self.keyboard_touch_end(d, i, true);
+        }
+        osk::handle_software_keyboard_mouse_down(at, MouseButton::Left, Modifiers::default());
+        self.keyboard_touch = Some((device, id, at));
+        true
+    }
+
+    /// The keyboard's finger moved: the pressed key (or the highlighted
+    /// alternate) follows it. `false` for any other finger.
+    fn keyboard_touch_move(
+        &mut self,
+        device: crate::touch_state::TouchDeviceId,
+        id: crate::touch_state::TouchId,
+        screen_x: f64,
+        screen_y: f64,
+    ) -> bool {
+        let at = self.flip_y(screen_x, screen_y);
+        match &mut self.keyboard_touch {
+            Some((d, i, last)) if *d == device && *i == id => {
+                *last = at;
+                crate::widgets::on_screen_keyboard::handle_software_keyboard_mouse_move(at);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// The keyboard's finger lifted (`lifted`) or was cancelled: a lift
+    /// types the key under it and hands the key to the focused field; a
+    /// cancel types nothing. `false` for any other finger.
+    fn keyboard_touch_end(
+        &mut self,
+        device: crate::touch_state::TouchDeviceId,
+        id: crate::touch_state::TouchId,
+        lifted: bool,
+    ) -> bool {
+        use crate::widgets::on_screen_keyboard as osk;
+        match self.keyboard_touch {
+            Some((d, i, last)) if d == device && i == id => {
+                self.keyboard_touch = None;
+                if lifted {
+                    osk::handle_software_keyboard_mouse_up(
+                        last,
+                        MouseButton::Left,
+                        Modifiers::default(),
+                    );
+                    self.drain_keyboard_synthetic_keys();
+                } else {
+                    osk::cancel_press();
+                }
+                true
+            }
+            _ => false,
+        }
     }
 
     /// Replay emulation commands through the regular mouse entry points.

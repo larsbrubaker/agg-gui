@@ -12,6 +12,7 @@ use web_time::Instant;
 
 use crate::animation::Tween;
 
+use super::alternates::AlternatesPopup;
 use super::enter_action::TextInputHints;
 use super::key::PaintedKey;
 use super::layouts::Layer;
@@ -80,6 +81,24 @@ pub struct KeyboardState {
     /// The focused field's hints (its Enter action and whether it starts
     /// sentences with a capital), set on focus.
     pub hints: TextInputHints,
+    /// The held key that has long-press alternates, until they open or
+    /// the finger moves to another key or lifts.
+    pub hold: Option<HoldState>,
+    /// The open long-press alternates popup (see `alternates.rs`).
+    pub alternates: Option<AlternatesPopup>,
+    /// The key last released and until when it stays drawn pressed (with
+    /// its preview), so a quick tap still flashes it.
+    pub linger: Option<(usize, Instant)>,
+}
+
+/// A press on a key with long-press alternates, timed from when the finger
+/// arrived on it.
+#[derive(Debug, Clone, Copy)]
+pub struct HoldState {
+    /// Index into `last_painted_keys`.
+    pub key_index: usize,
+    /// When the finger arrived on the key.
+    pub pressed_at: Instant,
 }
 
 /// Hold-to-repeat state captured the moment the user presses a
@@ -128,6 +147,9 @@ impl Default for KeyboardState {
             key_repeat: None,
             dismiss_requested: false,
             hints: TextInputHints::default(),
+            hold: None,
+            alternates: None,
+            linger: None,
         }
     }
 }

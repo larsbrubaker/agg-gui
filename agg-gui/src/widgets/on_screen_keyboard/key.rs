@@ -67,6 +67,8 @@ pub enum KeyGlyph {
     Go,
     /// Paper plane — Enter that sends a message.
     Send,
+    /// Smiling face — the iPhone's emoji key, below the keys.
+    Emoji,
 }
 
 impl KeyGlyph {
