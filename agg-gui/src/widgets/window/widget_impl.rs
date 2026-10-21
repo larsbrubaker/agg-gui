@@ -426,8 +426,12 @@ impl Widget for Window {
         if self.tight_content_fit && !self.auto_size && !self.collapsed && !self.maximized {
             if let Some(child) = self.children.first() {
                 let needed = child.measure_min_height(self.bounds.width);
-                let new_h = (needed + TITLE_H).max(MIN_H);
                 let top = self.bounds.y + self.bounds.height;
+                // Never past the bottom of the canvas (y = 0): on a short
+                // screen, a phone, the window ends there and its content's
+                // ScrollView scrolls, instead of the window running off the
+                // bottom where nothing can reach it.
+                let new_h = (needed + TITLE_H).max(MIN_H).min(top.max(MIN_H));
                 self.bounds.height = new_h;
                 self.bounds.y = top - new_h;
                 self.last_content_natural_h.set(needed);

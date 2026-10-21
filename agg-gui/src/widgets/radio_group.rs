@@ -18,6 +18,12 @@ use crate::widgets::label::Label;
 const DOT_R: f64 = 7.0; // outer circle radius
 const GAP: f64 = 8.0;
 const ROW_H: f64 = 22.0;
+
+/// One option's row height: [`ROW_H`], at least a finger's height on a
+/// phone (`touch_target_min`).
+fn row_h() -> f64 {
+    ROW_H.max(crate::input_profile::touch_target_min())
+}
 /// Horizontal spacing between wrapped items in horizontal-wrap mode.
 const HWRAP_SPACING: f64 = 6.0;
 /// Left/right slack reserved so the circle's 1.5-px stroke (and its AA
@@ -188,15 +194,15 @@ impl RadioGroup {
         }
         // rows are stacked top-to-bottom, so row 0 is at the top.
         // In Y-up, top row has the largest Y.
-        let row_top_y = total_h - (i as f64) * ROW_H;
-        row_top_y - ROW_H * 0.5
+        let row_top_y = total_h - (i as f64) * row_h();
+        row_top_y - row_h() * 0.5
     }
 
     fn row_for_y(&self, pos_y: f64) -> Option<usize> {
         let h = self.bounds.height;
         for i in 0..self.options.len() {
             let cy = self.row_center_y(i, h);
-            if pos_y >= cy - ROW_H * 0.5 && pos_y < cy + ROW_H * 0.5 {
+            if pos_y >= cy - row_h() * 0.5 && pos_y < cy + row_h() * 0.5 {
                 return Some(i);
             }
         }
@@ -235,15 +241,15 @@ impl RadioGroup {
             x += item_w + HWRAP_SPACING;
         }
         let rows = row + 1;
-        let h = rows as f64 * ROW_H;
+        let h = rows as f64 * row_h();
         // Second pass: convert row index to Y-up centre and build hit boxes.
         let items = placed
             .into_iter()
             .map(|(r, x_left, item_w, _label_w, has_label)| {
-                let cy = h - (r as f64) * ROW_H - ROW_H * 0.5;
+                let cy = h - (r as f64) * row_h() - row_h() * 0.5;
                 let dot_cx = LEFT_INSET + DOT_R + x_left;
                 let label_x = x_left + dot_extent + GAP;
-                let hit = Rect::new(x_left, cy - ROW_H * 0.5, item_w, ROW_H);
+                let hit = Rect::new(x_left, cy - row_h() * 0.5, item_w, row_h());
                 (dot_cx, cy, label_x, has_label, hit)
             })
             .collect();
@@ -272,10 +278,10 @@ impl RadioGroup {
             if !has_label {
                 // Bare dot: give the empty label a zero-width slot at the dot.
                 child.set_bounds(Rect::new(label_x, cy, 0.0, 0.0));
-                let _ = child.layout(Size::new(0.0, ROW_H));
+                let _ = child.layout(Size::new(0.0, row_h()));
                 continue;
             }
-            let s = child.layout(Size::new((available.width - label_x).max(0.0), ROW_H));
+            let s = child.layout(Size::new((available.width - label_x).max(0.0), row_h()));
             let ly = cy - s.height * 0.5;
             child.set_bounds(Rect::new(label_x, ly, s.width, s.height));
         }
@@ -337,7 +343,7 @@ impl Widget for RadioGroup {
             let (_, h) = self.compute_hwrap(available_w);
             return h;
         }
-        self.options.len() as f64 * ROW_H
+        self.options.len() as f64 * row_h()
     }
 
     fn layout(&mut self, available: Size) -> Size {
@@ -353,7 +359,7 @@ impl Widget for RadioGroup {
         if self.horizontal {
             return self.layout_horizontal(available);
         }
-        let h = self.options.len() as f64 * ROW_H;
+        let h = self.options.len() as f64 * row_h();
         self.bounds = Rect::new(0.0, 0.0, available.width, h);
         // `LEFT_INSET` shifts the circle inward; the label moves the
         // same amount so the visual gap between dot and label is preserved.
@@ -361,12 +367,12 @@ impl Widget for RadioGroup {
         let label_avail_w = (available.width - circle_extent - GAP).max(0.0);
         let lx = circle_extent + GAP;
         for (i, child) in self.children.iter_mut().enumerate() {
-            let s = child.layout(Size::new(label_avail_w, ROW_H));
+            let s = child.layout(Size::new(label_avail_w, row_h()));
             // Position the label child in the row's vertical centre,
             // offset right of the radio dot.  In Y-up the first row
             // (i=0) sits at the TOP of the widget — see `row_center_y`.
-            let row_top_y = h - (i as f64) * ROW_H;
-            let cy = row_top_y - ROW_H * 0.5;
+            let row_top_y = h - (i as f64) * row_h();
+            let cy = row_top_y - row_h() * 0.5;
             let ly = cy - s.height * 0.5;
             child.set_bounds(Rect::new(lx, ly, s.width, s.height));
         }

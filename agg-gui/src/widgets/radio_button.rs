@@ -418,7 +418,10 @@ impl Widget for RadioButton {
             ));
             (dot_slot.max(s.height), s)
         } else {
-            let h = dot_slot.max(self.font_size * 1.25);
+            // On a phone the row is at least a finger's height.
+            let h = dot_slot
+                .max(self.font_size * 1.25)
+                .max(crate::input_profile::touch_target_min());
             let label_avail = (available.width - dot_slot - gap).max(0.0);
             (h, self.children[0].layout(Size::new(label_avail, h)))
         };

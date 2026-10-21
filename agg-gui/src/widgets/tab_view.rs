@@ -75,6 +75,13 @@ impl TabView {
         }
     }
 
+    /// The tab bar's height: the configured one, at least a finger's
+    /// height on a phone (`touch_target_min`).
+    fn bar_height(&self) -> f64 {
+        self.tab_bar_height
+            .max(crate::input_profile::touch_target_min())
+    }
+
     pub fn with_tab_bar_height(mut self, h: f64) -> Self {
         self.tab_bar_height = h;
         self
@@ -159,8 +166,8 @@ impl TabView {
         self.show_sidebar.as_ref().map(|s| s.get()).unwrap_or(false)
     }
 
-    fn content_height(&self) -> f64 {
-        (self.bounds.height - self.tab_bar_height).max(0.0)
+    pub(crate) fn content_height(&self) -> f64 {
+        (self.bounds.height - self.bar_height()).max(0.0)
     }
 
     fn tabs_width(&self) -> f64 {
@@ -274,7 +281,7 @@ impl Widget for TabView {
                 self.switch_to(want);
             }
         }
-        let content_h = (available.height - self.tab_bar_height).max(0.0);
+        let content_h = (available.height - self.bar_height()).max(0.0);
         let showing = self.sidebar_showing();
         let sw = if showing {
             clamp_to_limits(self.sidebar_w, MIN_SIDEBAR_W, available.width * 0.8)
@@ -310,7 +317,7 @@ impl Widget for TabView {
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
         let w = self.bounds.width;
         let h = self.bounds.height;
-        let tab_h = self.tab_bar_height;
+        let tab_h = self.bar_height();
         let content_h = self.content_height();
         let tabs_w = self.tabs_width();
         let n = self.tab_labels.len().max(1);

@@ -467,9 +467,12 @@ impl Widget for Button {
         // `min_size.width` handling below) so callers can force uniform
         // square icon buttons. Defaults to `Size::ZERO`, so unset buttons
         // keep the font-derived natural height.
+        // On a phone a button is at least a finger's height
+        // (`touch_target_min`, zero on the desktop).
         let natural_height = (self.font_size * 1.7)
             .max(24.0)
-            .max(self.base.min_size.height);
+            .max(self.base.min_size.height)
+            .max(crate::input_profile::touch_target_min());
         let height = if available.height > 0.0 {
             natural_height.min(available.height)
         } else {

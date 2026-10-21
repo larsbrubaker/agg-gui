@@ -52,10 +52,19 @@ impl InputProfile {
         )
     }
 
-    /// Recommended [`crate::ux_scale`] multiplier for this profile.
-    /// `1.0` for desktop; ~`1.7` for mobile touch (phones held at
-    /// arm's length need ~44 px touch targets and ~17 px body text,
-    /// which is roughly 1.7× what reads well on a desktop monitor).
+    /// Recommended [`crate::ux_scale`] multiplier for this profile:
+    /// `1.0` on the desktop, [`MOBILE_UX_SCALE`] on a phone or tablet.
+    ///
+    /// A phone's CSS pixel is already sized for the distance a phone is held
+    /// at (that is what its device-pixel ratio does), and native phone UIs
+    /// set body text at about 16 CSS px with 44-48 px touch targets.
+    /// agg-gui's body text is 14 logical px (labels, buttons, text fields;
+    /// 13 for dense lists), so the zoom only needs to bring 14 to about 16:
+    /// `1.15` makes it 16.1. Touch targets are not reached by zooming
+    /// everything (a 24 px button would need 1.8x and take the text to
+    /// 25 px): controls take [`touch_target_min`] as their minimum height
+    /// instead, and the on-screen keyboard keeps its platform size in CSS
+    /// px whatever the zoom.
     ///
     /// Apps that want a different feel can override with
     /// [`crate::ux_scale::set_ux_scale`] *after* the profile is
@@ -64,9 +73,30 @@ impl InputProfile {
         match self {
             InputProfile::Desktop => 1.0,
             InputProfile::MobileIOS | InputProfile::MobileAndroid | InputProfile::MobileOther => {
-                1.7
+                MOBILE_UX_SCALE
             }
         }
+    }
+}
+
+/// The UX zoom for phones and tablets (see
+/// [`InputProfile::recommended_ux_scale`]): agg-gui's 14 px body text at
+/// about 16 CSS px.
+pub const MOBILE_UX_SCALE: f64 = 1.15;
+
+/// The smallest height, in CSS px, of a control a finger taps on a phone
+/// or tablet (Apple's 44 pt; Material's 48 dp includes spacing).
+pub const TOUCH_TARGET_CSS_PX: f64 = 44.0;
+
+/// The minimum height, in logical units, of a tappable control (a button,
+/// a check box or radio row, a tab bar) under a phone or tablet profile, so
+/// it is [`TOUCH_TARGET_CSS_PX`] tall on screen whatever the UX zoom; `0.0`
+/// on the desktop, where controls keep their own heights.
+pub fn touch_target_min() -> f64 {
+    if is_mobile_touch() {
+        TOUCH_TARGET_CSS_PX / crate::ux_scale::ux_scale().max(1e-6)
+    } else {
+        0.0
     }
 }
 

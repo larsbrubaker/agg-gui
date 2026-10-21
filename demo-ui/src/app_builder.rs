@@ -334,9 +334,10 @@ pub fn build_demo_ui(
         };
         let auto_size = spec.title == "\u{F096} Frame";
         // The Mobile Keyboard window is a fixed-layout testbench: lock its
-        // height to its content (no scroll, no empty band below the tip) and
-        // disable user resize. Its inner ScrollView stays in the tree so the
-        // keyboard-driven focus lift still works.
+        // height to its content (no empty band below the tip) and disable
+        // user resize. On a screen too short for it (a phone) the window
+        // stops at the bottom of the screen and its inner ScrollView
+        // scrolls the rest into reach.
         let tight_fit = spec.title == windows::MOBILE_KEYBOARD_TITLE;
         let mut win = Window::new(spec.title, Arc::clone(&font), content)
             .with_bounds(Rect::new(

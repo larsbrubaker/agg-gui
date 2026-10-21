@@ -335,7 +335,11 @@ impl Widget for Checkbox {
             return self.layout_classic(available);
         }
         let box_slot_w = BOX_SIZE + FOCUS_PAD * 2.0;
-        let h = (BOX_SIZE + FOCUS_PAD * 2.0).max(self.props.font_size * 1.25);
+        // On a phone the row is at least a finger's height; the box and
+        // label centre in it.
+        let h = (BOX_SIZE + FOCUS_PAD * 2.0)
+            .max(self.props.font_size * 1.25)
+            .max(crate::input_profile::touch_target_min());
         let label_avail_w = (available.width - box_slot_w - GAP).max(0.0);
         let s = self.children[0].layout(Size::new(label_avail_w, h));
         let lx = if self.label_text.is_empty() {
