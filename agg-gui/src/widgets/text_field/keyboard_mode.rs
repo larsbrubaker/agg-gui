@@ -1,4 +1,5 @@
-//! Keyboard-mode hooks for `TextField`.
+//! Keyboard-mode hooks for `TextField`: the on-screen keyboard's layer,
+//! Enter action and capitalisation for this field.
 //!
 //! Split out of `text_field.rs` to keep that file under the 800-line
 //! cap.  The storage (`keyboard_mode: Rc<Cell<KeyboardInputMode>>`)
@@ -16,7 +17,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use super::TextField;
-use crate::widgets::on_screen_keyboard::KeyboardInputMode;
+use crate::widgets::on_screen_keyboard::{EnterAction, KeyboardInputMode};
 
 impl TextField {
     /// Assign a stable id for the programmatic focus channel. App code can
@@ -73,5 +74,24 @@ impl TextField {
     /// same handle to ride a single switch.
     pub fn keyboard_mode_handle(&self) -> Rc<Cell<KeyboardInputMode>> {
         Rc::clone(&self.keyboard_mode)
+    }
+
+    /// Say what Enter does in this field, so the on-screen keyboard draws
+    /// its Enter key as that action (a magnifier for
+    /// [`EnterAction::Search`], an arrow for [`EnterAction::Next`], …).
+    /// Defaults to [`EnterAction::Done`]. The field still receives
+    /// `Key::Enter`; this changes only the key's icon.
+    pub fn with_enter_action(mut self, action: EnterAction) -> Self {
+        self.keyboard_hints.enter_action = action;
+        self
+    }
+
+    /// Open the on-screen keyboard with Shift on when the field is empty
+    /// or its text ends a sentence, for fields that hold sentences (a
+    /// description, a message). Off by default: names, searches and
+    /// values open in lower case, as on the phone.
+    pub fn with_auto_capitalize(mut self, on: bool) -> Self {
+        self.keyboard_hints.auto_capitalize = on;
+        self
     }
 }

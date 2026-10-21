@@ -58,13 +58,20 @@
 //!
 //! References: `docs/Android Keyboard/` (Gboard). The keyboard must
 //! - leave no dead space: every point belongs to the nearest key, so a touch
-//!   between keys types the closest one;
+//!   between keys types the closest one (met: `hit.rs` tiles the panel with
+//!   the keys' hit areas, and a sliding finger types the key it lifts on);
 //! - look and feel like the platform keyboard: key shapes, gaps, proportions,
-//!   the middle row's half-key offset, the bottom row, light and dark colours;
+//!   the middle row's half-key offset, the bottom row, light and dark colours
+//!   (met for Android, measured off a Gboard screenshot: one key pitch per
+//!   width unit, 15 dp margins, 45 dp keys, the hide chevron below the keys;
+//!   open: the symbol pages have one row fewer than the letters, so the
+//!   keyboard's height changes with the page, where Gboard's stays put);
 //! - show letters in the case Shift will type, with Shift and Caps Lock as on
-//!   the phone, and label Enter with what it does (Done, Search, Next, Go);
+//!   the phone, and label Enter with what it does (Done, Search, Next, Go)
+//!   (met: a field says what Enter does and whether it holds sentences with
+//!   [`TextInputHints`]; one-line fields open in lower case);
 //! - offer the long-press alternates (accents, digits) and the symbol, number
-//!   and emoji pages;
+//!   and emoji pages (open: long-press alternates and the emoji page);
 //! - add no latency, repeat a held Backspace, and never lose a tap to a drag or
 //!   a long press;
 //! - tell the app its exact height the moment it changes, so the app lays out
@@ -103,31 +110,40 @@
 //!   so an iPad and a Pixel see different keyboards from the same Rust
 //!   binary.
 //!
-//! ## Scope of this first cut
+//! ## Scope today
 //!
 //! - Gboard-style US-QWERTY pages (see `docs/Android Keyboard/`):
 //!   letters with a number row, `?123` symbols, `=\<` extended
 //!   symbols, and a numeric pad for numeric fields.
-//! - Tap-to-type (no long-press, no hold-to-repeat, no predictive bar
-//!   yet — the module is structured to grow into those without a
-//!   rewrite).
+//! - Tap and slide to type, a preview bubble over the pressed letter,
+//!   hold-to-repeat Backspace, Shift / Caps Lock, and an Enter key drawn
+//!   as the field's action. No long-press alternates or predictive bar
+//!   yet — the module is structured to grow into those without a rewrite.
 //! - Layout-driven painting via [`layouts::Layout`] so adding a new
 //!   layer or layout is a data change, not a code change.
 
 use crate::draw_ctx::DrawCtx;
-use crate::event::{Key, Modifiers, MouseButton};
-use crate::geometry::{Point, Rect};
+use crate::geometry::Rect;
 use crate::input_profile::current_input_profile;
 
+pub mod enter_action;
 pub mod events;
+mod hit;
 pub mod key;
+mod layout_paint;
 pub mod layouts;
 mod paint;
+mod pointer;
 pub mod state;
 pub mod style;
 
-use events::push_synthetic_key;
+pub use enter_action::{EnterAction, TextInputHints};
 use layouts::{Layer, Layout};
+use pointer::tick_key_repeat;
+pub use pointer::{
+    contains_point, handle_software_keyboard_mouse_down, handle_software_keyboard_mouse_move,
+    handle_software_keyboard_mouse_up,
+};
 use state::{with_state_mut, with_state_ref};
 use style::Style;
 
@@ -284,11 +300,28 @@ pub fn layout_room(viewport: crate::geometry::Size) -> f64 {
 /// [`KeyboardInputMode::Numeric`] is passed the auto-cap heuristic is
 /// skipped and the keyboard opens on [`Layer::NumPad`].
 pub fn set_text_input_focused(focused: bool, existing_text: Option<&str>, mode: KeyboardInputMode) {
+    set_text_input_focused_with_hints(focused, existing_text, mode, TextInputHints::default());
+}
+
+/// [`set_text_input_focused`] with the focused field's [`TextInputHints`]:
+/// what its Enter key does (the key's icon) and whether it starts sentences
+/// with a capital. With `hints.auto_capitalize` off the letters always open
+/// in lower case. The App calls this on every focus change with the
+/// widget's [`Widget::text_input_hints`](crate::widget::Widget::text_input_hints).
+pub fn set_text_input_focused_with_hints(
+    focused: bool,
+    existing_text: Option<&str>,
+    mode: KeyboardInputMode,
+    hints: TextInputHints,
+) {
     with_state_mut(|s| {
         if !s.enabled {
             return;
         }
         s.text_input_focused = focused;
+        if focused {
+            s.hints = hints;
+        }
         let target = if focused { 1.0 } else { 0.0 };
         s.slide.set_target(target);
         if focused {
@@ -301,6 +334,13 @@ pub fn set_text_input_focused(focused: bool, existing_text: Option<&str>, mode: 
                     s.current_layer = Layer::NumPad;
                     s.caps_lock = false;
                     s.last_shift_tap = None;
+                }
+                KeyboardInputMode::Text if !hints.auto_capitalize => {
+                    // A field that doesn't hold sentences opens in lower
+                    // case, as the phone does for names and searches.
+                    if !s.caps_lock {
+                        s.current_layer = Layer::Letters;
+                    }
                 }
                 KeyboardInputMode::Text => {
                     if let Some(text) = existing_text {
@@ -387,8 +427,13 @@ pub fn paint_software_keyboard(ctx: &mut dyn DrawCtx, viewport: crate::geometry:
     }
 
     let style = Style::for_profile(current_input_profile());
-    let layer = with_state_ref(|s| s.current_layer);
-    let layout = Layout::for_layer(layer);
+    let paint_state = with_state_ref(|s| layout_paint::PaintState {
+        layer: s.current_layer,
+        caps_lock: s.caps_lock,
+        pressed: s.pressed_key_index,
+        enter: s.hints.enter_action,
+    });
+    let layout = Layout::for_layer(paint_state.layer);
 
     // Compute panel rect. The fully-extended height is determined by the
     // layout (rows + paddings); we then slide it up from off-screen by
@@ -419,7 +464,7 @@ pub fn paint_software_keyboard(ctx: &mut dyn DrawCtx, viewport: crate::geometry:
     paint_panel_background(ctx, panel, &style);
 
     // Lay out + paint keys, caching their hit rects for tap dispatch.
-    let painted_keys = layout.paint(ctx, panel, &style, layer);
+    let painted_keys = layout.paint(ctx, panel, &style, &paint_state);
     ctx.restore();
     with_state_mut(|s| s.last_painted_keys = painted_keys);
 }
@@ -442,261 +487,13 @@ fn paint_panel_background(ctx: &mut dyn DrawCtx, panel: Rect, style: &Style) {
 }
 
 // ---------------------------------------------------------------------------
-// Pointer routing
-// ---------------------------------------------------------------------------
-
-/// `true` when the keyboard panel currently occupies `pos` and would
-/// consume an event there.
-pub fn contains_point(pos: Point) -> bool {
-    if !is_visible() {
-        return false;
-    }
-    with_state_ref(|s| {
-        let frac = s.slide.value();
-        if frac <= 0.001 {
-            return false;
-        }
-        let panel_height = s.last_panel_height.unwrap_or(0.0);
-        let panel_top = panel_height * frac;
-        // Panel occupies [0, panel_top] in Y-up viewport coords.
-        pos.y >= 0.0 && pos.y <= panel_top
-    })
-}
-
-/// Handle a pointer-down inside the keyboard. Returns `true` if consumed
-/// (the [`App`](crate::widget::App) skips its normal tree dispatch).
-pub fn handle_software_keyboard_mouse_down(
-    pos: Point,
-    button: MouseButton,
-    _modifiers: Modifiers,
-) -> bool {
-    if button != MouseButton::Left {
-        return contains_point(pos);
-    }
-    if !contains_point(pos) {
-        return false;
-    }
-    let hit = find_key_at(pos);
-    with_state_mut(|s| {
-        s.pressed_key_index = hit;
-        s.captured_pointer = true;
-        // Register a hold-to-repeat tracker if the pressed key supports
-        // it (currently Backspace only).
-        s.key_repeat = hit.and_then(|i| {
-            s.last_painted_keys.get(i).and_then(|k| match k.action {
-                key::KeyAction::Backspace => Some(state::KeyRepeatState {
-                    key_index: i,
-                    pressed_at: crate::clock::now(),
-                    last_fired_at: None,
-                }),
-                _ => None,
-            })
-        });
-    });
-    if hit.is_some() {
-        crate::animation::request_draw();
-    }
-    true
-}
-
-/// Handle a pointer-move while the keyboard is interactive. Returns
-/// `true` if the keyboard wants to keep the pointer captured.
-pub fn handle_software_keyboard_mouse_move(pos: Point) -> bool {
-    let (captured, _) = with_state_ref(|s| (s.captured_pointer, s.pressed_key_index));
-    if !captured {
-        return false;
-    }
-    // Track hover for visual feedback on a drag inside the keyboard.
-    let new_hit = find_key_at(pos);
-    with_state_mut(|s| {
-        if s.pressed_key_index != new_hit {
-            s.pressed_key_index = new_hit;
-            crate::animation::request_draw();
-        }
-    });
-    true
-}
-
-/// Handle a pointer-up. If the release lands on the same key as the
-/// press, that key fires (`push_synthetic_key`).
-pub fn handle_software_keyboard_mouse_up(
-    pos: Point,
-    button: MouseButton,
-    modifiers: Modifiers,
-) -> bool {
-    let captured = with_state_ref(|s| s.captured_pointer);
-    if !captured {
-        return false;
-    }
-    let pressed = with_state_mut(|s| {
-        let p = s.pressed_key_index.take();
-        s.captured_pointer = false;
-        let repeat_fired = s
-            .key_repeat
-            .map(|r| r.last_fired_at.is_some())
-            .unwrap_or(false);
-        s.key_repeat = None;
-        (p, repeat_fired)
-    });
-    let (pressed_idx, repeat_already_fired) = pressed;
-    if button != MouseButton::Left {
-        crate::animation::request_draw();
-        return true;
-    }
-    let on_panel = contains_point(pos);
-    let final_hit = if on_panel { find_key_at(pos) } else { None };
-    if let (Some(start), Some(end)) = (pressed_idx, final_hit) {
-        // Suppress the tap commit if hold-to-repeat already fired at
-        // least once during the press — otherwise the release would
-        // synthesize one extra Backspace after the user lifted.
-        if start == end && !repeat_already_fired {
-            commit_key_press(end, modifiers);
-        }
-    }
-    crate::animation::request_draw();
-    true
-}
-
-fn find_key_at(pos: Point) -> Option<usize> {
-    with_state_ref(|s| {
-        s.last_painted_keys
-            .iter()
-            .enumerate()
-            .find(|(_, k)| k.rect.contains(pos))
-            .map(|(i, _)| i)
-    })
-}
-
-fn commit_key_press(index: usize, modifiers: Modifiers) {
-    let painted = with_state_ref(|s| s.last_painted_keys.get(index).cloned());
-    let Some(painted) = painted else {
-        return;
-    };
-    // Clear any pending shift-double-tap detection on a non-shift commit
-    // so a Shift tap that's *not* immediately followed by another Shift
-    // tap doesn't accidentally promote to caps-lock when the user later
-    // taps Shift unrelated.
-    let is_shift_action = matches!(painted.action, key::KeyAction::Switch(Layer::Shifted));
-    if !is_shift_action {
-        with_state_mut(|s| s.last_shift_tap = None);
-    }
-    match painted.action {
-        key::KeyAction::Char(c) => {
-            let mut mods = modifiers;
-            let was_shifted = with_state_ref(|s| s.current_layer == Layer::Shifted);
-            if was_shifted {
-                mods.shift = true;
-            }
-            push_synthetic_key(Key::Char(c), mods);
-            // One-shot shift: drop back to base layer after a single
-            // character — unless caps lock is engaged, in which case
-            // stay in Shifted.
-            with_state_mut(|s| {
-                if s.current_layer == Layer::Shifted && !s.caps_lock {
-                    s.current_layer = Layer::Letters;
-                }
-            });
-        }
-        key::KeyAction::Backspace => push_synthetic_key(Key::Backspace, modifiers),
-        key::KeyAction::Enter => {
-            push_synthetic_key(Key::Enter, modifiers);
-        }
-        key::KeyAction::Space => push_synthetic_key(Key::Char(' '), modifiers),
-        key::KeyAction::Switch(target) => {
-            handle_layer_switch(target);
-        }
-        key::KeyAction::Dismiss => dismiss(),
-    }
-    crate::animation::request_draw();
-}
-
-/// Apply a layer-switch action with special handling for the Shift
-/// key:
-/// - First tap → toggle into [`Layer::Shifted`] (one-shot upper case).
-/// - Second tap within [`state::SHIFT_DOUBLE_TAP_WINDOW`] → engage caps
-///   lock; keyboard stays Shifted until shift is tapped again.
-/// - Tap while caps lock is on → release caps lock + drop to lowercase.
-/// - Any other layer switch (?123 / ABC / =\< / 1234) just changes the
-///   layer and clears caps-lock state.
-fn handle_layer_switch(target: Layer) {
-    if target == Layer::Shifted || target == Layer::Letters {
-        with_state_mut(|s| {
-            let now = crate::clock::now();
-            let recently_tapped = s
-                .last_shift_tap
-                .map(|t| now.duration_since(t) <= state::SHIFT_DOUBLE_TAP_WINDOW)
-                .unwrap_or(false);
-
-            if s.caps_lock {
-                // Caps lock release: tap shift → drop back to lowercase.
-                s.caps_lock = false;
-                s.current_layer = Layer::Letters;
-                s.last_shift_tap = None;
-            } else if recently_tapped {
-                // Double-tap → caps lock on.
-                s.caps_lock = true;
-                s.current_layer = Layer::Shifted;
-                s.last_shift_tap = None;
-            } else {
-                // First tap → one-shot shift (or unshift if currently Shifted).
-                s.current_layer = match s.current_layer {
-                    Layer::Shifted => Layer::Letters,
-                    _ => Layer::Shifted,
-                };
-                s.last_shift_tap = Some(now);
-            }
-        });
-    } else {
-        with_state_mut(|s| {
-            s.current_layer = target;
-            s.last_shift_tap = None;
-        });
-    }
-}
-
-/// Advance the hold-to-repeat state machine. Called once per paint so
-/// the cadence rides on the animation loop. When the held key has been
-/// down long enough we synthesize a `Backspace` and request another
-/// draw so the loop keeps pumping for the next repeat.
-fn tick_key_repeat() {
-    let now = crate::clock::now();
-    let action = with_state_mut(|s| {
-        let repeat = s.key_repeat.as_mut()?;
-        // Repeat is only valid while the user is still holding the key
-        // (captured_pointer == true && pressed_key_index matches).
-        if !s.captured_pointer || s.pressed_key_index != Some(repeat.key_index) {
-            s.key_repeat = None;
-            return None;
-        }
-        let held = now.duration_since(repeat.pressed_at);
-        let should_fire = match repeat.last_fired_at {
-            None => held >= state::KeyRepeatState::INITIAL_DELAY,
-            Some(t) => now.duration_since(t) >= state::KeyRepeatState::REPEAT_PERIOD,
-        };
-        if should_fire {
-            let key = s.last_painted_keys.get(repeat.key_index)?.action;
-            repeat.last_fired_at = Some(now);
-            return Some(key);
-        }
-        None
-    });
-    if let Some(action) = action {
-        if let key::KeyAction::Backspace = action {
-            push_synthetic_key(Key::Backspace, Modifiers::default());
-        }
-        // Keep the loop hot for the next tick.
-        crate::animation::request_draw();
-    }
-}
-
-// ---------------------------------------------------------------------------
 // Synthetic key drain (called from App after each pointer event)
 // ---------------------------------------------------------------------------
 
 pub use events::drain_synthetic_keys;
 
 // Re-export common types for ergonomics.
-pub use key::{KeyAction, KeyCap};
+pub use key::{KeyAction, KeyCap, KeyGlyph};
 pub use layouts::Layer as KeyboardLayer;
 
 // ---------------------------------------------------------------------------
@@ -734,7 +531,7 @@ pub(crate) mod test_hook {
     /// exercised from cross-module tests without first synthesising a
     /// full paint pass.
     pub fn simulate_shift_tap() {
-        super::handle_layer_switch(super::Layer::Shifted);
+        super::pointer::handle_layer_switch(super::Layer::Shifted);
     }
 
     /// Read caps-lock state without exposing the full module state.
@@ -745,5 +542,11 @@ pub(crate) mod test_hook {
     /// Read current layer for tests.
     pub fn current_layer() -> Layer {
         with_state_ref(|s| s.current_layer)
+    }
+
+    /// The painted key that owns `pos` (viewport, Y-up), by the same
+    /// lookup a touch uses.
+    pub fn key_at(pos: crate::geometry::Point) -> Option<usize> {
+        super::pointer::find_key_at(pos)
     }
 }

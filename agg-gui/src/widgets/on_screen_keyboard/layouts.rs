@@ -6,13 +6,9 @@
 //! number pad for numeric fields. Adding a new layer (e.g. a French
 //! AZERTY, an emoji picker) is a data change here: define a new
 //! [`Layer`] variant and return a `Layout` from [`Layout::for_layer`].
-//! The painter ([`super::paint`]) and hit-tester don't change.
+//! The paint pass (`layout_paint.rs`) and hit-tester don't change.
 
-use crate::draw_ctx::DrawCtx;
-use crate::geometry::Rect;
-
-use super::key::{KeyAction, KeyCap, KeyGlyph, PaintedKey};
-use super::paint::paint_key;
+use super::key::{KeyAction, KeyCap, KeyGlyph};
 use super::style::Style;
 
 /// Which layer of the keyboard is currently visible.
@@ -66,7 +62,7 @@ pub(super) enum KeyKind {
 /// A laid-out layer, ready to paint. Captured so the paint and the
 /// hit-test layer-aware logic share a single source of truth.
 pub struct Layout {
-    rows: Vec<Vec<KeySpec>>,
+    pub(super) rows: Vec<Vec<KeySpec>>,
 }
 
 impl Layout {
@@ -81,67 +77,15 @@ impl Layout {
     }
 
     /// Compute the panel height required to render this layout at the
-    /// given viewport width, accounting for vertical padding and row
-    /// gaps.
+    /// given viewport width, accounting for vertical padding, row gaps and
+    /// the strip below the keys that holds the hide-keyboard chevron.
     pub fn compute_panel_height(&self, _viewport_width: f64, style: &Style) -> f64 {
         let rows = self.rows.len() as f64;
         style.panel_padding_top
             + style.panel_padding_bottom
+            + style.bottom_strip_height
             + rows * style.row_height
             + (rows - 1.0).max(0.0) * style.key_v_gap
-    }
-
-    /// Paint every key and return the on-screen hit rects (used by the
-    /// tap dispatcher).
-    pub fn paint(
-        &self,
-        ctx: &mut dyn DrawCtx,
-        panel: Rect,
-        style: &Style,
-        active_layer: Layer,
-    ) -> Vec<PaintedKey> {
-        let mut painted = Vec::with_capacity(self.rows.iter().map(|r| r.len()).sum());
-
-        let inner_x = panel.x + style.panel_padding_horizontal;
-        let inner_w = panel.width - 2.0 * style.panel_padding_horizontal;
-
-        // Rows paint top-to-bottom visually. Y-up means the top of the
-        // panel is at panel.y + panel.height; descend by row_height +
-        // gap per row.
-        let mut row_top_y = panel.y + panel.height - style.panel_padding_top;
-
-        for (row_index, row) in self.rows.iter().enumerate() {
-            let row_bottom_y = row_top_y - style.row_height;
-            let total_units: f64 = row.iter().map(|k| k.width_units).sum();
-            let total_gaps = (row.len() as f64 - 1.0).max(0.0) * style.key_h_gap;
-            let key_unit_width = (inner_w - total_gaps) / total_units.max(0.001);
-
-            let mut cursor_x = inner_x;
-            for spec in row.iter() {
-                let kw = spec.width_units * key_unit_width;
-                if spec.kind == KeyKind::Spacer {
-                    cursor_x += kw + style.key_h_gap;
-                    continue;
-                }
-                let rect = Rect::new(cursor_x, row_bottom_y, kw, style.row_height);
-
-                let pressed = false; // pressed visuals come from hover state, painted later
-                paint_key(ctx, rect, spec, pressed, style, active_layer);
-
-                painted.push(PaintedKey {
-                    rect,
-                    action: spec.action,
-                    cap: spec.cap.clone(),
-                });
-                cursor_x += kw + style.key_h_gap;
-            }
-
-            if row_index + 1 < self.rows.len() {
-                row_top_y = row_bottom_y - style.key_v_gap;
-            }
-        }
-
-        painted
     }
 }
 
@@ -309,19 +253,14 @@ fn letters_layer(shifted: bool) -> Layout {
     row_shift.push(backspace(1.5));
     rows.push(row_shift);
 
-    // Bottom row: ?123 · , · dismiss · space · . · enter. Gboard puts
-    // its emoji key where we place dismiss — we have no emoji layer,
-    // and the panel needs an explicit close affordance (no system nav
-    // bar underneath us).
+    // Bottom row: ?123 · , · space · . · enter. Gboard puts its emoji key
+    // between `,` and space; with no emoji page yet, the spacebar takes
+    // that room (Gboard's own layout with its emoji key turned off). The
+    // hide-keyboard chevron sits below the keys, as on the phone.
     rows.push(vec![
         mode_pill("?123", Layer::Symbols),
         util_char(',', 1.0),
-        KeySpec {
-            cap: KeyCap::Glyph(KeyGlyph::DismissDown),
-            action: KeyAction::Dismiss,
-            ..key(' ')
-        },
-        space_bar(4.0),
+        space_bar(5.0),
         util_char('.', 1.0),
         enter_key(),
     ]);

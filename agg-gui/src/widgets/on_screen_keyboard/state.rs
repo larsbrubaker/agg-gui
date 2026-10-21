@@ -12,6 +12,7 @@ use web_time::Instant;
 
 use crate::animation::Tween;
 
+use super::enter_action::TextInputHints;
 use super::key::PaintedKey;
 use super::layouts::Layer;
 
@@ -76,6 +77,9 @@ pub struct KeyboardState {
     /// Host opted in via [`super::set_resizes_layout`]: while the keyboard
     /// is up the App lays the tree out in the room above it.
     pub resizes_layout: bool,
+    /// The focused field's hints (its Enter action and whether it starts
+    /// sentences with a capital), set on focus.
+    pub hints: TextInputHints,
 }
 
 /// Hold-to-repeat state captured the moment the user presses a
@@ -123,6 +127,7 @@ impl Default for KeyboardState {
             last_shift_tap: None,
             key_repeat: None,
             dismiss_requested: false,
+            hints: TextInputHints::default(),
         }
     }
 }

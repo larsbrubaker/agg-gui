@@ -207,6 +207,8 @@ pub struct TextField {
     /// the next focus event picks up the new value.  See
     /// `text_field/keyboard_mode.rs` for the builders.
     keyboard_mode: Rc<Cell<crate::widgets::on_screen_keyboard::KeyboardInputMode>>,
+    /// Enter action and capitalisation for the on-screen keyboard.
+    keyboard_hints: crate::widgets::on_screen_keyboard::TextInputHints,
 
     /// Per-widget colour overrides — `None` colours fall back to
     /// the ambient `visuals()` palette. Set via [`with_theme`].
@@ -282,6 +284,7 @@ impl TextField {
             keyboard_mode: Rc::new(Cell::new(
                 crate::widgets::on_screen_keyboard::KeyboardInputMode::default(),
             )),
+            keyboard_hints: crate::widgets::on_screen_keyboard::TextInputHints::SINGLE_LINE,
             theme: TextFieldTheme::default(),
             frame: true,
             cache: BackbufferCache::default(),

@@ -22,8 +22,9 @@ pub enum KeyAction {
     /// Switch the visible layer (letters / shift / numbers / symbols).
     /// Internal to the keyboard; never reaches the focused widget.
     Switch(Layer),
-    /// Dismiss the keyboard (no-op on the focused widget). Maps to the
-    /// "downward chevron" key common on iOS keyboards.
+    /// Dismiss the keyboard (no-op on the focused widget). The small
+    /// downward chevron below the keys' bottom-left corner, where the
+    /// phone shows its own hide-keyboard control.
     Dismiss,
 }
 
@@ -54,18 +55,54 @@ pub enum KeyGlyph {
     /// ⌴ bracket — the space key on the numeric pad (the main spacebar
     /// is blank, like Gboard's).
     Space,
+    /// Magnifier — Enter in a search field.
+    Search,
+    /// Check mark — Enter that finishes the field.
+    Done,
+    /// Right arrow — Enter that moves to the next field.
+    Next,
+    /// Left arrow — Enter that moves to the previous field.
+    Previous,
+    /// Arrow into a bar — Enter that opens what was typed.
+    Go,
+    /// Paper plane — Enter that sends a message.
+    Send,
+}
+
+impl KeyGlyph {
+    /// The Enter key's icon for what Enter does in the focused field.
+    pub fn for_enter(action: super::enter_action::EnterAction) -> Self {
+        use super::enter_action::EnterAction as E;
+        match action {
+            E::Newline => KeyGlyph::Return,
+            E::Done => KeyGlyph::Done,
+            E::Search => KeyGlyph::Search,
+            E::Next => KeyGlyph::Next,
+            E::Previous => KeyGlyph::Previous,
+            E::Go => KeyGlyph::Go,
+            E::Send => KeyGlyph::Send,
+        }
+    }
 }
 
 /// One key cell positioned and painted by the layout engine. Stored in
 /// [`super::state::KeyboardState::last_painted_keys`] so taps can be
 /// hit-tested in O(n).
+///
+/// `rect` is the drawn face; `hit` is the larger area that takes touches
+/// for it (out to the midlines between keys and the panel's edges, see
+/// `hit.rs`), so the keys' hit areas cover the whole panel.
 #[derive(Debug, Clone)]
 pub struct PaintedKey {
-    /// Hit-test rectangle in viewport coordinates (Y-up).
+    /// The drawn key face in viewport coordinates (Y-up).
     pub rect: Rect,
+    /// The area that takes touches for this key (viewport, Y-up): the
+    /// face grown to the midlines between keys and to the panel's edges.
+    pub hit: Rect,
     /// Action committed on release.
     pub action: KeyAction,
-    /// Cap as it was painted (kept for inspection / accessibility).
-    #[allow(dead_code)]
+    /// Cap as it was painted (kept for inspection / accessibility). A
+    /// letter's cap shows the case it types now: lower case, or upper
+    /// case while Shift or Caps Lock is on.
     pub cap: KeyCap,
 }

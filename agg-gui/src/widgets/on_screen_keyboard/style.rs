@@ -30,6 +30,9 @@ pub struct Style {
     pub key_v_gap: f64,
     /// Key corner radius.
     pub key_corner_radius: f64,
+    /// Height of the strip below the keys that holds the hide-keyboard
+    /// chevron (where the phone shows its own hide control).
+    pub bottom_strip_height: f64,
 
     // ── Standard key
     pub key_face_bg: Color,
@@ -51,6 +54,8 @@ pub struct Style {
     pub return_key_bg: Color,
     pub return_key_text: Color,
     pub return_key_bg_pressed: Color,
+    /// Face of the preview bubble shown over a pressed letter.
+    pub preview_bg: Color,
 }
 
 impl Style {
@@ -80,6 +85,7 @@ fn ios(dark: bool) -> Style {
         key_h_gap: 6.0,
         key_v_gap: 10.0,
         key_corner_radius: 5.0,
+        bottom_strip_height: 30.0,
         key_face_bg: Color::from_rgb8(0xFE, 0xFE, 0xFE),
         key_face_bg_pressed: Color::from_rgb8(0xBC, 0xC0, 0xC9),
         key_face_text: Color::from_rgb8(0x10, 0x10, 0x18),
@@ -94,6 +100,7 @@ fn ios(dark: bool) -> Style {
         return_key_bg: Color::from_rgb8(0x00, 0x7A, 0xFF), // iOS system blue
         return_key_text: Color::from_rgb8(0xFF, 0xFF, 0xFF),
         return_key_bg_pressed: Color::from_rgb8(0x00, 0x57, 0xBE),
+        preview_bg: Color::from_rgb8(0xFE, 0xFE, 0xFE),
     };
     if !dark {
         return base;
@@ -111,6 +118,7 @@ fn ios(dark: bool) -> Style {
         util_key_text: Color::from_rgb8(0xFF, 0xFF, 0xFF),
         return_key_bg: Color::from_rgb8(0x0A, 0x84, 0xFF), // iOS dark system blue
         return_key_bg_pressed: Color::from_rgb8(0x06, 0x5F, 0xBD),
+        preview_bg: Color::from_rgb8(0x68, 0x68, 0x6B),
         ..base
     }
 }
@@ -118,24 +126,28 @@ fn ios(dark: bool) -> Style {
 fn android(dark: bool) -> Style {
     // Light palette matched to the Gboard screenshots — a Material You
     // "dynamic color" theme: peach tray, white letter keys, light-blue
-    // utility keys, flat (no key shadow).
+    // utility keys, flat (no key shadow). Metrics measured off a Gboard
+    // screenshot on a 411 dp wide phone: keys 32.5 dp wide with 6 dp
+    // gaps, 15 dp side margins, 45 dp key height on a 54.5 dp row pitch,
+    // gently rounded (about 6 dp) keys.
     let base = Style {
         panel_bg: Color::from_rgb8(0xFB, 0xEA, 0xDF),
         panel_top_border: Color::from_rgba8(0x00, 0x00, 0x00, 0x10),
-        panel_padding_horizontal: 4.0,
+        panel_padding_horizontal: 15.0,
         panel_padding_top: 10.0,
-        panel_padding_bottom: 14.0,
-        row_height: 48.0,
+        panel_padding_bottom: 6.0,
+        row_height: 45.0,
         key_h_gap: 6.0,
-        key_v_gap: 9.0,
-        key_corner_radius: 10.0,
+        key_v_gap: 9.5,
+        key_corner_radius: 6.0,
+        bottom_strip_height: 32.0,
         key_face_bg: Color::from_rgb8(0xFF, 0xFF, 0xFF),
         key_face_bg_pressed: Color::from_rgb8(0xE3, 0xCF, 0xC2),
         key_face_text: Color::from_rgb8(0x4C, 0x39, 0x28),
         key_face_text_pressed: Color::from_rgb8(0x4C, 0x39, 0x28),
         key_shadow: Color::from_rgba8(0, 0, 0, 0x00), // Gboard keys are flat
         key_shadow_offset_y: 0.0,
-        letter_font_size: 22.0,
+        letter_font_size: 24.0,
         utility_font_size: 16.0,
         util_key_bg: Color::from_rgb8(0xC8, 0xDD, 0xF5),
         util_key_bg_pressed: Color::from_rgb8(0xA3, 0xC2, 0xE8),
@@ -143,6 +155,7 @@ fn android(dark: bool) -> Style {
         return_key_bg: Color::from_rgb8(0xBC, 0xD5, 0xF2),
         return_key_text: Color::from_rgb8(0x3F, 0x48, 0x54),
         return_key_bg_pressed: Color::from_rgb8(0x93, 0xB8, 0xE4),
+        preview_bg: Color::from_rgb8(0xFF, 0xFF, 0xFF),
     };
     if !dark {
         return base;
@@ -163,6 +176,7 @@ fn android(dark: bool) -> Style {
         return_key_bg: Color::from_rgb8(0xA8, 0xC8, 0xF0),
         return_key_text: Color::from_rgb8(0x20, 0x2A, 0x38),
         return_key_bg_pressed: Color::from_rgb8(0x84, 0xAC, 0xDE),
+        preview_bg: Color::from_rgb8(0x4A, 0x44, 0x3F),
         ..base
     }
 }
@@ -178,6 +192,7 @@ fn neutral(dark: bool) -> Style {
         key_h_gap: 5.0,
         key_v_gap: 8.0,
         key_corner_radius: 6.0,
+        bottom_strip_height: 30.0,
         key_face_bg: Color::from_rgb8(0x2A, 0x2B, 0x36),
         key_face_bg_pressed: Color::from_rgb8(0x44, 0x46, 0x55),
         key_face_text: Color::from_rgb8(0xE7, 0xE8, 0xF0),
@@ -192,6 +207,7 @@ fn neutral(dark: bool) -> Style {
         return_key_bg: Color::from_rgb8(0x3B, 0x82, 0xF6),
         return_key_text: Color::from_rgb8(0xFF, 0xFF, 0xFF),
         return_key_bg_pressed: Color::from_rgb8(0x2B, 0x66, 0xD0),
+        preview_bg: Color::from_rgb8(0x44, 0x46, 0x55),
     };
     if dark {
         return base;
@@ -207,6 +223,7 @@ fn neutral(dark: bool) -> Style {
         util_key_bg: Color::from_rgb8(0xC9, 0xCC, 0xD6),
         util_key_bg_pressed: Color::from_rgb8(0xAF, 0xB3, 0xC0),
         util_key_text: Color::from_rgb8(0x14, 0x15, 0x1C),
+        preview_bg: Color::from_rgb8(0xFF, 0xFF, 0xFF),
         ..base
     }
 }

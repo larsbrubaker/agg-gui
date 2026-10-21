@@ -300,23 +300,32 @@ pub(crate) fn notify_focus_change(
     viewport_width: f64,
     root: &mut dyn Widget,
 ) {
-    use crate::widgets::on_screen_keyboard::{set_text_input_focused, KeyboardInputMode};
+    use crate::widgets::on_screen_keyboard::{
+        set_text_input_focused_with_hints, KeyboardInputMode, TextInputHints,
+    };
     LIFTED_MODAL_FOCUS.with(|c| c.set(None));
     // Read the affordance bundle from the focused widget — text input
     // flag, current text (for the sentence-start auto-cap heuristic),
     // and the preferred keyboard mode (Numeric fields open on digits).
-    let (accepts, existing_text, mode) = match new_path {
+    let none = (
+        false,
+        None,
+        KeyboardInputMode::Text,
+        TextInputHints::default(),
+    );
+    let (accepts, existing_text, mode, hints) = match new_path {
         Some(p) => match mutable_widget_at_path(root, p) {
             Some(w) => (
                 w.accepts_text_input(),
                 w.text_input_value(),
                 w.text_input_mode(),
+                w.text_input_hints(),
             ),
-            None => (false, None, KeyboardInputMode::Text),
+            None => none,
         },
-        None => (false, None, KeyboardInputMode::Text),
+        None => none,
     };
-    set_text_input_focused(accepts, existing_text.as_deref(), mode);
+    set_text_input_focused_with_hints(accepts, existing_text.as_deref(), mode, hints);
     if super::keyboard_resize::active() {
         // The next layout, in the keyboard's new room, places the field.
         super::keyboard_resize::note_focus_change();

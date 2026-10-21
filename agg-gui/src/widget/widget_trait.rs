@@ -392,6 +392,14 @@ pub trait Widget {
         crate::widgets::on_screen_keyboard::KeyboardInputMode::Text
     }
 
+    /// What this widget's Enter does (the on-screen keyboard's Enter icon)
+    /// and whether its sentences start with a capital. Default is
+    /// [`TextInputHints::MULTI_LINE`](crate::widgets::on_screen_keyboard::TextInputHints::MULTI_LINE);
+    /// `TextField` returns its own (one-line: Done, lower case).
+    fn text_input_hints(&self) -> crate::widgets::on_screen_keyboard::TextInputHints {
+        crate::widgets::on_screen_keyboard::TextInputHints::MULTI_LINE
+    }
+
     /// Try to lift this widget's visible content upward by `amount`
     /// pixels.  Used by the on-screen-keyboard auto-scroll so a
     /// focused text field doesn't end up hidden behind the keyboard
