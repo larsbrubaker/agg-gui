@@ -23,6 +23,7 @@ impl Widget for ScrollView {
             return false;
         }
         self.scrollbar_animation_active()
+            || self.fling.is_some()
             || self.painted_style_epoch.get() != current_scroll_style_epoch()
             || self.children().iter().any(|c| c.needs_draw())
     }
@@ -49,6 +50,7 @@ impl Widget for ScrollView {
         if applied.abs() < 0.5 {
             return 0.0;
         }
+        self.stop_fling();
         self.v.offset = target;
         self.publish_offsets();
         crate::animation::request_draw();
@@ -67,6 +69,7 @@ impl Widget for ScrollView {
             crate::widgets::scrollbar::minimum_scroll_to_show(self.v.offset, top - vh, top, rect);
         let target = offset.clamp(0.0, self.v.max_scroll(vh));
         if target != self.v.offset {
+            self.stop_fling();
             self.v.offset = target;
             self.publish_offsets();
             crate::animation::request_draw();
@@ -140,12 +143,18 @@ impl Widget for ScrollView {
     }
 
     fn layout(&mut self, available: Size) -> Size {
-        // Pull live state from external cells first.
+        // Pull live state from external cells first. A fling publishes
+        // every step to the cells, so a cell that no longer holds the offset
+        // was set from outside: a programmatic scroll, which stops the fling.
+        let before = (self.v.offset, self.h.offset);
         if let Some(c) = &self.offset_cell {
             self.v.offset = c.get();
         }
         if let Some(c) = &self.h_offset_cell {
             self.h.offset = c.get();
+        }
+        if (self.v.offset, self.h.offset) != before {
+            self.stop_fling();
         }
         if let Some(c) = &self.visibility_cell {
             self.bar_visibility = c.get();
@@ -186,6 +195,9 @@ impl Widget for ScrollView {
         // Re-query viewport now that content dimensions are known (Solid bars
         // may reserve different space once we know overflow).
         let (vw, vh) = self.viewport();
+
+        // A flick's throw moves on against the content just measured.
+        self.step_fling(vw, vh);
 
         if self.stick_to_bottom && self.was_at_bottom {
             self.v.offset = self.v.max_scroll(vh);
@@ -285,6 +297,8 @@ impl Widget for ScrollView {
                 modifiers,
                 ..
             } => {
+                // The wheel takes over from a flick's throw.
+                self.stop_fling();
                 // Shift turns a wheel sideways, where the view scrolls
                 // horizontally and something is off the sides (otherwise the
                 // wheel scrolls as it always did): agg-sharp's
@@ -345,6 +359,9 @@ impl Widget for ScrollView {
                     let world = crate::widget::current_mouse_world().unwrap_or(*pos);
                     let dx = world.x - self.middle_start_world.x;
                     let dy = world.y - self.middle_start_world.y;
+                    if self.v.touch_panning {
+                        self.track_pan(world);
+                    }
                     if self.h.enabled {
                         self.h.offset = self.middle_start_h_offset - dx;
                     }
@@ -412,6 +429,9 @@ impl Widget for ScrollView {
                     }
                 }
                 if v_scroll || h_scroll {
+                    // A new pan starts from where a throw has got to.
+                    self.stop_fling();
+                    self.velocity.clear();
                     self.v.touch_panning = touch.is_some();
                     self.h.touch_panning = touch.is_some();
                     self.middle_dragging = true;
@@ -429,6 +449,9 @@ impl Widget for ScrollView {
                 button: MouseButton::Left,
                 ..
             } => {
+                // A press on the view (its bar, or a mouse click) stops a
+                // flick's throw.
+                self.stop_fling();
                 let (vw, vh) = self.viewport();
                 let v_scroll = self.v.can_scroll(vh);
                 let h_scroll = self.h.can_scroll(vw);
@@ -479,6 +502,7 @@ impl Widget for ScrollView {
                 self.middle_dragging = false;
                 self.v.touch_panning = false;
                 self.h.touch_panning = false;
+                self.velocity.clear();
                 if was {
                     crate::animation::request_draw();
                     EventResult::Consumed
@@ -488,7 +512,13 @@ impl Widget for ScrollView {
             }
 
             // ── Mouse up ──────────────────────────────────────────────────────
-            Event::MouseUp { button, .. } => {
+            Event::MouseUp { pos, button, .. } => {
+                // A touch pan whose finger lifts (not a second finger landing,
+                // not a cancel) may throw the content on.
+                let thrown = *button == MouseButton::Middle
+                    && self.middle_dragging
+                    && self.v.touch_panning
+                    && crate::touch_emulation::fling::lift_may_fling();
                 let was = self.v.dragging
                     || self.h.dragging
                     || (*button == MouseButton::Middle && self.middle_dragging);
@@ -498,6 +528,11 @@ impl Widget for ScrollView {
                     self.middle_dragging = false;
                     self.v.touch_panning = false;
                     self.h.touch_panning = false;
+                    if thrown {
+                        let world = crate::widget::current_mouse_world().unwrap_or(*pos);
+                        self.start_fling(Point::new(world.x - pos.x, world.y - pos.y));
+                    }
+                    self.velocity.clear();
                 }
                 if was {
                     crate::animation::request_draw();

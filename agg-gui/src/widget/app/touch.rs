@@ -10,6 +10,11 @@
 //! (`touch_drag_press`). Platform shells therefore forward raw touches ONLY —
 //! synthesizing mouse events shell-side would double-fire them.
 //!
+//! Momentum scrolling ([`crate::touch_emulation::fling`]) needs two things
+//! from here: a finger landing on a flinging view catches it (and is then no
+//! tap), and only a finger's lift — not a second finger landing, not a
+//! cancel — may throw the content.
+//!
 //! The long press ([`crate::touch_emulation::long_press`]) needs time to
 //! pass with no input: `layout` polls the emulator every frame
 //! (`tick_long_press`), and `paint` keeps a wake-up armed for the next
@@ -44,6 +49,11 @@ impl App {
         if crate::widgets::on_screen_keyboard::contains_point(self.flip_y(screen_x, screen_y)) {
             self.touch_mouse_emu.cancel_long_press();
         }
+        // A finger on content that is still flinging stops it, and is not a
+        // tap on whatever row the fling carried under it.
+        if crate::touch_emulation::fling::catch_at(pos) {
+            self.touch_mouse_emu.catch_fling();
+        }
         // Wake an idle app when the hold's cue is due; each paint after
         // that re-arms until the long press fires or the finger lets go.
         if self.touch_mouse_emu.long_press_deadline().is_some() {
@@ -74,7 +84,8 @@ impl App {
         crate::touch_points::publish(self.touch_state.active_points());
         crate::touch_state::note_touch_event();
         let cmds = self.touch_mouse_emu.on_end(device, id);
-        self.apply_emu_cmds(cmds);
+        // The finger lifting is the one release that may fling a pan.
+        crate::touch_emulation::fling::while_lifting(|| self.apply_emu_cmds(cmds));
     }
     pub fn on_touch_cancel(
         &mut self,

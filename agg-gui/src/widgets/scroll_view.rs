@@ -398,6 +398,11 @@ pub struct ScrollView {
     /// Offsets of the last layout; a change is a scroll, announced to the
     /// subtree (`Widget::on_ancestor_scrolled`).
     laid_out_offsets: Option<(f64, f64)>,
+    /// Momentum scrolling of touch pans (`fling.rs`): whether it is on, the
+    /// pan's recent finger positions, and the running throw.
+    fling_enabled: bool,
+    velocity: fling::VelocityTracker,
+    fling: Option<fling::Fling>,
 }
 
 impl ScrollView {
@@ -431,6 +436,9 @@ impl ScrollView {
             middle_start_h_offset: 0.0,
             fade_color: None,
             laid_out_offsets: None,
+            fling_enabled: true,
+            velocity: fling::VelocityTracker::new(),
+            fling: None,
         }
     }
 
@@ -477,6 +485,7 @@ impl ScrollView {
     }
 
     pub fn set_scroll_offset(&mut self, offset: f64) {
+        self.stop_fling();
         self.v.offset = offset;
         // A request away from the bottom stops stick-to-bottom following
         // growing content until the view is back at the end (agg-sharp's
@@ -722,6 +731,7 @@ impl ScrollView {
 }
 
 mod bar_properties;
+pub mod fling;
 mod widget_impl;
 
 mod touch_pan;

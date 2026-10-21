@@ -45,6 +45,9 @@
 //!     and every touch event checks the deadline first, so a late frame
 //!     never turns a hold into a tap or a drag. The cue, the touch-origin
 //!     flag and the listeners are in [`long_press`].
+//!   - A finger that lands on a `ScrollView` while it flings catches it
+//!     ([`fling`]): the content stops, and the touch is neither a tap nor a
+//!     long press, though it can still drag.
 //!
 //! All coordinates are the same screen-space (Y-down, physical-pixel)
 //! units the `App::on_mouse_*` entry points accept.
@@ -57,6 +60,7 @@ use web_time::Instant;
 use crate::event::MouseButton;
 use crate::touch_state::{TouchDeviceId, TouchId};
 
+pub mod fling;
 pub mod long_press;
 pub use long_press::{
     last_press_was_touch, long_press_cue, long_press_ring_drawn, on_long_press,
@@ -139,6 +143,9 @@ pub struct TouchMouseEmu {
     /// The touch-down point of a long press that fired since the last
     /// [`Self::take_long_press`].
     fired: Option<(f64, f64)>,
+    /// True once the primary finger caught a fling ([`Self::catch_fling`]):
+    /// its lift taps nothing.
+    caught: bool,
 }
 
 impl TouchMouseEmu {
@@ -160,6 +167,7 @@ impl TouchMouseEmu {
             self.suppressed = false;
             self.held_since = Some(crate::clock::now());
             self.spent = false;
+            self.caught = false;
             return vec![EmuCmd::MouseMove(x, y)];
         }
         // A hold that came due before this finger landed fires first.
@@ -242,6 +250,19 @@ impl TouchMouseEmu {
         }
     }
 
+    /// The primary finger landed on content that was still flinging and
+    /// stopped it ([`fling`]). The user aimed at moving content, not at the
+    /// row that happened to be under the finger: the touch's lift is no tap
+    /// and holding it is no long press. It can still become a drag (a pan
+    /// that takes over from the fling). Does nothing once the finger has
+    /// dragged or the gesture went multi-touch.
+    pub fn catch_fling(&mut self) {
+        if self.primary.is_some() && !self.suppressed && !self.scrolling && !self.pressed {
+            self.caught = true;
+            self.held_since = None;
+        }
+    }
+
     /// The touch-down point of the primary finger (screen space).
     pub fn start_pos(&self) -> (f64, f64) {
         self.start_pos
@@ -284,7 +305,7 @@ impl TouchMouseEmu {
                 self.scrolling = false;
                 cmds.push(EmuCmd::MouseUp(x, y, MouseButton::Middle));
                 cmds.push(EmuCmd::MouseLeave);
-            } else if allow_tap {
+            } else if allow_tap && !self.caught {
                 cmds.push(EmuCmd::MouseDown(x, y, MouseButton::Left));
                 cmds.push(EmuCmd::MouseUp(x, y, MouseButton::Left));
                 cmds.push(EmuCmd::MouseLeave);
@@ -300,6 +321,7 @@ impl TouchMouseEmu {
             self.pressed = false;
             self.suppressed = false;
             self.spent = false;
+            self.caught = false;
             self.held_since = None;
         }
         cmds

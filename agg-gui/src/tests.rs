@@ -148,6 +148,7 @@ mod scroll_relayout;
 mod scroll_solid_reserve;
 mod scroll_view;
 mod scroll_view_downcast;
+mod scroll_view_fling;
 mod scrollable_touch_pan;
 mod scrollable_widget;
 mod scrollable_widget_options;
