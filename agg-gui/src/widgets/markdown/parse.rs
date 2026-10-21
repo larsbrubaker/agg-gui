@@ -77,6 +77,8 @@ pub(super) fn parse_markdown(markdown: &str) -> Vec<ParagraphItem> {
     let mut aligns = AlignStack::default();
     let mut html_blocks = HtmlBlocks::default();
     let mut stamped = 0usize;
+    // The event that opened the heading being read, for its source text.
+    let mut heading_start: Option<usize> = None;
 
     /// Push the pending text as one item of `style`. An item glues onto the
     /// one before it when no whitespace separates them in the source.
@@ -145,6 +147,7 @@ pub(super) fn parse_markdown(markdown: &str) -> Vec<ParagraphItem> {
                 quote,
                 align: MarkdownAlign::Left,
                 level: 0,
+                anchor: None,
             });
         }
     }
@@ -426,6 +429,7 @@ pub(super) fn parse_markdown(markdown: &str) -> Vec<ParagraphItem> {
                 }
             }
             MdEvent::Start(Tag::Heading { level, .. }) => {
+                heading_start = Some(idx);
                 flush_flow(
                     &mut out,
                     &mut cur_items,
@@ -458,8 +462,17 @@ pub(super) fn parse_markdown(markdown: &str) -> Vec<ParagraphItem> {
                     quote,
                     link,
                 );
-                if let Some(ParagraphItem::Flow { level: l, .. }) = out.get_mut(before) {
+                let anchor = heading_start
+                    .take()
+                    .map(|start| heading_source(&source, &event_ranges[start + 1..idx]));
+                if let Some(ParagraphItem::Flow {
+                    level: l,
+                    anchor: a,
+                    ..
+                }) = out.get_mut(before)
+                {
                     *l = level as u8;
+                    *a = anchor;
                 }
                 add_spacer(&mut out);
                 cur_style = LineStyle::Body;
@@ -643,6 +656,19 @@ pub(super) fn parse_markdown(markdown: &str) -> Vec<ParagraphItem> {
     );
     alignment::stamp(&mut out[stamped..], aligns.current());
     out
+}
+
+/// A heading's source text between its marks: from where its first inline
+/// event starts to where its last ends (so an ATX heading's `#`s, its closing
+/// `#`s and a setext underline are left out), trimmed. Empty for an empty
+/// heading.
+fn heading_source(source: &str, inner: &[std::ops::Range<usize>]) -> String {
+    let start = inner.iter().map(|r| r.start).min();
+    let end = inner.iter().map(|r| r.end).max();
+    match (start, end) {
+        (Some(start), Some(end)) => source.get(start..end).unwrap_or("").trim().to_string(),
+        _ => String::new(),
+    }
 }
 
 /// A table column's alignment: MarkdigAgg's `AggTableRenderer` leaves a

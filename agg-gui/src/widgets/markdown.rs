@@ -28,7 +28,9 @@
 //!
 //! # Supported Markdown features
 //!
-//! - Headings H1–H4 (larger font sizes)
+//! - Headings H1–H4 (larger font sizes), each with the anchor a docs site
+//!   gives it, and where it sits ([`MarkdownView::headings`],
+//!   [`heading_slug`], `headings.rs`)
 //! - Paragraphs (word-wrapped)
 //! - Bullet lists (`-`/`*`) with "• " prefix
 //! - Ordered lists with "N. " prefix
@@ -100,6 +102,9 @@ mod feature_rendering_tests;
 #[cfg(test)]
 mod grid_table_tests;
 mod grid_tables;
+mod headings;
+#[cfg(test)]
+mod headings_tests;
 mod html_form;
 #[cfg(test)]
 mod html_form_tests;
@@ -151,6 +156,7 @@ use block_scroll::{
 };
 pub use colors::MarkdownColors;
 pub use emphasis::MarkdownRunStyle;
+pub use headings::{heading_slug, MarkdownHeading};
 pub use html_form::{markdown_html, markdown_html_collapsed};
 pub use image_loader::{
     clear_remote_image_loader_on_this_thread, default_remote_image_loader,
@@ -304,6 +310,10 @@ enum ParagraphItem {
         align: MarkdownAlign,
         /// The heading level (1-6), 0 for a paragraph or list item.
         level: u8,
+        /// A Markdown heading's source text between its marks (`headings.rs`
+        /// makes its anchor from it); `None` for a paragraph, a list item and
+        /// a heading written as an HTML element.
+        anchor: Option<String>,
     },
     Table {
         rows: Vec<Vec<String>>,
@@ -411,6 +421,9 @@ pub struct MarkdownView {
     content_h: f64,
     /// Widest text row from the last layout pass (see [`MarkdownView::max_line_width`]).
     max_line_w: f64,
+    /// The Markdown headings of the last layout pass: the index in `items`
+    /// of each one's first row and its source text (`headings.rs`).
+    heading_rows: Vec<(usize, String)>,
     on_link_click: Option<UrlCallback>,
     on_image_open: Option<UrlCallback>,
     block_scrolls: Vec<BlockScroll>,
@@ -464,6 +477,7 @@ impl MarkdownView {
             items: Vec::new(),
             content_h: 0.0,
             max_line_w: 0.0,
+            heading_rows: Vec::new(),
             on_link_click: None,
             on_image_open: None,
             block_scrolls: Vec::new(),

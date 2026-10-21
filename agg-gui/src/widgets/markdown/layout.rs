@@ -79,6 +79,9 @@ impl MarkdownView {
         let mut block_idx = 0usize;
         // Widest text row (indent + its content), C#'s `ParagraphX.MaxLineWidth`.
         let mut max_line_w = 0.0_f64;
+        // Each Markdown heading's first row in `laid_out` (which becomes
+        // `items` in order) and its source text, for `headings.rs`.
+        let mut heading_rows = Vec::new();
 
         for item in &paragraphs {
             match item {
@@ -183,6 +186,7 @@ impl MarkdownView {
                     quote,
                     align,
                     level,
+                    anchor,
                 } => {
                     let flow_start = laid_out.len();
                     let font_size = style.font_size(self.font_size);
@@ -307,6 +311,9 @@ impl MarkdownView {
                         }
                     }
                     alignment::align_rows(&mut laid_out[flow_start..], avail, *align);
+                    if let Some(anchor) = anchor.as_ref().filter(|_| laid_out.len() > flow_start) {
+                        heading_rows.push((flow_start, anchor.clone()));
+                    }
                 }
             }
         }
@@ -340,6 +347,7 @@ impl MarkdownView {
 
         self.content_h = total_h;
         self.max_line_w = max_line_w;
+        self.heading_rows = heading_rows;
         self.bounds = crate::geometry::Rect::new(0.0, 0.0, wrap_w, total_h);
         self.rebuild_selection_model();
         Size::new(wrap_w, total_h)

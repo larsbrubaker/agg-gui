@@ -144,6 +144,7 @@ pub(super) fn write_html_block(
         quote,
         align,
         level,
+        anchor: None,
     });
     if !matches!(out.last(), Some(ParagraphItem::Spacer)) {
         out.push(ParagraphItem::Spacer);

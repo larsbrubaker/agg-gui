@@ -118,11 +118,11 @@ pub use image_view::ImageView;
 pub use inspector::{InspectorPanel, InspectorSavedState};
 pub use label::{Label, LabelAlign};
 pub use markdown::{
-    clear_remote_image_loader_on_this_thread, default_remote_image_loader,
+    clear_remote_image_loader_on_this_thread, default_remote_image_loader, heading_slug,
     remote_image_loader_on_this_thread, remote_images_in_flight,
     remote_images_in_flight_on_this_thread, set_default_remote_image_loader,
     set_remote_image_loader_on_this_thread, HttpRemoteImageLoader, MarkdownBlockKind,
-    MarkdownTableCell, MarkdownView, RemoteImageDone, RemoteImageLoader,
+    MarkdownHeading, MarkdownTableCell, MarkdownView, RemoteImageDone, RemoteImageLoader,
 };
 pub use menu::{
     MenuBar, MenuBarStrip, MenuEntry, MenuItem, MenuResponse, MenuSelection, MenuShortcut,
