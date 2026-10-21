@@ -13,6 +13,73 @@
 //! - per-OS chrome (iOS / Android / generic) that approximates the
 //!   user's muscle memory.
 //!
+//! ## Why agg-gui draws its own keyboard (a settled decision)
+//!
+//! agg-gui types on touch screens with this keyboard, not the device's native
+//! soft keyboard, and will keep doing so. This is not a stopgap: the keyboard
+//! is a product surface we own and keep improving until it is as good as the
+//! one on the user's phone. Don't reopen the native route without reading this.
+//!
+//! agg-gui draws its whole UI into one canvas. A browser can't open its
+//! keyboard for a canvas, so every canvas-drawn framework fakes a focused DOM
+//! text element and then has to keep its layout in step with a keyboard whose
+//! size and timing the browser reports badly. That is a well-documented,
+//! unsolved problem, not something we failed to figure out:
+//!
+//! - MatterCAD spent hours on the native keyboard (2026): the app couldn't tell
+//!   how high to lift its layout, and the page's JavaScript and the app
+//!   disagreed about when the keyboard rose and fell.
+//! - egui/eframe uses that hidden-input trick; its maintainer's own tracking
+//!   issue says "Text editing on mobile web is pretty bad in eframe" (the
+//!   keyboard covering the field, janky focus, Backspace failing, the keyboard
+//!   not always appearing on iOS): <https://github.com/emilk/egui/issues/4500>.
+//! - Slint's WASM input never raised the mobile keyboard
+//!   (<https://github.com/slint-ui/slint/issues/215>); Iced on native Android
+//!   gets raw key events only, so no composition, autocorrect or swipe.
+//! - Avalonia's WASM keyboard is broken on Android browsers; a maintainer
+//!   called the hidden-input approach a hack that "will never work properly"
+//!   (<https://github.com/AvaloniaUI/Avalonia/issues/11665>).
+//! - Flutter web, the most mature canvas-drawn framework, also uses a hidden
+//!   input and still has the keyboard covering the field on Safari
+//!   (<https://github.com/flutter/flutter/issues/42211>).
+//! - The browser APIs meant to fix this don't yet: Chrome's VirtualKeyboard API
+//!   overshoots the keyboard's height while it animates and reports its
+//!   rectangle in the wrong coordinates (only `keyboard-inset-height` is right),
+//!   and Safari and Firefox lack it
+//!   (<https://zouhir.org/blog/virtual-keyboard-api/>); EditContext, the proper
+//!   API for canvas editors, is experimental and Chromium-only.
+//!
+//! Owning the keyboard removes that whole class of problems: its height is
+//! ours, so the app always lays out exactly above it; it opens and closes when
+//! we say; it never covers the field; it behaves the same in every browser and
+//! natively.
+//!
+//! ### The bar: as good as the phone's own keyboard
+//!
+//! References: `docs/Android Keyboard/` (Gboard). The keyboard must
+//! - leave no dead space: every point belongs to the nearest key, so a touch
+//!   between keys types the closest one;
+//! - look and feel like the platform keyboard: key shapes, gaps, proportions,
+//!   the middle row's half-key offset, the bottom row, light and dark colours;
+//! - show letters in the case Shift will type, with Shift and Caps Lock as on
+//!   the phone, and label Enter with what it does (Done, Search, Next, Go);
+//! - offer the long-press alternates (accents, digits) and the symbol, number
+//!   and emoji pages;
+//! - add no latency, repeat a held Backspace, and never lose a tap to a drag or
+//!   a long press;
+//! - tell the app its exact height the moment it changes, so the app lays out
+//!   above it and keeps the focused field in view.
+//!
+//! Swipe (glide) typing needs a word-prediction engine and per-language
+//! dictionaries; it is the one thing the phone's keyboard has that this one
+//! doesn't yet, and if it is built, it belongs here.
+//!
+//! Look again only if the platform changes: EditContext (or an equivalent) in
+//! Safari and Chrome on Android and iOS, with keyboard geometry reported
+//! correctly while it animates. If the native route is ever retried, start from
+//! Flutter's pattern (a hidden input over the field, the settled visible-area
+//! height) and test on real phones first.
+//!
 //! ## Architecture (follows the combo-popup pattern)
 //!
 //! - The keyboard is **not** a child widget in the tree. It lives in
