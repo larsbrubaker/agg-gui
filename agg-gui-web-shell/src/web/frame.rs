@@ -180,6 +180,9 @@ fn tick() {
     let fullscreen = platform::service_fullscreen(&canvas);
     report_geometry(w, h, dpr, fullscreen);
 
+    // Input held while the app was borrowed reaches it before the tick's
+    // own work, so a press and its release stay in order with everything else.
+    super::deliver_held_input();
     with_app_host(|app, host| host.on_tick(app));
     // Queued UI work (`agg_gui::ui_thread`) before the paint decision, so
     // what it changes shows this tick; it runs even while the GPU is not

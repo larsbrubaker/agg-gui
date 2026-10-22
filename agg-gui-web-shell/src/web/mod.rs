@@ -30,6 +30,7 @@ use wasm_bindgen::JsValue;
 use crate::config::{RedrawPolicy, WebShellConfig};
 use crate::error::{GpuInfo, WebShellError};
 use crate::fatal::{fatal_message, shows_panel};
+use crate::held_input::HeldInput;
 use crate::host::WebShellHost;
 use crate::pointer::PointerTracker;
 use crate::policy::FirstPaintGate;
@@ -66,6 +67,9 @@ thread_local! {
     /// forwarder keeps agg-gui's default `ClickPolicy`; the native shell is
     /// the one that reads the OS setting (`agg-gui-shell`'s `click_policy`).
     static INPUT: RefCell<InputForwarder> = RefCell::new(InputForwarder::new());
+    /// Input that arrived while the app was borrowed, waiting for it
+    /// ([`forward`]).
+    static HELD_INPUT: HeldInput<ForwarderEvent> = const { HeldInput::new() };
     static FIRST_PAINT: FirstPaintGate = const { FirstPaintGate::new() };
     /// Latched once any frame has been presented since boot (unlike the
     /// gate, a GPU rebuild does not reopen it).
@@ -128,10 +132,30 @@ pub fn with_app<R>(f: impl FnOnce(&mut App) -> R) -> Option<R> {
 }
 
 /// Hand one DOM input event to the shell's [`InputForwarder`], which calls
-/// the matching `App` entry point. Dropped, as before, while the app is not
-/// built yet (or is borrowed).
+/// the matching `App` entry point. While the app is borrowed (a DOM event the
+/// browser fires synchronously from inside the app) the event is held and
+/// delivered, in arrival order, by the next forward or the next frame tick
+/// ([`deliver_held_input`]); see [`crate::held_input`]. Dropped only while
+/// the app is not built yet.
 pub(crate) fn forward(event: ForwarderEvent) {
-    with_app(|app| INPUT.with(|f| f.borrow_mut().platform(app, event)));
+    forward_or_hold(Some(event));
+}
+
+/// Deliver any input held while the app was borrowed. The frame tick calls
+/// this before anything else touches the app.
+pub(crate) fn deliver_held_input() {
+    forward_or_hold(None);
+}
+
+/// [`crate::held_input::forward_or_hold`] on the shell's app and held input.
+fn forward_or_hold(event: Option<ForwarderEvent>) {
+    APP.with(|app| {
+        HELD_INPUT.with(|held| {
+            crate::held_input::forward_or_hold(app, held, event, |app, event| {
+                INPUT.with(|f| f.borrow_mut().platform(app, event));
+            })
+        })
+    });
 }
 
 /// Run `f` with the shell's canvas element. `None` before [`start`]. Safe

@@ -112,7 +112,11 @@ impl<'a> WebShellControl<'a> {
 ///   `has_presented` are safe (separate cells, never held across a callback);
 /// - a `#[wasm_bindgen]` export the page calls *during* a callback cannot
 ///   happen (the browser main thread is busy), so exports may use `with_app`
-///   freely.
+///   freely;
+/// - a DOM input event the browser fires synchronously from a DOM call made
+///   inside a callback is held and reaches the app, in order, as soon as the
+///   callback returns control (the next input event or frame tick), never
+///   lost.
 pub trait WebShellHost {
     /// Runs on **every** `requestAnimationFrame` tick, before the shell
     /// drains `agg_gui::ui_thread`'s queued work and decides whether to
