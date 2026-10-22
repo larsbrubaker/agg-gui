@@ -1,5 +1,6 @@
 //! Pointer-input methods on [`App`] — mouse move/down/up plus the
-//! modal-subtree hit extension they share. Split out of `app.rs`
+//! modal-subtree hit extension they share, with the hover a modal lets
+//! pass outside its bounds. Split out of `app.rs`
 //! (800-line guardrail); keyboard routing is in `keyboard.rs`, wheel
 //! routing stays in `app.rs`.
 
@@ -32,17 +33,17 @@ impl App {
         }
     }
 
-    /// Extend the active modal widget's path by hit-testing inside its
-    /// subtree at `pos_in_root`, so the modal's own children (buttons,
-    /// fields, scroll views) receive pointer events. Falls back to the
-    /// modal widget itself when nothing inside is hit (the scrim).
-    pub(crate) fn extend_modal_path(&self, modal_path: &[usize], pos_in_root: Point) -> Vec<usize> {
+    /// The widget at `modal_path` and `pos_in_root` in its own coordinates;
+    /// `None` when the path no longer names a widget.
+    fn modal_local(
+        &self,
+        modal_path: &[usize],
+        pos_in_root: Point,
+    ) -> Option<(&dyn Widget, Point)> {
         let mut widget: &dyn Widget = self.root.as_ref();
         let mut pos = pos_in_root;
         for &index in modal_path {
-            let Some(child) = widget.children().get(index) else {
-                return modal_path.to_vec();
-            };
+            let child = widget.children().get(index)?;
             let bounds = child.bounds();
             if let Some(t) = widget.child_transform() {
                 t.inverse_transform(&mut pos.x, &mut pos.y);
@@ -50,11 +51,42 @@ impl App {
             pos = Point::new(pos.x - bounds.x, pos.y - bounds.y);
             widget = child.as_ref();
         }
+        Some((widget, pos))
+    }
+
+    /// Extend the active modal widget's path by hit-testing inside its
+    /// subtree at `pos_in_root`, so the modal's own children (buttons,
+    /// fields, scroll views) receive pointer events. Falls back to the
+    /// modal widget itself when nothing inside is hit (the scrim).
+    pub(crate) fn extend_modal_path(&self, modal_path: &[usize], pos_in_root: Point) -> Vec<usize> {
         let mut full = modal_path.to_vec();
-        if let Some(sub_path) = hit_test_subtree(widget, pos) {
-            full.extend(sub_path);
+        if let Some((widget, pos)) = self.modal_local(modal_path, pos_in_root) {
+            if let Some(sub_path) = hit_test_subtree(widget, pos) {
+                full.extend(sub_path);
+            }
         }
         full
+    }
+
+    /// Where a pointer move (hover) at `pos` goes while a modal is active:
+    /// the hit inside the modal's subtree. `None` when no modal is active,
+    /// or when the modal lets hover outside it pass
+    /// ([`Widget::modal_hover_passes_outside`]) and `pos` is outside its
+    /// bounds; the move then takes the ordinary hit-tested route, so the
+    /// widgets beside a light-dismiss panel still show their cursors.
+    fn modal_hover_path(&self, pos: Point) -> Option<Vec<usize>> {
+        let modal_path = active_modal_path(self.root.as_ref())?;
+        if let Some((widget, local)) = self.modal_local(&modal_path, pos) {
+            let bounds = widget.bounds();
+            let inside = local.x >= 0.0
+                && local.y >= 0.0
+                && local.x <= bounds.width
+                && local.y <= bounds.height;
+            if widget.modal_hover_passes_outside() && !inside {
+                return None;
+            }
+        }
+        Some(self.extend_modal_path(&modal_path, pos))
     }
 
     /// Mouse cursor moved with an explicit modifier state. Equivalent to
@@ -79,8 +111,7 @@ impl App {
         }
         let pos = super::keyboard_scroll::lift_to_world(screen);
         set_current_mouse_world(pos);
-        if let Some(path) = active_modal_path(self.root.as_ref()) {
-            let path = self.extend_modal_path(&path, pos);
+        if let Some(path) = self.modal_hover_path(pos) {
             self.update_hover_chain(Some(&path), None);
             let event = Event::MouseMove { pos };
             // A widget holding the capture (a slider thumb, a resize edge)
@@ -325,8 +356,7 @@ impl App {
     /// after every press and release.
     fn refresh_hover_after_release(&mut self, pos: Point) {
         crate::cursor::reset_cursor_icon();
-        if let Some(path) = active_modal_path(self.root.as_ref()) {
-            let path = self.extend_modal_path(&path, pos);
+        if let Some(path) = self.modal_hover_path(pos) {
             self.update_hover_chain(Some(&path), None);
             dispatch_event(&mut self.root, &path, &Event::MouseMove { pos }, pos);
             self.store_hovered(Some(path));

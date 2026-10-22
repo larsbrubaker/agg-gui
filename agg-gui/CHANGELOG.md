@@ -10,6 +10,12 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- `Widget::modal_hover_passes_outside` (default `false`): a modal that answers `true` lets pointer
+  moves outside its bounds hover the widgets under the pointer as usual, so a light-dismiss panel
+  with no backdrop leaves the cursors beside it showing (a splitter's resize pointer), including
+  after `App::refresh_cursor`. Presses, releases, the wheel and keys still go to the modal, and a
+  drag it captured keeps every move.
+
 - Long press: a finger held still for `LONG_PRESS_DELAY` (500 ms) within `LONG_PRESS_SLOP` of where
   it went down, with no second finger, is a right press and release at the touch-down point, so
   every widget that opens a context menu on a right click opens it on a long press. The finger is

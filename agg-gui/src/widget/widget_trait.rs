@@ -116,6 +116,17 @@ pub trait Widget {
         false
     }
 
+    /// Whether, while this widget is the active modal, pointer moves outside
+    /// its bounds hover the widgets under the pointer as usual: their hover
+    /// state and cursor (a splitter's resize pointer) show, as beside any
+    /// panel. Presses, releases, the wheel and keys still go to the modal, so
+    /// a press outside still reaches it first (to close it). For a
+    /// light-dismiss panel with no backdrop; a dialog over a backdrop keeps
+    /// the default `false`, hiding what is beneath.
+    fn modal_hover_passes_outside(&self) -> bool {
+        false
+    }
+
     /// A [`ScrollView`](crate::widgets::ScrollView) above this widget has
     /// scrolled. Delivered to the whole scrolled subtree, only while a
     /// caret suggestion list is open anywhere; a widget showing an unclipped

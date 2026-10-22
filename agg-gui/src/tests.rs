@@ -113,6 +113,7 @@ mod ime_input;
 mod markdown_image_visibility;
 mod menu_hidpi_scale;
 mod menu_rows_by_press;
+mod modal_hover_outside;
 mod modal_sheet_move;
 mod modal_sheet_resize;
 mod modal_sheet_room;
