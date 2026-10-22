@@ -282,6 +282,7 @@ impl WgpuGfxCtx {
             &self.comp_op,
             &prepared,
             self.viewport,
+            self.adapter_caps.as_ref(),
         );
         if let Some((_, view)) = &proxy {
             crate::comp_op::blit_proxy(
@@ -326,6 +327,7 @@ fn execute_prepared<'a>(
     comp_op: &crate::comp_op::CompOpGpu,
     prepared: &'a [Prepared],
     surface_viewport: (f32, f32),
+    adapter_caps: Option<&crate::adapter_caps::AdapterCaps>,
 ) {
     // Initial clear: only honoured if the very first command is Clear.  Mid-frame
     // clears (after a draw) are skipped — the layer system makes them rare.
@@ -501,6 +503,8 @@ fn execute_prepared<'a>(
                         screen_rect: *screen_rect,
                         parent_clip: *parent_clip,
                         pipelines,
+                        adapter: adapter_caps.map(|caps| &caps.adapter),
+                        downlevel: adapter_caps.map(|caps| &caps.downlevel),
                     };
                     renderer.borrow_mut().render(ctx);
                     i += 1;

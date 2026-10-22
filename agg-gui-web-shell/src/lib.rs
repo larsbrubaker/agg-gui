@@ -7,7 +7,9 @@
 //! - a WebGPU or WebGL2 wgpu surface on a `<canvas>` — the consumer picks with
 //!   [`Backend`] (WebGPU and WebGL2 need the default `webgpu` and `webgl`
 //!   features; a WebGPU-only app turns `webgl` off), including a
-//!   clean WebGPU → WebGL2 fallback probed before the canvas is bound;
+//!   clean WebGPU → WebGL2 fallback probed before the canvas is bound, and
+//!   the app's own check of the adapter
+//!   ([`WebShellConfig::with_adapter_check`]) before the device is requested;
 //! - the `requestAnimationFrame` loop with [`RedrawPolicy::Reactive`] /
 //!   [`RedrawPolicy::Continuous`] run modes, layout caching, and the
 //!   **first-paint guarantee** (the first frame always paints, even when
@@ -71,6 +73,7 @@
 // exercised by the unit tests alone.
 #![cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 
+mod adapter_check;
 mod config;
 mod cursor;
 mod dom_math;
@@ -86,6 +89,7 @@ mod policy;
 mod recovery;
 mod settings;
 
+pub use adapter_check::{AdapterCheck, AdapterCheckFn};
 pub use config::{Backend, RedrawPolicy, WebShellConfig};
 pub use error::{GpuInfo, WebShellError};
 pub use fatal::{FatalHook, FatalMessageFn};

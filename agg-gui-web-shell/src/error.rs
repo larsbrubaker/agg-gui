@@ -1,6 +1,6 @@
 //! [`WebShellError`] — why the web shell could not start — and [`GpuInfo`],
-//! the device bundle handed to the app builder and to
-//! [`crate::WebShellHost::on_gpu_rebuilt`].
+//! the device bundle (with the adapter it came from) handed to the app
+//! builder and to [`crate::WebShellHost::on_gpu_rebuilt`].
 //!
 //! Platform-neutral (plain wgpu types), so both compile natively and the
 //! builder signature documented on docs.rs is the real one.
@@ -41,6 +41,9 @@ pub enum WebShellError {
     AlreadyStarted,
     /// The GPU device (or WebGL2 context) was lost and could not be rebuilt.
     DeviceLost(String),
+    /// The app's adapter check ([`crate::WebShellConfig::with_adapter_check`])
+    /// refused the adapter; the message is the app's own, shown as it is.
+    AdapterRejected(String),
 }
 
 impl WebShellError {
@@ -75,6 +78,7 @@ impl std::fmt::Display for WebShellError {
             Self::App(e) => write!(f, "app start-up: {e}"),
             Self::AlreadyStarted => write!(f, "agg-gui-web-shell was already started on this page"),
             Self::DeviceLost(e) => write!(f, "the GPU was lost and could not be recovered: {e}"),
+            Self::AdapterRejected(why) => f.write_str(why),
         }
     }
 }
@@ -98,6 +102,9 @@ pub struct GpuInfo {
     /// `BrowserWebGpu` or `Gl` — which API [`Backend::PreferWebGpu`] landed on.
     pub backend: wgpu::Backend,
     pub adapter_info: wgpu::AdapterInfo,
+    /// The adapter the device came from, for what a device cannot report:
+    /// `get_downlevel_capabilities()` and `get_texture_format_features(f)`.
+    pub adapter: wgpu::Adapter,
 }
 
 /// Pick the swap-chain format: agg-gui-wgpu's shared rule
@@ -218,5 +225,9 @@ mod tests {
         assert!(WebShellError::DeviceLost("x".into())
             .to_string()
             .contains("lost"));
+        assert_eq!(
+            WebShellError::AdapterRejected("Needs float targets.".into()).to_string(),
+            "Needs float targets."
+        );
     }
 }

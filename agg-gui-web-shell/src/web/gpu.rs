@@ -1,5 +1,6 @@
 //! Canvas GPU bring-up for the web shell: instance (with the WebGPU → WebGL2
-//! probe), surface, adapter, device, swap-chain configuration; per-frame
+//! probe), surface, adapter (and the app's adapter check, before any device
+//! exists), device, swap-chain configuration; per-frame
 //! surface acquire with recovery; and the device-loss rebuild.
 //!
 //! The union of three copies it replaces — `demo-wgpu`'s `web_shell`
@@ -18,6 +19,7 @@ use std::sync::Arc;
 
 use wasm_bindgen::JsValue;
 
+use crate::adapter_check::{run_adapter_check, AdapterCheck};
 use crate::config::{Backend, WebShellConfig};
 use crate::dom_math::clamp_to_max_dim;
 use crate::error::{device_features, device_limits, pick_surface_format, GpuInfo, WebShellError};
@@ -41,11 +43,14 @@ pub(crate) struct WebGpu {
     pub(crate) device: Arc<wgpu::Device>,
     pub(crate) queue: Arc<wgpu::Queue>,
     pub(crate) config: wgpu::SurfaceConfiguration,
-    adapter_info: wgpu::AdapterInfo,
+    /// The adapter the device came from; the render context and the app's
+    /// [`GpuInfo`] read what a device can't report from it.
+    pub(crate) adapter: wgpu::Adapter,
     lost: Arc<AtomicBool>,
     required_features: wgpu::Features,
     optional_features: wgpu::Features,
     limits_override: Option<wgpu::Limits>,
+    adapter_check: Option<AdapterCheck>,
     label: String,
 }
 
@@ -93,6 +98,7 @@ impl WebGpu {
             cfg.required_features,
             cfg.optional_features,
             cfg.limits.as_ref(),
+            cfg.adapter_check.as_ref(),
         )
         .await?;
 
@@ -127,22 +133,25 @@ impl WebGpu {
             device: Arc::new(device),
             queue: Arc::new(queue),
             config,
-            adapter_info: adapter.get_info(),
+            adapter,
             lost,
             required_features: cfg.required_features,
             optional_features: cfg.optional_features,
             limits_override: cfg.limits.clone(),
+            adapter_check: cfg.adapter_check.clone(),
             label: cfg.device_label.clone(),
         })
     }
 
     pub(crate) fn info(&self) -> GpuInfo {
+        let adapter_info = self.adapter.get_info();
         GpuInfo {
             device: Arc::clone(&self.device),
             queue: Arc::clone(&self.queue),
             surface_format: self.config.format,
-            backend: self.adapter_info.backend,
-            adapter_info: self.adapter_info.clone(),
+            backend: adapter_info.backend,
+            adapter_info,
+            adapter: self.adapter.clone(),
         }
     }
 
@@ -190,6 +199,7 @@ impl WebGpu {
             self.required_features,
             self.optional_features,
             self.limits_override.as_ref(),
+            self.adapter_check.as_ref(),
         )
         .await;
         match result {
@@ -197,7 +207,7 @@ impl WebGpu {
                 self.surface.configure(&device, &self.config);
                 self.device = Arc::new(device);
                 self.queue = Arc::new(queue);
-                self.adapter_info = adapter.get_info();
+                self.adapter = adapter;
                 self.lost = lost;
                 Ok(self)
             }
@@ -213,6 +223,7 @@ async fn request_device(
     required_features: wgpu::Features,
     optional_features: wgpu::Features,
     limits_override: Option<&wgpu::Limits>,
+    adapter_check: Option<&AdapterCheck>,
 ) -> Result<(wgpu::Device, wgpu::Queue, wgpu::Adapter, Arc<AtomicBool>), WebShellError> {
     let adapter = instance
         .request_adapter(&wgpu::RequestAdapterOptions {
@@ -222,6 +233,9 @@ async fn request_device(
         })
         .await
         .map_err(|e| WebShellError::RequestAdapter(format!("{e:?}")))?;
+    // The app's own refusal, before its required features: its message says
+    // what this browser's graphics lack in the app's words.
+    run_adapter_check(adapter_check, &adapter)?;
     let backend = adapter.get_info().backend;
     let features = device_features(adapter.features(), required_features, optional_features)?;
     let (device, queue) = adapter

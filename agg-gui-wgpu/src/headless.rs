@@ -582,7 +582,8 @@ impl HeadlessFrame {
             target.format(),
             w as f32,
             h as f32,
-        );
+        )
+        .with_adapter(gpu.wgpu_adapter());
         Self {
             ctx,
             target,

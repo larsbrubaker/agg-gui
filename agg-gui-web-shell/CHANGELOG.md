@@ -10,6 +10,15 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- `WebShellConfig::with_adapter_check(|adapter| -> Result<(), String>)` /
+  `adapter_check`: the app checks the adapter the browser handed out (downlevel
+  flags, texture format features) before the device is requested, and on every
+  device-loss rebuild. An `Err` stops start-up with the app's own message as the
+  new `WebShellError::AdapterRejected`, through the fatal path (console,
+  `on_fatal`, the panel). `GpuInfo::adapter` hands the adapter to the app
+  builder and `on_gpu_rebuilt`, and the render context records it, so custom
+  render passes see its downlevel capabilities.
+
 - `WebShellConfig::with_claimed_shortcut(key)` / `claimed_shortcuts`: Ctrl/Cmd shortcuts the app
   handles itself and takes from the browser (`'s'` for Save, so "Save Page As" does not open),
   applied at start through agg-gui's `claim_web_shortcut`. Empty by default.

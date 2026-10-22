@@ -95,6 +95,8 @@ pub use gpu_budget::{
 #[cfg(not(target_arch = "wasm32"))]
 pub use uncaptured_errors::UncapturedErrors;
 
+/// The adapter a context's device came from, for custom render passes.
+mod adapter_caps;
 pub mod custom_render;
 pub use custom_render::{SharedCustomRenderer, WgpuCustomRender, WgpuCustomRenderCtx};
 
@@ -370,6 +372,9 @@ pub struct WgpuGfxCtx {
     pub(crate) queue: Arc<wgpu::Queue>,
     pub(crate) surface_format: wgpu::TextureFormat,
     pub(crate) viewport: (f32, f32),
+    /// The adapter the device came from, when the shell recorded it
+    /// (`adapter_caps.rs`); custom render passes read it.
+    pub(crate) adapter_caps: Option<adapter_caps::AdapterCaps>,
 
     // ── render pipelines (created in Phase 2) ────────────────────────────────
     pub(crate) pipelines: WgpuPipelines,
@@ -597,6 +602,7 @@ impl WgpuGfxCtx {
             queue,
             surface_format,
             viewport: (width, height),
+            adapter_caps: None,
             pipelines,
             commands: Vec::new(),
             texture_cache: HashMap::new(),

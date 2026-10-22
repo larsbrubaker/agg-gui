@@ -10,6 +10,8 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- The window's render context records the GPU's adapter, so custom render
+  passes see `WgpuCustomRenderCtx::adapter` and `downlevel`.
 - `ShellSession`: the window, GPU and app `run` brings up, with the event
   loop pumped by the caller (`pump(timeout)` over winit's `pump_events`)
   instead of owning the thread, for a test that drives a real window step by

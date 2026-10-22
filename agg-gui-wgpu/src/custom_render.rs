@@ -84,6 +84,18 @@ pub struct WgpuCustomRenderCtx<'a> {
     /// 2-D render target without rebuilding the textured-quad pipeline
     /// itself.  See [`crate::ssaa::SsaaFramebuffer::blit_to`].
     pub pipelines: &'a WgpuPipelines,
+    /// The adapter `device` came from, for what a device cannot report
+    /// (per-format texture features, for one). `None` only when the
+    /// context's creator never called
+    /// [`WgpuGfxCtx::set_adapter`](crate::WgpuGfxCtx::set_adapter); the
+    /// native and web shells and the headless frame always do.
+    pub adapter: Option<&'a wgpu::Adapter>,
+    /// The adapter's downlevel capabilities, so a pass can be chosen from
+    /// what the adapter supports without test pipelines: WebGL2, for one,
+    /// lacks `DownlevelFlags::INDEPENDENT_BLEND` (different blends per
+    /// colour target in one pipeline). `None` exactly when
+    /// [`Self::adapter`] is.
+    pub downlevel: Option<&'a wgpu::DownlevelCapabilities>,
 }
 
 /// Trait implemented by widgets that want to inject custom wgpu render

@@ -10,6 +10,12 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- `WgpuGfxCtx::set_adapter` / `with_adapter` (and `adapter()`,
+  `downlevel_capabilities()`): record the adapter the device came from.
+  `WgpuCustomRenderCtx::adapter` and `WgpuCustomRenderCtx::downlevel` hand it
+  and its `DownlevelCapabilities` to every custom render pass, so a 3-D view
+  chooses its passes (independent blend, which WebGL2 lacks) without probing
+  the device. `HeadlessFrame` records its adapter.
 - `WgpuGfxCtx::texture_counts` / `SsaaFramebuffer::texture_counts` (a
   `TextureCounts` of textures made, waiting and destroyed) and
   `WgpuGfxCtx::retire_texture`, which destroys a caller's texture after the

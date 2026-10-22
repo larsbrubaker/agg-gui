@@ -7,6 +7,9 @@
 //! crate root, so `crate::layer_text_readback_tests` and
 //! `crate::wgsl_uniformity` still name them.
 
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "adapter_caps_tests.rs"]
+mod adapter_caps_tests;
 #[path = "clip_path_readback_tests.rs"]
 mod clip_path_readback_tests;
 #[path = "dead_sweep_tests.rs"]

@@ -6,6 +6,7 @@
 //! tested) on native too. The runtime that consumes it lives in
 //! [`crate::web`] and is wasm-only.
 
+use crate::adapter_check::AdapterCheck;
 use crate::fatal::{FatalHook, FatalMessageFn};
 
 /// Which browser graphics API the shell renders through.
@@ -140,6 +141,14 @@ pub struct WebShellConfig {
     /// the conservative 2048 WebGL2 default. Set it when the app's own
     /// renderer needs more (storage-buffer sizes for compute, for example).
     pub limits: Option<wgpu::Limits>,
+    /// The app's check of the adapter the browser handed out, run before the
+    /// device is requested (and again on a device-loss rebuild). Its `Err`
+    /// message stops start-up as [`crate::WebShellError::AdapterRejected`]
+    /// through the fatal path, so a browser whose graphics can't draw what the
+    /// app's renderer needs is told so plainly. `None` (default) accepts every
+    /// adapter. The adapter itself reaches the app builder too, in
+    /// [`crate::GpuInfo::adapter`].
+    pub adapter_check: Option<AdapterCheck>,
     /// Render every frame into an offscreen scene texture and blit it to the
     /// canvas, so `WgpuGfxCtx::capture_screenshot` / `read_screenshot` work.
     /// The web counterpart of `CopySrc::Required`: browser surfaces only
@@ -200,6 +209,7 @@ impl WebShellConfig {
             optional_features: wgpu::Features::empty(),
             required_features: wgpu::Features::empty(),
             limits: None,
+            adapter_check: None,
             offscreen_scene: false,
             detect_platform: true,
             fatal_panel: true,
@@ -241,6 +251,17 @@ impl WebShellConfig {
 
     pub fn with_limits(mut self, limits: wgpu::Limits) -> Self {
         self.limits = Some(limits);
+        self
+    }
+
+    /// Check the adapter before the device is requested (see
+    /// [`Self::adapter_check`]): return `Err` with the message the user
+    /// should see to refuse it.
+    pub fn with_adapter_check(
+        mut self,
+        check: impl Fn(&wgpu::Adapter) -> Result<(), String> + 'static,
+    ) -> Self {
+        self.adapter_check = Some(AdapterCheck(std::rc::Rc::new(check)));
         self
     }
 
@@ -372,6 +393,7 @@ mod tests {
         assert!(!cfg.offscreen_scene);
         assert_eq!(cfg.backend, Backend::default());
         assert!(cfg.required_features.is_empty());
+        assert!(cfg.adapter_check.is_none());
         assert!(cfg.app_name.is_none() && cfg.fatal_message.is_none());
         assert!(cfg.fatal_panel_class.is_none() && cfg.on_fatal.is_none());
         assert!(!cfg.keyboard_needs_focus);

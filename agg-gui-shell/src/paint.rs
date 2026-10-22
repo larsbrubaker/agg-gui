@@ -72,6 +72,7 @@ impl Painter {
             gpu.config().width as f32,
             gpu.config().height as f32,
         )
+        .with_adapter(gpu.wgpu_adapter())
     }
 
     /// Rebuild the render context against a fresh device after device loss.

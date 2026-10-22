@@ -81,6 +81,7 @@ fn new_ctx(gpu: &WebGpu) -> WgpuGfxCtx {
         gpu.config.width as f32,
         gpu.config.height as f32,
     )
+    .with_adapter(&gpu.adapter)
 }
 
 pub(super) fn install_gpu(gpu: WebGpu) {
