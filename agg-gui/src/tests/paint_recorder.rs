@@ -126,6 +126,16 @@ impl PaintRecorder {
         }
     }
 
+    /// The font the widget set last (`set_font`), if any.
+    pub(crate) fn font(&self) -> Option<&Arc<Font>> {
+        self.font.as_ref()
+    }
+
+    /// The font size the widget set last (`set_font_size`).
+    pub(crate) fn font_size(&self) -> f64 {
+        self.font_size
+    }
+
     /// A recorder whose target is `width`×`height` device pixels: fills
     /// outside it are clipped off [`filled_area`](Self::filled_area).
     pub(crate) fn with_target(width: f64, height: f64) -> Self {

@@ -322,6 +322,28 @@ fn rust_only_bold_runs_measure_in_the_bold_face() {
     assert_eq!(*width, measure_advance(&bold_face, "heavy", view.font_size));
 }
 
+/// The system bold companion wins over the view's own bold face, and a live
+/// swap of it (or clearing it) restyles bold runs with no rebuild.
+#[test]
+fn bold_runs_follow_the_system_bold_companion_live() {
+    let own_bold = Arc::new(
+        Font::from_slice(include_bytes!("../../../../demo/assets/Nunito_Bold.ttf"))
+            .expect("bold face"),
+    );
+    let companion = Arc::new(
+        Font::from_slice(include_bytes!("../../../../demo/assets/Poppins.ttf")).expect("face"),
+    );
+    let style = MarkdownRunStyle {
+        bold: true,
+        ..MarkdownRunStyle::default()
+    };
+    let view = MarkdownView::new("**heavy**", font()).with_bold_font(Arc::clone(&own_bold));
+    crate::font_settings::set_system_bold_font(Some(Arc::clone(&companion)));
+    assert!(Arc::ptr_eq(&view.run_font(style), &companion));
+    crate::font_settings::set_system_bold_font(None);
+    assert!(Arc::ptr_eq(&view.run_font(style), &own_bold));
+}
+
 #[test]
 fn rust_only_span_edges_keep_the_source_spacing() {
     let view = render_markdown("say **bold**, then *slant* end");

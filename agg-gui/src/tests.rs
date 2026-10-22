@@ -87,6 +87,7 @@ mod keyboard_lift_popups;
 mod keyboard_lift_tooltips;
 mod keyboard_modal_clamp;
 mod keyboard_resized_layout;
+mod label_bold;
 mod label_descenders;
 mod label_ellipsis;
 mod label_ellipsis_mode;

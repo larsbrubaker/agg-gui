@@ -15,8 +15,10 @@
 //! Drawing follows agg-sharp's `TextWidget`: italic is a faux shear
 //! (`Font::variant_with_faux_style`, `StyledTypeFace.FauxItalic`) that keeps
 //! every advance, bold draws with the host's bold face
-//! ([`MarkdownView::with_bold_font`], C# `AggContext.DefaultFontBold`) — or the
-//! regular face thickened when the host has none — and so measures with it,
+//! ([`MarkdownView::with_bold_font`], C# `AggContext.DefaultFontBold`; the
+//! system bold companion `font_settings::current_system_bold_font` wins when
+//! set) — or the regular face thickened when the host has none — and so
+//! measures with it,
 //! and strikethrough is a 1 px line through the middle of the text.
 //!
 //! `parse.rs` keeps a [`StyleStack`] while walking pulldown-cmark's events,
@@ -196,10 +198,20 @@ pub(super) type StyledFontCache = RefCell<Option<StyledFonts>>;
 
 impl MarkdownView {
     /// Draw bold runs with `font` (C# `AggContext.DefaultFontBold`). Without
-    /// one, bold runs draw with the regular face thickened.
+    /// one, bold runs draw with the regular face thickened. The system bold
+    /// companion (`font_settings::set_system_bold_font`) takes precedence
+    /// when set, as the system font does over the view's regular face.
     pub fn with_bold_font(mut self, font: Arc<Font>) -> Self {
         self.bold_font = Some(font);
         self
+    }
+
+    /// The face bold runs draw with on this layout/paint: the system bold
+    /// companion, else the view's own bold face, else `None` (thickened).
+    /// Read every call, like [`Self::active_font`], so a live companion swap
+    /// restyles bold runs with no rebuild.
+    fn active_bold_font(&self) -> Option<Arc<Font>> {
+        crate::font_settings::current_system_bold_font().or_else(|| self.bold_font.clone())
     }
 
     /// The face a run of `style` measures and draws with.
@@ -216,12 +228,13 @@ impl MarkdownView {
 
     pub(super) fn run_font(&self, style: MarkdownRunStyle) -> Arc<Font> {
         let regular = self.active_font();
+        let bold_face = self.active_bold_font();
         let mut cache = self.styled_fonts.borrow_mut();
         if !cache
             .as_ref()
-            .is_some_and(|fonts| fonts.matches(&regular, &self.bold_font))
+            .is_some_and(|fonts| fonts.matches(&regular, &bold_face))
         {
-            *cache = Some(StyledFonts::new(regular, self.bold_font.clone()));
+            *cache = Some(StyledFonts::new(regular, bold_face));
         }
         let idx = (usize::from(style.bold) << 1) | usize::from(style.italic);
         match cache.as_ref() {

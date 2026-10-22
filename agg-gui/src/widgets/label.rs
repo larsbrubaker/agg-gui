@@ -8,6 +8,9 @@
 //! Wrapped text breaks at word boundaries to the available width; its lines
 //! advance by the label's line spacing (`label/line_spacing.rs`), and the
 //! ellipsis modes for clipped single lines live in `label/ellipsis.rs`.
+//! The face and size each layout and paint use — the system font, its bold
+//! companion for a bold label, and the text-size scale — are resolved in
+//! `label/font_choice.rs`.
 //!
 //! # Backbuffer
 //!
@@ -34,6 +37,7 @@ use crate::text::{EllipsisMode, Font};
 use crate::widget::Widget;
 
 mod ellipsis;
+mod font_choice;
 mod line_box;
 mod line_spacing;
 
@@ -143,6 +147,13 @@ pub struct Label {
     /// font selector) where each entry must render in its OWN face
     /// regardless of the current global font choice.
     ignore_system_font: bool,
+    /// Draw with the bold companion of the system font (or this label's
+    /// face thickened); see `label/font_choice.rs`.
+    bold: bool,
+    /// The thickened variant of the last face a bold label resolved when
+    /// no bold companion is set, with the [`Font::id`] of that face: kept so
+    /// the variant's id stays the same from frame to frame.
+    faux_bold: std::cell::RefCell<Option<(u64, Arc<Font>)>>,
     /// Per-instance LCD preference: `Some(true)` always LCD, `Some(false)`
     /// always grayscale, `None` defers to the global
     /// `font_settings::lcd_enabled()`.  Exposed on every widget via
@@ -208,6 +219,8 @@ impl Label {
             wrap: false,
             ellipsis: None,
             ignore_system_font: false,
+            bold: false,
+            faux_bold: std::cell::RefCell::new(None),
             lcd_pref: None,
             line_box: None,
             line_spacing: 1.0,
@@ -278,11 +291,6 @@ impl Label {
         self
     }
 
-    /// Opt OUT of the system-wide font override for this Label.  The
-    /// Label will render with `self.font` (passed to `Label::new`)
-    /// regardless of what `font_settings::set_system_font` is pointing
-    /// at.  Useful for font-preview UI — each entry in a font picker
-    /// dropdown needs its OWN face, not the currently selected one.
     /// Pin this label's LCD setting: `Some(true)` always LCD, `Some(false)`
     /// always grayscale, `None` (default) defers to the global toggle.
     pub fn with_lcd(mut self, pref: Option<bool>) -> Self {
@@ -290,6 +298,12 @@ impl Label {
         self
     }
 
+    /// Opt OUT of the system-wide font override for this Label.  The
+    /// Label will render with `self.font` (passed to `Label::new`)
+    /// regardless of what `font_settings::set_system_font` is pointing
+    /// at, and at its own size, without the system size scale.  Useful for
+    /// font-preview UI — each entry in a font picker dropdown needs its OWN
+    /// face, not the currently selected one.
     pub fn with_ignore_system_font(mut self, ignore: bool) -> Self {
         self.ignore_system_font = ignore;
         self
@@ -329,31 +343,6 @@ impl Label {
     /// Return the current label text as a `&str`.
     pub fn text_str(&self) -> &str {
         &self.text
-    }
-
-    /// Resolve the font used for THIS layout/paint.  Prefers the system-wide
-    /// font override (set by the System window / `font_settings::set_system_font`)
-    /// so swapping the system font live flows through every widget; falls
-    /// back to the per-instance font otherwise.  Scrollbar-style pattern.
-    fn active_font(&self) -> Arc<Font> {
-        if self.ignore_system_font {
-            Arc::clone(&self.font)
-        } else {
-            crate::font_settings::current_system_font().unwrap_or_else(|| Arc::clone(&self.font))
-        }
-    }
-
-    /// Per-instance font size multiplied by the system-wide
-    /// [`font_settings::current_font_size_scale`].  Label's font-preview
-    /// UI (combo-box items flagged `ignore_system_font`) ALSO ignores
-    /// the scale — a font picker must show every entry at the same
-    /// reference size or comparing faces becomes useless.
-    fn active_font_size(&self) -> f64 {
-        if self.ignore_system_font {
-            self.font_size
-        } else {
-            self.font_size * crate::font_settings::current_font_size_scale()
-        }
     }
 
     // ── setter methods (for post-construction mutation) ───────────────────────

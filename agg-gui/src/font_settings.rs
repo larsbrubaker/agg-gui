@@ -73,6 +73,10 @@ thread_local! {
     /// System-wide font override.  `None` means "widgets keep whatever font
     /// they were constructed with".
     static SYSTEM_FONT:     RefCell<Option<Arc<Font>>> = const { RefCell::new(None) };
+    /// Bold companion of [`SYSTEM_FONT`]: the face bold text (`Label::with_bold`,
+    /// Markdown `**bold**` runs) draws with.  `None` means bold text is the
+    /// regular face thickened (or the widget's own bold face, for Markdown).
+    static SYSTEM_BOLD_FONT: RefCell<Option<Arc<Font>>> = const { RefCell::new(None) };
     /// System-wide font size multiplier — applied to every widget's own
     /// `font_size` at paint/layout time.  `1.0` = unchanged.  Acts like
     /// egui's `pixels_per_point` for typography: shrink or enlarge ALL
@@ -139,6 +143,24 @@ pub fn current_system_font() -> Option<Arc<Font>> {
 /// to per-widget fonts.
 pub fn set_system_font(font: Option<Arc<Font>>) {
     SYSTEM_FONT.with(|c| *c.borrow_mut() = font);
+    bump_typography_epoch();
+}
+
+/// The bold face that goes with the system font, if the app set one with
+/// [`set_system_bold_font`].  Bold text reads it at layout/paint time, the
+/// same way regular text reads [`current_system_font`], so swapping both
+/// faces live restyles bold and regular text together.
+pub fn current_system_bold_font() -> Option<Arc<Font>> {
+    SYSTEM_BOLD_FONT.with(|c| c.borrow().clone())
+}
+
+/// Replace the bold companion of the system font.  Set it next to
+/// [`set_system_font`], to the bold face of the same family, whenever the
+/// system font changes.  Pass `None` to clear: bold `Label`s then draw the
+/// regular face thickened, and Markdown bold runs fall back to the view's
+/// own bold face (`MarkdownView::with_bold_font`) or the thickened one.
+pub fn set_system_bold_font(font: Option<Arc<Font>>) {
+    SYSTEM_BOLD_FONT.with(|c| *c.borrow_mut() = font);
     bump_typography_epoch();
 }
 
@@ -585,5 +607,21 @@ mod tests {
         // Reset first — other tests may have set it.
         set_system_font(None);
         assert!(current_system_font().is_none());
+    }
+
+    #[test]
+    fn system_bold_font_round_trips_and_bumps_the_epoch() {
+        set_system_bold_font(None);
+        assert!(current_system_bold_font().is_none());
+        let font = Arc::new(
+            Font::from_slice(include_bytes!("../../demo/assets/Nunito_Bold.ttf")).expect("font"),
+        );
+        let before = current_thread_typography_epoch();
+        set_system_bold_font(Some(Arc::clone(&font)));
+        assert!(current_thread_typography_epoch() > before);
+        let got = current_system_bold_font().expect("companion set");
+        assert!(Arc::ptr_eq(&got, &font));
+        set_system_bold_font(None);
+        assert!(current_system_bold_font().is_none());
     }
 }
