@@ -128,6 +128,19 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   below 35 ms, so the limit does not switch every frame. The count and the
   learned frame times start again whenever a device is installed, so a lost
   or wedged GPU cannot stop painting for good.
+- Firefox paints every frame of an animation again instead of about ten a
+  second. Firefox's WebGPU reports a finished frame when it next presents one
+  or at its own 100 ms device poll, so a lone frame (the last before a pause)
+  was reported up to 100 ms late, timed as a slow GPU, and the gate dropped
+  to one frame in flight; with nothing presented behind it, every frame then
+  waited for the poll. A lone frame slower than 50 ms now holds painting and
+  asks the browser an empty `onSubmittedWorkDone` (no submit); two answered
+  late in a row show the delay is the browser's, and from then on lone frames
+  are not timed and two frames stay in flight. A prompt answer means the
+  frame really was slow, and it is learned as before. Measured on an M4 Max
+  with MatterCAD's editor sliding in: Firefox 157 painted 6 frames in the
+  half-second slide before and 24 after, the same as Chrome. Only the
+  browser's WebGPU is asked; wgpu's WebGL2 backend is unchanged.
 - Every frame starts from the theme's background: an area no widget paints
   shows the background, never the canvas's initial transparent black or an
   earlier frame's drawing.
