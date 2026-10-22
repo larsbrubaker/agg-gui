@@ -1,7 +1,9 @@
 //! Tests for `frames_in_flight.rs`: painting waits while the GPU holds the
 //! frames allowed in flight, the first tick after a completion paints, a
-//! redraw requested while waiting is still painted, and a device reset never
-//! leaves painting stalled on frames the lost device will not finish.
+//! redraw requested while waiting is still painted, a device reset never
+//! leaves painting stalled on frames the lost device will not finish, and a
+//! browser that reports lone frames late (Firefox's 100 ms poll) is told from
+//! a slow GPU by asking it an empty wait.
 
 use super::*;
 
@@ -194,12 +196,18 @@ impl GpuModel {
         self.queue.push((ticket, done));
     }
 
-    /// Delivers the completions due by `now`; returns how many ended a stall.
+    /// Delivers the completions due by `now`, answering at once any empty
+    /// wait one of them raises (a browser that reports promptly, as Chrome
+    /// does); returns how many ended a stall.
     fn deliver(&mut self, gate: &mut FramesInFlight, now: Instant) -> usize {
         let mut recovered = 0;
         while self.queue.first().is_some_and(|(_, done)| *done <= now) {
             let (ticket, done) = self.queue.remove(0);
             recovered += usize::from(gate.finished(ticket, done));
+            while gate.wants_report_probe() {
+                let probe = gate.report_probe_sent(done);
+                gate.report_probe_answered(probe, done + Duration::from_millis(1));
+            }
         }
         recovered
     }
@@ -375,4 +383,275 @@ fn a_device_reset_learns_frame_times_afresh() {
     gate.reset();
     assert!(!gate.is_single(), "a new device starts with two in flight");
     assert_eq!(gate.stall_wait(), MIN_STALL_WAIT);
+}
+
+/// A browser that reports a finished frame only when it next presents a
+/// frame or when its own device poll comes round, every 100 ms (Firefox's
+/// WebGPU, measured: a lone 5 ms frame resolves `onSubmittedWorkDone` up to
+/// 100 ms after its submit, while a frame followed by another resolves when
+/// that one is presented). The GPU itself is fast: each frame takes 5 ms.
+struct PollingBrowser {
+    queue: Vec<(FrameTicket, Instant)>,
+    busy_until: Instant,
+    /// When the browser last presented a frame, which reports every frame
+    /// finished by then.
+    last_present: Option<Instant>,
+    /// The empty wait out, and when the browser answers it: its next poll
+    /// (nothing is presented while the gate waits for it).
+    probe: Option<(ProbeTicket, Instant)>,
+    /// Empty waits asked so far.
+    probes: usize,
+}
+
+/// How often the polling browser reports finished work on its own.
+const POLL: Duration = Duration::from_millis(100);
+/// The polling browser's GPU time for a frame.
+const FAST_GPU_FRAME: Duration = Duration::from_millis(5);
+
+impl PollingBrowser {
+    fn new() -> Self {
+        Self {
+            queue: Vec::new(),
+            busy_until: t0(),
+            last_present: None,
+            probe: None,
+            probes: 0,
+        }
+    }
+
+    /// The browser's first poll after `at`.
+    fn next_poll_after(at: Instant) -> Instant {
+        let since = at.saturating_duration_since(t0()).as_nanos();
+        let poll = POLL.as_nanos();
+        t0() + Duration::from_nanos((since / poll + 1) as u64 * poll as u64)
+    }
+
+    /// Sends an empty wait at `at` if the gate asks for one, as the frame
+    /// loop does from the completion that raised the question.
+    fn ask_if_wanted(&mut self, gate: &mut FramesInFlight, at: Instant) {
+        if gate.wants_report_probe() {
+            self.probes += 1;
+            self.probe = Some((gate.report_probe_sent(at), Self::next_poll_after(at)));
+        }
+    }
+
+    fn submit(&mut self, gate: &mut FramesInFlight, now: Instant) {
+        let ticket = gate.submitted(now);
+        let done = self.busy_until.max(now) + FAST_GPU_FRAME;
+        self.busy_until = done;
+        self.queue.push((ticket, done));
+        self.last_present = Some(now);
+    }
+
+    /// When a frame finished at `done` reaches the page: the first present
+    /// at or after `done`, else the first poll at or after it.
+    fn reported(&self, done: Instant, now: Instant) -> Option<Instant> {
+        if self.last_present.is_some_and(|p| p >= done && p <= now) {
+            return self.last_present;
+        }
+        let since = done.saturating_duration_since(t0()).as_nanos();
+        let poll = POLL.as_nanos();
+        let next_poll = t0() + Duration::from_nanos(since.div_ceil(poll) as u64 * poll as u64);
+        (next_poll <= now).then_some(next_poll)
+    }
+
+    /// Delivers the completions and empty-wait answers the browser has
+    /// reported by `now`, in order.
+    fn deliver(&mut self, gate: &mut FramesInFlight, now: Instant) {
+        loop {
+            let frame = self
+                .queue
+                .first()
+                .and_then(|&(ticket, done)| Some((ticket, self.reported(done, now)?)));
+            let answer = self.probe.filter(|&(_, at)| at <= now);
+            match (frame, answer) {
+                (Some((_, at)), Some((probe, answered))) if answered < at => {
+                    self.probe = None;
+                    gate.report_probe_answered(probe, answered);
+                    self.ask_if_wanted(gate, answered);
+                }
+                (Some((ticket, at)), _) => {
+                    self.queue.remove(0);
+                    gate.finished(ticket, at);
+                    self.ask_if_wanted(gate, at);
+                }
+                (None, Some((probe, answered))) => {
+                    self.probe = None;
+                    gate.report_probe_answered(probe, answered);
+                    self.ask_if_wanted(gate, answered);
+                }
+                (None, None) => break,
+            }
+        }
+    }
+}
+
+/// The frame loop at 60 Hz on the polling browser: an animation (a redraw
+/// every tick) until `pause`, nothing to draw until `resume`, then another
+/// animation until `end`. Returns the frames painted after `resume`.
+fn animate_with_pause(gate: &mut FramesInFlight, browser: &mut PollingBrowser) -> usize {
+    let tick = Duration::from_micros(16_667);
+    let (pause, resume, end) = (
+        t0() + Duration::from_millis(1_010),
+        t0() + Duration::from_millis(1_300),
+        t0() + Duration::from_millis(2_300),
+    );
+    let mut now = t0();
+    let mut painted = 0;
+    while now < end {
+        browser.deliver(gate, now);
+        gate.expire(now);
+        let animating = now < pause || now >= resume;
+        if animating && gate.can_submit() {
+            browser.submit(gate, now);
+            if now >= resume {
+                painted += 1;
+            }
+        }
+        now += tick;
+    }
+    painted
+}
+
+#[test]
+fn a_fast_gpu_on_a_browser_that_reports_lone_frames_late_paints_every_tick_after_a_pause() {
+    // The editor's slide on Firefox: the last frame before the pause had no
+    // frame after it, so it was reported at the browser's next poll.
+    let mut gate = FramesInFlight::new(MAX_FRAMES_IN_FLIGHT);
+    gate.enable_report_probes(true);
+    let mut browser = PollingBrowser::new();
+    let painted = animate_with_pause(&mut gate, &mut browser);
+    assert!(
+        painted >= 55,
+        "a second of animation at 60 Hz on a 5 ms GPU paints about 60 frames: {painted}"
+    );
+    assert!(gate.reports_late());
+    assert_eq!(
+        browser.probes, LATE_ANSWERS as usize,
+        "asked once per answer needed, during the pause"
+    );
+}
+
+#[test]
+fn a_slow_gpu_on_a_browser_that_answers_promptly_still_runs_one_frame_at_a_time() {
+    // CI's software GPU in Chrome, with the empty waits on: every lone frame
+    // is slow, every empty wait is answered at once.
+    let mut gate = FramesInFlight::new(MAX_FRAMES_IN_FLIGHT);
+    gate.enable_report_probes(true);
+    let mut gpu = GpuModel::new(Duration::from_secs(3));
+    let (warnings, deepest) = run_loop(
+        &mut gate,
+        &mut gpu,
+        Duration::from_millis(16),
+        Duration::from_secs(120),
+        Duration::from_secs(15),
+    );
+    assert_eq!(warnings, 1);
+    assert!(deepest <= 1, "one frame on the GPU at a time: {deepest}");
+    assert!(gate.is_single());
+    assert!(!gate.reports_late());
+}
+
+/// A lone frame finished `took` after its submit, on a gate asking empty
+/// waits; returns the gate with the question open.
+fn lone_slow_frame(took: Duration) -> FramesInFlight {
+    let mut gate = FramesInFlight::new(MAX_FRAMES_IN_FLIGHT);
+    gate.enable_report_probes(true);
+    let t = gate.submitted(t0());
+    gate.finished(t, t0() + took);
+    gate
+}
+
+#[test]
+fn a_lone_slow_frame_holds_painting_until_the_browser_answers() {
+    let mut gate = lone_slow_frame(Duration::from_millis(100));
+    assert!(gate.wants_report_probe());
+    assert!(!gate.can_submit(), "a present now would hurry the answer");
+    let mut p = Pending { dirty: true };
+    assert_eq!(p.tick(&mut gate).0, TickPaint::WaitForGpu);
+    let sent = t0() + Duration::from_millis(100);
+    let probe = gate.report_probe_sent(sent);
+    assert!(!gate.wants_report_probe(), "one wait out at a time");
+    gate.report_probe_answered(probe, sent + Duration::from_millis(1));
+    assert!(gate.can_submit());
+    assert!(gate.is_single(), "answered promptly: the frame was slow");
+    assert!(!gate.reports_late());
+}
+
+#[test]
+fn one_late_answer_is_not_enough() {
+    let mut gate = lone_slow_frame(Duration::from_millis(100));
+    let mut at = t0() + Duration::from_millis(100);
+    let first = gate.report_probe_sent(at);
+    at += Duration::from_millis(174);
+    gate.report_probe_answered(first, at);
+    assert!(gate.wants_report_probe(), "asked again");
+    let second = gate.report_probe_sent(at);
+    gate.report_probe_answered(second, at + Duration::from_millis(2));
+    assert!(!gate.reports_late());
+    assert!(
+        gate.is_single(),
+        "the second answer was prompt: the frame was slow"
+    );
+}
+
+#[test]
+fn a_browser_found_late_never_drops_to_one_frame() {
+    let mut gate = lone_slow_frame(Duration::from_millis(100));
+    let mut at = t0() + Duration::from_millis(100);
+    for _ in 0..LATE_ANSWERS {
+        let probe = gate.report_probe_sent(at);
+        at += POLL;
+        gate.report_probe_answered(probe, at);
+    }
+    assert!(gate.reports_late());
+    assert!(gate.can_submit());
+    // Lone frames are passed over without asking again, and a followed frame
+    // slower than SLOW_FRAME does not drop the limit either.
+    let lone = gate.submitted(at);
+    at += POLL;
+    gate.finished(lone, at);
+    assert!(!gate.wants_report_probe());
+    let followed = gate.submitted(at);
+    let _next = gate.submitted(at);
+    at += Duration::from_millis(80);
+    gate.finished(followed, at);
+    assert!(!gate.is_single());
+    assert!(gate.can_submit(), "one of two in flight");
+}
+
+#[test]
+fn an_empty_wait_never_answered_is_given_up_after_the_stall_wait() {
+    let mut gate = lone_slow_frame(Duration::from_millis(100));
+    let sent = t0() + Duration::from_millis(100);
+    let probe = gate.report_probe_sent(sent);
+    let wait = gate.stall_wait();
+    gate.expire(sent + wait);
+    assert!(!gate.can_submit(), "still asking at the bound");
+    gate.expire(sent + wait + Duration::from_millis(1));
+    assert!(gate.can_submit(), "painting goes on");
+    assert!(gate.is_single(), "the lone frame learned as measured");
+    // Its answer after all changes nothing.
+    gate.report_probe_answered(probe, sent + wait * 2);
+    assert!(!gate.reports_late());
+}
+
+#[test]
+fn a_new_device_asks_its_browser_afresh() {
+    let mut gate = lone_slow_frame(Duration::from_millis(100));
+    let stale = gate.report_probe_sent(t0());
+    gate.reset();
+    assert!(gate.can_submit(), "the question went with the old device");
+    gate.report_probe_answered(stale, t0() + POLL);
+    assert!(!gate.reports_late());
+}
+
+#[test]
+fn without_empty_waits_a_lone_slow_frame_is_learned_at_once() {
+    // wgpu's WebGL2 backend: completions come from the shell's own polling.
+    let mut gate = FramesInFlight::new(MAX_FRAMES_IN_FLIGHT);
+    let t = gate.submitted(t0());
+    gate.finished(t, t0() + Duration::from_millis(100));
+    assert!(!gate.wants_report_probe());
+    assert!(gate.is_single());
 }

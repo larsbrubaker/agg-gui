@@ -86,7 +86,15 @@ fn new_ctx(gpu: &WebGpu) -> WgpuGfxCtx {
 
 pub(super) fn install_gpu(gpu: WebGpu) {
     MAX_DIM.with(|m| m.set(gpu.device.limits().max_texture_dimension_2d));
-    IN_FLIGHT.with(|f| f.borrow_mut().reset());
+    // Only the browser's WebGPU reports completions itself, and can report
+    // them late (`frames_in_flight`); wgpu's WebGL2 backend runs them from the
+    // shell's own polling.
+    let browser_webgpu = gpu.adapter.get_info().backend == wgpu::Backend::BrowserWebGpu;
+    IN_FLIGHT.with(|f| {
+        let mut f = f.borrow_mut();
+        f.reset();
+        f.enable_report_probes(browser_webgpu);
+    });
     let ctx = new_ctx(&gpu);
     GPU.with(|g| {
         *g.borrow_mut() = GpuState::Ready(Box::new(Painter {
@@ -362,13 +370,43 @@ fn wait_for_gpu(resized: bool) {
 fn track_in_flight(queue: &wgpu::Queue) {
     let ticket = IN_FLIGHT.with(|f| f.borrow_mut().submitted(web_time::Instant::now()));
     queue.on_submitted_work_done(move || {
-        let recovered =
-            IN_FLIGHT.with(|f| f.borrow_mut().finished(ticket, web_time::Instant::now()));
+        let (recovered, ask) = IN_FLIGHT.with(|f| {
+            let mut f = f.borrow_mut();
+            let recovered = f.finished(ticket, web_time::Instant::now());
+            (recovered, f.wants_report_probe())
+        });
         if recovered {
             web_sys::console::info_1(&JsValue::from_str(
                 "agg-gui-web-shell: the GPU is finishing frames again",
             ));
         }
+        if ask {
+            send_report_probe();
+        }
+    });
+}
+
+/// Asks the browser how late it reports finished work
+/// ([`FramesInFlight::wants_report_probe`]): an empty `onSubmittedWorkDone`,
+/// with nothing on the GPU, sent straight from the completion that raised the
+/// question (or the answer that needs confirming), so the time it takes is
+/// the browser's own. No submit: a page counting submissions sees none.
+fn send_report_probe() {
+    GPU.with(|g| {
+        let GpuState::Ready(p) = &*g.borrow() else {
+            return;
+        };
+        let ticket = IN_FLIGHT.with(|f| f.borrow_mut().report_probe_sent(web_time::Instant::now()));
+        p.gpu.queue.on_submitted_work_done(move || {
+            let again = IN_FLIGHT.with(|f| {
+                let mut f = f.borrow_mut();
+                f.report_probe_answered(ticket, web_time::Instant::now());
+                f.wants_report_probe()
+            });
+            if again {
+                send_report_probe();
+            }
+        });
     });
 }
 
