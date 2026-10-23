@@ -588,10 +588,13 @@ pub fn peek_draw_signals() -> (bool, Option<Instant>) {
 /// every pending [`ScheduledDraw`].
 pub fn peek_next_draw_deadline() -> Option<Instant> {
     let fire_and_forget = NEXT_DRAW_AT.with(|c| c.get());
-    match (fire_and_forget, scheduled_draw::earliest()) {
-        (Some(a), Some(b)) => Some(a.min(b)),
-        (one, None) | (None, one) => one,
-    }
+    scheduled_draw::min_deadline(fire_and_forget, scheduled_draw::earliest())
+}
+
+/// The [`request_draw_after`] deadline, read so it never panics during thread
+/// teardown (`None` then), for a [`ScheduledDraw`] withdrawn by a destructor.
+fn try_fire_and_forget_deadline() -> Option<Instant> {
+    NEXT_DRAW_AT.try_with(|c| c.get()).ok().flatten()
 }
 
 // ── Tween ────────────────────────────────────────────────────────────────────

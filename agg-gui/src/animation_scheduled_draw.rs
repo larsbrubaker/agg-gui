@@ -23,6 +23,8 @@
 //!
 //! The pending set is per thread, like the rest of the draw signals, so a
 //! handle is not `Send`: it is cancelled on the thread that scheduled it.
+//! A handle a thread-local owns may be dropped while its thread exits, after
+//! the pending set is gone; withdrawing then does nothing and never panics.
 
 use std::cell::RefCell;
 use std::marker::PhantomData;
@@ -94,18 +96,27 @@ impl ScheduledDraw {
     }
 
     fn withdraw(&self) {
-        let before = super::peek_next_draw_deadline();
-        // `try_with`: a handle dropped during thread teardown has nothing
-        // left to withdraw from.
-        let removed = PENDING
+        // Only `try_with`, everywhere: a handle dropped during thread
+        // teardown (by another thread-local's destructor) may outlive the
+        // pending set, and a panic there aborts the process. With the set
+        // gone there is nothing left to withdraw and no host to tell.
+        let earliest_moved = PENDING
             .try_with(|p| {
                 let mut p = p.borrow_mut();
+                let before = earliest_of(&p);
                 let len = p.len();
                 p.retain(|&(id, _)| id != self.id);
-                p.len() != len
+                (p.len() != len).then(|| (before, earliest_of(&p)))
             })
-            .unwrap_or(false);
-        if removed && super::peek_next_draw_deadline() != before {
+            .ok()
+            .flatten()
+            .is_some_and(|(before, after)| {
+                // the host's wake time is the earliest of these and the
+                // fire-and-forget deadline, which this does not touch
+                let fire_and_forget = super::try_fire_and_forget_deadline();
+                min_deadline(fire_and_forget, before) != min_deadline(fire_and_forget, after)
+            });
+        if earliest_moved {
             crate::frame_demand::notify();
         }
     }
@@ -119,7 +130,19 @@ impl Drop for ScheduledDraw {
 
 /// The earliest pending cancellable deadline.
 pub(super) fn earliest() -> Option<Instant> {
-    PENDING.with(|p| p.borrow().iter().map(|&(_, at)| at).min())
+    PENDING.with(|p| earliest_of(&p.borrow()))
+}
+
+fn earliest_of(pending: &[(u64, Instant)]) -> Option<Instant> {
+    pending.iter().map(|&(_, at)| at).min()
+}
+
+/// The earlier of two optional deadlines.
+pub(super) fn min_deadline(a: Option<Instant>, b: Option<Instant>) -> Option<Instant> {
+    match (a, b) {
+        (Some(a), Some(b)) => Some(a.min(b)),
+        (one, None) | (None, one) => one,
+    }
 }
 
 /// Remove every deadline due at `now`; returns whether there was one.

@@ -163,3 +163,36 @@ fn reset_withdraws_every_scheduled_draw() {
     assert!(!a.is_pending() && !b.is_pending());
     assert_eq!(peek_next_draw_deadline(), None);
 }
+
+/// Holds a pending draw until the thread exits.
+struct DrawHolder(std::cell::RefCell<Option<crate::animation::ScheduledDraw>>);
+
+impl Drop for DrawHolder {
+    fn drop(&mut self) {
+        // dropping the handle withdraws it, here after the thread's own
+        // thread-locals may already be gone
+        drop(self.0.borrow_mut().take());
+    }
+}
+
+std::thread_local! {
+    static FIRST_HOLDER: DrawHolder = const { DrawHolder(std::cell::RefCell::new(None)) };
+    static LAST_HOLDER: DrawHolder = const { DrawHolder(std::cell::RefCell::new(None)) };
+}
+
+#[test]
+fn a_pending_draw_dropped_while_its_thread_exits_does_not_panic() {
+    // One holder is registered before the pending set and one after, so
+    // whichever order the platform tears thread-locals down in, one of them
+    // drops its pending handle after the pending set is gone. A panic in a
+    // thread-local destructor aborts the whole test process.
+    let thread = std::thread::spawn(|| {
+        FIRST_HOLDER.with(|h| {
+            *h.0.borrow_mut() = Some(schedule_draw_after(ms(1000)));
+        });
+        LAST_HOLDER.with(|h| {
+            *h.0.borrow_mut() = Some(schedule_draw_after(ms(2000)));
+        });
+    });
+    assert!(thread.join().is_ok(), "the thread exits cleanly");
+}
