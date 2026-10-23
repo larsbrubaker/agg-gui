@@ -21,8 +21,10 @@
 //!   shell's frame (`set_surface_texture`, `begin_frame`, paint, `end_frame`,
 //!   release) around a paint closure or an [`App`](agg_gui::App). Custom
 //!   render passes ([`crate::WgpuCustomRender`]) queued during paint run
-//!   inside it as they do on a window. Frames are paced as a window's are:
-//!   at most two on the GPU at once (see [`HeadlessFrame::render`]).
+//!   inside it as they do on a window, seeing the device's generation and
+//!   the frames' completion times (`crate::frame_timing`) as they do there.
+//!   Frames are paced as a window's are: at most two on the GPU at once (see
+//!   [`HeadlessFrame::render`]).
 //!
 //! Every wait on the GPU here — the frame pacing and the read-back — is
 //! bounded ([`crate::GPU_WAIT_BUDGET`] by default, see
@@ -162,6 +164,8 @@ pub struct HeadlessGpu {
     loss: Arc<DeviceLoss>,
     /// The hints the device was requested with.
     memory_hints: GpuMemoryHints,
+    /// This device's generation ([`crate::next_device_generation`]).
+    device_generation: u64,
 }
 
 impl HeadlessGpu {
@@ -338,6 +342,13 @@ impl HeadlessGpu {
     pub fn memory_hints(&self) -> GpuMemoryHints {
         self.memory_hints
     }
+
+    /// This device's generation, never shared with another device in the
+    /// process; every [`HeadlessFrame`] on it reports it (see
+    /// [`crate::WgpuCustomRenderCtx::device_generation`]).
+    pub fn device_generation(&self) -> u64 {
+        self.device_generation
+    }
 }
 
 /// The adapter and device requests of the headless device, which its callers
@@ -377,6 +388,7 @@ fn request_headless_device(options: HeadlessOptions) -> Result<HeadlessGpu, Head
         wgpu_adapter: adapter,
         loss,
         memory_hints,
+        device_generation: crate::next_device_generation(),
     })
 }
 
@@ -583,7 +595,8 @@ impl HeadlessFrame {
             w as f32,
             h as f32,
         )
-        .with_adapter(gpu.wgpu_adapter());
+        .with_adapter(gpu.wgpu_adapter())
+        .with_device_generation(gpu.device_generation);
         Self {
             ctx,
             target,
@@ -619,6 +632,12 @@ impl HeadlessFrame {
 
     pub fn ctx(&self) -> &WgpuGfxCtx {
         &self.ctx
+    }
+
+    /// The generation of the frame's device, as its custom passes see it
+    /// ([`WgpuGfxCtx::device_generation`]).
+    pub fn device_generation(&self) -> u64 {
+        self.ctx.device_generation()
     }
 
     /// The context, for state that lives across frames (LCD text, cached

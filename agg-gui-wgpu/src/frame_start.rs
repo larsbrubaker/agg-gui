@@ -74,6 +74,8 @@ impl WgpuGfxCtx {
     /// whose starting pixels a test pins.
     pub(crate) fn begin_frame_cleared(&mut self, view: wgpu::TextureView, clear: Color) {
         self.open_frame(view);
+        // A window frame: the next frame number, timed from its submit.
+        self.frame_timing.begin_frame();
         self.frame_clear = Some(clear);
         self.queue_leading_clear(clear);
     }

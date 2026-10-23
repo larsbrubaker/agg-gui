@@ -85,6 +85,9 @@ fn new_ctx(gpu: &WebGpu) -> WgpuGfxCtx {
     // Custom render passes see the device's rejected frames as
     // `WgpuCustomRenderCtx::lost_frames`.
     .with_uncaptured_errors(&gpu.errors)
+    // Custom render passes key their GPU state on the device's generation,
+    // which a rebuilt device never shares with the lost one.
+    .with_device_generation(gpu.device_generation)
 }
 
 pub(super) fn install_gpu(gpu: WebGpu) {

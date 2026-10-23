@@ -393,6 +393,8 @@ pub struct Gpu {
     device_lost: Arc<std::sync::atomic::AtomicBool>,
     /// The device's uncaptured wgpu errors, logged and counted.
     uncaptured_errors: crate::UncapturedErrors,
+    /// This device's generation ([`crate::next_device_generation`]).
+    device_generation: u64,
     /// Whether the swap chain is configured, and if not, the retry backoff
     /// and the latest error. wgpu drops the swap chain on a failed
     /// configure, and acquiring from an unconfigured surface is itself fatal,
@@ -521,6 +523,7 @@ impl Gpu {
             config: surface_config,
             device_lost,
             uncaptured_errors,
+            device_generation: crate::next_device_generation(),
             retry: Mutex::new(acquire::RetryState::new(ConfigureRetry::configured())),
             retry_budget: config.surface_retry_budget,
         })
@@ -556,6 +559,15 @@ impl Gpu {
 
     pub fn queue(&self) -> &Arc<wgpu::Queue> {
         &self.queue
+    }
+
+    /// This device's generation, never shared with another device in the
+    /// process (a device-loss rebuild's new `Gpu` gets the next one); record
+    /// it on the render context with
+    /// [`crate::WgpuGfxCtx::set_device_generation`]. See
+    /// [`crate::WgpuCustomRenderCtx::device_generation`].
+    pub fn device_generation(&self) -> u64 {
+        self.device_generation
     }
 
     /// Everything wgpu reports about the adapter this device runs on.

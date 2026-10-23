@@ -98,6 +98,9 @@ pub use uncaptured_errors::UncapturedErrors;
 mod adapter_caps;
 pub mod custom_render;
 pub use custom_render::{SharedCustomRenderer, WgpuCustomRender, WgpuCustomRenderCtx};
+/// Device generations and per-frame GPU completion times for custom passes.
+mod frame_timing;
+pub use frame_timing::{next_device_generation, FrameCompletion};
 
 /// Offscreen rendering with no window: a shared device, a target in the
 /// shells' frame format, a frame driver and RGBA read-back — for test
@@ -535,6 +538,9 @@ pub struct WgpuGfxCtx {
     pub(crate) textures: texture_life::TextureLedger,
     /// Transient layer textures, reused frame to frame by size.
     pub(crate) layer_pool: texture_life::LayerPool,
+    /// The device's generation, the frame number and the latest frame's GPU
+    /// completion time (`frame_timing.rs`); custom render passes read them.
+    pub(crate) frame_timing: frame_timing::FrameTiming,
 }
 
 /// Wall-clock breakdown of the most recent `WgpuGfxCtx::end_frame` call.
@@ -657,6 +663,7 @@ impl WgpuGfxCtx {
             last_end_frame_stats: LastEndFrameStats::default(),
             textures: texture_life::TextureLedger::default(),
             layer_pool: texture_life::LayerPool::default(),
+            frame_timing: frame_timing::FrameTiming::new(),
         }
     }
 

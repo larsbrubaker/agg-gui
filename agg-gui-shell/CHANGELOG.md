@@ -10,6 +10,9 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- The window's render context records its device's generation
+  (`Gpu::device_generation`, new for every device-loss rebuild), so custom
+  render passes see `WgpuCustomRenderCtx::device_generation`.
 - The window's render context records the GPU's adapter, so custom render
   passes see `WgpuCustomRenderCtx::adapter` and `downlevel`.
 - `ShellSession`: the window, GPU and app `run` brings up, with the event

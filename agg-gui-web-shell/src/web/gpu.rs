@@ -17,7 +17,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use agg_gui_wgpu::UncapturedErrors;
+use agg_gui_wgpu::{next_device_generation, UncapturedErrors};
 use wasm_bindgen::JsValue;
 
 use crate::adapter_check::{run_adapter_check, AdapterCheck};
@@ -51,6 +51,9 @@ pub(crate) struct WebGpu {
     /// The device's uncaptured errors, logged to the console and counted;
     /// the render context hands the count to custom render passes.
     pub(crate) errors: UncapturedErrors,
+    /// The device's generation (`agg_gui_wgpu::next_device_generation`), new
+    /// for each rebuild; the render context hands it to custom render passes.
+    pub(crate) device_generation: u64,
     required_features: wgpu::Features,
     optional_features: wgpu::Features,
     limits_override: Option<wgpu::Limits>,
@@ -140,6 +143,7 @@ impl WebGpu {
             adapter,
             lost,
             errors,
+            device_generation: next_device_generation(),
             required_features: cfg.required_features,
             optional_features: cfg.optional_features,
             limits_override: cfg.limits.clone(),
@@ -215,6 +219,7 @@ impl WebGpu {
                 self.adapter = adapter;
                 self.lost = lost;
                 self.errors = errors;
+                self.device_generation = next_device_generation();
                 Ok(self)
             }
             Err(e) => Err((self, e)),

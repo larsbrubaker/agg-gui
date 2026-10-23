@@ -283,7 +283,7 @@ impl WgpuGfxCtx {
             &prepared,
             self.viewport,
             self.adapter_caps.as_ref(),
-            self.lost_frames(),
+            self.pass_frame_info(),
         );
         if let Some((_, view)) = &proxy {
             crate::comp_op::blit_proxy(
@@ -299,6 +299,9 @@ impl WgpuGfxCtx {
         let t_submit = web_time::Instant::now();
         self.queue.submit(std::iter::once(encoder.finish()));
         let submit_us = t_submit.elapsed().as_micros().min(u32::MAX as u128) as u32;
+        // Times the frame from this submit to the GPU finishing it, recorded
+        // by a callback; never waits (see `frame_timing`).
+        self.frame_timing.after_submit(&self.queue, t_submit);
         // Everything let go so far was last used by this frame or an earlier
         // one, all submitted now: destroy it (see `texture_life`). Layer
         // textures no frame asked for this time go with it.
@@ -329,7 +332,7 @@ fn execute_prepared<'a>(
     prepared: &'a [Prepared],
     surface_viewport: (f32, f32),
     adapter_caps: Option<&crate::adapter_caps::AdapterCaps>,
-    lost_frames: u64,
+    frame_info: crate::frame_timing::PassFrameInfo,
 ) {
     // Initial clear: only honoured if the very first command is Clear.  Mid-frame
     // clears (after a draw) are skipped — the layer system makes them rare.
@@ -507,7 +510,10 @@ fn execute_prepared<'a>(
                         pipelines,
                         adapter: adapter_caps.map(|caps| &caps.adapter),
                         downlevel: adapter_caps.map(|caps| &caps.downlevel),
-                        lost_frames,
+                        lost_frames: frame_info.lost_frames,
+                        device_generation: frame_info.device_generation,
+                        frame: frame_info.frame,
+                        last_frame_completion: frame_info.last_frame_completion,
                     };
                     renderer.borrow_mut().render(ctx);
                     i += 1;

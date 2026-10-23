@@ -10,6 +10,27 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- Device generations: `next_device_generation()` hands out a process-wide,
+  increasing `u64` that no two devices share. `Gpu::device_generation` and
+  `HeadlessGpu::device_generation` report the one taken when the device was
+  made (a device-loss rebuild's new `Gpu` gets a new one);
+  `WgpuGfxCtx::set_device_generation` / `with_device_generation` record it on
+  the context (a context with none records a fresh one of its own), and
+  `WgpuGfxCtx::device_generation`, `HeadlessFrame::device_generation` and
+  `WgpuCustomRenderCtx::device_generation` report it. A custom renderer keys
+  its GPU state on it instead of `wgpu::Device` equality, which compares an id
+  unique only within one `wgpu::Instance` (every agg-gui device has its own),
+  so a rebuilt device could compare equal to the lost one.
+- Frame completion times: each window frame's `end_frame` registers
+  `queue.on_submitted_work_done` right after its submit and records the time
+  until wgpu reports the frame done, without waiting.
+  `WgpuCustomRenderCtx::frame` (and `WgpuGfxCtx::frame_number`) is the number
+  of the frame being recorded; `WgpuCustomRenderCtx::last_frame_completion`
+  (and `WgpuGfxCtx::last_frame_completion`) is the latest finished frame as a
+  `FrameCompletion { frame, submit_to_done_ms }`: whole-window GPU time plus
+  queue latency, an upper bound where wgpu reports finished work only at the
+  next submit or poll (native, WebGL2). For a frame cost on GPUs without
+  timestamp queries.
 - `WgpuCustomRenderCtx::lost_frames`: how many frames the device has lost to
   GPU work wgpu rejected (validation errors from any pass, out-of-memory), so
   a custom render pass that keeps its finished picture between frames knows

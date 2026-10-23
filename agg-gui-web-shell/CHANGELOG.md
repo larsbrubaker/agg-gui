@@ -10,6 +10,12 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- The canvas's render context records its device's generation
+  (`agg_gui_wgpu::next_device_generation`, taken anew for every device-loss
+  rebuild), so custom render passes see
+  `WgpuCustomRenderCtx::device_generation`. Frame completion times
+  (`WgpuCustomRenderCtx::last_frame_completion`) come from the render context
+  as on native.
 - `WebShellConfig::with_adapter_check(|adapter| -> Result<(), String>)` /
   `adapter_check`: the app checks the adapter the browser handed out (downlevel
   flags, texture format features) before the device is requested, and on every

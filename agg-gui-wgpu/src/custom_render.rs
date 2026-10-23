@@ -119,6 +119,34 @@ pub struct WgpuCustomRenderCtx<'a> {
     /// the native and web shells always do. The headless frame's device keeps
     /// wgpu's panicking handler unless a test installs one and records it.
     pub lost_frames: u64,
+    /// The generation of [`Self::device`]: a number no other device in this
+    /// process has had, taken when agg-gui created the device (a window's,
+    /// each device-loss rebuild's, the browser canvas's, the headless one).
+    /// Key GPU state on this, never on `wgpu::Device` equality: wgpu compares
+    /// devices by an id unique only within one `wgpu::Instance`, and every
+    /// device agg-gui creates comes from a new instance, so a rebuilt device
+    /// can compare equal to the lost one whose resources are gone. Never 0.
+    /// See [`crate::next_device_generation`].
+    pub device_generation: u64,
+    /// The number of the window frame being recorded
+    /// ([`WgpuGfxCtx::frame_number`](crate::WgpuGfxCtx::frame_number)),
+    /// increasing by one each frame on this context. Store it with whatever
+    /// the pass drew, to match a later [`Self::last_frame_completion`] to
+    /// the frame it measured.
+    pub frame: u64,
+    /// The latest window frame the GPU has finished, with the time from
+    /// agg-gui's submit of it to the GPU finishing it; `None` until wgpu has
+    /// reported one. Always an earlier frame than [`Self::frame`]: nothing
+    /// waits for the GPU to produce it.
+    ///
+    /// The whole window's GPU time plus queue latency, not this pass's cost.
+    /// Where wgpu reports finished work only at the next submit or poll
+    /// (native backends, WebGL2) it is an upper bound of about a frame
+    /// interval when the GPU keeps up, and grows past it when the GPU is
+    /// what limits the frame rate. For a device without
+    /// `Features::TIMESTAMP_QUERY`, it is the frame cost there is. See
+    /// [`crate::FrameCompletion`].
+    pub last_frame_completion: Option<crate::FrameCompletion>,
 }
 
 /// Trait implemented by widgets that want to inject custom wgpu render

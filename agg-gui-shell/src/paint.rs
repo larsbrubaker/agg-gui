@@ -76,6 +76,9 @@ impl Painter {
         // Custom render passes see the device's rejected frames as
         // `WgpuCustomRenderCtx::lost_frames`.
         .with_uncaptured_errors(gpu.uncaptured_errors())
+        // Custom render passes key their GPU state on the device's
+        // generation, which a rebuilt device never shares with the lost one.
+        .with_device_generation(gpu.device_generation())
     }
 
     /// Rebuild the render context against a fresh device after device loss.
