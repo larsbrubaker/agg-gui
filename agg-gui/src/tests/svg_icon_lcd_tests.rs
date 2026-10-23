@@ -570,3 +570,48 @@ fn an_lcd_icon_in_a_straight_backbuffer_composites_like_a_direct_draw() {
         );
     }
 }
+
+/// At a display scale such as 175% an icon placed on a whole device pixel in
+/// logical units maps back through the CTM a hair off the grid
+/// (`29 / 1.75 * 1.75` is `29.000000000000004`).  It is still on the pixel
+/// grid, so it keeps its subpixel edges; a placement a quarter pixel off still
+/// takes the plain blit.
+#[test]
+fn an_icon_on_the_grid_at_a_fractional_scale_keeps_its_subpixel_edges() {
+    const SCALE: f64 = 1.75;
+    const DEVICE_X: f64 = 29.0;
+    let previous = crate::device_scale::device_scale();
+    crate::device_scale::set_device_scale(SCALE);
+    let icon = load_svg_icon(CORNER, false);
+    let draw = |device_x: f64, lcd_icon: bool| {
+        let mut fb = Framebuffer::new(96, 96);
+        let mut ctx = GfxCtx::new(&mut fb);
+        ctx.clear(Color::white());
+        ctx.set_lcd_mode(true);
+        ctx.scale(SCALE, SCALE);
+        let (x, y) = (device_x / SCALE, 8.0 / SCALE);
+        if lcd_icon {
+            icon.draw(&mut ctx, x, y);
+        } else {
+            let (data, w, h) = icon.raster_at_scale(SCALE).expect("raster");
+            let size = icon.size();
+            ctx.draw_image_rgba_arc(&data, w, h, x, y, size.width, size.height);
+        }
+        drop(ctx);
+        fb
+    };
+    assert_ne!(
+        DEVICE_X / SCALE * SCALE,
+        DEVICE_X,
+        "the placement has to come back off the grid by rounding for this to test it"
+    );
+    let on_grid = draw(DEVICE_X, true);
+    let quarter_off = draw(DEVICE_X + 0.25, true);
+    let quarter_off_plain = draw(DEVICE_X + 0.25, false);
+    crate::device_scale::set_device_scale(previous);
+    assert!(
+        count_chroma_pixels(&on_grid) > 0,
+        "an icon on whole device pixels at 175% takes the LCD path"
+    );
+    assert_painted_and_identical(&quarter_off, &quarter_off_plain, WHITE);
+}

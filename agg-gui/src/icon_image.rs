@@ -294,7 +294,8 @@ impl IconImage {
     /// otherwise.  Port of agg-sharp's `LcdImageComposite.TryRender`.  The
     /// gates: the raster is an SVG one; the CTM is a pure positive-axis
     /// scale (no turn, shear or mirror) that maps `rect` onto exactly the
-    /// raster's pixels at whole-pixel device coordinates — the planes are
+    /// raster's pixels at whole-pixel device coordinates (to within
+    /// floating-point rounding, [`GRID_TOLERANCE`]) — the planes are
     /// finished pixels, and resampling them would smear each channel's phase
     /// into its neighbours; the target takes an LCD image over the footprint
     /// ([`DrawCtx::takes_lcd_image_over`]); and the pixel filter has not added
@@ -308,18 +309,20 @@ impl IconImage {
         let (w, h) = (raster.width, raster.height);
         if t.shx != 0.0
             || t.shy != 0.0
-            || rect.width * t.sx != w as f64
-            || rect.height * t.sy != h as f64
+            || !near(rect.width * t.sx, w as f64)
+            || !near(rect.height * t.sy, h as f64)
         {
             return false;
         }
         let placed_x = rect.x * t.sx + t.tx;
         let placed_y = rect.y * t.sy + t.ty;
-        let whole = |v: f64| v.is_finite() && v.fract() == 0.0 && v.abs() < i32::MAX as f64 / 2.0;
-        if !whole(placed_x) || !whole(placed_y) {
+        let on_grid = |v: f64| v.is_finite() && near_whole(v) && v.abs() < i32::MAX as f64 / 2.0;
+        if !on_grid(placed_x) || !on_grid(placed_y) {
             return false;
         }
-        let (left, bottom) = (placed_x as i32, placed_y as i32);
+        // Every composite rounds the corner to the pixel grid itself, so the
+        // gate's own rounding lands the footprint where the planes will.
+        let (left, bottom) = (placed_x.round() as i32, placed_y.round() as i32);
         if !ctx.takes_lcd_image_over(left, bottom, left + w as i32, bottom + h as i32) {
             return false;
         }
@@ -348,6 +351,25 @@ impl IconImage {
         );
         true
     }
+}
+
+/// The furthest, in device pixels, a size or corner may sit from a whole
+/// pixel and still count as on the grid.  A caller that places an icon on a
+/// device pixel at a scale such as 1.75 or 1.1 does so in logical units, and
+/// mapping that back through the CTM is not exact in floating point
+/// (`29 / 1.75 * 1.75` is `29.000000000000004`); that rounding error must not
+/// cost the icon its subpixel edges.  A placement really off the grid (a
+/// quarter or half pixel) is far outside this and still takes the plain blit.
+const GRID_TOLERANCE: f64 = 1e-6;
+
+/// True when `a` is within [`GRID_TOLERANCE`] of `b`.
+fn near(a: f64, b: f64) -> bool {
+    (a - b).abs() <= GRID_TOLERANCE
+}
+
+/// True when `v` is within [`GRID_TOLERANCE`] of a whole number.
+fn near_whole(v: f64) -> bool {
+    near(v, v.round())
 }
 
 impl IconImage {
