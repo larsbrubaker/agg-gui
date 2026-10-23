@@ -10,6 +10,15 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- `WgpuCustomRenderCtx::lost_frames`: how many frames the device has lost to
+  GPU work wgpu rejected (validation errors from any pass, out-of-memory), so
+  a custom render pass that keeps its finished picture between frames knows
+  when a frame it recorded into never reached its texture. The count comes
+  from the `UncapturedErrors` recorded with `WgpuGfxCtx::set_uncaptured_errors`
+  / `with_uncaptured_errors` (also read by `WgpuGfxCtx::lost_frames`); the
+  native and web shells record theirs. `UncapturedErrors` now builds for
+  wasm32, and `UncapturedErrors::install_reporting` reports each error through
+  the caller's own function.
 - `WgpuGfxCtx::set_adapter` / `with_adapter` (and `adapter()`,
   `downlevel_capabilities()`): record the adapter the device came from.
   `WgpuCustomRenderCtx::adapter` and `WgpuCustomRenderCtx::downlevel` hand it

@@ -17,6 +17,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
+use agg_gui_wgpu::UncapturedErrors;
 use wasm_bindgen::JsValue;
 
 use crate::adapter_check::{run_adapter_check, AdapterCheck};
@@ -47,6 +48,9 @@ pub(crate) struct WebGpu {
     /// [`GpuInfo`] read what a device can't report from it.
     pub(crate) adapter: wgpu::Adapter,
     lost: Arc<AtomicBool>,
+    /// The device's uncaptured errors, logged to the console and counted;
+    /// the render context hands the count to custom render passes.
+    pub(crate) errors: UncapturedErrors,
     required_features: wgpu::Features,
     optional_features: wgpu::Features,
     limits_override: Option<wgpu::Limits>,
@@ -91,7 +95,7 @@ impl WebGpu {
             .create_surface(wgpu::SurfaceTarget::Canvas(canvas.clone()))
             .map_err(|e| WebShellError::CreateSurface(format!("{e:?}")))?;
 
-        let (device, queue, adapter, lost) = request_device(
+        let (device, queue, adapter, lost, errors) = request_device(
             &instance,
             &surface,
             &cfg.device_label,
@@ -135,6 +139,7 @@ impl WebGpu {
             config,
             adapter,
             lost,
+            errors,
             required_features: cfg.required_features,
             optional_features: cfg.optional_features,
             limits_override: cfg.limits.clone(),
@@ -203,18 +208,29 @@ impl WebGpu {
         )
         .await;
         match result {
-            Ok((device, queue, adapter, lost)) => {
+            Ok((device, queue, adapter, lost, errors)) => {
                 self.surface.configure(&device, &self.config);
                 self.device = Arc::new(device);
                 self.queue = Arc::new(queue);
                 self.adapter = adapter;
                 self.lost = lost;
+                self.errors = errors;
                 Ok(self)
             }
             Err(e) => Err((self, e)),
         }
     }
 }
+
+/// A new device with its queue, the adapter it came from, its device-lost
+/// flag and its uncaptured-error record.
+type RequestedDevice = (
+    wgpu::Device,
+    wgpu::Queue,
+    wgpu::Adapter,
+    Arc<AtomicBool>,
+    UncapturedErrors,
+);
 
 async fn request_device(
     instance: &wgpu::Instance,
@@ -224,7 +240,7 @@ async fn request_device(
     optional_features: wgpu::Features,
     limits_override: Option<&wgpu::Limits>,
     adapter_check: Option<&AdapterCheck>,
-) -> Result<(wgpu::Device, wgpu::Queue, wgpu::Adapter, Arc<AtomicBool>), WebShellError> {
+) -> Result<RequestedDevice, WebShellError> {
     let adapter = instance
         .request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::default(),
@@ -254,9 +270,13 @@ async fn request_device(
 
     // Uncaptured errors are the difference between "black canvas, no
     // explanation" and a diagnosable bug on a device we can't attach to.
-    device.on_uncaptured_error(Arc::new(|e: wgpu::Error| {
-        web_sys::console::error_1(&JsValue::from_str(&format!("wgpu uncaptured error: {e}")));
-    }));
+    // Counted too: each one cost a frame, which a custom render pass that
+    // keeps its picture between frames needs to know.
+    let errors = UncapturedErrors::install_reporting(&device, |message| {
+        web_sys::console::error_1(&JsValue::from_str(&format!(
+            "wgpu uncaptured error: {message}"
+        )));
+    });
     let lost = Arc::new(AtomicBool::new(false));
     {
         let flag = Arc::clone(&lost);
@@ -269,5 +289,5 @@ async fn request_device(
             }
         });
     }
-    Ok((device, queue, adapter, lost))
+    Ok((device, queue, adapter, lost, errors))
 }

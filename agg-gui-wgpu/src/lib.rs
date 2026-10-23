@@ -85,14 +85,13 @@ pub use surface_format::choose_surface_format;
 #[cfg(not(target_arch = "wasm32"))]
 mod surface_retry;
 /// Logs and counts the window device's uncaptured wgpu errors instead of
-/// wgpu's default panic, so a rejected submission costs one frame.
-#[cfg(not(target_arch = "wasm32"))]
+/// wgpu's default panic, so a rejected submission costs one frame. Native and
+/// web shells both install it.
 mod uncaptured_errors;
 pub use gpu_budget::{
     create_within_budget, drain_within_budget, BudgetReport, GPU_STARTUP_BUDGET,
     GPU_TEARDOWN_BUDGET,
 };
-#[cfg(not(target_arch = "wasm32"))]
 pub use uncaptured_errors::UncapturedErrors;
 
 /// The adapter a context's device came from, for custom render passes.
@@ -375,6 +374,10 @@ pub struct WgpuGfxCtx {
     /// The adapter the device came from, when the shell recorded it
     /// (`adapter_caps.rs`); custom render passes read it.
     pub(crate) adapter_caps: Option<adapter_caps::AdapterCaps>,
+    /// The device's uncaptured-error record, when the shell recorded it
+    /// (`uncaptured_errors.rs`); custom render passes read its count as
+    /// `lost_frames`.
+    pub(crate) uncaptured_errors: Option<UncapturedErrors>,
 
     // ── render pipelines (created in Phase 2) ────────────────────────────────
     pub(crate) pipelines: WgpuPipelines,
@@ -603,6 +606,7 @@ impl WgpuGfxCtx {
             surface_format,
             viewport: (width, height),
             adapter_caps: None,
+            uncaptured_errors: None,
             pipelines,
             commands: Vec::new(),
             texture_cache: HashMap::new(),

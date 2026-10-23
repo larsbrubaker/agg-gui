@@ -82,6 +82,9 @@ fn new_ctx(gpu: &WebGpu) -> WgpuGfxCtx {
         gpu.config.height as f32,
     )
     .with_adapter(&gpu.adapter)
+    // Custom render passes see the device's rejected frames as
+    // `WgpuCustomRenderCtx::lost_frames`.
+    .with_uncaptured_errors(&gpu.errors)
 }
 
 pub(super) fn install_gpu(gpu: WebGpu) {

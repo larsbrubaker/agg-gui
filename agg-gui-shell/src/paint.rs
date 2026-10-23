@@ -73,6 +73,9 @@ impl Painter {
             gpu.config().height as f32,
         )
         .with_adapter(gpu.wgpu_adapter())
+        // Custom render passes see the device's rejected frames as
+        // `WgpuCustomRenderCtx::lost_frames`.
+        .with_uncaptured_errors(gpu.uncaptured_errors())
     }
 
     /// Rebuild the render context against a fresh device after device loss.

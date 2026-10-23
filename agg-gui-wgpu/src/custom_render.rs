@@ -96,6 +96,29 @@ pub struct WgpuCustomRenderCtx<'a> {
     /// colour target in one pipeline). `None` exactly when
     /// [`Self::adapter`] is.
     pub downlevel: Option<&'a wgpu::DownlevelCapabilities>,
+    /// How many frames this device has lost so far: frames whose GPU work
+    /// wgpu rejected — a validation error from any pass in the frame (this
+    /// one's or another widget's), or running out of GPU memory — as counted
+    /// by the device's [`crate::UncapturedErrors`]. A frame's commands are
+    /// submitted together, so a rejection throws away everything recorded
+    /// into [`Self::encoder`] that frame.
+    ///
+    /// A pass that keeps its output between frames (reusing a finished
+    /// picture while nothing in its view changed) stores this value when it
+    /// records, and treats the kept output as never drawn when a later frame
+    /// shows a different value. The error is reported when the frame is
+    /// submitted, and in the browser only once the GPU process answers, so
+    /// the value moves a frame or more after the frame that was lost: the
+    /// next frames may still see the old value.
+    ///
+    /// It never decreases on one device. A device-loss rebuild starts a new
+    /// device, whose count starts again at 0 (a pass has to rebuild its GPU
+    /// resources then anyway), so compare for any change, not for an
+    /// increase. Always 0 when the context's creator never called
+    /// [`WgpuGfxCtx::set_uncaptured_errors`](crate::WgpuGfxCtx::set_uncaptured_errors);
+    /// the native and web shells always do. The headless frame's device keeps
+    /// wgpu's panicking handler unless a test installs one and records it.
+    pub lost_frames: u64,
 }
 
 /// Trait implemented by widgets that want to inject custom wgpu render
