@@ -17,16 +17,15 @@
 //! widgets they point to. No widget opts in and no API changes — any reorder
 //! of an existing child (swap, remove + insert, rebuild of the `Vec` from the
 //! same boxes) is followed. A widget that was dropped has no new index: when
-//! its path now indexes past the tree, the path is dropped (focus clears,
-//! hover and capture fall back to what the pointer is over); when another
-//! widget now sits at its indices, the path names that widget (see the
-//! replacement note below). The current index is checked first, so a path whose
-//! widgets did not move resolves in O(depth) without searching.
+//! its path now indexes past the tree, a hover or capture path is dropped
+//! (hover and capture fall back to what the pointer is over); when another
+//! widget now sits at its indices, the path names that widget. The current
+//! index is checked first, so a path whose widgets did not move resolves in
+//! O(depth) without searching.
 //!
-//! A path whose widget was *replaced* by a same-shaped one resolves to the
-//! replacement, which never received `FocusGained`;
-//! `App::focus_is_anchored` detects that so `App::set_focus` can treat
-//! focusing the replacement as a real focus change.
+//! Focus is then checked against the widget that was told it has focus
+//! (`focus_change.rs`): a replacement at the focused place is told, and
+//! focus clears when nothing focusable stands there.
 //!
 //! [`WidgetAnchor`] exposes the same anchoring for code outside `App` (GUI
 //! automation's widget handles).
@@ -107,11 +106,11 @@ impl App {
     /// capture, the enter/leave hover chain) to where its widgets now sit, after any reordering of
     /// children since the path was recorded.
     ///
-    /// A focus, hover or capture path that no longer names a widget at all
-    /// (its widget, or an ancestor, was removed from the tree) is dropped:
-    /// using it would address a widget that does not exist. Dropping focus
-    /// sends no `FocusLost` (the widget that had focus is gone) but does tell
-    /// the keyboard layer, so the on-screen keyboard and its lift let go. The
+    /// A hover or capture path that no longer names a widget at all (its
+    /// widget, or an ancestor, was removed from the tree) is dropped: using
+    /// it would address a widget that does not exist. Focus is kept on the
+    /// widget told it has focus, or handed to its replacement, or cleared
+    /// (see [`follow_focused_widget`](Self::follow_focused_widget)). The
     /// hover chain is left alone: its enter/leave diff already skips widgets
     /// that left the tree (see `hover_chain.rs`).
     pub(super) fn resolve_tracked_paths(&mut self) {
@@ -129,17 +128,17 @@ impl App {
             }
         }
         self.drop_stale_paths();
+        self.follow_focused_widget();
     }
 
-    /// Clear each stored focus, hover and capture path that indexes past the
-    /// tree (see [`resolve_tracked_paths`](Self::resolve_tracked_paths)).
+    /// Clear each stored hover and capture path that indexes past the tree
+    /// (see [`resolve_tracked_paths`](Self::resolve_tracked_paths)).
     fn drop_stale_paths(&mut self) {
         let root = self.root.as_ref();
         let stale = |p: &Option<Vec<usize>>| {
             p.as_deref()
                 .is_some_and(|p| anchor_of(root, Some(p)).len() != p.len())
         };
-        let focus_stale = stale(&self.focus);
         let hovered_stale = stale(&self.hovered);
         let captured_stale = stale(&self.captured);
         let gesture_stale = stale(&self.gesture_captured);
@@ -152,27 +151,22 @@ impl App {
         if gesture_stale {
             self.store_gesture_captured(None);
         }
-        if focus_stale {
-            self.store_focus(None);
-            crate::widget::keyboard_scroll::notify_focus_change(
-                None,
-                self.viewport_size.width,
-                self.root.as_mut(),
-            );
-        }
     }
 
-    /// Whether the stored focus path still names the widgets that were
-    /// focused, i.e. the focused widget was not replaced. When an app swaps
-    /// the focused subtree for a freshly built one of the same shape, the
-    /// path resolves to the new widget, which never received `FocusGained`;
-    /// `App::set_focus` uses this to focus it properly on the next click and
-    /// to skip `FocusLost` for a widget that never had focus. Call after
-    /// [`resolve_tracked_paths`](Self::resolve_tracked_paths).
+    /// Whether the stored focus path still names the widgets it was anchored
+    /// to (compared by heap address, so a rebuilt widget that reuses a freed
+    /// address passes). `focus_change.rs` uses it for focused widgets
+    /// without a `WidgetBase`, and to re-anchor focus after an ancestor
+    /// swap. Call after [`resolve_tracked_paths`](Self::resolve_tracked_paths).
     pub(super) fn focus_is_anchored(&self) -> bool {
         self.focus
             .as_deref()
             .is_some_and(|p| anchor_of(self.root.as_ref(), Some(p)) == self.anchors.focus)
+    }
+
+    /// The identity of the focused widget when focus was last stored.
+    pub(super) fn anchors_focus_leaf(&self) -> Option<&usize> {
+        self.anchors.focus.last()
     }
 
     /// Store the focus path and anchor it to the widgets it names now.

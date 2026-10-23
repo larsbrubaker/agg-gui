@@ -31,6 +31,10 @@
 //! and [`request_blur`]; a [`release_focus`] only cancels a pending
 //! [`request_focus`] for the same `id`. When a blur and a focus request are
 //! both pending, the blur is applied first.
+//!
+//! [`FocusStamp`] is the `App`'s record, kept in each widget's
+//! [`WidgetBase`](crate::layout_props::WidgetBase), of which widget it last
+//! told it has focus (see `widget/app/focus_change.rs`).
 
 use std::cell::Cell;
 
@@ -41,6 +45,48 @@ pub type FocusId = u64;
 std::thread_local! {
     static PENDING_FOCUS: Cell<Option<FocusId>> = const { Cell::new(None) };
     static PENDING_BLUR: Cell<Option<BlurRequest>> = const { Cell::new(None) };
+    static LAST_FOCUS_STAMP: Cell<u64> = const { Cell::new(0) };
+}
+
+/// Marks the widget the [`App`](crate::widget::App) last sent `FocusGained`.
+///
+/// The `App` addresses the focused widget by its place in the tree. When an
+/// app rebuilds that part of the tree, a new widget stands at the focused
+/// place, and it has not been told it has focus. Heap addresses cannot tell
+/// the two apart (a rebuilt widget often reuses the freed address), so each
+/// time the `App` sends `FocusGained` it writes a fresh stamp into the
+/// widget's [`WidgetBase`](crate::layout_props::WidgetBase) and remembers
+/// it: a widget at the focused place without that stamp is a replacement,
+/// and is told it has focus.
+///
+/// Owned by the `App`; widgets only carry it. A new or cloned `WidgetBase`
+/// holds no stamp, because a clone is a different widget that has not been
+/// told anything.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct FocusStamp(u64);
+
+impl Clone for FocusStamp {
+    fn clone(&self) -> Self {
+        Self::default()
+    }
+}
+
+impl FocusStamp {
+    /// A stamp no widget holds yet. Stamps are unique within a thread, the
+    /// thread that owns the widget tree.
+    pub(crate) fn fresh() -> Self {
+        Self(LAST_FOCUS_STAMP.with(|c| {
+            let next = c.get().wrapping_add(1).max(1);
+            c.set(next);
+            next
+        }))
+    }
+
+    /// The same stamp, for the `App` to keep beside the copy it writes into
+    /// the widget (a plain `clone` gives an empty stamp).
+    pub(crate) fn duplicate(&self) -> Self {
+        Self(self.0)
+    }
 }
 
 /// A pending request to clear keyboard focus, read by the `App` through

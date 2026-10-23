@@ -2,6 +2,7 @@ use super::*;
 
 mod activation;
 mod file_drop;
+mod focus_change;
 mod gesture;
 mod hover_chain;
 mod ime;
@@ -53,6 +54,10 @@ pub struct App {
     /// Widget identities along the four paths above, so they follow their
     /// widgets when a parent reorders its children. See [`path_anchor`].
     anchors: path_anchor::TrackedAnchors,
+    /// The stamp written into the focused widget's `WidgetBase` when it was
+    /// sent `FocusGained`; `None` when nothing is focused or the focused
+    /// widget has no `WidgetBase`. See [`focus_change`].
+    focus_stamp: Option<crate::focus::FocusStamp>,
     /// Whether last frame's aggregate was `Some` — lets the gesture router
     /// detect the `None`→`Some` start edge (when it hit-tests) versus an
     /// ongoing gesture (when it delivers to the captured path only).
@@ -115,6 +120,7 @@ impl App {
             captured: None,
             gesture_captured: None,
             anchors: path_anchor::TrackedAnchors::default(),
+            focus_stamp: None,
             gesture_in_progress: false,
             file_drag_active: false,
             viewport_height: 1.0,
@@ -695,33 +701,6 @@ impl App {
         } else if let Some(path) = new_hit {
             dispatch_event(&mut self.root, &path, &event, pos);
         }
-    }
-
-    /// Set focus to `new_path`, sending `FocusLost` / `FocusGained` as needed.
-    ///
-    /// When the app replaced the focused widget with a same-shaped one, the
-    /// stored path names the replacement, which never had focus: focusing that
-    /// same path again sends it `FocusGained`, and no `FocusLost` goes to it
-    /// when focus moves on (see `App::focus_is_anchored`).
-    fn set_focus(&mut self, new_path: Option<Vec<usize>>) {
-        let focused_widget_present = self.focus_is_anchored();
-        if self.focus == new_path && (new_path.is_none() || focused_widget_present) {
-            return;
-        }
-        if let Some(old) = self.focus.take() {
-            if focused_widget_present {
-                dispatch_event(&mut self.root, &old, &Event::FocusLost, Point::ORIGIN);
-            }
-        }
-        self.store_focus(new_path.clone());
-        if let Some(new) = new_path.clone() {
-            dispatch_event(&mut self.root, &new, &Event::FocusGained, Point::ORIGIN);
-        }
-        super::keyboard_scroll::notify_focus_change(
-            new_path.as_deref(),
-            self.viewport_size.width,
-            self.root.as_mut(),
-        );
     }
 
     /// Lift the focused widget above the on-screen keyboard panel so

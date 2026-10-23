@@ -444,6 +444,12 @@ pub struct WidgetBase {
     /// `GuiWidget.DrawOnTopOfSiblings`); read by the default
     /// [`Widget::draw_on_top_of_siblings`](crate::widget::Widget::draw_on_top_of_siblings).
     pub draw_on_top_of_siblings: bool,
+    /// Which focus grant the [`App`](crate::widget::App) last gave this
+    /// widget, so it can tell this widget from a replacement standing at the
+    /// same place in the tree ([`FocusStamp`](crate::focus::FocusStamp)).
+    /// Written only by the `App`.
+    #[cfg_attr(feature = "reflect", reflect(ignore))]
+    pub focus_stamp: crate::focus::FocusStamp,
 }
 
 impl WidgetBase {
@@ -469,6 +475,7 @@ impl WidgetBase {
             shared_size_raise: None,
             shared_size_pass: false,
             draw_on_top_of_siblings: false,
+            focus_stamp: crate::focus::FocusStamp::default(),
         }
     }
 

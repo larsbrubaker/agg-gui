@@ -288,7 +288,7 @@ pub(crate) fn paint_lifted_tree(
     }
 }
 
-/// Combined "focus changed" hook called from `App::set_focus`.
+/// Combined "focus changed" hook called from `App`'s focus changes (`app/focus_change.rs`).
 /// Pushes the newly-focused widget's text-input affordance into the
 /// on-screen keyboard (so it slides up / down) and immediately runs
 /// the auto-scroll so the field clears the keyboard panel.  Doing

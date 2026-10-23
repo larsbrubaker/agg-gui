@@ -67,6 +67,8 @@ mod flex_gap;
 mod flex_integer_bounds;
 mod focus;
 mod focus_blur;
+mod focus_follows_rebuilt_list;
+mod focus_follows_replacement;
 mod focus_replaced_subtree;
 mod horizontal_wheel_routing;
 mod hover_cursor_tests;

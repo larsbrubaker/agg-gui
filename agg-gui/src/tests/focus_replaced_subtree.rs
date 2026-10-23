@@ -2,11 +2,12 @@
 //!
 //! `App` stores focus as a child-index path, anchored to the focused widgets'
 //! identities (`widget/app/path_anchor.rs`). When the app swaps the focused
-//! subtree for a freshly built one of the same shape, the stored path names
-//! the new widget — which never received `FocusGained`. Clicking it must
-//! still focus it (the path is equal, but the widget is not the one that was
-//! focused), and moving focus away must not send `FocusLost` to a widget that
-//! never had focus (a `TextField` would commit an edit it never started).
+//! subtree for a freshly built one of the same shape, the new widget takes
+//! focus and is told so on the next resolve (`widget/app/focus_change.rs`).
+//! Clicking it keeps it focused and typing reaches it. A swap made while an
+//! event is being dispatched leaves, until that resolve, a focus path naming
+//! a widget that never had focus: moving focus away then must not send it
+//! `FocusLost` (a `TextField` would commit an edit it never started).
 
 use crate::{
     App, DrawCtx, Event, EventResult, Font, Key, Modifiers, MouseButton, Rect, Size, TextField,
@@ -28,7 +29,12 @@ type Log = Rc<RefCell<Vec<String>>>;
 struct Row {
     bounds: Rect,
     children: Vec<Box<dyn Widget>>,
+    /// Swapped in for the first child when a key arrives, as an app
+    /// rebuilding that child in a key handler would.
+    swap_on_press: SwapSlot,
 }
+
+type SwapSlot = Rc<RefCell<Option<Box<dyn Widget>>>>;
 
 impl Widget for Row {
     fn bounds(&self) -> Rect {
@@ -51,6 +57,14 @@ impl Widget for Row {
         available
     }
     fn paint(&mut self, _ctx: &mut dyn DrawCtx) {}
+    fn preview_event(&mut self, event: &Event) -> EventResult {
+        if matches!(event, Event::KeyDown { .. }) {
+            if let Some(new) = self.swap_on_press.borrow_mut().take() {
+                self.children[0] = new;
+            }
+        }
+        EventResult::Ignored
+    }
     fn on_event(&mut self, _event: &Event) -> EventResult {
         EventResult::Ignored
     }
@@ -125,6 +139,7 @@ fn clicking_replaced_focused_text_field_focuses_it() {
     let mut app = App::new(Box::new(Row {
         bounds: Rect::default(),
         children: vec![field(&old_cell)],
+        swap_on_press: SwapSlot::default(),
     }));
     app.layout(SIZE);
     click(&mut app, 50.0);
@@ -144,24 +159,48 @@ fn clicking_replaced_focused_text_field_focuses_it() {
     assert_eq!(old_cell.borrow().as_str(), "a");
 }
 
-/// Moving focus away from a replaced focused widget sends `FocusLost` to
-/// nobody: the widget that had focus is gone, and its replacement never
-/// gained it.
+/// The key that moves focus away (Tab) also rebuilds the focused widget
+/// (the parent swaps it while the key is dispatched): `FocusLost` goes to
+/// nobody, because the widget that had focus is gone and its replacement
+/// never gained it.
 #[test]
-fn focus_moving_off_replaced_widget_sends_no_focus_lost() {
+fn focus_moving_off_widget_replaced_by_same_key_sends_no_focus_lost() {
     let log: Log = Rc::new(RefCell::new(Vec::new()));
+    let swap = SwapSlot::default();
     let mut app = App::new(Box::new(Row {
         bounds: Rect::default(),
         children: vec![focus_log("old", &log), focus_log("other", &log)],
+        swap_on_press: Rc::clone(&swap),
     }));
     app.layout(SIZE);
     click(&mut app, 50.0);
     assert_eq!(*log.borrow(), ["old gained"]);
+    log.borrow_mut().clear();
+
+    *swap.borrow_mut() = Some(focus_log("new", &log));
+    app.on_key_down(Key::Tab, Modifiers::default());
+    assert_eq!(app.focused_path(), Some(&[1usize][..]));
+    assert_eq!(*log.borrow(), ["other gained"]);
+}
+
+/// A widget rebuilt between events is told it has focus at the next resolve,
+/// so focus moving away from it later sends it `FocusLost`.
+#[test]
+fn focus_moving_off_told_replacement_sends_it_focus_lost() {
+    let log: Log = Rc::new(RefCell::new(Vec::new()));
+    let mut app = App::new(Box::new(Row {
+        bounds: Rect::default(),
+        children: vec![focus_log("old", &log), focus_log("other", &log)],
+        swap_on_press: SwapSlot::default(),
+    }));
+    app.layout(SIZE);
+    click(&mut app, 50.0);
 
     app.root_mut().children_mut()[0] = focus_log("new", &log);
     app.layout(SIZE);
-    log.borrow_mut().clear();
-
     click(&mut app, 250.0);
-    assert_eq!(*log.borrow(), ["other gained"]);
+    assert_eq!(
+        *log.borrow(),
+        ["old gained", "new gained", "new lost", "other gained"]
+    );
 }
