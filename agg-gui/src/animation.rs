@@ -14,7 +14,11 @@
 //!    tooltip delay) calls `request_draw_after(Duration)`; the host's
 //!    loop goes to sleep with `ControlFlow::WaitUntil(that_instant)` and
 //!    draws when the deadline fires.  Successive calls keep the EARLIEST
-//!    deadline.
+//!    deadline.  [`schedule_draw_after`] schedules one that can be
+//!    withdrawn: it returns a [`ScheduledDraw`] whose `cancel` (or drop)
+//!    takes the deadline back (`animation_scheduled_draw.rs`).  Every pending
+//!    handle keeps its own deadline; the host wakes for the earliest of them
+//!    and of the `request_draw_after` one.
 //!
 //! The scheduled channel is read **non-destructively** via
 //! [`peek_next_draw_deadline`]: a host re-arms its `WaitUntil` from the same
@@ -49,6 +53,10 @@ use std::cell::Cell;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use web_time::Instant;
+
+#[path = "animation_scheduled_draw.rs"]
+mod scheduled_draw;
+pub use scheduled_draw::{schedule_draw_after, ScheduledDraw};
 
 // ── Draw-request provenance trace ─────────────────────────────────────────────
 //
@@ -405,13 +413,17 @@ pub fn wants_draw() -> bool {
     if NEEDS_DRAW.with(|c| c.get()) || layout_requested() {
         return true;
     }
+    let now = crate::clock::now();
     let due = NEXT_DRAW_AT.with(|c| match c.get() {
-        Some(when) if crate::clock::now() >= when => {
+        Some(when) if now >= when => {
             c.set(None);
             true
         }
         _ => false,
     });
+    // Both channels are checked, so every due deadline is served by this
+    // one draw rather than each waking a frame of its own.
+    let due = scheduled_draw::take_due(now) | due;
     if due {
         NEEDS_DRAW.with(|c| c.set(true));
     }
@@ -496,6 +508,7 @@ pub fn clear_draw_request() {
             c.set(None);
         }
     });
+    scheduled_draw::take_due(now);
 }
 
 /// Clear every draw signal, a future scheduled deadline included: a clean
@@ -505,6 +518,7 @@ pub fn clear_draw_request() {
 pub fn reset_draw_signals() {
     clear_draw_request();
     NEXT_DRAW_AT.with(|c| c.set(None));
+    scheduled_draw::clear_all();
 }
 
 /// Clear **only** the immediate draw request ([`request_draw`]'s flag).
@@ -530,6 +544,11 @@ pub fn clear_immediate_draw_request() {
 /// Schedule a future draw.  Keeps the EARLIEST pending deadline, so multiple
 /// widgets asking for different delays will all be served by the soonest one
 /// (each widget re-arms its own deadline on the next draw anyway).
+///
+/// Fire and forget: nothing withdraws it, so the draw happens even if its
+/// reason went away. A draw that may become unnecessary (a watchdog for work
+/// that can finish early) uses [`schedule_draw_after`], whose handle cancels
+/// it.
 pub fn request_draw_after(delay: Duration) {
     let when = crate::clock::now() + delay;
     NEXT_DRAW_AT.with(|c| match c.get() {
@@ -549,8 +568,7 @@ pub fn request_draw_after(delay: Duration) {
 #[doc(hidden)]
 pub fn peek_draw_signals() -> (bool, Option<Instant>) {
     let flag = NEEDS_DRAW.with(|c| c.get());
-    let deadline = NEXT_DRAW_AT.with(|c| c.get());
-    (flag, deadline)
+    (flag, peek_next_draw_deadline())
 }
 
 /// Non-destructive read of the earliest pending scheduled-draw deadline.
@@ -565,8 +583,15 @@ pub fn peek_draw_signals() -> (bool, Option<Instant>) {
 ///
 /// The deadline is in UI-clock time ([`crate::clock`]); with the real clock
 /// (every shell) that is the wall clock.
+///
+/// Covers both scheduled channels: the [`request_draw_after`] deadline and
+/// every pending [`ScheduledDraw`].
 pub fn peek_next_draw_deadline() -> Option<Instant> {
-    NEXT_DRAW_AT.with(|c| c.get())
+    let fire_and_forget = NEXT_DRAW_AT.with(|c| c.get());
+    match (fire_and_forget, scheduled_draw::earliest()) {
+        (Some(a), Some(b)) => Some(a.min(b)),
+        (one, None) | (None, one) => one,
+    }
 }
 
 // ── Tween ────────────────────────────────────────────────────────────────────

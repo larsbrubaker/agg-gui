@@ -67,8 +67,10 @@
 //!   changed something (`App::wants_draw`).
 //! - **Widgets and app code** ask through agg-gui: `animation::request_draw`
 //!   (and its tagged / no-invalidation forms), `request_layout`,
-//!   `request_draw_after` and per-widget draw deadlines (caret blink,
-//!   tooltips), `ui_thread::run_on_idle` / `run_on_idle_after` /
+//!   `request_draw_after`, `schedule_draw_after` (whose handle withdraws
+//!   it again: the loop then re-arms its timer for the next deadline or
+//!   sleeps) and per-widget draw deadlines (caret blink, tooltips),
+//!   `ui_thread::run_on_idle` / `run_on_idle_after` /
 //!   `set_interval`, `animation::signal_async_state_change`, `tilt` and
 //!   `fullscreen` requests. Made outside a tick (a fetch completion, a
 //!   promise, a `setTimeout`) they wake the loop through
@@ -82,9 +84,11 @@
 //!   [`WebShellHost::wants_tick`] while it polls.
 //!
 //! The shell keeps the loop running itself while a mouse button or touch is
-//! held, a gamepad is connected, a frame has yet to be presented, or the
-//! policy is [`RedrawPolicy::Continuous`]; resize, DPR, visibility,
-//! fullscreen, gamepad-connect, device-loss and backoff timers wake it.
+//! held, a gamepad is connected, input waits for an app that was busy, a
+//! frame has yet to be presented, a redraw waits for the GPU to finish
+//! earlier frames, or the policy is [`RedrawPolicy::Continuous`]; resize,
+//! DPR, visibility, fullscreen, gamepad-connect, device-loss, a failed
+//! rebuild and backoff timers wake it.
 //!
 //! # Targets
 //!

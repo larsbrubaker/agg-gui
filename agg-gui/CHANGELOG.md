@@ -10,6 +10,17 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- `animation::schedule_draw_after(delay) -> ScheduledDraw`: a scheduled draw that can be withdrawn.
+  `ScheduledDraw::cancel()`, or dropping the handle, takes the deadline back, so a watchdog for
+  work that finished early no longer paints an idle window once more for nothing. Several can be
+  pending at once, each with its own deadline; the host wakes for the earliest of them and of the
+  `request_draw_after` deadline (`peek_next_draw_deadline`, `App::next_draw_deadline`), and
+  cancelling the earliest hands over to the next. Scheduling and cancelling the earliest call the
+  `frame_demand` hook, so a sleeping web loop re-arms its timer or sleeps outright. A due one is
+  served like a `request_draw_after` deadline (`wants_draw` promotes it, `is_pending()` turns
+  false); a paint before it is due keeps it; `reset_draw_signals` withdraws every one.
+  `request_draw_after` is unchanged: fire and forget.
+
 - `frame_demand`: a per-thread hook every draw, layout and idle-queue request
   calls (`set_hook` / `notify`), so a shell whose loop sleeps while idle
   wakes for requests made outside its loop. `ui_thread::next_due()` /

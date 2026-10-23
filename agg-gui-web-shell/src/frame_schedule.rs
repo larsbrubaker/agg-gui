@@ -74,8 +74,7 @@ pub(crate) enum NextTick {
 pub(crate) fn next_tick(d: &LoopDemand) -> NextTick {
     let paint =
         d.can_paint && (d.continuous || d.first_paint_pending || d.dirty || d.app_wants_draw);
-    let poll =
-        d.pointer_held || d.gamepad_connected || d.input_held || d.platform_request_pending;
+    let poll = d.pointer_held || d.gamepad_connected || d.input_held || d.platform_request_pending;
     if paint || poll || d.tick_requested {
         return NextTick::Frame;
     }

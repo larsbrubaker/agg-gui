@@ -36,7 +36,7 @@ fn a_settled_page_sleeps() {
 #[test]
 fn every_reason_to_run_keeps_the_loop_running() {
     let now = Instant::now();
-    let reasons: [Reason; 10] = [
+    let reasons: [Reason; 11] = [
         ("continuous", |d| d.continuous = true),
         ("first paint", |d| d.first_paint_pending = true),
         ("dirty", |d| d.dirty = true),
@@ -252,4 +252,81 @@ fn a_delayed_action_wakes_the_loop_exactly_when_due() {
     assert!(ran.load(Ordering::SeqCst));
     agg_gui::ui_thread::reset_for_tests();
     agg_gui::animation::reset_draw_signals();
+}
+
+std::thread_local! {
+    /// The loop state a test's frame-demand hook wakes, as the shell's own
+    /// hook (`web::schedule::wake`) wakes the page's.
+    static TEST_LOOP: std::cell::RefCell<FrameScheduler> =
+        const { std::cell::RefCell::new(FrameScheduler::new()) };
+    /// Frames the test hook requested.
+    static FRAMES_REQUESTED: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+
+fn test_wake() {
+    if TEST_LOOP.with(|s| s.borrow_mut().wake()) {
+        FRAMES_REQUESTED.with(|f| f.set(f.get() + 1));
+    }
+}
+
+/// One tick of a loop over agg-gui's real draw signals, ending with the
+/// decision and what it does to the loop's timer.
+fn tick_and_decide() -> (NextTick, TimerChange) {
+    TEST_LOOP.with(|s| s.borrow_mut().begin_tick());
+    let mut d = settled(agg_gui::clock::now());
+    d.app_wants_draw = agg_gui::animation::wants_draw();
+    d.next_draw_deadline = agg_gui::animation::peek_next_draw_deadline();
+    let next = next_tick(&d);
+    let timer = TEST_LOOP.with(|s| s.borrow_mut().end_tick(next)).timer;
+    (next, timer)
+}
+
+/// Cancelled scheduled draws: withdrawing the earliest wakes the sleeping
+/// loop once, whose tick re-arms the timer for the next draw; withdrawing
+/// the last lets it sleep with no timer, and the cancelled deadlines never
+/// bring a frame.
+#[test]
+fn the_loop_sleeps_after_the_last_scheduled_draw_is_cancelled() {
+    let _clock = agg_gui::clock::scoped_virtual(None);
+    agg_gui::animation::reset_draw_signals();
+    TEST_LOOP.with(|s| *s.borrow_mut() = FrameScheduler::new());
+    FRAMES_REQUESTED.with(|f| f.set(0));
+    agg_gui::frame_demand::set_hook(Some(test_wake));
+
+    let watchdog = agg_gui::animation::schedule_draw_after(Duration::from_millis(100));
+    let blink = agg_gui::animation::schedule_draw_after(Duration::from_millis(600));
+    assert_eq!(
+        FRAMES_REQUESTED.with(|f| f.get()),
+        1,
+        "scheduling woke the loop"
+    );
+    let (next, timer) = tick_and_decide();
+    assert_eq!(next, NextTick::Timer(watchdog.deadline()));
+    assert_eq!(timer, TimerChange::Arm(watchdog.deadline()));
+
+    // The guarded work finished early: the watchdog is withdrawn.
+    watchdog.cancel();
+    assert_eq!(FRAMES_REQUESTED.with(|f| f.get()), 2, "the cancel woke it");
+    let (next, timer) = tick_and_decide();
+    assert_eq!(next, NextTick::Timer(blink.deadline()));
+    assert_eq!(timer, TimerChange::Arm(blink.deadline()), "re-armed later");
+
+    blink.cancel();
+    assert_eq!(FRAMES_REQUESTED.with(|f| f.get()), 3);
+    let (next, timer) = tick_and_decide();
+    assert_eq!(next, NextTick::Sleep);
+    assert_eq!(timer, TimerChange::Cancel, "no timer left armed");
+    assert!(TEST_LOOP.with(|s| s.borrow().is_asleep()));
+
+    agg_gui::clock::advance(Duration::from_secs(1));
+    assert!(
+        !agg_gui::animation::wants_draw(),
+        "the withdrawn deadlines never ask for a frame"
+    );
+    assert_eq!(
+        FRAMES_REQUESTED.with(|f| f.get()),
+        3,
+        "and never wake the loop"
+    );
+    agg_gui::frame_demand::set_hook(None);
 }

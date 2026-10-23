@@ -213,3 +213,39 @@ fn tick_drains_the_ui_thread_queue_first() {
     );
     quiet();
 }
+
+/// The headless tick never paints for a scheduled draw withdrawn before its
+/// time (a watchdog whose work finished early), and still paints for the
+/// next one when that comes due.
+#[test]
+fn reactive_tick_skips_a_cancelled_scheduled_draw() {
+    own_ui_queue();
+    let _clock = crate::clock::scoped_virtual(None);
+    animation::reset_draw_signals();
+    quiet();
+    let (mut app, _) = counting_app();
+    let mut tracker = LayoutTracker::new();
+    let viewport = Size::new(10.0, 10.0);
+    let paints = Cell::new(0);
+    // What `App::paint` does to the draw signals, without a draw context.
+    let paint = |_: &mut App| {
+        paints.set(paints.get() + 1);
+        animation::clear_draw_request();
+    };
+    let watchdog = animation::schedule_draw_after(Duration::from_millis(100));
+    let blink = animation::schedule_draw_after(Duration::from_millis(500));
+    assert_eq!(app.next_draw_deadline(), Some(watchdog.deadline()));
+    watchdog.cancel();
+    assert_eq!(app.next_draw_deadline(), Some(blink.deadline()));
+
+    crate::clock::advance(Duration::from_millis(200));
+    assert!(
+        !tracker.tick(&mut app, viewport, TickMode::Reactive, paint),
+        "the withdrawn deadline passed without a paint"
+    );
+    crate::clock::advance(Duration::from_millis(300));
+    assert!(tracker.tick(&mut app, viewport, TickMode::Reactive, paint));
+    assert_eq!(paints.get(), 1);
+    assert_eq!(app.next_draw_deadline(), None, "the served draw is gone");
+    quiet();
+}

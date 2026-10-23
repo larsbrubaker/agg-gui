@@ -205,4 +205,35 @@ mod tests {
         };
         assert_eq!(next_control_flow(&deadline), ControlFlow::WaitUntil(t));
     }
+
+    /// A scheduled draw withdrawn before its time (a watchdog whose work
+    /// finished early) stops setting the loop's wake: the loop parks until
+    /// the next pending draw, then plain `Wait` once none is left, and the
+    /// withdrawn deadline passing asks for no frame.
+    #[test]
+    fn a_cancelled_scheduled_draw_no_longer_sets_the_wake() {
+        use agg_gui::animation;
+        let _clock = agg_gui::clock::scoped_virtual(None);
+        animation::reset_draw_signals();
+        let state = || LoopState {
+            app_wants_draw: animation::wants_draw(),
+            app_deadline: animation::peek_next_draw_deadline(),
+            ..idle(agg_gui::clock::now())
+        };
+        let watchdog = animation::schedule_draw_after(Duration::from_millis(100));
+        let blink = animation::schedule_draw_after(Duration::from_millis(500));
+        assert_eq!(
+            next_control_flow(&state()),
+            ControlFlow::WaitUntil(watchdog.deadline())
+        );
+        watchdog.cancel();
+        assert_eq!(
+            next_control_flow(&state()),
+            ControlFlow::WaitUntil(blink.deadline())
+        );
+        blink.cancel();
+        assert_eq!(next_control_flow(&state()), ControlFlow::Wait);
+        agg_gui::clock::advance(Duration::from_secs(1));
+        assert_eq!(next_control_flow(&state()), ControlFlow::Wait);
+    }
 }

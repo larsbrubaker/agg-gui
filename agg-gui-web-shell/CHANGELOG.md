@@ -15,9 +15,15 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   connected gamepad, pending tilt or fullscreen request, or host poll), and
   arms one `setTimeout` for the earliest scheduled draw or queued idle work
   (`ui_thread::next_due`, asked directly so work posted mid-tick is never
-  lost to the paint's flag clear) instead of ticking until it. Input, agg-gui requests made outside a tick (through the new
+  lost to the paint's flag clear) instead of ticking until it. Input,
+  agg-gui requests made outside a tick (through the new
   `agg_gui::frame_demand` hook), a canvas `ResizeObserver`, DPR and
-  fullscreen changes, `gamepadconnected`, visibility and device loss wake it.
+  fullscreen changes, `gamepadconnected`, visibility, device loss and a
+  failed device rebuild (to arm its backoff timer) wake it; input held while
+  the app was borrowed keeps it running until delivered. A withdrawn
+  `agg_gui::animation::ScheduledDraw` re-arms the timer for the next
+  deadline, or lets the loop sleep with none. Frame pacing is unchanged: a
+  redraw waiting for the GPU keeps the loop running until it paints.
   `request_tick()` asks for one tick from an export; a host that polls in
   `on_tick` returns `true` from the new `WebShellHost::wants_tick`, which
   `demo-wgpu`'s deprecated `web_shell::start` wrapper does for its per-frame
