@@ -39,18 +39,20 @@
 //! With the `native-mic` feature (cpal), a recorder thread captures the
 //! default input device and an engine thread runs the model. The model comes
 //! from [`Config::model_path`], else the cache directory, else (feature
-//! `native-download`) a download into it. Without `native-mic` the key shows
-//! that there is no microphone.
+//! `native-download`) a download into it. Without `native-mic` a tap on the key
+//! says that there is no microphone.
 //!
 //! ## Layout
 //!
 //! - `protocol.rs`: the messages between provider and engine; `engine.rs`:
 //!   the model and its stream, answering them (web worker and native thread
-//!   alike); `text_map.rs`: stream updates to the keyboard's committed and
+//!   alike); `resample.rs`: the device's audio to the model's 16 kHz, one
+//!   stream per session; `text_map.rs`: stream updates to the keyboard's committed and
 //!   pending text; `model_check.rs`: the model's size and checksum.
 //! - `machine.rs`: the provider's state machine, shared by both hosts;
 //!   `provider.rs`: the `VoiceInput` over it.
-//! - `web/` (the worker and the microphone, on the UI thread), `worker/`
+//! - `web/` (the worker and the microphone, on the UI thread; `drain.rs`
+//!   delivers the worklet's last audio at a stop), `worker/`
 //!   (inside the worker), `native/` (threads and cpal).
 //!
 //! ## License
@@ -61,6 +63,8 @@
 
 #[cfg(feature = "provider")]
 mod config;
+#[cfg(any(all(feature = "provider", target_arch = "wasm32"), test))]
+mod drain_book;
 #[cfg(any(
     all(feature = "worker", target_arch = "wasm32"),
     all(feature = "provider", not(target_arch = "wasm32"))
@@ -80,6 +84,11 @@ mod native;
 pub mod protocol;
 #[cfg(feature = "provider")]
 mod provider;
+#[cfg(any(
+    all(feature = "worker", target_arch = "wasm32"),
+    all(feature = "provider", not(target_arch = "wasm32"))
+))]
+mod resample;
 #[cfg(feature = "provider")]
 mod text_map;
 #[cfg(all(feature = "provider", target_arch = "wasm32"))]

@@ -10,6 +10,12 @@
 //! the sink's last partial chunk on the UI thread itself, so a stop's last
 //! audio reaches the engine before the `Finish` the machine sends next.
 //!
+//! A cpal stream error (the device unplugged, the stream invalidated) ends
+//! the dictation with an error (`MicFailed`; while listening the machine
+//! first finishes what was captured, its last chunk included); an overrun
+//! is only logged. A push the engine thread can
+//! no longer take reports the engine lost.
+//!
 //! The OS asks for microphone permission when the stream opens (macOS
 //! wants `NSMicrophoneUsageDescription` in the app bundle); cpal does not
 //! say when it is refused, so a refused microphone listens to silence.
@@ -67,12 +73,40 @@ impl Sink {
         if self.buffer.is_empty() {
             return;
         }
-        let _ = self.engine.send(ToWorker::Push {
+        let sent = self.engine.send(ToWorker::Push {
             session: self.session,
             rate: self.rate,
             samples: std::mem::take(&mut self.buffer),
         });
+        if sent.is_err() {
+            // The engine thread is gone: nothing will hear this session.
+            self.open = false;
+            self.notifier.send(Event::EngineLost(
+                "the engine thread stopped taking audio".into(),
+            ));
+        }
     }
+}
+
+/// cpal's stream error callback: a stream that can't go on fails the
+/// session's microphone (once); an overrun is a glitch and only logged.
+fn on_stream_error(sink: &Mutex<Sink>, err: cpal::StreamError) {
+    if let cpal::StreamError::BufferUnderrun = err {
+        eprintln!("agg-gui-whistle: microphone: {err}");
+        return;
+    }
+    let Ok(mut sink) = sink.lock() else {
+        return;
+    };
+    if !sink.open {
+        return;
+    }
+    sink.open = false;
+    let reason = match err {
+        cpal::StreamError::DeviceNotAvailable => MicError::NoDevice,
+        other => MicError::Other(other.to_string()),
+    };
+    sink.notifier.send(Event::MicFailed(sink.session, reason));
 }
 
 struct Capture {
@@ -193,6 +227,7 @@ where
     f32: FromSample<T>,
 {
     let mut mono = Vec::new();
+    let error_sink = sink.clone();
     device
         .build_input_stream(
             config,
@@ -205,8 +240,12 @@ where
                     sink.feed(&mono);
                 }
             },
-            |err| eprintln!("agg-gui-whistle: microphone: {err}"),
+            move |err| on_stream_error(&error_sink, err),
             None,
         )
         .map_err(|e| MicError::Other(e.to_string()))
 }
+
+#[cfg(test)]
+#[path = "mic_tests.rs"]
+mod tests;

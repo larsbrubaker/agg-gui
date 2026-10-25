@@ -13,6 +13,13 @@ use crate::machine::Machine;
 pub(crate) trait Host {
     /// Apply `f` to the machine, then run the commands it queued.
     fn dispatch(&self, f: &mut dyn FnMut(&mut Machine));
+
+    /// The keyboard's `start`, called inside the user's tap: a host may
+    /// do there what only a user gesture allows (the web host starts its
+    /// audio).
+    fn start(&self, ctx: &VoiceContext) {
+        self.dispatch(&mut |m| m.start(ctx));
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -42,7 +49,7 @@ impl VoiceInput for WhistleVoice {
     }
 
     fn start(&mut self, ctx: &VoiceContext) {
-        self.host.dispatch(&mut |m| m.start(ctx));
+        self.host.start(ctx);
     }
 
     fn stop(&mut self) {

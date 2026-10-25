@@ -12,8 +12,8 @@
 //! idle app paints the news. A load that fails ends the thread; the next
 //! `Load` starts another.
 //!
-//! Without `native-mic` the machine reports that there is no microphone and
-//! nothing starts: the seam for another audio source is `mic.rs`'s
+//! Without `native-mic` a tap on the key says that there is no microphone,
+//! and nothing starts: the seam for another audio source is `mic.rs`'s
 //! `Recorder` (open a session, stream `Push`es to the engine, close with or
 //! without its last chunk).
 
@@ -43,6 +43,9 @@ pub(crate) enum Event {
     MicOpened(u32),
     MicFailed(u32, MicError),
     Level(u32, f32),
+    /// The engine thread is gone (it panicked, or a push found its inbox
+    /// closed).
+    EngineLost(String),
 }
 
 /// A sender of [`Event`]s that wakes the UI thread.
@@ -120,6 +123,10 @@ impl Host for NativeHost {
                 Event::MicOpened(s) => inner.machine.on_mic_opened(s),
                 Event::MicFailed(s, err) => inner.machine.on_mic_failed(s, err),
                 Event::Level(s, level) => inner.machine.on_level(s, level),
+                Event::EngineLost(detail) => {
+                    inner.engine = None;
+                    inner.machine.worker_lost(&detail);
+                }
             }
         }
         f(&mut inner.machine);
@@ -207,7 +214,21 @@ fn whistle(
     Ok((*MODEL.get_or_init(|| Box::leak(Box::new(built))), from))
 }
 
+/// Reports the engine lost if its thread panics (dropped while unwinding),
+/// so a dictation in progress ends with an error instead of waiting.
+pub(crate) struct LostGuard(pub(crate) Notifier);
+
+impl Drop for LostGuard {
+    fn drop(&mut self) {
+        if std::thread::panicking() {
+            self.0
+                .send(Event::EngineLost("the engine thread panicked".into()));
+        }
+    }
+}
+
 fn engine_thread(source: model::Source, inbox: Receiver<ToWorker>, notifier: Notifier) {
+    let _guard = LostGuard(notifier.clone());
     let mut engine = None;
     let mut queue = VecDeque::new();
     loop {

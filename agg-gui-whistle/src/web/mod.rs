@@ -12,19 +12,28 @@
 //!
 //! Platforms that can't do this at all (no `getUserMedia`, no module
 //! workers, no WebAssembly SIMD for the model's kernels) get a machine that
-//! reports so, without retry, and never start a worker.
+//! says so when the key is tapped (an error without retry, never before a
+//! tap) and never start a worker.
+//!
+//! A provider dropped without a cancel (the app registering another, or
+//! none) releases everything at once: the worker is terminated, the
+//! microphone's tracks stopped and its `AudioContext` closed (`Drop` for
+//! [`WebHost`] and [`Shared`], and for the microphone in `mic.rs`).
 
+mod drain;
 mod mic;
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
 
+use agg_gui::widgets::on_screen_keyboard::VoiceContext;
 use js_sys::{Reflect, Uint8Array, WebAssembly};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
-use web_sys::{ErrorEvent, Event, MessageEvent, Worker, WorkerOptions, WorkerType};
+use web_sys::{AudioContext, ErrorEvent, Event, MessageEvent, Worker, WorkerOptions, WorkerType};
 
 use crate::config::Config;
+use crate::drain_book::DrainBook;
 use crate::js_fields::{from_object, to_object};
 use crate::machine::{Command, Machine};
 use crate::protocol::{FromWorker, LoadFailure, ToWorker};
@@ -33,25 +42,71 @@ use crate::provider::Host;
 const NO_AUDIO: &str = "This browser can't record audio";
 const NO_ENGINE: &str = "This browser can't run speech recognition";
 
-/// A running worker and the handlers it calls.
+/// A running worker and the handlers it calls. Dropping it terminates the
+/// worker, its handlers cleared first.
 struct WorkerHandle {
     worker: Worker,
     _on_message: Closure<dyn FnMut(MessageEvent)>,
     _on_error: Closure<dyn FnMut(Event)>,
 }
 
+impl Drop for WorkerHandle {
+    fn drop(&mut self) {
+        self.worker.set_onmessage(None);
+        self.worker.set_onerror(None);
+        self.worker.terminate();
+    }
+}
+
 pub(crate) struct Shared {
     machine: RefCell<Machine>,
     worker: RefCell<Option<WorkerHandle>>,
     mic: RefCell<Option<mic::Mic>>,
+    /// A stopped microphone delivering its last audio (`drain.rs`).
+    drain: RefCell<DrainBook<drain::Draining>>,
+    /// The context a tap made for a start that waits for the model
+    /// (`mic::warm_up`).
+    warm: RefCell<Option<AudioContext>>,
+    /// The console has been told the worklet failed.
+    worklet_warned: Cell<bool>,
     /// Absolute URLs.
     worker_url: String,
     worklet_url: String,
 }
 
+impl Shared {
+    /// Release the worker, the microphone and the audio, now.
+    fn shut_down(&self) {
+        let taken = (
+            self.drain.try_borrow_mut().ok().and_then(|mut d| d.take()),
+            self.mic.try_borrow_mut().ok().and_then(|mut m| m.take()),
+            self.warm.try_borrow_mut().ok().and_then(|mut w| w.take()),
+            self.worker.try_borrow_mut().ok().and_then(|mut w| w.take()),
+        );
+        if let Some(ctx) = &taken.2 {
+            let _ = ctx.close();
+        }
+        drop(taken);
+    }
+}
+
+impl Drop for Shared {
+    fn drop(&mut self) {
+        self.shut_down();
+    }
+}
+
 /// See the module docs.
 pub(crate) struct WebHost {
     shared: Rc<Shared>,
+}
+
+impl Drop for WebHost {
+    /// Futures still in flight may hold the shared state a little longer;
+    /// what it owns goes now.
+    fn drop(&mut self) {
+        self.shared.shut_down();
+    }
 }
 
 /// `url` resolved against the page.
@@ -109,6 +164,9 @@ impl WebHost {
                 machine: RefCell::new(machine),
                 worker: RefCell::new(None),
                 mic: RefCell::new(None),
+                drain: RefCell::new(DrainBook::default()),
+                warm: RefCell::new(None),
+                worklet_warned: Cell::new(false),
                 worker_url: absolute(&config.worker_url),
                 worklet_url: absolute(&config.worklet_url),
             }),
@@ -119,6 +177,21 @@ impl WebHost {
 impl Host for WebHost {
     fn dispatch(&self, f: &mut dyn FnMut(&mut Machine)) {
         dispatch(&self.shared, f);
+    }
+
+    /// Inside the tap: a start that waits for the model gets its audio
+    /// context now, while the gesture lets it start (`mic.rs`).
+    fn start(&self, ctx: &VoiceContext) {
+        dispatch(&self.shared, &mut |m| m.start(ctx));
+        let pending = self
+            .shared
+            .machine
+            .try_borrow()
+            .map(|m| m.start_pending())
+            .unwrap_or(false);
+        if pending {
+            mic::warm_up(&self.shared);
+        }
     }
 }
 
@@ -137,6 +210,7 @@ pub(crate) fn dispatch(shared: &Rc<Shared>, f: &mut dyn FnMut(&mut Machine)) {
     for command in commands {
         run(shared, command);
     }
+    mic::drop_unwanted_warm(shared);
 }
 
 fn run(shared: &Rc<Shared>, command: Command) {
@@ -144,6 +218,9 @@ fn run(shared: &Rc<Shared>, command: Command) {
         Command::Worker(msg) => {
             if matches!(msg, ToWorker::Load { .. }) {
                 ensure_worker(shared);
+            }
+            if drain::hold(shared, &msg) {
+                return;
             }
             post(shared, &msg);
         }
@@ -211,9 +288,8 @@ fn on_worker_error(weak: &Weak<Shared>, event: Event) {
 }
 
 fn drop_worker(shared: &Shared) {
-    if let Some(handle) = shared.worker.borrow_mut().take() {
-        handle.worker.terminate();
-    }
+    let handle = shared.worker.borrow_mut().take();
+    drop(handle);
 }
 
 fn ensure_worker(shared: &Rc<Shared>) {

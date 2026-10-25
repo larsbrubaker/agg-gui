@@ -4,8 +4,8 @@
  *
  * Chrome's fake capture device plays a whistle-rust test clip as the
  * microphone (`--use-file-for-fake-audio-capture`), and its fake media UI
- * grants the permission. The test opens the TextEdit demo, taps the
- * single-line field (the keyboard comes up and the model downloads, with
+ * grants the permission. The test opens the TextEdit demo, taps its
+ * multi-line TextArea (the keyboard comes up and the model downloads, with
  * progress), taps the microphone, waits out the clip, taps it again, and
  * checks the words landed in the field. It reports the time from that
  * second tap to the final text.
@@ -19,9 +19,20 @@
  * (`DEMO_URL=http://localhost:3011/` points it at another server.)
  */
 
-import { test, expect, devices, type Page } from "@playwright/test";
+import { test, expect } from "@playwright/test";
 import { existsSync } from "fs";
 import { join } from "path";
+
+import {
+  FIELD,
+  MIC,
+  OUTSIDE,
+  PHONE,
+  dictationState,
+  fieldText,
+  seedTextEdit,
+  waitForState,
+} from "./dictation_common";
 
 const CLIP =
   process.env.DICTATION_CLIP ??
@@ -29,14 +40,8 @@ const CLIP =
 const BASE = process.env.DEMO_URL ?? "/";
 const SHOTS = join(__dirname, "snapshots");
 
-const pixel = devices["Pixel 7"];
 test.use({
-  viewport: pixel.viewport,
-  deviceScaleFactor: 2,
-  isMobile: true,
-  hasTouch: true,
-  userAgent: pixel.userAgent,
-  channel: "chrome",
+  ...PHONE,
   launchOptions: {
     args: [
       "--use-fake-ui-for-media-stream",
@@ -53,35 +58,10 @@ test.use({
 // what agg-gui-whistle owns.
 test.describe.configure({ retries: 1 });
 
-// Must match the DEMOS / TESTS arrays in demo-ui/src/specs.rs.
-const DEMO_COUNT = 34;
-const TEST_COUNT = 13;
-const TEXT_EDIT_IDX = 2;
-
-function seedState(openIdx: number, w: number, h: number): string {
-  let s = `version=1\ndemos=${DEMO_COUNT}\ntests=${TEST_COUNT}\n`;
-  for (let i = 0; i < DEMO_COUNT; i++) {
-    s += i === openIdx ? `d${i}=1,0,0,${w},${h},0\n` : `d${i}=0,0,0,0,0,0\n`;
-  }
-  for (let i = 0; i < TEST_COUNT; i++) s += `t${i}=0,0,0,0,0,0\n`;
-  s += "about=0,0,0,0,0,0\nbackend=0\nsnap=1\ntheme=light\n";
-  return s;
-}
-
-async function dictationState(page: Page): Promise<string | null> {
-  return page.evaluate(() => {
-    const wasm = (window as unknown as Record<string, any>).__wasm;
-    return wasm["dictation_state"]() as string | null;
-  });
-}
-
 test("a tap on the microphone dictates into the TextEdit field", async ({ page }) => {
   test.skip(!existsSync(CLIP), `no clip at ${CLIP}`);
   test.setTimeout(180_000);
-  const vp = page.viewportSize()!;
-  await page.addInitScript((state: string) => {
-    localStorage.setItem("agg-gui-demo-state", state);
-  }, seedState(TEXT_EDIT_IDX, vp.width, vp.height));
+  await seedTextEdit(page);
   page.on("console", (m) => console.log(`[page ${m.type()}] ${m.text()}`));
   await page.goto(BASE);
   await page.locator("#loading").waitFor({ state: "hidden", timeout: 30_000 });
@@ -101,7 +81,7 @@ test("a tap on the microphone dictates into the TextEdit field", async ({ page }
   });
 
   // Tap the multi-line field: the keyboard comes up and the model loads.
-  await page.touchscreen.tap(250, 340);
+  await page.touchscreen.tap(FIELD.x, FIELD.y);
   const states: string[] = [];
   const t0 = Date.now();
   let shotProgress = false;
@@ -142,7 +122,6 @@ test("a tap on the microphone dictates into the TextEdit field", async ({ page }
   });
 
   // Tap the microphone: the fake device plays the clip from now.
-  const MIC = { x: 380, y: 506 };
   await page.touchscreen.tap(MIC.x, MIC.y);
   const tListen = Date.now();
   const listening: string[] = [];
@@ -183,12 +162,7 @@ test("a tap on the microphone dictates into the TextEdit field", async ({ page }
   await page.screenshot({ path: join(SHOTS, "dictation-5-done.png") });
 
   // Read the field back: select all and copy into the app's clipboard.
-  const text = await page.evaluate(() => {
-    const wasm = (window as unknown as Record<string, any>).__wasm;
-    wasm["on_key_down"]("a", false, true, false, false);
-    wasm["on_key_down"]("c", false, true, false, false);
-    return wasm["wasm_clipboard_get"]() as string | null;
-  });
+  const text = await fieldText(page);
   console.log(`field text: ${JSON.stringify(text)}`);
   // The words land after the field's text, spaced by the keyboard. The
   // editor is a multi-line TextArea, which auto-capitalises, but the caret
@@ -202,25 +176,12 @@ test("a tap on the microphone dictates into the TextEdit field", async ({ page }
   expect(text ?? "").toMatch(/^Edit this text make the .*\b20\b.*wide and round the top edges\.$/);
 });
 
-async function waitForState(page: Page, pattern: RegExp, timeoutMs = 60_000): Promise<string> {
-  const t0 = Date.now();
-  for (;;) {
-    const s = (await dictationState(page)) ?? "none";
-    if (pattern.test(s)) return s;
-    if (Date.now() - t0 > timeoutMs) throw new Error(`state stuck at ${s}, wanted ${pattern}`);
-    await page.waitForTimeout(20);
-  }
-}
-
 test("a failed download is an error the next keyboard show retries, then the cache serves", async ({
   page,
   context,
 }) => {
   test.setTimeout(120_000);
-  const vp = page.viewportSize()!;
-  await page.addInitScript((state: string) => {
-    localStorage.setItem("agg-gui-demo-state", state);
-  }, seedState(TEXT_EDIT_IDX, vp.width, vp.height));
+  await seedTextEdit(page);
   // Every copy of the model fails to download (the worker's fetches too).
   let blocked = true;
   await context.route(/whistle\.cact/, (route) =>
@@ -230,7 +191,7 @@ test("a failed download is an error the next keyboard show retries, then the cac
   await page.locator("#loading").waitFor({ state: "hidden", timeout: 30_000 });
   await page.waitForTimeout(300);
 
-  await page.touchscreen.tap(250, 340);
+  await page.touchscreen.tap(FIELD.x, FIELD.y);
   const failed = await waitForState(page, /^Error/);
   expect(failed).toContain("Couldn't download the speech model");
   expect(failed).toContain("retry: true");
@@ -239,9 +200,9 @@ test("a failed download is an error the next keyboard show retries, then the cac
   // Close the keyboard (tap outside the field), let downloads through, and
   // bring it back: the show prepares again, which retries the download.
   blocked = false;
-  await page.touchscreen.tap(200, 135);
+  await page.touchscreen.tap(OUTSIDE.x, OUTSIDE.y);
   await page.waitForTimeout(600);
-  await page.touchscreen.tap(250, 340);
+  await page.touchscreen.tap(FIELD.x, FIELD.y);
   await waitForState(page, /^Ready$/);
 
   // A reload loads the checked copy from the Cache API: no download.
@@ -254,7 +215,7 @@ test("a failed download is an error the next keyboard show retries, then the cac
   await page.locator("#loading").waitFor({ state: "hidden", timeout: 30_000 });
   await page.waitForTimeout(300);
   const t0 = Date.now();
-  await page.touchscreen.tap(250, 340);
+  await page.touchscreen.tap(FIELD.x, FIELD.y);
   await waitForState(page, /^Ready$/);
   console.log(`ready from the cache after ${Date.now() - t0} ms`);
   expect(fetched, "the model comes from the cache").toBe(0);

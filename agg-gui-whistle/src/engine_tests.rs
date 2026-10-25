@@ -138,27 +138,98 @@ fn a_cancelled_stream_takes_no_more_audio_and_still_answers_finish() {
     );
 }
 
+/// The text a session gets for `samples` at `rate`, pushed in `chunk`s.
+fn dictate(whistle: &'static Whistle, rate: u32, samples: &[f32], chunk: usize) -> String {
+    let mut engine = Engine::new(whistle);
+    let mut mapper = TextMapper::new(true);
+    engine.handle(start(4));
+    let mut text = String::new();
+    for piece in samples.chunks(chunk) {
+        match engine.handle(ToWorker::Push {
+            session: 4,
+            rate,
+            samples: piece.to_vec(),
+        }) {
+            Some(FromWorker::Update { update, .. }) => mapper.update(&update),
+            other => panic!("unexpected reply {other:?}"),
+        }
+        if let Some(d) = mapper.take() {
+            text.push_str(&d.committed);
+        }
+    }
+    match engine.handle(ToWorker::Finish { session: 4 }) {
+        Some(FromWorker::Final { update, .. }) => mapper.update(&update),
+        other => panic!("unexpected reply {other:?}"),
+    }
+    mapper.finish();
+    if let Some(d) = mapper.take() {
+        text.push_str(&d.committed);
+    }
+    text
+}
+
 #[test]
 fn audio_at_another_rate_is_resampled() {
     let whistle = require_model!();
     let samples = clip("en_samantha.wav");
     let upsampled = whistle::audio::resample(&samples, 16_000, 48_000);
-    let mut engine = Engine::new(whistle);
-    let mut mapper = TextMapper::new(true);
-    engine.handle(start(4));
-    for chunk in upsampled.chunks(12_000) {
-        if let Some(FromWorker::Update { update, .. }) = engine.handle(ToWorker::Push {
-            session: 4,
-            rate: 48_000,
-            samples: chunk.to_vec(),
-        }) {
-            mapper.update(&update);
+    let text = dictate(whistle, 48_000, &upsampled, 12_000);
+    assert!(text.to_lowercase().contains("cube"), "recognised: {text}");
+}
+
+/// The audio a stream gets at 16 kHz is the same however the device's
+/// audio was cut into pushes, so the words are too: the 250 ms pushes of
+/// a 44.1 kHz microphone read as the whole clip resampled at once does.
+#[test]
+fn pushes_at_another_rate_read_as_the_whole_clip_resampled() {
+    let whistle = require_model!();
+    let samples = clip("en_samantha.wav");
+    let device = whistle::audio::resample(&samples, 16_000, 44_100);
+    let whole = crate::resample::tests::whole(&device, 44_100);
+    let reference = dictate(whistle, 16_000, &whole, 4_000);
+    assert_eq!(dictate(whistle, 44_100, &device, 11_025), reference);
+    assert_eq!(dictate(whistle, 44_100, &device, 1_000), reference);
+}
+
+fn rec(text: &str, continues: bool, pending: &str) -> Recognised {
+    Recognised {
+        text: text.into(),
+        continues,
+        pending: pending.into(),
+    }
+}
+
+/// Two updates merged map to the same text as the two in a row.
+#[test]
+fn merged_updates_read_as_the_two_in_a_row() {
+    let cases = [
+        (rec("", false, "a"), rec("make the", false, "cube")),
+        (rec("make the", false, "cu"), rec("", false, "cube")),
+        (rec("make the", false, "cu"), rec("be wide", true, "")),
+        (rec(" 2", true, ""), rec("0 mm ", true, "wide")),
+        (rec("make", false, ""), rec("the cube", false, "x")),
+        (rec("  ", false, "p"), rec("", false, "")),
+    ];
+    for (first, second) in cases {
+        for sentence_start in [true, false] {
+            let mut apart = TextMapper::new(sentence_start);
+            apart.update(&rec("Say", false, ""));
+            apart.update(&first);
+            apart.update(&second);
+            let mut merged = TextMapper::new(sentence_start);
+            merged.update(&rec("Say", false, ""));
+            merged.update(&merge(first.clone(), second.clone()));
+            assert_eq!(merged.take(), apart.take(), "{first:?} then {second:?}");
+            let mut fresh_apart = TextMapper::new(sentence_start);
+            fresh_apart.update(&first);
+            fresh_apart.update(&second);
+            let mut fresh_merged = TextMapper::new(sentence_start);
+            fresh_merged.update(&merge(first.clone(), second.clone()));
+            assert_eq!(
+                fresh_merged.take(),
+                fresh_apart.take(),
+                "{first:?} then {second:?}"
+            );
         }
     }
-    if let Some(FromWorker::Final { update, .. }) = engine.handle(ToWorker::Finish { session: 4 }) {
-        mapper.update(&update);
-    }
-    mapper.finish();
-    let text = mapper.take().map(|d| d.committed).unwrap_or_default();
-    assert!(text.to_lowercase().contains("cube"), "recognised: {text}");
 }

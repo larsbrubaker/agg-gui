@@ -48,6 +48,9 @@ pub(crate) enum MicError {
     NoDevice,
     /// The platform has no microphone access (no `getUserMedia`, no HTTPS).
     Unsupported,
+    /// The audio would not start (iOS starts audio only inside a tap, and
+    /// the next tap is one).
+    Suspended,
     /// Anything else; the detail is for the console.
     Other(String),
 }
@@ -59,6 +62,7 @@ impl MicError {
             MicError::Denied => ("Microphone access was denied".into(), false),
             MicError::NoDevice => ("No microphone found".into(), true),
             MicError::Unsupported => ("This browser can't record audio".into(), false),
+            MicError::Suspended => ("Couldn't start the audio; tap to try again".into(), true),
             MicError::Other(_) => ("Couldn't start the microphone".into(), true),
         }
     }
@@ -112,6 +116,9 @@ pub(crate) struct Machine {
     default_language: Option<String>,
     /// Set for good when the platform can't do dictation at all.
     unsupported: Option<String>,
+    /// The user tapped the key on such a platform: from then on it says
+    /// why.
+    unsupported_tapped: bool,
     model: Model,
     dictation: Dictation,
     last_session: u32,
@@ -135,6 +142,7 @@ impl Machine {
             urls,
             default_language: language,
             unsupported: None,
+            unsupported_tapped: false,
             model: Model::Idle,
             dictation: Dictation::Idle,
             last_session: 0,
@@ -147,8 +155,11 @@ impl Machine {
         }
     }
 
-    /// A machine for a platform without dictation: it reports `message` as
-    /// an error without retry and does nothing.
+    /// A machine for a platform without dictation: it does nothing, and
+    /// reports `message` as an error without retry from the first tap on.
+    /// Until then it reports `Ready`, so that tap reaches it: the keyboard's
+    /// `Unavailable` key ignores taps and shows no reason, and an error
+    /// before any tap would put up a banner nobody asked for.
     pub fn unsupported(message: &str) -> Machine {
         let mut m = Machine::new(Vec::new(), None);
         m.unsupported = Some(message.to_string());
@@ -168,6 +179,19 @@ impl Machine {
             | Dictation::Listening { session }
             | Dictation::Finishing { session, .. } => Some(session),
         }
+    }
+
+    /// A tap's start is waiting for the model to load.
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    pub fn start_pending(&self) -> bool {
+        self.start_when_loaded.is_some()
+    }
+
+    /// A microphone is wanted: a start waits for the model, or a session
+    /// is in progress.
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    pub fn wants_mic(&self) -> bool {
+        self.start_pending() || self.current_session().is_some()
     }
 
     fn load(&mut self) {
@@ -190,7 +214,11 @@ impl Machine {
     }
 
     pub fn start(&mut self, ctx: &VoiceContext) {
-        if self.unsupported.is_some() || self.dictation != Dictation::Idle {
+        if self.unsupported.is_some() {
+            self.unsupported_tapped = true;
+            return;
+        }
+        if self.dictation != Dictation::Idle {
             return;
         }
         self.error = None;
@@ -280,15 +308,26 @@ impl Machine {
         }
     }
 
+    /// The microphone did not open: the dictation ends with the error. Or
+    /// (unplugged, its stream broken) it stopped while listening: like a
+    /// stop, what it captured is recognised and committed, and the error
+    /// shows after the final text.
     pub fn on_mic_failed(&mut self, session: u32, err: MicError) {
-        if self.dictation != (Dictation::Opening { session }) {
-            return;
-        }
+        let listening = match self.dictation {
+            Dictation::Opening { session: s } if s == session => false,
+            Dictation::Listening { session: s } if s == session => true,
+            _ => return,
+        };
         if let MicError::Other(detail) = &err {
             log(&format!("microphone: {detail}"));
         }
-        self.dictation = Dictation::Idle;
+        // Shown once the dictation is idle (`state` reports it no sooner).
         self.error = Some(err.shown());
+        if listening {
+            self.stop();
+            return;
+        }
+        self.dictation = Dictation::Idle;
         self.commands
             .push(Command::Worker(ToWorker::Cancel { session }));
     }
@@ -385,6 +424,9 @@ impl Machine {
 
     fn state(&self) -> VoiceState {
         if let Some(message) = &self.unsupported {
+            if !self.unsupported_tapped {
+                return VoiceState::Ready;
+            }
             return VoiceState::Error {
                 message: message.clone(),
                 retry: false,

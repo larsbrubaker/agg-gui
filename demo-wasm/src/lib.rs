@@ -153,7 +153,7 @@ pub fn wasm_start() {
 /// adds the model there too. The model falls back to whistle-rust's GitHub
 /// Pages copy, then Hugging Face. Nothing loads until the keyboard first
 /// comes up.
-fn install_dictation() {
+pub(crate) fn install_dictation() {
     agg_gui_whistle::install(agg_gui_whistle::Config {
         model_urls: vec![
             "./public/whistle/whistle.cact".into(),

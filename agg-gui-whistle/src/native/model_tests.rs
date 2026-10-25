@@ -104,6 +104,7 @@ fn only_http_urls_are_kept_natively() {
 mod download_tests {
     use std::io::{Read, Write};
     use std::net::TcpListener;
+    use std::time::{Duration, Instant};
 
     use super::*;
 
@@ -124,6 +125,120 @@ mod download_tests {
             }
         });
         format!("http://{addr}/whistle.cact")
+    }
+
+    /// A URL on a loopback port nothing listens on: the connection is
+    /// refused, a network failure.
+    fn refused_url() -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        drop(listener);
+        format!("http://{addr}/whistle.cact")
+    }
+
+    /// Serve the headers of a whole model and a little of it, then stall
+    /// (the connection stays open) for `stall`.
+    fn serve_stalling(stall: Duration) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        std::thread::spawn(move || {
+            if let Ok((mut stream, _)) = listener.accept() {
+                let mut buf = [0u8; 2048];
+                let _ = stream.read(&mut buf);
+                let head = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n",
+                    model_check::expected_bytes()
+                );
+                let _ = stream.write_all(head.as_bytes());
+                let _ = stream.write_all(&[0u8; 4096]);
+                let _ = stream.flush();
+                std::thread::sleep(stall);
+            }
+        });
+        format!("http://{addr}/whistle.cact")
+    }
+
+    /// A download that stops arriving times out (a phone's link dropped
+    /// mid-transfer must not leave the key on Preparing for good).
+    #[test]
+    fn a_stalled_download_times_out() {
+        let url = serve_stalling(Duration::from_secs(30));
+        let t0 = Instant::now();
+        let agent = download::agent_with(Duration::from_millis(300));
+        let err = download::get_with(&agent, &url, &no_progress).unwrap_err();
+        assert!(
+            t0.elapsed() < Duration::from_secs(10),
+            "took {:?}",
+            t0.elapsed()
+        );
+        assert!(err.to_lowercase().contains("timeout"), "{err}");
+    }
+
+    /// A slow link that keeps delivering must be able to finish however
+    /// long the 17 MB take: only silence times out, never the total.
+    #[test]
+    fn only_silence_times_a_download_out() {
+        let stall = Duration::from_millis(300);
+        let agent = download::agent_with(stall);
+        assert_eq!(
+            agent.config().timeouts().recv_body,
+            None,
+            "no cap on the body"
+        );
+        assert_eq!(agent.config().timeout_per_read(), Some(stall));
+    }
+
+    /// A body that trickles in, each piece well inside the stall timeout,
+    /// arrives whole even when the transfer takes several times as long.
+    #[test]
+    fn a_trickling_download_completes() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        std::thread::spawn(move || {
+            if let Ok((mut stream, _)) = listener.accept() {
+                let mut buf = [0u8; 2048];
+                let _ = stream.read(&mut buf);
+                let _ = stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 1000\r\n\r\n");
+                for _ in 0..10 {
+                    let _ = stream.write_all(&[7u8; 100]);
+                    let _ = stream.flush();
+                    std::thread::sleep(Duration::from_millis(100));
+                }
+            }
+        });
+        let url = format!("http://{addr}/whistle.cact");
+        let agent = download::agent_with(Duration::from_millis(300));
+        let bytes = download::get_with(&agent, &url, &no_progress).expect("arrives");
+        assert_eq!(bytes.len(), 1000);
+    }
+
+    /// More bytes than whistle.cact has is some other file, refused while
+    /// it downloads: a download failure saying so, as on the web.
+    #[test]
+    fn an_oversized_download_is_a_download_failure_saying_so() {
+        let url = serve_once(
+            "HTTP/1.1 200 OK",
+            vec![0u8; model_check::expected_bytes() + 10],
+        );
+        let err = source(None, Some(temp_dir("dlhuge")), &[&url])
+            .load(&no_progress)
+            .unwrap_err();
+        assert_eq!(err.0, LoadFailure::Download, "{}", err.1);
+        assert!(err.1.contains("larger than whistle.cact"), "{}", err.1);
+    }
+
+    #[test]
+    fn a_network_failure_after_a_wrong_file_is_a_download_failure() {
+        let wrong = serve_once("HTTP/1.1 200 OK", b"not the model".to_vec());
+        let refused = refused_url();
+        let err = source(
+            None,
+            Some(temp_dir("dlwrongthenrefused")),
+            &[&wrong, &refused],
+        )
+        .load(&no_progress)
+        .unwrap_err();
+        assert_eq!(err.0, LoadFailure::Download, "{}", err.1);
     }
 
     #[test]
@@ -158,6 +273,7 @@ mod download_tests {
         let (got, from) = src
             .load(&|loaded, total| {
                 assert!(loaded <= total);
+                assert_eq!(total, model_check::expected_bytes() as u64);
                 seen.set(loaded);
             })
             .expect("downloads");

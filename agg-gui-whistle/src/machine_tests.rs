@@ -173,6 +173,30 @@ fn start_after_a_failed_load_retries_and_listens_once_loaded() {
     ));
 }
 
+/// The web host makes the microphone's AudioContext inside the tap that
+/// starts a dictation even when the model is still loading, and releases
+/// it when nothing wants it any more: it asks these.
+#[test]
+fn a_start_waiting_for_the_model_wants_the_microphone_until_it_fails_or_ends() {
+    let mut m = machine();
+    assert!(!m.wants_mic());
+    m.start(&ctx(true));
+    assert!(m.start_pending() && m.wants_mic());
+    m.on_worker(FromWorker::LoadFailed {
+        reason: LoadFailure::Download,
+        detail: "offline".into(),
+    });
+    assert!(!m.start_pending() && !m.wants_mic());
+    m.start(&ctx(true));
+    m.on_worker(FromWorker::Loaded {
+        source: "cache".into(),
+    });
+    assert!(!m.start_pending(), "the start began");
+    assert!(m.wants_mic(), "its session is opening");
+    m.cancel();
+    assert!(!m.wants_mic());
+}
+
 #[test]
 fn start_opens_the_stream_before_the_microphone_and_listens_once_it_opens() {
     let mut m = ready();
@@ -289,6 +313,88 @@ fn a_denied_microphone_is_an_error_without_retry_and_cancels_the_stream() {
     // Reopening the keyboard clears it, so the user can try again.
     m.prepare();
     assert_eq!(state(&mut m), VoiceState::Ready);
+}
+
+/// A microphone that fails mid-dictation (unplugged, its stream broken)
+/// ends it instead of listening on to nothing: like a stop, the speech
+/// already captured is recognised and committed, and the error shows once
+/// the final text is in.
+#[test]
+fn a_microphone_that_fails_while_listening_finishes_then_reports_it() {
+    let (mut m, s) = listening(true);
+    m.on_worker(FromWorker::Update {
+        session: s,
+        update: rec("make the", false, "cube"),
+    });
+    m.on_mic_failed(s, MicError::NoDevice);
+    assert_eq!(
+        m.take_commands(),
+        vec![
+            Command::CloseMic {
+                session: s,
+                flush: true
+            },
+            Command::Worker(ToWorker::Finish { session: s }),
+        ]
+    );
+    let poll = m.poll();
+    assert_eq!(poll.state, VoiceState::Finishing);
+    assert_eq!(
+        poll.text,
+        Some(VoiceText {
+            committed: "make the".into(),
+            pending: " cube".into()
+        })
+    );
+    m.on_worker(FromWorker::Final {
+        session: s,
+        update: rec("cube", false, ""),
+    });
+    let poll = m.poll();
+    assert_eq!(
+        poll.state,
+        VoiceState::Finishing,
+        "the final text goes first"
+    );
+    assert_eq!(
+        poll.text,
+        Some(VoiceText {
+            committed: " cube".into(),
+            pending: String::new()
+        })
+    );
+    assert_eq!(
+        m.poll().state,
+        VoiceState::Error {
+            message: "No microphone found".into(),
+            retry: true
+        }
+    );
+    assert_eq!(m.current_session(), None);
+    // A late update for the session is dropped.
+    m.on_worker(FromWorker::Update {
+        session: s,
+        update: rec("wide", false, ""),
+    });
+    assert_eq!(m.poll().text, None);
+}
+
+/// The microphone failing after the stop is nothing new: the dictation is
+/// finishing already.
+#[test]
+fn a_microphone_failure_while_finishing_changes_nothing() {
+    let (mut m, s) = listening(true);
+    m.stop();
+    m.take_commands();
+    m.on_mic_failed(s, MicError::NoDevice);
+    assert!(m.take_commands().is_empty());
+    assert_eq!(m.poll().state, VoiceState::Finishing);
+    m.on_worker(FromWorker::Final {
+        session: s,
+        update: Recognised::default(),
+    });
+    m.poll();
+    assert_eq!(m.poll().state, VoiceState::Ready);
 }
 
 #[test]
@@ -518,17 +624,28 @@ fn an_engine_failure_ends_the_dictation_with_an_error() {
     ));
 }
 
+/// A platform that can't dictate says why when the user taps the key, not
+/// with an error banner on the keyboard's first show. The keyboard's
+/// `Unavailable` can't carry a reason (a tap on it does nothing), so the
+/// key looks ready until the first tap, and is an error without retry from
+/// then on.
 #[test]
-fn an_unsupported_browser_is_an_error_without_retry_for_good() {
+fn an_unsupported_browser_says_why_from_the_first_tap_and_for_good() {
     let mut m = Machine::unsupported("This browser can't record audio");
     m.prepare();
+    for _ in 0..3 {
+        assert_eq!(state(&mut m), VoiceState::Ready, "no error before a tap");
+    }
     m.start(&ctx(true));
     assert!(m.take_commands().is_empty());
-    assert_eq!(
-        state(&mut m),
-        VoiceState::Error {
-            message: "This browser can't record audio".into(),
-            retry: false
-        }
-    );
+    assert_eq!(m.current_session(), None);
+    let error = VoiceState::Error {
+        message: "This browser can't record audio".into(),
+        retry: false,
+    };
+    assert_eq!(state(&mut m), error);
+    // The keyboard coming up again doesn't hide it.
+    m.prepare();
+    assert_eq!(state(&mut m), error);
+    assert!(m.take_commands().is_empty());
 }

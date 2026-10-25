@@ -41,7 +41,7 @@ localhost) for the microphone.
 With the `native-mic` feature, cpal records the default input device on a recorder thread and an
 engine thread runs the model. The model comes from `Config::model_path`, else the cache directory,
 else (feature `native-download`) a download into it, checked like the web's. Without `native-mic`
-the key reports that the build has no microphone.
+a tap on the key says that the build has no microphone.
 
 ## License
 

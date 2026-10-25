@@ -4,31 +4,40 @@
 //! sent to the worker in ~250 ms `Push`es. Mirrors whistle-rust's demo
 //! (`demo/web/src/microphone.ts`).
 //!
-//! The `AudioContext` is made at once, inside the tap that called `start`
-//! (a page may only start audio from a user gesture), asking for 16 kHz,
-//! which most browsers resample the microphone to; where the microphone
-//! can't join a 16 kHz context (Firefox) it runs at the device rate and the
-//! engine resamples. Permission is asked for then, on the first tap, not
-//! when the keyboard comes up.
+//! A page may only start audio inside a user gesture (iOS Safari is strict:
+//! a context made or resumed outside the tap's event handler stays
+//! suspended). So the `AudioContext` is made inside the tap that called
+//! `start`, asking for 16 kHz, which most browsers resample the microphone
+//! to: by `open` when the microphone opens at once, or by [`warm_up`] when
+//! the start waits for the model (the next `open` takes that context). It is
+//! resumed again once `getUserMedia` resolves, and a context still
+//! suspended then is a microphone error (`MicError::Suspended`, which a tap
+//! retries) rather than listening to silence. Where the microphone can't
+//! join a 16 kHz context (Firefox) it runs at the device rate and the
+//! engine resamples. Permission is asked for on the first tap, not when the
+//! keyboard comes up.
 //!
 //! A start the user stopped or cancelled while the permission prompt was up
 //! is aborted: when the prompt resolves, the stream is released at once and
-//! nothing is reported.
+//! nothing is reported. Releasing a microphone clears its handlers before
+//! they are dropped, closes the worklet's port, stops the tracks and closes
+//! the context ([`Mic`]'s and [`Live`]'s `Drop`); a stop drains the worklet
+//! first (`drain.rs`), so the audio it already posted reaches the engine.
 
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
 
-use js_sys::{Float32Array, Object, Reflect};
+use js_sys::{Array, Float32Array, Object, Promise, Reflect};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{
-    AudioContext, AudioContextOptions, AudioNode, AudioProcessingEvent, AudioWorkletNode,
-    DomException, MediaStream, MediaStreamAudioSourceNode, MediaStreamConstraints,
-    MediaStreamTrack, MessageEvent,
+    AudioContext, AudioContextOptions, AudioContextState, AudioNode, AudioProcessingEvent,
+    AudioWorkletNode, DomException, MediaStream, MediaStreamAudioSourceNode,
+    MediaStreamConstraints, MediaStreamTrack, MessageEvent, MessagePort, ScriptProcessorNode,
 };
 
-use super::{dispatch, post, Shared};
+use super::{dispatch, drain, post, Shared};
 use crate::machine::MicError;
 use crate::protocol::ToWorker;
 
@@ -36,30 +45,91 @@ use crate::protocol::ToWorker;
 const CHUNK_SECONDS: f64 = 0.25;
 /// The rate asked of the `AudioContext`: the model's.
 const MODEL_RATE: f32 = 16_000.0;
+/// The `ScriptProcessor` fallback's buffer, in frames: 64 ms at 16 kHz.
+/// Its partial buffer can't be flushed at a stop, so it is kept small.
+const PROCESSOR_FRAMES: u32 = 1024;
+/// How long a resume may take after `getUserMedia` before the context
+/// counts as suspended, in ms.
+const RESUME_MS: i32 = 1_000;
 
 type PortHandler = Closure<dyn FnMut(MessageEvent)>;
 type ProcessHandler = Closure<dyn FnMut(AudioProcessingEvent)>;
 
-/// The microphone of one session.
+/// The microphone of one session. Dropping it releases everything.
 pub(crate) struct Mic {
-    session: u32,
+    pub(super) session: u32,
     ctx: AudioContext,
     /// Set once the stream is wired into the graph.
     live: Option<Live>,
-    chunker: Rc<RefCell<Chunker>>,
+    pub(super) chunker: Rc<RefCell<Chunker>>,
 }
 
-/// The wired graph and the handler feeding the chunker.
+impl Drop for Mic {
+    fn drop(&mut self) {
+        // The graph and the tracks first, then the context they ran in.
+        drop(self.live.take());
+        let _ = self.ctx.close();
+    }
+}
+
+impl Mic {
+    /// The worklet's port, when the worklet captures.
+    pub(super) fn worklet_port(&self) -> Option<&MessagePort> {
+        match &self.live.as_ref()?.capture {
+            Capture::Worklet { port, .. } => Some(port),
+            Capture::Processor { .. } => None,
+        }
+    }
+
+    /// Stop taking new audio (the graph's input and the tracks) while the
+    /// capture node delivers what it has.
+    pub(super) fn stop_input(&self) {
+        if let Some(live) = &self.live {
+            let _ = live.source.disconnect();
+            stop_tracks(&live.stream);
+        }
+    }
+}
+
+/// How the graph hands audio to the chunker.
+enum Capture {
+    Worklet {
+        port: MessagePort,
+        _handler: PortHandler,
+    },
+    Processor {
+        node: ScriptProcessorNode,
+        _handler: ProcessHandler,
+    },
+}
+
+/// The wired graph. Dropping it disconnects it, clears its handler before
+/// the closure goes (a late quantum must not call a dropped closure) and
+/// stops the tracks.
 struct Live {
     stream: MediaStream,
     source: MediaStreamAudioSourceNode,
     node: AudioNode,
-    _port_handler: Option<PortHandler>,
-    _process_handler: Option<ProcessHandler>,
+    capture: Capture,
+}
+
+impl Drop for Live {
+    fn drop(&mut self) {
+        let _ = self.source.disconnect();
+        let _ = self.node.disconnect();
+        match &self.capture {
+            Capture::Worklet { port, .. } => {
+                port.set_onmessage(None);
+                port.close();
+            }
+            Capture::Processor { node, .. } => node.set_onaudioprocess(None),
+        }
+        stop_tracks(&self.stream);
+    }
 }
 
 /// Collects samples into pushes and tracks the level.
-struct Chunker {
+pub(super) struct Chunker {
     shared: Weak<Shared>,
     session: u32,
     rate: u32,
@@ -92,7 +162,7 @@ impl Chunker {
         }
     }
 
-    fn flush(&mut self, shared: &Shared) {
+    pub(super) fn flush(&mut self, shared: &Shared) {
         if self.buffer.is_empty() {
             return;
         }
@@ -119,16 +189,49 @@ fn new_context(rate: Option<f32>) -> Option<AudioContext> {
     }
 }
 
+/// A context for the microphone, at the model's rate if it can be.
+fn model_rate_context() -> Option<AudioContext> {
+    new_context(Some(MODEL_RATE)).or_else(|| new_context(None))
+}
+
+/// Inside the tap of a start that waits for the model: make (or resume) the
+/// context the microphone will use, while a gesture allows it to start.
+pub(crate) fn warm_up(shared: &Shared) {
+    let mut warm = shared.warm.borrow_mut();
+    if warm.is_none() {
+        *warm = model_rate_context();
+    }
+    if let Some(ctx) = warm.as_ref() {
+        let _ = ctx.resume();
+    }
+}
+
+/// Close the warmed-up context once nothing wants a microphone (the start
+/// it was made for failed or was cancelled).
+pub(crate) fn drop_unwanted_warm(shared: &Shared) {
+    let wanted = shared
+        .machine
+        .try_borrow()
+        .map(|m| m.wants_mic())
+        .unwrap_or(true);
+    if !wanted {
+        let warm = shared.warm.borrow_mut().take();
+        if let Some(ctx) = warm {
+            let _ = ctx.close();
+        }
+    }
+}
+
 /// Open the microphone for `session` (the machine's `OpenMic`).
 pub(crate) fn open(shared: &Rc<Shared>, session: u32) {
-    if let Some(old) = shared.mic.borrow_mut().take() {
-        release(old, false, shared);
-    }
-    let Some(ctx) = new_context(Some(MODEL_RATE)).or_else(|| new_context(None)) else {
+    let old = shared.mic.borrow_mut().take();
+    drop(old);
+    let warm = shared.warm.borrow_mut().take();
+    let Some(ctx) = warm.or_else(model_rate_context) else {
         report_failure(shared, session, MicError::Unsupported);
         return;
     };
-    // Inside the user's tap: allowed to start.
+    // Inside the user's tap when the model was ready: allowed to start.
     let _ = ctx.resume();
     let chunker = Rc::new(RefCell::new(Chunker {
         shared: Rc::downgrade(shared),
@@ -158,9 +261,8 @@ pub(crate) fn open(shared: &Rc<Shared>, session: u32) {
                         mic.live = kept.take();
                     }
                 }
-                if let Some(live) = kept {
-                    // Aborted while wiring up.
-                    stop_live(&live);
+                if kept.is_some() {
+                    // Aborted while wiring up: dropping it releases it.
                     return;
                 }
                 dispatch(&shared, &mut |m| m.on_mic_opened(session));
@@ -172,9 +274,8 @@ pub(crate) fn open(shared: &Rc<Shared>, session: u32) {
                 if !current {
                     return;
                 }
-                if let Some(mic) = shared.mic.borrow_mut().take() {
-                    let _ = mic.ctx.close();
-                }
+                let mic = shared.mic.borrow_mut().take();
+                drop(mic);
                 dispatch(&shared, &mut |m| m.on_mic_failed(session, err.clone()));
             }
         }
@@ -222,6 +323,23 @@ fn stop_tracks(stream: &MediaStream) {
     }
 }
 
+/// Resume `ctx` (again: the permission prompt may have suspended it) and
+/// say whether it runs, giving the resume [`RESUME_MS`].
+async fn runs(ctx: &AudioContext) -> bool {
+    if ctx.state() == AudioContextState::Running {
+        return true;
+    }
+    if let (Ok(resume), Some(window)) = (ctx.resume(), web_sys::window()) {
+        let timeout = Promise::new(&mut |resolve, _| {
+            let _ =
+                window.set_timeout_with_callback_and_timeout_and_arguments_0(&resolve, RESUME_MS);
+        });
+        // A rejected resume is a context that doesn't run.
+        let _ = JsFuture::from(Promise::race(&Array::of2(&resume, &timeout))).await;
+    }
+    ctx.state() == AudioContextState::Running
+}
+
 /// Ask for the microphone and wire it up. `Ok(None)`: the start was
 /// aborted meanwhile, and the stream is released.
 async fn connect(weak: &Weak<Shared>, session: u32) -> Result<Option<Live>, MicError> {
@@ -255,6 +373,18 @@ async fn connect(weak: &Weak<Shared>, session: u32) -> Result<Option<Live>, MicE
         Ok(source) => source,
         Err(_) => {
             // The microphone can't join a 16 kHz context: use its rate.
+            //
+            // This context is made after the `getUserMedia` await, outside
+            // the tap. That is acceptable: only Firefox refuses a
+            // microphone in a context at another rate, and Firefox lets a
+            // page start audio once it has had a user gesture or holds the
+            // microphone, both true here; iOS Safari, the browser that
+            // needs the gesture, resamples the microphone into the 16 kHz
+            // context and never comes here. A second, device-rate context
+            // ready from the tap would run two contexts on every dictation
+            // for this one path. Should a browser keep it suspended
+            // anyway, `runs` below reports that rather than listening to
+            // silence.
             let Some(device_rate) = new_context(None) else {
                 stop_tracks(&stream);
                 return Err(MicError::Unsupported);
@@ -274,39 +404,53 @@ async fn connect(weak: &Weak<Shared>, session: u32) -> Result<Option<Live>, MicE
             })?
         }
     };
-    let chunker = match shared.mic.borrow().as_ref() {
-        Some(mic) => mic.chunker.clone(),
-        None => {
-            stop_tracks(&stream);
-            return Ok(None);
-        }
-    };
     let worklet_url = shared.worklet_url.clone();
     drop(shared);
-    let live = match worklet_node(&ctx, &worklet_url, &chunker).await {
-        Some((node, handler)) => Live {
-            stream,
-            source,
+    if !runs(&ctx).await {
+        stop_tracks(&stream);
+        return Err(MicError::Suspended);
+    }
+    // This session's chunker only: a newer session may hold the slot now.
+    let Some(chunker) = weak.upgrade().and_then(|s| {
+        s.mic
+            .borrow()
+            .as_ref()
+            .filter(|m| m.session == session)
+            .map(|m| m.chunker.clone())
+    }) else {
+        stop_tracks(&stream);
+        return Ok(None);
+    };
+    let (node, capture) = match worklet_node(&ctx, &worklet_url, &chunker).await {
+        Ok((node, port, handler)) => (
             node,
-            _port_handler: Some(handler),
-            _process_handler: None,
-        },
-        None => {
+            Capture::Worklet {
+                port,
+                _handler: handler,
+            },
+        ),
+        Err(why) => {
+            warn_fallback(weak, &why);
             let (node, handler) = processor_node(&ctx, &chunker).map_err(|e| {
                 stop_tracks(&stream);
                 mic_error(&e)
             })?;
-            Live {
-                stream,
-                source,
-                node,
-                _port_handler: None,
-                _process_handler: Some(handler),
-            }
+            (
+                node.clone().unchecked_into(),
+                Capture::Processor {
+                    node,
+                    _handler: handler,
+                },
+            )
         }
     };
+    let live = Live {
+        stream,
+        source,
+        node,
+        capture,
+    };
     if wanted(weak, session).is_none() {
-        stop_live(&live);
         return Ok(None);
     }
     let wire = live
@@ -316,41 +460,75 @@ async fn connect(weak: &Weak<Shared>, session: u32) -> Result<Option<Live>, MicE
         // outputs silence.
         .and_then(|_| live.node.connect_with_audio_node(&ctx.destination()));
     if let Err(err) = wire {
-        stop_live(&live);
         return Err(mic_error(&err));
     }
     Ok(Some(live))
 }
 
-/// The worklet capture, where the browser has `AudioWorklet`.
+/// Say once per provider, in the console, that the worklet failed and why.
+fn warn_fallback(weak: &Weak<Shared>, why: &str) {
+    let Some(shared) = weak.upgrade() else {
+        return;
+    };
+    if !shared.worklet_warned.replace(true) {
+        web_sys::console::warn_1(
+            &format!("agg-gui-whistle: no AudioWorklet ({why}); capturing with a ScriptProcessor")
+                .into(),
+        );
+    }
+}
+
+fn js_text(err: &JsValue) -> String {
+    err.as_string()
+        .or_else(|| {
+            Reflect::get(err, &"message".into())
+                .ok()
+                .and_then(|m| m.as_string())
+        })
+        .unwrap_or_else(|| format!("{err:?}"))
+}
+
+/// The worklet capture, where the browser has `AudioWorklet`; why not
+/// otherwise.
 async fn worklet_node(
     ctx: &AudioContext,
     url: &str,
     chunker: &Rc<RefCell<Chunker>>,
-) -> Option<(AudioNode, PortHandler)> {
-    let worklet = ctx.audio_worklet().ok()?;
-    JsFuture::from(worklet.add_module(url).ok()?).await.ok()?;
-    let node = AudioWorkletNode::new(ctx, "agg-gui-whistle-capture").ok()?;
+) -> Result<(AudioNode, MessagePort, PortHandler), String> {
+    let worklet = ctx
+        .audio_worklet()
+        .map_err(|_| "this browser has none".to_string())?;
+    let loading = worklet.add_module(url).map_err(|e| js_text(&e))?;
+    JsFuture::from(loading)
+        .await
+        .map_err(|e| format!("{url} did not load: {}", js_text(&e)))?;
+    let node = AudioWorkletNode::new(ctx, "agg-gui-whistle-capture").map_err(|e| js_text(&e))?;
+    let port = node.port().map_err(|e| js_text(&e))?;
     let chunker = chunker.clone();
     let handler = Closure::<dyn FnMut(MessageEvent)>::new(move |e: MessageEvent| {
-        if let Some(samples) = e.data().dyn_ref::<Float32Array>() {
+        let data = e.data();
+        if let Some(samples) = data.dyn_ref::<Float32Array>() {
             chunker.borrow_mut().feed(&samples.to_vec());
+        } else if data.as_string().as_deref() == Some(drain::FLUSHED) {
+            let (shared, session) = {
+                let c = chunker.borrow();
+                (c.shared.clone(), c.session)
+            };
+            drain::drained(shared, session);
         }
     });
-    node.port()
-        .ok()?
-        .set_onmessage(Some(handler.as_ref().unchecked_ref()));
-    Some((node.unchecked_into(), handler))
+    port.set_onmessage(Some(handler.as_ref().unchecked_ref()));
+    Ok((node.unchecked_into(), port, handler))
 }
 
 /// The `ScriptProcessor` fallback.
 fn processor_node(
     ctx: &AudioContext,
     chunker: &Rc<RefCell<Chunker>>,
-) -> Result<(AudioNode, ProcessHandler), JsValue> {
+) -> Result<(ScriptProcessorNode, ProcessHandler), JsValue> {
     let node = ctx
         .create_script_processor_with_buffer_size_and_number_of_input_channels_and_number_of_output_channels(
-            4096, 1, 1,
+            PROCESSOR_FRAMES, 1, 1,
         )?;
     let chunker = chunker.clone();
     let handler =
@@ -362,28 +540,14 @@ fn processor_node(
             }
         });
     node.set_onaudioprocess(Some(handler.as_ref().unchecked_ref()));
-    Ok((node.unchecked_into(), handler))
+    Ok((node, handler))
 }
 
-fn stop_live(live: &Live) {
-    let _ = live.source.disconnect();
-    let _ = live.node.disconnect();
-    stop_tracks(&live.stream);
-}
-
-fn release(mic: Mic, flush: bool, shared: &Shared) {
-    if flush {
-        mic.chunker.borrow_mut().flush(shared);
-    }
-    if let Some(live) = &mic.live {
-        stop_live(live);
-    }
-    let _ = mic.ctx.close();
-}
-
-/// Close the session's microphone (the machine's `CloseMic`); with `flush`
-/// its last partial chunk goes to the worker first, before the `Finish`
-/// the machine sends next.
+/// Close the session's microphone (the machine's `CloseMic`). With `flush`
+/// its last audio goes to the worker before the `Finish` the machine sends
+/// next: a worklet is drained first (`drain.rs`, which holds that
+/// `Finish` back until then), a `ScriptProcessor`'s buffered chunk goes at
+/// once.
 pub(crate) fn close(shared: &Rc<Shared>, session: u32, flush: bool) {
     let mic = {
         let mut slot = shared.mic.borrow_mut();
@@ -392,7 +556,15 @@ pub(crate) fn close(shared: &Rc<Shared>, session: u32, flush: bool) {
             _ => None,
         }
     };
-    if let Some(mic) = mic {
-        release(mic, flush, shared);
+    let Some(mic) = mic else {
+        return;
+    };
+    if flush {
+        if mic.worklet_port().is_some() {
+            drain::start(shared, mic);
+            return;
+        }
+        mic.chunker.borrow_mut().flush(shared);
     }
+    drop(mic);
 }

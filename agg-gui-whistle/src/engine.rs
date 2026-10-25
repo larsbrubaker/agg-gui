@@ -6,14 +6,15 @@
 //! engine thread (`native/`); each host loads the model its own way and then
 //! hands every message but `Load` to [`Engine::handle`]. Streams use
 //! whistle's live preset, `Options::streaming()` (one beam, so a one-thread
-//! wasm pass stays under the 1 s step).
+//! wasm pass stays under the 1 s step). Audio at another rate than the
+//! model's is resampled as one stream per session (`resample.rs`), so the
+//! pushes it came in leave no trace; its last few milliseconds go in at
+//! `Finish`.
 
 use whistle::{Options, Stream, StreamUpdate, Whistle};
 
 use crate::protocol::{FromWorker, Recognised, ToWorker};
-
-/// The model's sample rate; other rates are resampled.
-const RATE: u32 = 16_000;
+use crate::resample::ModelRate;
 
 /// The model and the live stream.
 pub struct Engine {
@@ -21,8 +22,43 @@ pub struct Engine {
     /// for the rest of its life (the worker's, or the process's natively,
     /// where `native/` builds it once), so `'static` is the honest lifetime.
     whistle: &'static Whistle,
-    /// The open stream and its session.
-    stream: Option<(u32, Stream<'static>)>,
+    /// The open stream.
+    stream: Option<Open>,
+}
+
+/// A session's stream and its audio's conversion to the model's rate.
+struct Open {
+    session: u32,
+    stream: Stream<'static>,
+    input: ModelRate,
+}
+
+/// Two updates in a row as one: `first`'s committed words, then `second`'s
+/// (spaced as `text_map.rs` spaces updates), and `second`'s tail.
+pub(crate) fn merge(first: Recognised, second: Recognised) -> Recognised {
+    let trimmed = |r: &Recognised| {
+        if r.continues {
+            r.text.trim_end().to_string()
+        } else {
+            r.text.trim().to_string()
+        }
+    };
+    let (a, b) = (trimmed(&first), trimmed(&second));
+    if a.is_empty() {
+        return second;
+    }
+    let text = if b.is_empty() {
+        a
+    } else if second.continues {
+        format!("{a}{b}")
+    } else {
+        format!("{a} {b}")
+    };
+    Recognised {
+        text,
+        continues: first.continues,
+        pending: second.pending,
+    }
 }
 
 impl From<&StreamUpdate> for Recognised {
@@ -54,7 +90,7 @@ impl Engine {
 
     /// The session of the open stream.
     pub fn session(&self) -> Option<u32> {
-        self.stream.as_ref().map(|(s, _)| *s)
+        self.stream.as_ref().map(|open| open.session)
     }
 
     /// Answer one message. `Load` is the host's business and is ignored.
@@ -68,7 +104,11 @@ impl Engine {
                 };
                 match self.whistle.stream(&options) {
                     Ok(stream) => {
-                        self.stream = Some((session, stream));
+                        self.stream = Some(Open {
+                            session,
+                            stream,
+                            input: ModelRate::default(),
+                        });
                         None
                     }
                     Err(err) => {
@@ -85,16 +125,18 @@ impl Engine {
                 rate,
                 samples,
             } => {
-                let (open, stream) = self.stream.as_mut()?;
-                if *open != session {
+                let open = self.stream.as_mut()?;
+                if open.session != session {
                     return None;
                 }
-                let pushed = if rate == RATE {
-                    stream.push(&samples)
-                } else {
-                    stream.push(&whistle::audio::resample(&samples, rate, RATE))
+                let Some(samples) = open.input.push(rate, samples) else {
+                    self.stream = None;
+                    return Some(FromWorker::Failed {
+                        session,
+                        detail: format!("unsupported sample rate {rate} Hz"),
+                    });
                 };
-                Some(match pushed {
+                Some(match open.stream.push(&samples) {
                     Ok(update) => FromWorker::Update {
                         session,
                         update: (&update).into(),
@@ -111,8 +153,8 @@ impl Engine {
             ToWorker::Finish { session } => {
                 // A finish for a stream that is not open (its start failed)
                 // still gets its final reply, so the provider never waits.
-                let stream = match self.stream.take() {
-                    Some((open, stream)) if open == session => stream,
+                let open = match self.stream.take() {
+                    Some(open) if open.session == session => open,
                     other => {
                         self.stream = other;
                         return Some(FromWorker::Final {
@@ -121,11 +163,8 @@ impl Engine {
                         });
                     }
                 };
-                Some(match stream.finish() {
-                    Ok(update) => FromWorker::Final {
-                        session,
-                        update: (&update).into(),
-                    },
+                Some(match finish(open) {
+                    Ok(update) => FromWorker::Final { session, update },
                     Err(err) => FromWorker::Failed {
                         session,
                         detail: err.to_string(),
@@ -140,6 +179,24 @@ impl Engine {
             }
         }
     }
+}
+
+/// End `open`'s stream: the resampler's last audio, then whistle's finish,
+/// as one update.
+fn finish(open: Open) -> Result<Recognised, whistle::Error> {
+    let Open {
+        mut stream,
+        mut input,
+        ..
+    } = open;
+    let tail = input.finish();
+    let before = if tail.is_empty() {
+        Recognised::default()
+    } else {
+        (&stream.push(&tail)?).into()
+    };
+    let last: Recognised = (&stream.finish()?).into();
+    Ok(merge(before, last))
 }
 
 #[cfg(all(test, not(target_arch = "wasm32"), feature = "provider"))]

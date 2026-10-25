@@ -123,3 +123,69 @@ fn a_dictation_runs_through_the_engine_thread() {
     }
     assert_eq!(text, "Make the cube 20 mm wide and round the top edges.");
 }
+
+/// A panic on the engine thread is reported, so the key doesn't stay on
+/// Listening (or Preparing) with nobody answering.
+#[test]
+fn an_engine_thread_that_panics_reports_the_engine_lost() {
+    let (notifier, events) = notifier();
+    let thread = std::thread::spawn(move || {
+        let _guard = LostGuard(notifier);
+        panic!("a kernel bug");
+    });
+    assert!(thread.join().is_err());
+    assert!(matches!(events.try_recv(), Ok(Event::EngineLost(_))));
+}
+
+#[test]
+fn an_engine_thread_that_returns_reports_nothing_more() {
+    let (notifier, events) = notifier();
+    std::thread::spawn(move || {
+        let _guard = LostGuard(notifier);
+    })
+    .join()
+    .expect("no panic");
+    assert!(events.try_recv().is_err());
+}
+
+/// The host takes a lost engine as the machine's `worker_lost`: a
+/// dictation in progress ends with an error and the next load starts a new
+/// thread.
+#[cfg(feature = "native-mic")]
+#[test]
+fn the_host_ends_the_dictation_when_the_engine_is_lost() {
+    use agg_gui::widgets::on_screen_keyboard::VoiceState;
+    let host = NativeHost::new(config(None));
+    // A listening session, its commands dropped (no device is opened).
+    let mut session = None;
+    host.dispatch(&mut |m| {
+        m.on_worker(FromWorker::Loaded {
+            source: "test".into(),
+        });
+        m.start(&agg_gui::widgets::on_screen_keyboard::VoiceContext::default());
+        m.take_commands();
+        let s = m.current_session().expect("a session");
+        m.on_mic_opened(s);
+        session = Some(s);
+    });
+    let mut state = None;
+    host.dispatch(&mut |m| state = Some(m.poll().state));
+    assert!(
+        matches!(state, Some(VoiceState::Listening { .. })),
+        "{state:?}"
+    );
+
+    let notifier = host.inner.borrow().notifier.clone();
+    notifier.send(Event::EngineLost("panicked".into()));
+    let mut current = session;
+    host.dispatch(&mut |m| {
+        state = Some(m.poll().state);
+        current = m.current_session();
+    });
+    assert_eq!(current, None, "the dictation is over");
+    assert!(
+        matches!(state, Some(VoiceState::Error { retry: true, .. })),
+        "{state:?}"
+    );
+    assert!(host.inner.borrow().engine.is_none());
+}

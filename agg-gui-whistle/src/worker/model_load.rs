@@ -5,11 +5,25 @@
 //! `model_check.rs`) and cached under that checksum, so a new model version
 //! never reads an old copy. The digest is the browser's SubtleCrypto.
 //! Mirrors whistle-rust's demo (`demo/web/src/model.ts`).
+//!
+//! A download silent for [`STALL_MS`] (no response, no bytes) is aborted
+//! and counts as failed, so the keyboard's next show retries it. Progress
+//! counts against the model's pinned size, not `Content-Length` (which
+//! counts encoded bytes when the server compresses the body). When every
+//! place fails, the last failure names the reason: a network failure after
+//! a wrong file is a network failure.
+
+use std::cell::Cell;
+use std::rc::Rc;
 
 use js_sys::{Reflect, Uint8Array};
+use wasm_bindgen::prelude::*;
 use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::JsFuture;
-use web_sys::{Cache, DedicatedWorkerGlobalScope, ReadableStreamDefaultReader, Response};
+use web_sys::{
+    AbortController, Cache, DedicatedWorkerGlobalScope, ReadableStreamDefaultReader, RequestInit,
+    Response,
+};
 
 use crate::model_check::{self, Check};
 use crate::protocol::LoadFailure;
@@ -19,6 +33,73 @@ const CACHE_NAME: &str = "agg-gui-whistle-model-v1";
 
 /// Progress is reported at most this often, in ms.
 const PROGRESS_MS: f64 = 100.0;
+
+/// A download with no response or no new bytes for this long has stalled,
+/// in ms.
+const STALL_MS: i32 = 20_000;
+
+/// Aborts a download once it has been silent for [`STALL_MS`]; re-armed by
+/// each chunk. Dropping it disarms it.
+struct Watchdog {
+    scope: DedicatedWorkerGlobalScope,
+    controller: AbortController,
+    stalled: Rc<Cell<bool>>,
+    on_stall: Closure<dyn FnMut()>,
+    timer: Option<i32>,
+}
+
+impl Watchdog {
+    fn new(scope: &DedicatedWorkerGlobalScope) -> Result<Watchdog, JsValue> {
+        let controller = AbortController::new()?;
+        let stalled = Rc::new(Cell::new(false));
+        let on_stall = {
+            let (controller, stalled) = (controller.clone(), stalled.clone());
+            Closure::<dyn FnMut()>::new(move || {
+                stalled.set(true);
+                controller.abort();
+            })
+        };
+        let mut watchdog = Watchdog {
+            scope: scope.clone(),
+            controller,
+            stalled,
+            on_stall,
+            timer: None,
+        };
+        watchdog.rearm();
+        Ok(watchdog)
+    }
+
+    fn rearm(&mut self) {
+        if let Some(timer) = self.timer.take() {
+            self.scope.clear_timeout_with_handle(timer);
+        }
+        self.timer = self
+            .scope
+            .set_timeout_with_callback_and_timeout_and_arguments_0(
+                self.on_stall.as_ref().unchecked_ref(),
+                STALL_MS,
+            )
+            .ok();
+    }
+
+    /// `err`, or that the download stalled when that is why it failed.
+    fn reason(&self, url: &str, err: &JsValue) -> String {
+        if self.stalled.get() {
+            format!("{url}: stalled (nothing for {} s)", STALL_MS / 1000)
+        } else {
+            format!("{url}: {}", text(err))
+        }
+    }
+}
+
+impl Drop for Watchdog {
+    fn drop(&mut self) {
+        if let Some(timer) = self.timer.take() {
+            self.scope.clear_timeout_with_handle(timer);
+        }
+    }
+}
 
 fn text(err: &JsValue) -> String {
     err.as_string()
@@ -74,7 +155,8 @@ async fn from_cache(
 enum Failed {
     /// The request or the transfer failed.
     Transfer(String),
-    /// More bytes came than whistle.cact has: some other file.
+    /// More bytes came than whistle.cact has: some other file (a download
+    /// failure, with its own message, as natively).
     TooLarge(String),
 }
 
@@ -84,9 +166,12 @@ async fn download(
     progress: &dyn Fn(u64, u64),
 ) -> Result<Vec<u8>, Failed> {
     let fail = Failed::Transfer;
-    let response = JsFuture::from(scope.fetch_with_str(url))
+    let mut watchdog = Watchdog::new(scope).map_err(|e| fail(format!("{url}: {}", text(&e))))?;
+    let init = RequestInit::new();
+    init.set_signal(Some(&watchdog.controller.signal()));
+    let response = JsFuture::from(scope.fetch_with_str_and_init(url, &init))
         .await
-        .map_err(|e| fail(format!("{url}: {}", text(&e))))?;
+        .map_err(|e| fail(watchdog.reason(url, &e)))?;
     let response: Response = response
         .dyn_into()
         .map_err(|_| fail(format!("{url}: no response")))?;
@@ -94,13 +179,7 @@ async fn download(
         return Err(fail(format!("{url}: HTTP {}", response.status())));
     }
     let expected = model_check::expected_bytes();
-    let total = response
-        .headers()
-        .get("content-length")
-        .ok()
-        .flatten()
-        .and_then(|n| n.parse::<u64>().ok())
-        .unwrap_or(expected as u64);
+    let total = expected as u64;
     let body = response
         .body()
         .ok_or_else(|| fail(format!("{url}: no body")))?;
@@ -113,7 +192,8 @@ async fn download(
     loop {
         let chunk = JsFuture::from(reader.read())
             .await
-            .map_err(|e| fail(format!("{url}: {}", text(&e))))?;
+            .map_err(|e| fail(watchdog.reason(url, &e)))?;
+        watchdog.rearm();
         let done = Reflect::get(&chunk, &JsValue::from_str("done"))
             .ok()
             .and_then(|d| d.as_bool())
@@ -158,16 +238,18 @@ pub(super) async fn load(
         }
     }
     let mut failures = Vec::new();
-    let mut mismatched = false;
+    // The last failure's kind is the one reported.
+    let mut last = LoadFailure::Download;
     for url in urls {
         let mut bytes = match download(scope, url, progress).await {
             Ok(bytes) => bytes,
             Err(Failed::Transfer(err)) => {
+                last = LoadFailure::Download;
                 failures.push(err);
                 continue;
             }
             Err(Failed::TooLarge(err)) => {
-                mismatched = true;
+                last = LoadFailure::Download;
                 failures.push(err);
                 continue;
             }
@@ -175,11 +257,12 @@ pub(super) async fn load(
         match check(scope, &bytes).await {
             Ok(Check::Ok) => {}
             Ok(Check::Mismatch) => {
-                mismatched = true;
+                last = LoadFailure::Checksum;
                 failures.push(format!("{url}: not the expected whistle.cact"));
                 continue;
             }
             Err(err) => {
+                last = LoadFailure::Download;
                 failures.push(format!("{url}: {err}"));
                 continue;
             }
@@ -192,13 +275,8 @@ pub(super) async fn load(
         }
         return Ok((bytes, url.clone()));
     }
-    let reason = if mismatched {
-        LoadFailure::Checksum
-    } else {
-        LoadFailure::Download
-    };
     if failures.is_empty() {
         failures.push("no model URL configured".into());
     }
-    Err((reason, failures.join("; ")))
+    Err((last, failures.join("; ")))
 }

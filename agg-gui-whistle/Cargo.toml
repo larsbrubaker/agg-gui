@@ -45,7 +45,7 @@ whistle-rust = { path = "../../whistle-rust/crates/whistle-rust" }
 # The model's checksum, natively (the browser has SubtleCrypto).
 sha2 = "0.10"
 cpal = { version = "0.17", optional = true }
-ureq = { version = "3", optional = true, default-features = false, features = ["rustls-no-provider", "rustls-webpki-roots"] }
+ureq = { version = "3.5", optional = true, default-features = false, features = ["rustls-no-provider", "rustls-webpki-roots"] }
 rustls-rustcrypto = { version = "0.0.2-alpha", optional = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
@@ -93,6 +93,9 @@ web-sys = { version = "0.3.82", features = [
     "DedicatedWorkerGlobalScope",
     "WorkerGlobalScope",
     "Response",
+    "RequestInit",
+    "AbortController",
+    "AbortSignal",
     "Headers",
     "ReadableStream",
     "ReadableStreamDefaultReader",
