@@ -25,7 +25,13 @@
  *   one lags by seconds), which only delays the cue.
  * - Main-thread stalls longer than the ScriptProcessor's buffer replay no
  *   audio: an event that ran too late (its buffer already refilled) is
- *   dropped, so the stall costs words rather than making some up.
+ *   dropped, so the stall costs words rather than replaying others. Once
+ *   events are dropped, whistle's guesses over the gap are not the
+ *   fallback's doing: these tests then check only what it owns (no audio
+ *   twice, drops only with a stall, a finished dictation, the surviving
+ *   words in order, nothing before the clip). AudioWorklet is in every
+ *   current browser, so the fallback only serves old ones: the stall tests
+ *   prove the replay fix, not recognition quality.
  * - A model download that stalls times out and is an error the next tap
  *   retries.
  *
@@ -304,6 +310,17 @@ async function recordPushedSamples(page: Page): Promise<void> {
     const win = window as unknown as Record<string, any>;
     win.__samples = [] as number[];
     win.__processorEvents = 0;
+    // The longest the main thread was blocked since `armLateness`: how
+    // late a 20 ms timer ran. A dropped event needs about a second of it.
+    win.__lateness = { armed: false, max: 0 };
+    let last = performance.now();
+    setInterval(() => {
+      const now = performance.now();
+      if (win.__lateness.armed) {
+        win.__lateness.max = Math.max(win.__lateness.max, now - last - 20);
+      }
+      last = now;
+    }, 20);
     const proto = ScriptProcessorNode.prototype;
     const handler = Object.getOwnPropertyDescriptor(proto, "onaudioprocess")!;
     Object.defineProperty(proto, "onaudioprocess", {
@@ -335,7 +352,9 @@ async function recordPushedSamples(page: Page): Promise<void> {
  * by a quiet room's noise (no sample above 0.002, not exact zeros: no
  * second of the clip is that quiet), or not pushed at all.
  */
-async function pushedBlocks(page: Page): Promise<{ repeated: number; dropped: number }> {
+async function pushedBlocks(
+  page: Page,
+): Promise<{ repeated: number; dropped: number; quietBefore: boolean }> {
   return page.evaluate(() => {
     const win = window as unknown as Record<string, any>;
     const all = win.__samples as number[];
@@ -357,24 +376,93 @@ async function pushedBlocks(page: Page): Promise<{ repeated: number; dropped: nu
       seen.add(key);
     }
     const unpushed = Math.max(0, (win.__processorEvents as number) - blocks);
-    return { repeated, dropped: filled + unpushed };
+    // The first buffer was captured before the cue, before the clip: it
+    // must be silence (or the noise floor), not speech replayed from later.
+    const first = all.slice(0, frames);
+    const quietBefore = first.length < frames || first.every((v) => Math.abs(v) <= 0.002);
+    return { repeated, dropped: filled + unpushed, quietBefore };
   });
 }
 
-/** The words of a dictation that aren't the clip's, as whistle reads it
- * ("Q20", "cute", "queue"; replayed audio on CI read "money", "Madison",
- * "then", "twenty-th"). */
-function strangers(text: string | null): string[] {
-  const clipWords = new Set(
-    "make mate the cube cute queue q q20 20 twenty mm millimeters meters wide and round rounded to top edges".split(
-      " ",
-    ),
-  );
-  return (text ?? "")
+/** Start measuring how long the main thread is blocked (`recordPushedSamples`). */
+async function armLateness(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    (window as unknown as Record<string, any>).__lateness = { armed: true, max: 0 };
+  });
+}
+
+/** The clip's words, and how whistle has read each of them. */
+const CLIP_WORDS = ["make", "the", "cube", "20", "mm", "wide", "and", "round", "the", "top", "edges"];
+const READINGS: Record<string, string[]> = {
+  mate: ["make"],
+  cute: ["cube"],
+  queue: ["cube"],
+  q: ["cube"],
+  q20: ["cube", "20"],
+  twenty: ["20"],
+  millimeters: ["mm"],
+  meters: ["mm"],
+  rounded: ["round"],
+  to: ["the"],
+};
+
+/**
+ * The clip's words in a dictation, as whistle read them, that are out of
+ * the clip's order: none when the words that survived come in order. Other
+ * words are whistle's guesses where audio was missing, which this skips.
+ */
+function outOfOrder(text: string | null): string[] {
+  const said = (text ?? "")
     .replace(/^Edit this text/, "")
     .toLowerCase()
-    .split(/[^a-z0-9-]+/)
-    .filter((w) => w.length > 0 && !clipWords.has(w));
+    .split(/[^a-z0-9]+/)
+    .filter((w) => w.length > 0);
+  const wrong: string[] = [];
+  let at = 0;
+  for (const word of said) {
+    const meant = READINGS[word] ?? (CLIP_WORDS.includes(word) ? [word] : []);
+    for (const m of meant) {
+      const next = CLIP_WORDS.indexOf(m, at);
+      if (next < 0) wrong.push(word);
+      else at = next + 1;
+    }
+  }
+  return wrong;
+}
+
+/**
+ * What the fallback owns once events were dropped (audio the main thread
+ * held back too long, `processor_clock.rs`): whistle's guesses over the
+ * gap are not its doing, so not the words, but that no audio was pushed
+ * twice, that drops came only with a real stall, that the dictation
+ * finished, that the words left come in the clip's order, and that nothing
+ * from before the clip was pushed as sound (replayed speech read "money").
+ */
+async function expectWhatTheFallbackOwns(
+  page: Page,
+  text: string | null,
+  blocks: { repeated: number; dropped: number; quietBefore: boolean },
+): Promise<void> {
+  const blocked = await page.evaluate(
+    () => (window as unknown as Record<string, any>).__lateness.max as number,
+  );
+  const finals = await page.evaluate(
+    () => ((window as unknown as Record<string, any>).__traffic?.replies?.final ?? 0) as number,
+  );
+  console.log(
+    `field text: ${JSON.stringify(text)}; ${blocks.dropped} event(s) dropped, ` +
+      `${blocks.repeated} buffer(s) pushed twice; main thread blocked up to ` +
+      `${blocked.toFixed(0)} ms`,
+  );
+  expect(blocks.repeated, "a buffer of audio pushed twice").toBe(0);
+  if (blocks.dropped > 0) {
+    // An event is dropped only when it ran more than a buffer (1.024 s,
+    // less 50 ms) late: a block of the main thread close to that.
+    expect(blocked, "events dropped without a stall to hold them back").toBeGreaterThan(800);
+  }
+  expect(finals, "the dictation finished with its final text").toBeGreaterThan(0);
+  expect(blocks.quietBefore, "sound pushed from before the clip").toBe(true);
+  expect(outOfOrder(text), JSON.stringify(text)).toEqual([]);
 }
 
 async function withoutWorklet(page: Page): Promise<void> {
@@ -406,25 +494,20 @@ test("without an AudioWorklet the ScriptProcessor fallback dictates and says so 
   // Stalls of 300 ms: a 64 ms buffer came out shuffled and repeated
   // ("je trouve que je trouve que ..." on CI).
   await startStalls(page, 300, 500);
+  await armLateness(page);
   await page.touchscreen.tap(MIC.x, MIC.y);
   await dictateClip(page);
   await endStalls(page);
   const text = await fieldText(page);
-  const { repeated, dropped } = await pushedBlocks(page);
-  console.log(
-    `field text: ${JSON.stringify(text)}; ${dropped} event(s) dropped, ` +
-      `${repeated} buffer(s) pushed twice`,
-  );
-  expect(repeated, "a buffer of audio pushed twice").toBe(0);
-  if (dropped === 0) {
+  const blocks = await pushedBlocks(page);
+  await expectWhatTheFallbackOwns(page, text, blocks);
+  if (blocks.dropped === 0) {
     // The main thread kept within the buffer: every word.
     expect(text ?? "").toMatch(DICTATED);
-  } else {
-    // On top of these stalls, CI's own lag ran some events later than the
-    // buffer allows: their audio is lost, never replayed into made-up
-    // words.
-    expect(strangers(text), JSON.stringify(text)).toEqual([]);
   }
+  // With events dropped (CI's own lag on top of these stalls ran some more
+  // than a buffer late), their audio is lost and whistle guesses over the
+  // gap ("bite" for "wide" on CI): only what the fallback owns is checked.
   // A second dictation (the clip is over: silence) falls back again,
   // without another message.
   await page.touchscreen.tap(FIELD.x, FIELD.y);
@@ -453,19 +536,16 @@ test("without an AudioWorklet, main-thread stalls longer than its buffer replay 
   // later audio; pushed as read, that audio went twice ("cute twenty the
   // top edges").
   await startStalls(page, 2_500, 3_000);
+  await armLateness(page);
   await page.touchscreen.tap(MIC.x, MIC.y);
   await dictateClip(page);
   await endStalls(page);
   const text = await fieldText(page);
-  const { repeated, dropped } = await pushedBlocks(page);
-  console.log(
-    `field text: ${JSON.stringify(text)}; ${dropped} event(s) dropped, ` +
-      `${repeated} buffer(s) pushed twice`,
-  );
-  expect(repeated, "a buffer of audio pushed twice").toBe(0);
-  expect(dropped, "the stalls ran events too late").toBeGreaterThan(0);
-  // What a stall held back is missing, not made up.
-  expect(strangers(text), JSON.stringify(text)).toEqual([]);
+  const blocks = await pushedBlocks(page);
+  // A proof of the replay fix, not of recognition: the stalls must drop
+  // events, and what the fallback owns must hold.
+  expect(blocks.dropped, "the stalls ran events too late").toBeGreaterThan(0);
+  await expectWhatTheFallbackOwns(page, text, blocks);
 });
 
 /**
