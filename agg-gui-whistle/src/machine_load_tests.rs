@@ -16,6 +16,7 @@ fn opens(s: u32) -> Vec<Command> {
         Command::Worker(ToWorker::Start {
             session: s,
             language: String::new(),
+            full_pass: false,
         }),
         Command::OpenMic { session: s },
     ]

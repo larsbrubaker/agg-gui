@@ -173,7 +173,8 @@ async fn run_job(worker: &Shared, job: ToWorker) {
 }
 
 /// A session message before the model loaded: the provider never sends one,
-/// but if it does, a start fails and a finish still ends the session.
+/// but if it does, a start fails and a finish (and a full pass) still end
+/// the session.
 fn without_model(job: ToWorker) -> Option<FromWorker> {
     match job {
         ToWorker::Start { session, .. } => Some(FromWorker::Failed {
@@ -183,6 +184,10 @@ fn without_model(job: ToWorker) -> Option<FromWorker> {
         ToWorker::Finish { session } => Some(FromWorker::Final {
             session,
             update: Recognised::default(),
+        }),
+        ToWorker::FullPass { session } => Some(FromWorker::FullPassFailed {
+            session,
+            detail: "the model is not loaded".into(),
         }),
         _ => None,
     }

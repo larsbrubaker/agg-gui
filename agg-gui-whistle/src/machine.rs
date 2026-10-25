@@ -37,10 +37,19 @@
 //!
 //! A stop closes the microphone (sending its last audio), asks the engine
 //! to finish, reports `Finishing`, delivers the final text with a
-//! `Finishing` poll, then reports `Ready`.
+//! `Finishing` poll, then reports `Ready`. A dictation started with
+//! `full_pass` (`dictation.rs`; never the keyboard's) also asks the engine
+//! for the full pass after the finish, and stays `Finishing` until it is
+//! in: the stream's final text is delivered as soon as it arrives, and the
+//! pass with the poll that ends the dictation. A microphone lost while
+//! listening is reported at once ([`DictationError::MicLost`] in
+//! [`Machine::poll_dictation`]) and ends the dictation like a stop.
 
-use agg_gui::widgets::on_screen_keyboard::{VoiceContext, VoicePoll, VoiceState, VoiceText};
+#[cfg(test)]
+use agg_gui::widgets::on_screen_keyboard::VoicePoll;
+use agg_gui::widgets::on_screen_keyboard::{VoiceState, VoiceText};
 
+use crate::dictation::{DictationError, DictationOptions, DictationPoll, FullPass};
 use crate::protocol::{FromWorker, LoadFailure, ToWorker};
 use crate::text_map::TextMapper;
 
@@ -78,30 +87,28 @@ pub(crate) enum MicError {
 }
 
 impl MicError {
-    /// The message the keyboard shows, and whether a tap may retry.
-    fn shown(&self) -> (String, bool) {
+    /// What a start that failed this way tells its caller. A refusal is
+    /// one a tap retries: the browser is asked again, and refuses at once
+    /// while the site is blocked, or prompts or allows once it isn't.
+    fn at_start(&self) -> DictationError {
         match self {
-            // A tap asks the browser again: it refuses at once while the
-            // site is blocked, and prompts or allows once it isn't.
-            MicError::Denied => ("Microphone access was denied".into(), true),
-            MicError::NoDevice => ("No microphone found".into(), true),
-            MicError::Unsupported => ("This browser can't record audio".into(), false),
-            MicError::Suspended => ("Couldn't start the audio; tap to try again".into(), true),
-            MicError::Other(_) => ("Couldn't start the microphone".into(), true),
+            MicError::Denied => DictationError::MicDenied,
+            MicError::NoDevice => DictationError::NoMic,
+            MicError::Unsupported => DictationError::MicUnsupported,
+            MicError::Suspended => DictationError::MicSuspended,
+            MicError::Other(_) => DictationError::MicFailed,
         }
     }
 }
 
-fn load_failure_message(reason: LoadFailure) -> &'static str {
+fn load_failure(reason: LoadFailure) -> DictationError {
     match reason {
-        LoadFailure::Download => "Couldn't download the speech model",
-        LoadFailure::Checksum => "The speech model download was damaged",
-        LoadFailure::Model => "Couldn't load the speech model",
-        LoadFailure::Startup => "Couldn't start speech recognition",
+        LoadFailure::Download => DictationError::ModelDownload,
+        LoadFailure::Checksum => DictationError::ModelDamaged,
+        LoadFailure::Model => DictationError::ModelLoad,
+        LoadFailure::Startup => DictationError::EngineStartup,
     }
 }
-
-const ENGINE_FAILED: &str = "Speech recognition failed";
 
 #[derive(Debug, Clone, PartialEq)]
 enum Model {
@@ -112,7 +119,7 @@ enum Model {
     },
     Loaded,
     Failed {
-        message: String,
+        error: DictationError,
     },
 }
 
@@ -126,11 +133,23 @@ enum Dictation {
     Listening {
         session: u32,
     },
-    /// Stopped; `done` once the engine's final reply is in.
+    /// Stopped; `done` once the engine's final reply is in (and, for a
+    /// full-pass session, the pass: [`Machine::full_pass`]).
     Finishing {
         session: u32,
         done: bool,
     },
+}
+
+/// A session's full pass.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Pass {
+    /// Not asked for.
+    Unwanted,
+    /// Asked for (at the start); not in yet.
+    Waiting,
+    /// In, to deliver with the poll that ends the dictation.
+    Read(FullPass),
 }
 
 /// See the module docs.
@@ -151,9 +170,14 @@ pub(crate) struct Machine {
     /// The session's audio has reached the pipeline (its first level): only
     /// then does the key say listening.
     heard: bool,
+    /// The session's full pass.
+    full_pass: Pass,
+    /// The stream's final reply is in (the session finishes once its full
+    /// pass is too).
+    final_in: bool,
     /// The last dictation's error, shown until the next start (or an app's
     /// prepare).
-    error: Option<(String, bool)>,
+    error: Option<DictationError>,
     /// A poll has reported since the last start (an error that lands before
     /// one is held back a poll, so the keyboard sees the retry begin).
     polled_since_start: bool,
@@ -175,6 +199,8 @@ impl Machine {
             mapper: TextMapper::default(),
             level: None,
             heard: false,
+            full_pass: Pass::Unwanted,
+            final_in: false,
             error: None,
             polled_since_start: true,
             commands: Vec::new(),
@@ -190,6 +216,11 @@ impl Machine {
         let mut m = Machine::new(Vec::new(), None);
         m.unsupported = Some(message.to_string());
         m
+    }
+
+    /// Why the platform can't dictate, if it can't.
+    pub fn unsupported_reason(&self) -> Option<&str> {
+        self.unsupported.as_deref()
     }
 
     /// The commands queued since the last call, in order.
@@ -232,7 +263,10 @@ impl Machine {
         self.load();
     }
 
-    pub fn start(&mut self, ctx: &VoiceContext) {
+    /// Start a dictation: the keyboard's (`&VoiceContext`) or another
+    /// caller's (`&DictationOptions`).
+    pub fn start<'a>(&mut self, options: impl Into<DictationOptions> + 'a) {
+        let options: DictationOptions = options.into();
         if self.unsupported.is_some() {
             self.unsupported_tapped = true;
             return;
@@ -243,25 +277,34 @@ impl Machine {
         self.error = None;
         self.polled_since_start = false;
         self.load();
-        self.begin(ctx);
+        self.begin(&options);
     }
 
     /// Open a session: the engine's stream first (behind the load, if the
     /// model isn't in), so no audio arrives before it, then the microphone.
-    fn begin(&mut self, ctx: &VoiceContext) {
+    fn begin(&mut self, options: &DictationOptions) {
         self.last_session = self.last_session.wrapping_add(1);
         let session = self.last_session;
-        self.mapper = TextMapper::new(ctx.sentence_start);
+        self.mapper = TextMapper::new(options.sentence_start);
         self.level = None;
         self.heard = false;
+        self.final_in = false;
+        self.full_pass = if options.full_pass {
+            Pass::Waiting
+        } else {
+            Pass::Unwanted
+        };
         self.dictation = Dictation::Opening { session };
-        let language = ctx
+        let language = options
             .language
             .clone()
             .or_else(|| self.default_language.clone())
             .unwrap_or_default();
-        self.commands
-            .push(Command::Worker(ToWorker::Start { session, language }));
+        self.commands.push(Command::Worker(ToWorker::Start {
+            session,
+            language,
+            full_pass: options.full_pass,
+        }));
         self.commands.push(Command::OpenMic { session });
     }
 
@@ -301,6 +344,10 @@ impl Machine {
                 });
                 self.commands
                     .push(Command::Worker(ToWorker::Finish { session }));
+                if self.full_pass != Pass::Unwanted {
+                    self.commands
+                        .push(Command::Worker(ToWorker::FullPass { session }));
+                }
                 self.dictation = Dictation::Finishing {
                     session,
                     done: false,
@@ -330,9 +377,10 @@ impl Machine {
     }
 
     /// The microphone did not open: the dictation ends with the error. Or
-    /// (unplugged, its stream broken) it stopped while listening: like a
-    /// stop, what it captured is recognised and committed, and the error
-    /// shows after the final text.
+    /// (unplugged, switched, its stream ended) it stopped while listening:
+    /// like a stop, what it captured is recognised and committed, and
+    /// [`DictationError::MicLost`] shows after the final text (and is in
+    /// every poll from now on).
     pub fn on_mic_failed(&mut self, session: u32, err: MicError) {
         let listening = match self.dictation {
             Dictation::Opening { session: s } if s == session => false,
@@ -343,11 +391,12 @@ impl Machine {
             log(&format!("microphone: {detail}"));
         }
         // Shown once the dictation is idle (`state` reports it no sooner).
-        self.error = Some(err.shown());
         if listening {
+            self.error = Some(DictationError::MicLost);
             self.stop();
             return;
         }
+        self.error = Some(err.at_start());
         self.dictation = Dictation::Idle;
         self.commands
             .push(Command::Worker(ToWorker::Cancel { session }));
@@ -373,7 +422,7 @@ impl Machine {
             // Its cancel has nowhere to go.
             self.commands
                 .retain(|c| !matches!(c, Command::Worker(ToWorker::Cancel { .. })));
-            self.error = Some((ENGINE_FAILED.into(), true));
+            self.error = Some(DictationError::Engine);
         }
         // A session waiting for the model hears why; with nobody waiting the
         // key stays ready and the next tap loads afresh. A load that already
@@ -382,7 +431,7 @@ impl Machine {
         self.model = match &self.model {
             Model::Failed { .. } => self.model.clone(),
             _ if waiting => Model::Failed {
-                message: load_failure_message(LoadFailure::Startup).into(),
+                error: load_failure(LoadFailure::Startup),
             },
             _ => Model::Idle,
         };
@@ -410,7 +459,7 @@ impl Machine {
                 self.model = if self.waiting_for_model() {
                     self.abort();
                     Model::Failed {
-                        message: load_failure_message(reason).into(),
+                        error: load_failure(reason),
                     }
                 } else {
                     Model::Idle
@@ -430,11 +479,18 @@ impl Machine {
                 {
                     self.mapper.update(&update);
                     self.mapper.finish();
-                    self.dictation = Dictation::Finishing {
-                        session,
-                        done: true,
-                    };
+                    self.final_in = true;
+                    self.finish_if_done(session);
                 }
+            }
+            FromWorker::FullPass {
+                session,
+                text,
+                repeated,
+            } => self.on_full_pass(session, FullPass::Read { text, repeated }),
+            FromWorker::FullPassFailed { session, detail } => {
+                log(&format!("full pass: {detail}"));
+                self.on_full_pass(session, FullPass::Failed { detail });
             }
             FromWorker::Failed { session, detail } => {
                 if !self.receiving(session) && self.dictation != (Dictation::Opening { session }) {
@@ -448,8 +504,33 @@ impl Machine {
                     });
                 }
                 self.dictation = Dictation::Idle;
-                self.error = Some((ENGINE_FAILED.into(), true));
+                self.error = Some(DictationError::Engine);
             }
+        }
+    }
+
+    /// The full pass of the session finishing (a stale one is dropped).
+    fn on_full_pass(&mut self, session: u32, pass: FullPass) {
+        if self.dictation
+            == (Dictation::Finishing {
+                session,
+                done: false,
+            })
+            && self.full_pass == Pass::Waiting
+        {
+            self.full_pass = Pass::Read(pass);
+            self.finish_if_done(session);
+        }
+    }
+
+    /// The finishing session is done once its final reply and (if asked
+    /// for) its full pass are in.
+    fn finish_if_done(&mut self, session: u32) {
+        if self.final_in && self.full_pass != Pass::Waiting {
+            self.dictation = Dictation::Finishing {
+                session,
+                done: true,
+            };
         }
     }
 
@@ -462,14 +543,14 @@ impl Machine {
     }
 
     fn state(&self) -> VoiceState {
-        if let Some(message) = &self.unsupported {
-            if !self.unsupported_tapped {
-                return VoiceState::Ready;
-            }
+        if let Some(error) = self.unsupported_error() {
             return VoiceState::Error {
-                message: message.clone(),
-                retry: false,
+                message: error.message().to_string(),
+                retry: error.retry(),
             };
+        }
+        if self.unsupported.is_some() {
+            return VoiceState::Ready;
         }
         let progress = match &self.model {
             Model::Loading { progress } => *progress,
@@ -487,29 +568,47 @@ impl Machine {
             Dictation::Finishing { .. } => return VoiceState::Finishing,
             Dictation::Idle => {}
         }
-        if let Some((message, retry)) = &self.error {
-            return VoiceState::Error {
-                message: message.clone(),
-                retry: *retry,
-            };
-        }
-        match &self.model {
+        match self.idle_error() {
+            Some(error) => VoiceState::Error {
+                message: error.message().to_string(),
+                retry: error.retry(),
+            },
             // Ready for the tap that loads it; loading for nobody yet, a tap
             // may still ask to dictate.
-            Model::Idle | Model::Loaded | Model::Loading { .. } => VoiceState::Ready,
-            Model::Failed { message } => VoiceState::Error {
-                message: message.clone(),
-                retry: true,
-            },
+            None => VoiceState::Ready,
         }
     }
 
-    /// The state and the text since the last poll. A finished dictation's
-    /// final text goes out with a `Finishing` poll; the next reports the
-    /// state after it.
+    /// An unsupported platform's error, once a start was tried.
+    fn unsupported_error(&self) -> Option<DictationError> {
+        let reason = self.unsupported.as_ref()?;
+        self.unsupported_tapped
+            .then(|| DictationError::Unsupported(reason.clone()))
+    }
+
+    /// The error an idle machine reports: the last dictation's, else the
+    /// model's failed load.
+    fn idle_error(&self) -> Option<&DictationError> {
+        self.error.as_ref().or(match &self.model {
+            Model::Failed { error } => Some(error),
+            _ => None,
+        })
+    }
+
+    /// The keyboard's poll ([`Machine::poll_dictation`] without what only
+    /// other callers use), as the keyboard's tests read it.
+    #[cfg(test)]
     pub fn poll(&mut self) -> VoicePoll {
+        self.poll_dictation().into()
+    }
+
+    /// The state and the text since the last poll. A finished dictation's
+    /// final text goes out with a `Finishing` poll (marked `finished`, with
+    /// its full pass); the next reports the state after it.
+    pub fn poll_dictation(&mut self) -> DictationPoll {
         let mut state = self.state();
-        if !self.polled_since_start && matches!(state, VoiceState::Error { .. }) {
+        let held_back = !self.polled_since_start && matches!(state, VoiceState::Error { .. });
+        if held_back {
             state = VoiceState::Preparing { progress: None };
         }
         self.polled_since_start = true;
@@ -517,10 +616,34 @@ impl Machine {
             committed: d.committed,
             pending: d.pending,
         });
-        if let Dictation::Finishing { done: true, .. } = self.dictation {
+        let finished = matches!(self.dictation, Dictation::Finishing { done: true, .. });
+        let mut full_pass = None;
+        if finished {
             self.dictation = Dictation::Idle;
+            if let Pass::Read(pass) = std::mem::replace(&mut self.full_pass, Pass::Unwanted) {
+                full_pass = Some(pass);
+            }
         }
-        VoicePoll { state, text }
+        // While a dictation runs, only a lost microphone is news (it is
+        // finishing what it heard); otherwise what the state reports.
+        let error = if held_back {
+            None
+        } else if let Some(error) = self.unsupported_error() {
+            Some(error)
+        } else if self.current_session().is_some() || finished {
+            self.error.clone().filter(|e| *e == DictationError::MicLost)
+        } else if matches!(state, VoiceState::Error { .. }) {
+            self.idle_error().cloned()
+        } else {
+            None
+        };
+        DictationPoll {
+            state,
+            text,
+            finished,
+            full_pass,
+            error,
+        }
     }
 }
 

@@ -47,6 +47,7 @@ fn start(session: u32) -> ToWorker {
     ToWorker::Start {
         session,
         language: String::new(),
+        full_pass: false,
     }
 }
 
@@ -251,4 +252,133 @@ fn a_merged_tail_keeps_whether_it_continues_the_last_word() {
     together.update(&merged);
     assert_eq!(together.take(), apart.take());
     assert!(!merge(glued, rec("", false, "0 mm")).pending_continues);
+}
+
+fn start_kept(session: u32, language: &str) -> ToWorker {
+    ToWorker::Start {
+        session,
+        language: language.into(),
+        full_pass: true,
+    }
+}
+
+/// Streams `samples` at `rate` in `chunk`s through session `session` of
+/// `engine` (started already) and finishes it.
+fn stream_and_finish(engine: &mut Engine, session: u32, rate: u32, samples: &[f32], chunk: usize) {
+    for piece in samples.chunks(chunk) {
+        let reply = engine.handle(ToWorker::Push {
+            session,
+            rate,
+            samples: piece.to_vec(),
+        });
+        assert!(
+            matches!(reply, Some(FromWorker::Update { .. })),
+            "unexpected reply {reply:?}"
+        );
+    }
+    assert!(matches!(
+        engine.handle(ToWorker::Finish { session }),
+        Some(FromWorker::Final { .. })
+    ));
+}
+
+/// A session started with `full_pass` keeps its audio: after its finish,
+/// the full pass reads the whole recording as whistle's own offline
+/// transcription of it does (default options, its 3 beams).
+#[test]
+fn a_full_pass_reads_the_whole_recording_as_whistle_transcribes_it() {
+    let whistle = require_model!();
+    let samples = clip("en_samantha.wav");
+    let mut engine = Engine::new(whistle);
+    assert_eq!(engine.handle(start_kept(5, "")), None);
+    stream_and_finish(&mut engine, 5, 16_000, &samples, 4_000);
+    let reference = whistle
+        .transcribe(&samples, &Options::default())
+        .expect("transcribes");
+    assert_eq!(
+        engine.handle(ToWorker::FullPass { session: 5 }),
+        Some(FromWorker::FullPass {
+            session: 5,
+            text: reference.text.trim().to_string(),
+            repeated: reference.repeated,
+        })
+    );
+    // The recording goes with its pass.
+    assert!(matches!(
+        engine.handle(ToWorker::FullPass { session: 5 }),
+        Some(FromWorker::FullPassFailed { session: 5, .. })
+    ));
+}
+
+/// The full pass reads the audio the stream got at the model's rate, its
+/// resampler's last samples included: a 48 kHz recording reads its words.
+#[test]
+fn a_full_pass_reads_audio_that_came_at_another_rate() {
+    let whistle = require_model!();
+    let device = whistle::audio::resample(&clip("en_samantha.wav"), 16_000, 48_000);
+    let mut engine = Engine::new(whistle);
+    engine.handle(start_kept(6, "en"));
+    stream_and_finish(&mut engine, 6, 48_000, &device, 12_000);
+    match engine.handle(ToWorker::FullPass { session: 6 }) {
+        Some(FromWorker::FullPass {
+            session: 6, text, ..
+        }) => {
+            assert!(text.to_lowercase().contains("cube"), "read: {text}")
+        }
+        other => panic!("unexpected reply {other:?}"),
+    }
+}
+
+/// Without `full_pass` nothing is kept (the keyboard's dictation never
+/// pays for the recording's memory), and a full pass asked for anyway
+/// says so rather than leaving the provider waiting; a cancel, or the next
+/// session's start, lets go of a kept recording.
+#[test]
+fn only_a_full_pass_session_keeps_its_recording_until_the_pass_or_a_cancel() {
+    let whistle = require_model!();
+    let samples = clip("en_samantha.wav");
+    let mut engine = Engine::new(whistle);
+    engine.handle(start(7));
+    stream_and_finish(&mut engine, 7, 16_000, &samples, 8_000);
+    assert!(matches!(
+        engine.handle(ToWorker::FullPass { session: 7 }),
+        Some(FromWorker::FullPassFailed { session: 7, .. })
+    ));
+
+    engine.handle(start_kept(8, ""));
+    stream_and_finish(&mut engine, 8, 16_000, &samples, 8_000);
+    assert_eq!(engine.handle(ToWorker::Cancel { session: 8 }), None);
+    assert!(matches!(
+        engine.handle(ToWorker::FullPass { session: 8 }),
+        Some(FromWorker::FullPassFailed { session: 8, .. })
+    ));
+
+    engine.handle(start_kept(9, ""));
+    stream_and_finish(&mut engine, 9, 16_000, &samples, 8_000);
+    engine.handle(start(10));
+    assert!(matches!(
+        engine.handle(ToWorker::FullPass { session: 9 }),
+        Some(FromWorker::FullPassFailed { session: 9, .. })
+    ));
+}
+
+/// A recording stopped before any audio arrived has nothing to read: its
+/// full pass is empty text, not a failure.
+#[test]
+fn a_full_pass_over_no_audio_reads_nothing() {
+    let whistle = require_model!();
+    let mut engine = Engine::new(whistle);
+    engine.handle(start_kept(11, ""));
+    assert!(matches!(
+        engine.handle(ToWorker::Finish { session: 11 }),
+        Some(FromWorker::Final { .. })
+    ));
+    assert_eq!(
+        engine.handle(ToWorker::FullPass { session: 11 }),
+        Some(FromWorker::FullPass {
+            session: 11,
+            text: String::new(),
+            repeated: false,
+        })
+    );
 }

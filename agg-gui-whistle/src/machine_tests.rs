@@ -4,7 +4,8 @@
 //! then Ready), cancelling, and replies for sessions that are over. The
 //! model's load (on the first start, an app's prepare, failures and
 //! retries) is in `machine_load_tests.rs`, a child module sharing the
-//! helpers here.
+//! helpers here; what a caller other than the keyboard adds (the full
+//! pass, the structured errors) is in `machine_dictation_tests.rs`.
 
 use agg_gui::widgets::on_screen_keyboard::{VoiceContext, VoicePoll, VoiceState, VoiceText};
 
@@ -15,6 +16,9 @@ const URLS: [&str; 2] = ["https://here/whistle.cact", "https://there/whistle.cac
 
 #[path = "machine_load_tests.rs"]
 mod load;
+
+#[path = "machine_dictation_tests.rs"]
+mod dictation;
 
 fn machine() -> Machine {
     Machine::new(URLS.iter().map(|u| u.to_string()).collect(), None)
@@ -81,8 +85,9 @@ fn start_opens_the_stream_before_the_microphone_and_listens_once_it_opens() {
     let mut m = ready();
     m.start(&ctx(true));
     let cmds = m.take_commands();
-    let [Command::Worker(ToWorker::Start { session, language }), Command::OpenMic { session: open }] =
-        cmds.as_slice()
+    let [Command::Worker(ToWorker::Start {
+        session, language, ..
+    }), Command::OpenMic { session: open }] = cmds.as_slice()
     else {
         panic!("unexpected commands {cmds:?}");
     };
@@ -274,10 +279,13 @@ fn a_microphone_that_fails_while_listening_finishes_then_reports_it() {
             pending: String::new()
         })
     );
+    // Whatever the microphone reported, a microphone that worked and went
+    // away was disconnected ("No microphone found" read as if it never had
+    // one).
     assert_eq!(
         m.poll().state,
         VoiceState::Error {
-            message: "No microphone found".into(),
+            message: "The microphone was disconnected".into(),
             retry: true
         }
     );

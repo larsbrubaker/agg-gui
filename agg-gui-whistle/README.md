@@ -20,6 +20,32 @@ as you speak, with no second tap: the unconfirmed tail as composition text, comm
 they are confirmed. An app that wants the model warm sooner
 calls `VoiceInput::prepare` on a `WhistleVoice` before registering it with `set_voice_input`.
 
+## Other callers
+
+An app's own microphone button (a chat input, say) drives a `Dictation` directly: the same lazy
+load, microphone and worker, with the committed and pending text from each poll.
+
+```rust,ignore
+use agg_gui_whistle::{Dictation, DictationOptions};
+
+let dictation = Dictation::new(agg_gui_whistle::Config::default());
+// In the user's tap (the microphone prompt shows at once):
+dictation.start(&DictationOptions { sentence_start: true, full_pass: true, ..Default::default() });
+// Each frame or timer tick:
+let poll = dictation.poll(); // state, text, finished, full_pass, error
+```
+
+`DictationOptions::full_pass` keeps the recording and, after the stream's final text, reads it
+once more with whistle's offline options (3 beams, the whole recording around every word); the
+poll that ends the dictation (`finished`) carries it as `FullPass`, for the app to weigh against
+the streamed words. On the web it took 171 ms for a 5 s clip and 316 ms for a 6.4 s one
+(Chrome, simd128, one thread, Apple M-series). `DictationPoll::error` says what went wrong
+(`DictationError`), so the app can word its own message; a microphone lost mid-dictation
+(unplugged, switched, its track ended) is `MicLost` at once, while the words heard until then
+are finished and delivered. `Dictation::unsupported` says, before any tap, why a platform can't
+dictate at all. The keyboard's `WhistleVoice` is a thin adapter over `Dictation`, without the
+full pass.
+
 ## Web
 
 The model runs in a dedicated Web Worker, never on the UI thread. Serve one directory

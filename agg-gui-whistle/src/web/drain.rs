@@ -101,17 +101,17 @@ pub(crate) fn drained(shared: Weak<Shared>, session: u32) {
     });
 }
 
-/// An ended drain: its last chunk, then its held `Finish`; then the
-/// microphone is released (dropped).
+/// An ended drain: its last chunk, then its held `Finish` (and `FullPass`);
+/// then the microphone is released (dropped).
 fn deliver(shared: &Shared, done: Done<Draining>) {
     done.resource.mic.chunker.borrow_mut().flush(shared);
-    if let Some(finish) = &done.finish {
-        post(shared, finish);
+    for msg in &done.held {
+        post(shared, msg);
     }
 }
 
 /// Before `msg` goes to the worker: `true` when the drain holds it (a
-/// `Finish` for the session draining). A `Cancel` for that session drops
+/// `Finish` or `FullPass` for the session draining). A `Cancel` for that session drops
 /// the drain, and goes.
 pub(crate) fn hold(shared: &Shared, msg: &ToWorker) -> bool {
     let hold = shared.drain.borrow_mut().hold(msg);

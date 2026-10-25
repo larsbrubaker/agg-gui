@@ -225,6 +225,7 @@ fn the_inbox_is_bounded_while_the_model_loads() {
     tx.send(ToWorker::Start {
         session: 1,
         language: String::new(),
+        full_pass: false,
     })
     .unwrap();
     for _ in 0..200 {

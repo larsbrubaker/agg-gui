@@ -34,17 +34,25 @@ fn every_message_to_the_worker_round_trips() {
         ToWorker::Start {
             session: 7,
             language: "de".into(),
+            full_pass: false,
         },
         ToWorker::Start {
             session: 0,
             language: String::new(),
+            full_pass: false,
         },
         ToWorker::Push {
             session: 3,
             rate: 48_000,
             samples: vec![0.0, -0.5, 0.25],
         },
+        ToWorker::Start {
+            session: 4,
+            language: String::new(),
+            full_pass: true,
+        },
         ToWorker::Finish { session: 3 },
+        ToWorker::FullPass { session: 3 },
         ToWorker::Cancel { session: u32::MAX },
     ] {
         assert_eq!(to_round_trip(msg.clone()), msg);
@@ -94,6 +102,20 @@ fn every_message_from_the_worker_round_trips() {
         FromWorker::Failed {
             session: 9,
             detail: "non-finite sample".into(),
+        },
+        FromWorker::FullPass {
+            session: 2,
+            text: "Make the cube \"20\" mm taller.".into(),
+            repeated: true,
+        },
+        FromWorker::FullPass {
+            session: 3,
+            text: String::new(),
+            repeated: false,
+        },
+        FromWorker::FullPassFailed {
+            session: 2,
+            detail: "cancelled".into(),
         },
     ] {
         assert_eq!(from_round_trip(msg.clone()), msg);
@@ -152,6 +174,7 @@ fn queued_pushes_stay_separate_and_in_order() {
         ToWorker::Start {
             session: 1,
             language: String::new(),
+            full_pass: false,
         },
         push(1, 16_000, &[1.0]),
         push(1, 16_000, &[2.0, 3.0]),
@@ -164,7 +187,8 @@ fn queued_pushes_stay_separate_and_in_order() {
         vec![
             ToWorker::Start {
                 session: 1,
-                language: String::new()
+                language: String::new(),
+                full_pass: false,
             },
             push(1, 16_000, &[1.0]),
             push(1, 16_000, &[2.0, 3.0]),
@@ -180,6 +204,7 @@ fn work_for_a_session_cancelled_later_is_skipped() {
         ToWorker::Start {
             session: 1,
             language: String::new(),
+            full_pass: false,
         },
         push(1, 16_000, &[1.0]),
         ToWorker::Finish { session: 1 },
@@ -187,6 +212,7 @@ fn work_for_a_session_cancelled_later_is_skipped() {
         ToWorker::Start {
             session: 2,
             language: String::new(),
+            full_pass: false,
         },
         push(2, 16_000, &[5.0]),
     ]
@@ -197,7 +223,8 @@ fn work_for_a_session_cancelled_later_is_skipped() {
             ToWorker::Cancel { session: 1 },
             ToWorker::Start {
                 session: 2,
-                language: String::new()
+                language: String::new(),
+                full_pass: false,
             },
             push(2, 16_000, &[5.0]),
         ]
@@ -230,6 +257,7 @@ fn a_long_backlog_keeps_its_latest_30_seconds() {
     let start = ToWorker::Start {
         session: 1,
         language: String::new(),
+        full_pass: false,
     };
     let mut q: VecDeque<ToWorker> = [ToWorker::Load { urls: vec![] }, start.clone()].into();
     for _ in 0..60 {
@@ -256,6 +284,7 @@ fn a_queued_cancel_drops_its_sessions_work_at_once() {
     let start = |s| ToWorker::Start {
         session: s,
         language: String::new(),
+        full_pass: false,
     };
     let mut q: VecDeque<ToWorker> = [
         ToWorker::Load { urls: vec![] },
@@ -277,6 +306,41 @@ fn a_queued_cancel_drops_its_sessions_work_at_once() {
             ToWorker::Load { urls: vec![] },
             start(2),
             seconds_of(2, 1),
+            ToWorker::Cancel { session: 1 },
+        ])
+    );
+}
+
+/// A full pass is its session's work like the rest: a cancel queued after
+/// it skips it (the queue and the backlog drop alike), and another
+/// session's full pass stays.
+#[test]
+fn a_cancelled_sessions_full_pass_is_skipped() {
+    let mut q: VecDeque<ToWorker> = [
+        ToWorker::Finish { session: 1 },
+        ToWorker::FullPass { session: 1 },
+        ToWorker::FullPass { session: 2 },
+        ToWorker::Cancel { session: 1 },
+    ]
+    .into();
+    assert_eq!(
+        drain(&mut q),
+        vec![
+            ToWorker::FullPass { session: 2 },
+            ToWorker::Cancel { session: 1 },
+        ]
+    );
+    let mut q: VecDeque<ToWorker> = [
+        ToWorker::Load { urls: vec![] },
+        ToWorker::FullPass { session: 1 },
+        ToWorker::Cancel { session: 1 },
+    ]
+    .into();
+    drop_cancelled(&mut q);
+    assert_eq!(
+        q,
+        VecDeque::from(vec![
+            ToWorker::Load { urls: vec![] },
             ToWorker::Cancel { session: 1 },
         ])
     );

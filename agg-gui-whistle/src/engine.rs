@@ -10,6 +10,13 @@
 //! model's is resampled as one stream per session (`resample.rs`), so the
 //! pushes it came in leave no trace; its last few milliseconds go in at
 //! `Finish`.
+//!
+//! A session started with `full_pass` also keeps its audio, at the model's
+//! rate, through its `Finish`; the `FullPass` that follows reads the whole
+//! recording once more with whistle's offline options (the whole recording
+//! around every word, a wider beam search: [`full_pass_options`]), for a
+//! caller that weighs that reading against the streamed one. The kept
+//! recording goes with its pass, a cancel, or the next session's start.
 
 use whistle::{Options, Stream, StreamUpdate, Whistle};
 
@@ -24,6 +31,24 @@ pub struct Engine {
     whistle: &'static Whistle,
     /// The open stream.
     stream: Option<Open>,
+    /// A finished full-pass session's recording, waiting for its pass.
+    finished: Option<Kept>,
+}
+
+/// A finished session's recording, at the model's rate, for its full pass.
+struct Kept {
+    session: u32,
+    language: String,
+    samples: Vec<f32>,
+}
+
+/// The options of a full pass in `language` ("" detects it): whistle's
+/// defaults, its offline transcription.
+pub(crate) fn full_pass_options(language: &str) -> Options {
+    Options {
+        language: (!language.is_empty()).then(|| language.to_string()),
+        ..Options::default()
+    }
 }
 
 /// A session's stream and its audio's conversion to the model's rate.
@@ -31,6 +56,9 @@ struct Open {
     session: u32,
     stream: Stream<'static>,
     input: ModelRate,
+    language: String,
+    /// The audio pushed so far, when the session wants a full pass.
+    kept: Option<Vec<f32>>,
 }
 
 /// Two updates in a row as one: `first`'s committed words, then `second`'s
@@ -79,6 +107,7 @@ impl Engine {
         Engine {
             whistle,
             stream: None,
+            finished: None,
         }
     }
 
@@ -99,9 +128,15 @@ impl Engine {
     pub fn handle(&mut self, msg: ToWorker) -> Option<FromWorker> {
         match msg {
             ToWorker::Load { .. } => None,
-            ToWorker::Start { session, language } => {
+            ToWorker::Start {
+                session,
+                language,
+                full_pass,
+            } => {
+                // The last session's recording is no longer wanted.
+                self.finished = None;
                 let options = Options {
-                    language: (!language.is_empty()).then_some(language),
+                    language: (!language.is_empty()).then(|| language.clone()),
                     ..Options::streaming()
                 };
                 match self.whistle.stream(&options) {
@@ -110,6 +145,8 @@ impl Engine {
                             session,
                             stream,
                             input: ModelRate::default(),
+                            language,
+                            kept: full_pass.then(Vec::new),
                         });
                         None
                     }
@@ -138,6 +175,9 @@ impl Engine {
                         detail: format!("unsupported sample rate {rate} Hz"),
                     });
                 };
+                if let Some(kept) = open.kept.as_mut() {
+                    kept.extend_from_slice(&samples);
+                }
                 Some(match open.stream.push(&samples) {
                     Ok(update) => FromWorker::Update {
                         session,
@@ -165,7 +205,7 @@ impl Engine {
                         });
                     }
                 };
-                Some(match finish(open) {
+                Some(match finish(open, &mut self.finished) {
                     Ok(update) => FromWorker::Final { session, update },
                     Err(err) => FromWorker::Failed {
                         session,
@@ -173,9 +213,13 @@ impl Engine {
                     },
                 })
             }
+            ToWorker::FullPass { session } => Some(self.full_pass(session)),
             ToWorker::Cancel { session } => {
                 if self.session() == Some(session) {
                     self.stream = None;
+                }
+                if self.finished.as_ref().map(|k| k.session) == Some(session) {
+                    self.finished = None;
                 }
                 None
             }
@@ -183,15 +227,66 @@ impl Engine {
     }
 }
 
+impl Engine {
+    /// The full pass over `session`'s kept recording (taken: it goes with
+    /// its pass). A session that kept none (it didn't ask, was cancelled,
+    /// or another started since) fails, so the provider never waits.
+    fn full_pass(&mut self, session: u32) -> FromWorker {
+        let kept = match self.finished.take() {
+            Some(kept) if kept.session == session => kept,
+            other => {
+                self.finished = other;
+                return FromWorker::FullPassFailed {
+                    session,
+                    detail: "no recording was kept for the full pass".into(),
+                };
+            }
+        };
+        // Stopped before any audio arrived: nothing to read.
+        if kept.samples.is_empty() {
+            return FromWorker::FullPass {
+                session,
+                text: String::new(),
+                repeated: false,
+            };
+        }
+        match self
+            .whistle
+            .transcribe(&kept.samples, &full_pass_options(&kept.language))
+        {
+            Ok(transcript) => FromWorker::FullPass {
+                session,
+                text: transcript.text.trim().to_string(),
+                repeated: transcript.repeated,
+            },
+            Err(err) => FromWorker::FullPassFailed {
+                session,
+                detail: err.to_string(),
+            },
+        }
+    }
+}
+
 /// End `open`'s stream: the resampler's last audio, then whistle's finish,
-/// as one update.
-fn finish(open: Open) -> Result<Recognised, whistle::Error> {
+/// as one update. A full-pass session's recording, with that last audio,
+/// goes to `finished` for its pass.
+fn finish(open: Open, finished: &mut Option<Kept>) -> Result<Recognised, whistle::Error> {
     let Open {
+        session,
         mut stream,
         mut input,
-        ..
+        language,
+        kept,
     } = open;
     let tail = input.finish();
+    if let Some(mut samples) = kept {
+        samples.extend_from_slice(&tail);
+        *finished = Some(Kept {
+            session,
+            language,
+            samples,
+        });
+    }
     let before = if tail.is_empty() {
         Recognised::default()
     } else {

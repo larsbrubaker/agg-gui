@@ -1,12 +1,14 @@
-//! [`WhistleVoice`], the [`VoiceInput`] the keyboard drives: each call goes
-//! to the state machine (`machine.rs`) through the platform's host, which
-//! first takes in what arrived (engine replies, microphone events), then
-//! runs the commands the call queued. The host is `web::WebHost` on wasm and
+//! [`WhistleVoice`], the [`VoiceInput`] the keyboard drives: a thin adapter
+//! over [`Dictation`] (`dictation.rs`), which sends each call to the state
+//! machine (`machine.rs`) through the platform's host. A host first takes in
+//! what arrived (engine replies, microphone events), then runs the commands
+//! the call queued. The host is `web::WebHost` on wasm and
 //! `native::NativeHost` elsewhere.
 
-use agg_gui::widgets::on_screen_keyboard::{VoiceContext, VoiceInput, VoicePoll, VoiceState};
+use agg_gui::widgets::on_screen_keyboard::{VoiceContext, VoiceInput, VoicePoll};
 
 use crate::config::Config;
+use crate::dictation::{Dictation, DictationOptions};
 use crate::machine::Machine;
 
 /// A platform's side of the provider.
@@ -18,52 +20,47 @@ pub(crate) trait Host {
 }
 
 #[cfg(target_arch = "wasm32")]
-type PlatformHost = crate::web::WebHost;
+pub(crate) type PlatformHost = crate::web::WebHost;
 #[cfg(not(target_arch = "wasm32"))]
-type PlatformHost = crate::native::NativeHost;
+pub(crate) type PlatformHost = crate::native::NativeHost;
 
 /// Dictation for agg-gui's on-screen keyboard on whistle. Register it with
 /// [`crate::install`], or build one with [`WhistleVoice::new`] and pass it
 /// to `agg_gui::widgets::on_screen_keyboard::set_voice_input` yourself.
 /// Create it on the UI thread. It loads the model on the first tap on the
 /// microphone; call [`VoiceInput::prepare`] on it before registering it to
-/// load it sooner (the keyboard never does).
+/// load it sooner (the keyboard never does). The keyboard's dictation asks
+/// for no full pass.
 pub struct WhistleVoice {
-    host: PlatformHost,
+    dictation: Dictation,
 }
 
 impl WhistleVoice {
     pub fn new(config: Config) -> WhistleVoice {
         WhistleVoice {
-            host: PlatformHost::new(config),
+            dictation: Dictation::new(config),
         }
     }
 }
 
 impl VoiceInput for WhistleVoice {
     fn prepare(&mut self) {
-        self.host.dispatch(&mut |m| m.prepare());
+        self.dictation.prepare();
     }
 
     fn start(&mut self, ctx: &VoiceContext) {
-        self.host.dispatch(&mut |m| m.start(ctx));
+        self.dictation.start(&DictationOptions::from(ctx));
     }
 
     fn stop(&mut self) {
-        self.host.dispatch(&mut |m| m.stop());
+        self.dictation.stop();
     }
 
     fn cancel(&mut self) {
-        self.host.dispatch(&mut |m| m.cancel());
+        self.dictation.cancel();
     }
 
     fn poll(&mut self) -> VoicePoll {
-        let mut out = None;
-        self.host.dispatch(&mut |m| out = Some(m.poll()));
-        // `dispatch` always runs `f`; the fallback only satisfies the type.
-        out.unwrap_or(VoicePoll {
-            state: VoiceState::Preparing { progress: None },
-            text: None,
-        })
+        self.dictation.poll().into()
     }
 }

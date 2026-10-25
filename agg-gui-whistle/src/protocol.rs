@@ -42,8 +42,13 @@ pub enum ToWorker {
     /// Load the model: try the cache, then each URL in turn.
     Load { urls: Vec<String> },
     /// Open a stream for a dictation. `language` is a code ("en"), or empty
-    /// to detect it.
-    Start { session: u32, language: String },
+    /// to detect it. With `full_pass` the engine keeps the session's audio
+    /// (at the model's rate) for a [`ToWorker::FullPass`] after its finish.
+    Start {
+        session: u32,
+        language: String,
+        full_pass: bool,
+    },
     /// Mono audio at `rate` Hz for the session's stream.
     Push {
         session: u32,
@@ -53,7 +58,12 @@ pub enum ToWorker {
     /// The microphone is closed: recognise what is left and reply
     /// [`FromWorker::Final`].
     Finish { session: u32 },
-    /// Drop the session's stream; no reply.
+    /// After the session's `Finish` (of a stream started with `full_pass`):
+    /// read its whole recording once more, with whistle's default
+    /// (offline) options, and reply [`FromWorker::FullPass`] or
+    /// [`FromWorker::FullPassFailed`].
+    FullPass { session: u32 },
+    /// Drop the session's stream (and any recording it kept); no reply.
     Cancel { session: u32 },
 }
 
@@ -122,6 +132,18 @@ pub enum FromWorker {
     Final { session: u32, update: Recognised },
     /// The session's stream failed; it is closed.
     Failed { session: u32, detail: String },
+    /// The full pass over the session's recording ([`ToWorker::FullPass`]):
+    /// its text, trimmed (empty when it heard no speech), and whether
+    /// whistle's repetition guard fired on its decode
+    /// (`whistle::Transcript::repeated`).
+    FullPass {
+        session: u32,
+        text: String,
+        repeated: bool,
+    },
+    /// The full pass could not read the recording; `detail` is for the
+    /// console.
+    FullPassFailed { session: u32, detail: String },
 }
 
 /// Read fields by name, failing with the field's name.
@@ -207,10 +229,12 @@ impl ToWorker {
             ToWorker::Start {
                 session: s,
                 language,
+                full_pass,
             } => vec![
                 ty("start"),
                 session(*s),
                 ("language", Field::Str(language.clone())),
+                ("full_pass", Field::Bool(*full_pass)),
             ],
             ToWorker::Push {
                 session: s,
@@ -223,6 +247,7 @@ impl ToWorker {
                 ("samples", Field::Samples(samples.clone())),
             ],
             ToWorker::Finish { session: s } => vec![ty("finish"), session(*s)],
+            ToWorker::FullPass { session: s } => vec![ty("fullPass"), session(*s)],
             ToWorker::Cancel { session: s } => vec![ty("cancel"), session(*s)],
         }
     }
@@ -242,6 +267,7 @@ impl ToWorker {
             "start" => ToWorker::Start {
                 session: r.u32("session")?,
                 language: r.str("language")?,
+                full_pass: r.bool("full_pass")?,
             },
             "push" => ToWorker::Push {
                 session: r.u32("session")?,
@@ -249,6 +275,9 @@ impl ToWorker {
                 samples: r.samples("samples")?,
             },
             "finish" => ToWorker::Finish {
+                session: r.u32("session")?,
+            },
+            "fullPass" => ToWorker::FullPass {
                 session: r.u32("session")?,
             },
             "cancel" => ToWorker::Cancel {
@@ -291,6 +320,21 @@ impl FromWorker {
                 session(*s),
                 ("detail", Field::Str(detail.clone())),
             ],
+            FromWorker::FullPass {
+                session: s,
+                text,
+                repeated,
+            } => vec![
+                ty("fullPass"),
+                session(*s),
+                ("text", Field::Str(text.clone())),
+                ("repeated", Field::Bool(*repeated)),
+            ],
+            FromWorker::FullPassFailed { session: s, detail } => vec![
+                ty("fullPassFailed"),
+                session(*s),
+                ("detail", Field::Str(detail.clone())),
+            ],
         }
     }
 
@@ -325,21 +369,31 @@ impl FromWorker {
                 session: r.u32("session")?,
                 detail: r.str("detail")?,
             },
+            "fullPass" => FromWorker::FullPass {
+                session: r.u32("session")?,
+                text: r.str("text")?,
+                repeated: r.bool("repeated")?,
+            },
+            "fullPassFailed" => FromWorker::FullPassFailed {
+                session: r.u32("session")?,
+                detail: r.str("detail")?,
+            },
             other => return Err(ProtocolError(format!("unknown message `{other}`"))),
         })
     }
 }
 
 /// The next job for the engine from its queue, in order, except that work
-/// for a session cancelled later in the queue (its start, pushes and finish)
-/// is skipped, so a cancel never waits behind audio nobody wants.
+/// for a session cancelled later in the queue (its start, pushes, finish and
+/// full pass) is skipped, so a cancel never waits behind audio nobody wants.
 pub fn next_job(queue: &mut VecDeque<ToWorker>) -> Option<ToWorker> {
     loop {
         let job = queue.pop_front()?;
         let session = match &job {
             ToWorker::Start { session, .. }
             | ToWorker::Push { session, .. }
-            | ToWorker::Finish { session } => *session,
+            | ToWorker::Finish { session }
+            | ToWorker::FullPass { session } => *session,
             ToWorker::Load { .. } | ToWorker::Cancel { .. } => return Some(job),
         };
         let cancelled_later = queue
@@ -351,7 +405,7 @@ pub fn next_job(queue: &mut VecDeque<ToWorker>) -> Option<ToWorker> {
     }
 }
 
-/// Drop the work (start, audio, finish) of every session cancelled later in
+/// Drop the work (start, audio, finish, full pass) of every session cancelled later in
 /// the queue, at once: what [`next_job`] would skip, released now rather
 /// than when the job is reached (behind a slow load, that is minutes of
 /// audio). The cancels stay, for a stream the engine may already have open.
@@ -375,7 +429,8 @@ pub fn drop_cancelled(queue: &mut VecDeque<ToWorker>) {
             ToWorker::Cancel { session } => seen_cancel.push(*session),
             ToWorker::Start { session, .. }
             | ToWorker::Push { session, .. }
-            | ToWorker::Finish { session } => {
+            | ToWorker::Finish { session }
+            | ToWorker::FullPass { session } => {
                 if seen_cancel.contains(session) {
                     keep[i] = false;
                 }

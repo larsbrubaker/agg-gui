@@ -44,6 +44,11 @@
 //! node first (`drain.rs`), so the audio it already holds reaches the
 //! engine.
 //!
+//! A microphone that goes away while it is wired (unplugged, switched off,
+//! its permission revoked) ends its tracks, which fire `ended` (a track the
+//! page stops itself fires none): the session's microphone then fails, and
+//! the machine finishes what it heard like a stop ([`watch_ended`]).
+//!
 //! A `ScriptProcessor` hands its audio to the main thread from a double
 //! buffer that the audio thread refills one buffer later, so an event the
 //! main thread runs later than that reads newer audio than its own, and the
@@ -149,18 +154,25 @@ enum Capture {
     },
 }
 
-/// The wired graph. Dropping it disconnects it, clears its handler before
-/// the closure goes (a late quantum must not call a dropped closure) and
+/// The wired graph. Dropping it disconnects it, clears its handlers before
+/// the closures go (a late quantum must not call a dropped closure) and
 /// stops the tracks.
 struct Live {
     stream: MediaStream,
     source: MediaStreamAudioSourceNode,
     node: AudioNode,
     capture: Capture,
+    /// The tracks' `ended` handler ([`watch_ended`]).
+    _on_ended: Closure<dyn FnMut()>,
 }
 
 impl Drop for Live {
     fn drop(&mut self) {
+        for track in self.stream.get_tracks().iter() {
+            if let Ok(track) = track.dyn_into::<MediaStreamTrack>() {
+                track.set_onended(None);
+            }
+        }
         let _ = self.source.disconnect();
         let _ = self.node.disconnect();
         match &self.capture {
@@ -316,6 +328,37 @@ pub(crate) fn open(shared: &Rc<Shared>, session: u32) {
         }
         agg_gui::animation::request_draw();
     });
+}
+
+/// The microphone of `session` went away: every track of `stream` reports
+/// its end, and the first one, while the session's microphone is still the
+/// one wired, fails it. The machine then closes it as at a stop (draining
+/// what the capture node holds) and finishes what was heard.
+fn watch_ended(stream: &MediaStream, weak: &Weak<Shared>, session: u32) -> Closure<dyn FnMut()> {
+    let weak = weak.clone();
+    let on_ended = Closure::<dyn FnMut()>::new(move || {
+        let Some(shared) = weak.upgrade() else {
+            return;
+        };
+        let wired = shared
+            .mic
+            .borrow()
+            .as_ref()
+            .is_some_and(|m| m.session == session && m.live.is_some());
+        if wired {
+            report_failure(
+                &shared,
+                session,
+                MicError::Other("the microphone's track ended".into()),
+            );
+        }
+    });
+    for track in stream.get_tracks().iter() {
+        if let Ok(track) = track.dyn_into::<MediaStreamTrack>() {
+            track.set_onended(Some(on_ended.as_ref().unchecked_ref()));
+        }
+    }
+    on_ended
 }
 
 /// Report a failure after the current dispatch (the machine is borrowed).
@@ -499,11 +542,13 @@ async fn connect(
             )
         }
     };
+    let on_ended = watch_ended(&stream, weak, session);
     let live = Live {
         stream,
         source,
         node,
         capture,
+        _on_ended: on_ended,
     };
     let wire = live
         .source

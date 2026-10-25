@@ -41,6 +41,15 @@
 //! keyboard's composition text, committed words as they are confirmed.
 //! agg-gui's `demo/build-wasm.sh` shows the whole build.
 //!
+//! ## Other callers
+//!
+//! An app's own microphone button (a chat input, say) drives a
+//! [`Dictation`] directly: the same lazy load, microphone and worker, with
+//! committed and pending text from its polls, the structured reason a
+//! dictation failed or lost its microphone ([`DictationError`]), and an
+//! optional full pass over the whole recording at the stop
+//! ([`DictationOptions::full_pass`], [`FullPass`]).
+//!
 //! ## Native
 //!
 //! With the `native-mic` feature (agg-mic, this workspace's pure-Rust
@@ -58,7 +67,8 @@
 //!   whistle `StreamResampler` per session; `text_map.rs`: stream updates to the keyboard's committed and
 //!   pending text; `model_check.rs`: the model's size and checksum.
 //! - `machine.rs`: the provider's state machine, shared by both hosts;
-//!   `provider.rs`: the `VoiceInput` over it.
+//!   `dictation.rs`: the public [`Dictation`] over it; `provider.rs`: the
+//!   keyboard's `VoiceInput` over that.
 //! - `web/` (the worker and the microphone, on the UI thread; `drain.rs`
 //!   delivers the worklet's last audio at a stop), `worker/`
 //!   (inside the worker), `native/` (threads and agg-mic).
@@ -71,6 +81,8 @@
 
 #[cfg(feature = "provider")]
 mod config;
+#[cfg(feature = "provider")]
+mod dictation;
 #[cfg(any(all(feature = "provider", target_arch = "wasm32"), test))]
 mod drain_book;
 #[cfg(any(
@@ -108,6 +120,8 @@ pub mod worker;
 
 #[cfg(feature = "provider")]
 pub use config::{Config, HUGGING_FACE_MODEL_URL, WHISTLE_PAGES_MODEL_URL};
+#[cfg(feature = "provider")]
+pub use dictation::{Dictation, DictationError, DictationOptions, DictationPoll, FullPass};
 #[cfg(feature = "provider")]
 pub use provider::WhistleVoice;
 
