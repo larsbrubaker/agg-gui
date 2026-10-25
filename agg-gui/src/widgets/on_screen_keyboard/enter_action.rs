@@ -1,6 +1,6 @@
 //! What the focused field tells the on-screen keyboard about itself beyond
-//! its input mode: what its Enter key does and whether a sentence starts
-//! with a capital.
+//! its input mode: what its Enter key does, whether a sentence starts with
+//! a capital, and whether it holds a secret (no voice input then).
 //!
 //! The phone's keyboard draws Enter as the action it performs (a magnifier
 //! in a search box, a check mark when it finishes the form, an arrow when
@@ -43,6 +43,9 @@ pub struct TextInputHints {
     /// Shift on when the field is empty or its text ends a sentence.
     /// `false` (a name, a search, a number) always opens in lower case.
     pub auto_capitalize: bool,
+    /// The field holds a secret (a password field, whether or not its text
+    /// is shown now): the keyboard offers no voice input, as on the phone.
+    pub secure: bool,
 }
 
 impl TextInputHints {
@@ -51,12 +54,14 @@ impl TextInputHints {
     pub const SINGLE_LINE: Self = Self {
         enter_action: EnterAction::Done,
         auto_capitalize: false,
+        secure: false,
     };
     /// Multi-line text: Enter starts a new line, and sentences start with
     /// a capital.
     pub const MULTI_LINE: Self = Self {
         enter_action: EnterAction::Newline,
         auto_capitalize: true,
+        secure: false,
     };
 }
 

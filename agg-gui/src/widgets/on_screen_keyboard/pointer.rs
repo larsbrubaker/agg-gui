@@ -284,6 +284,14 @@ fn commit_key_press(index: usize, modifiers: Modifiers) {
     let Some(painted) = painted else {
         return;
     };
+    // Any key but the microphone ends a dictation first, its shown tail
+    // committed, as on Gboard: typed keys never mix into the composition.
+    if !matches!(
+        painted.action,
+        key::KeyAction::Voice | key::KeyAction::Inert
+    ) {
+        super::voice_session::end_keeping_tail();
+    }
     // Clear any pending shift-double-tap detection on a non-shift commit
     // so a Shift tap that's *not* immediately followed by another Shift
     // tap doesn't accidentally promote to caps-lock when the user later
@@ -303,6 +311,8 @@ fn commit_key_press(index: usize, modifiers: Modifiers) {
             handle_layer_switch(target);
         }
         key::KeyAction::Dismiss => dismiss(),
+        key::KeyAction::Voice => super::voice_session::toggle(),
+        key::KeyAction::Inert => {}
     }
     crate::animation::request_draw();
 }

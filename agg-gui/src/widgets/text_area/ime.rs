@@ -57,6 +57,96 @@ impl TextArea {
         self.mark_dirty();
     }
 
+    /// The committed text: the buffer with any composition taken out (and
+    /// the selection it displaced put back). What the widget reports as its
+    /// text ([`Widget::text_input_value`]); [`TextArea::text`] includes the
+    /// composition.
+    pub(super) fn committed_text(&self) -> String {
+        let st = self.edit.borrow();
+        match &self.composition {
+            Some(c) => {
+                let end = (c.start + c.len).min(st.text.len());
+                let start = c.start.min(end);
+                let mut text = st.text.clone();
+                text.replace_range(start..end, &c.replaced);
+                text
+            }
+            None => st.text.clone(),
+        }
+    }
+
+    /// The committed text before the caret, or before the selection or the
+    /// composition (which input replaces): what the on-screen keyboard's
+    /// dictation reads ([`Widget::text_before_caret`]).
+    pub(super) fn text_up_to_caret(&self) -> Option<String> {
+        let st = self.edit.borrow();
+        let caret = match &self.composition {
+            Some(c) => c.start,
+            None => st.cursor.min(st.anchor),
+        };
+        st.text.get(..caret.min(st.text.len())).map(str::to_string)
+    }
+
+    /// Take over a dictation from the area this one replaced
+    /// ([`Widget::resume_text_input`]): caret at byte `caret`, `composition`
+    /// shown there. With `in_text` the shared buffer already holds it there
+    /// (the old area's composition): it is adopted as this area's, with no
+    /// change to the text.
+    pub(super) fn resume_composition(
+        &mut self,
+        caret: usize,
+        composition: &str,
+        in_text: bool,
+    ) -> bool {
+        if self.composition.is_some() {
+            return false;
+        }
+        let fits = {
+            let st = self.edit.borrow();
+            st.text.is_char_boundary(caret)
+                && (!in_text || st.text.get(caret..caret + composition.len()) == Some(composition))
+        };
+        if !fits {
+            return false;
+        }
+        let end = composition.len();
+        let Some(preedit) = Preedit::from_event(composition, Some((end, end))) else {
+            let mut st = self.edit.borrow_mut();
+            st.cursor = caret;
+            st.anchor = caret;
+            drop(st);
+            self.after_ime_edit();
+            return true;
+        };
+        if in_text {
+            {
+                let mut st = self.edit.borrow_mut();
+                st.cursor = caret + end;
+                st.anchor = caret + end;
+            }
+            self.composition = Some(Composition {
+                start: caret,
+                len: end,
+                replaced: String::new(),
+                preedit,
+            });
+            self.mark_dirty();
+            self.after_ime_edit();
+            return true;
+        }
+        {
+            let mut st = self.edit.borrow_mut();
+            st.cursor = caret;
+            st.anchor = caret;
+        }
+        let event = Event::ImePreedit {
+            text: composition.to_string(),
+            cursor: Some((end, end)),
+        };
+        self.handle_ime_event(&event);
+        true
+    }
+
     /// Handle [`Event::TextInput`] / [`Event::ImePreedit`]; `None` for any
     /// other event.
     pub(super) fn handle_ime_event(&mut self, event: &Event) -> Option<EventResult> {

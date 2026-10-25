@@ -15,6 +15,7 @@ mod tooltip_target;
 mod touch;
 mod tree_paths;
 mod under_mouse;
+mod voice;
 use tree_paths::{collect_focusable, widget_at_path, widget_at_path_ref};
 pub use under_mouse::{under_mouse_state_of, UnderMouseState, WidgetId};
 
@@ -347,6 +348,8 @@ impl App {
         // → mark_dirty chain), so the fold it applied here re-rasters this
         // same frame.  See `super::app::gesture`.
         self.dispatch_gesture();
+        // Dictated text reaches the focused field before it paints.
+        self.pump_voice_input();
         // Tick the keyboard-driven lift once per paint.  Translates
         // the widget tree (and its global overlays) upward by `lift`
         // pixels so a focused field doesn't disappear behind the

@@ -51,6 +51,9 @@ impl App {
         if self.focus == new_path && (new_path.is_none() || told) {
             return;
         }
+        // A dictation into the field losing focus ends there, before it
+        // hears `FocusLost` (which drops any composition it shows).
+        self.end_voice_input_keeping_tail();
         if let Some(old) = self.focus.take() {
             if told {
                 dispatch_event(&mut self.root, &old, &Event::FocusLost, Point::ORIGIN);
@@ -121,7 +124,11 @@ impl App {
         }
         let focusable =
             widget_at_path_ref(self.root.as_ref(), &path).is_some_and(|w| w.is_focusable());
-        self.enter_focus(focusable.then_some(path));
+        self.enter_focus(focusable.then_some(path.clone()));
+        // A dictation goes on into the same field rebuilt, once it has been
+        // told it has focus; for any other widget (or none) it ends, its
+        // words kept from the newcomer.
+        self.follow_voice_into_replacement(&path, focusable);
     }
 
     /// The path to the widget last told it has focus, wherever it now is in

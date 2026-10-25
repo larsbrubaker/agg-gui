@@ -33,6 +33,13 @@ pub struct Style {
     /// Height of the strip below the keys that holds the hide-keyboard
     /// chevron (where the phone shows its own hide control).
     pub bottom_strip_height: f64,
+    /// Height of the toolbar row above the keys that holds the microphone
+    /// key while a voice provider is registered (Gboard's toolbar; `0.0`
+    /// where the platform puts the microphone elsewhere, as the iPhone's
+    /// strip below the keys). See `voice_paint.rs`.
+    pub toolbar_height: f64,
+    /// Diameter of the microphone key's round face in the toolbar.
+    pub voice_key_diameter: f64,
 
     // ── Standard key
     pub key_face_bg: Color,
@@ -94,6 +101,8 @@ impl Style {
             key_v_gap: self.key_v_gap * k,
             key_corner_radius: self.key_corner_radius * k,
             bottom_strip_height: self.bottom_strip_height * k,
+            toolbar_height: self.toolbar_height * k,
+            voice_key_diameter: self.voice_key_diameter * k,
             key_shadow_offset_y: self.key_shadow_offset_y * k,
             letter_font_size: self.letter_font_size * k,
             utility_font_size: self.utility_font_size * k,
@@ -132,6 +141,9 @@ fn ios(dark: bool) -> Style {
         key_v_gap: 12.0,
         key_corner_radius: 5.0,
         bottom_strip_height: 44.0,
+        // The iPhone's microphone sits in the strip below the keys.
+        toolbar_height: 0.0,
+        voice_key_diameter: 0.0,
         key_face_bg: Color::from_rgb8(0xFE, 0xFE, 0xFE),
         key_face_bg_pressed: Color::from_rgb8(0xBC, 0xC0, 0xC9),
         key_face_text: Color::from_rgb8(0x10, 0x10, 0x18),
@@ -192,6 +204,11 @@ fn android(dark: bool) -> Style {
         key_v_gap: 9.5,
         key_corner_radius: 6.0,
         bottom_strip_height: 32.0,
+        // Gboard's toolbar: 43 dp from the panel's top to the keys' top
+        // padding, its microphone a 34 dp circle (measured off
+        // `standard.png`).
+        toolbar_height: 43.0,
+        voice_key_diameter: 34.0,
         key_face_bg: Color::from_rgb8(0xFF, 0xFF, 0xFF),
         key_face_bg_pressed: Color::from_rgb8(0xE3, 0xCF, 0xC2),
         key_face_text: Color::from_rgb8(0x4C, 0x39, 0x28),
@@ -253,6 +270,8 @@ fn neutral(dark: bool) -> Style {
         key_v_gap: 8.0,
         key_corner_radius: 6.0,
         bottom_strip_height: 30.0,
+        toolbar_height: 40.0,
+        voice_key_diameter: 32.0,
         key_face_bg: Color::from_rgb8(0x2A, 0x2B, 0x36),
         key_face_bg_pressed: Color::from_rgb8(0x44, 0x46, 0x55),
         key_face_text: Color::from_rgb8(0xE7, 0xE8, 0xF0),

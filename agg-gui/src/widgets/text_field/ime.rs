@@ -46,9 +46,46 @@ impl TextField {
     }
 
     /// The displayed text up to the caret, composition included.
-    pub(super) fn text_before_caret(&self) -> String {
+    pub(super) fn shown_text_before_caret(&self) -> String {
         let (text, caret, _) = self.shown_text();
         text[..caret].to_string()
+    }
+
+    /// The committed text before the caret, or before the selection the
+    /// composition (and any input) replaces; the composition left out.
+    pub(super) fn committed_text_before_caret(&self) -> String {
+        let (lo, _) = self.preedit_anchor_range();
+        let st = self.edit.borrow();
+        st.text.get(..lo).unwrap_or_default().to_string()
+    }
+
+    /// Take over a dictation from the field this one replaced
+    /// ([`Widget::resume_text_input`]): caret at byte `caret`, `composition`
+    /// shown there. The buffer never holds a composition, so one said to be
+    /// in the text means this isn't the same field.
+    pub(super) fn resume_composition(
+        &mut self,
+        caret: usize,
+        composition: &str,
+        in_text: bool,
+    ) -> bool {
+        if in_text {
+            return false;
+        }
+        {
+            let mut st = self.edit.borrow_mut();
+            if !st.text.is_char_boundary(caret) {
+                return false;
+            }
+            st.cursor = caret;
+            st.anchor = caret;
+        }
+        let end = composition.len();
+        self.preedit = Preedit::from_event(composition, Some((end, end)));
+        self.restart_blink();
+        self.ensure_cursor_visible();
+        crate::animation::request_draw();
+        true
     }
 
     /// Whether the caret line should draw: always without a composition; with

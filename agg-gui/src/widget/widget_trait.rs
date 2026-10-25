@@ -389,6 +389,38 @@ pub trait Widget {
         None
     }
 
+    /// The committed text before the caret (before the selection, and
+    /// before any input-method composition, which is not part of the text),
+    /// if this widget is text-bearing: what the on-screen keyboard's
+    /// dictation reads to decide whether the dictated words start a sentence
+    /// and need a space before them (`on_screen_keyboard/voice_session.rs`).
+    /// Default is `None`, and the keyboard then takes the whole
+    /// [`text_input_value`](Self::text_input_value) (the caret at the end).
+    /// `TextField`, `TextArea` and `RichTextEdit` override it.
+    fn text_before_caret(&self) -> Option<String> {
+        None
+    }
+
+    /// Take over a dictation from the field this widget replaced: the app
+    /// rebuilt the focused field in place, with the same text, and the
+    /// on-screen keyboard's dictation follows it
+    /// (`widget/app/voice.rs`). Put the caret at byte `caret` of the
+    /// committed text and show `composition` there as input-method
+    /// composition text (empty: none). With `composition_in_text`, the
+    /// widget's text already holds `composition` at `caret` (a text area
+    /// sharing its edit state with the one it replaced, which kept its
+    /// composition in the buffer): adopt it as the composition rather than
+    /// insert it again. Returns whether it did; the default can't, and the
+    /// dictation then ends instead of following.
+    fn resume_text_input(
+        &mut self,
+        _caret: usize,
+        _composition: &str,
+        _composition_in_text: bool,
+    ) -> bool {
+        false
+    }
+
     /// Preferred keyboard input mode for this widget — used by the
     /// on-screen software keyboard to pick the initial layer when this
     /// widget gains focus.  Default is

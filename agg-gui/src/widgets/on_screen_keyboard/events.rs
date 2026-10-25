@@ -17,7 +17,12 @@ thread_local! {
 
 /// Enqueue a synthetic key event. Called by the keyboard module when a
 /// key tap commits.
+///
+/// A key typed during a dictation ends it first (a held Backspace's repeats
+/// and a long-press alternate included), so the App delivers its committed
+/// tail before the key.
 pub fn push_synthetic_key(key: Key, modifiers: Modifiers) {
+    super::voice_session::end_keeping_tail();
     QUEUE.with(|q| q.borrow_mut().push((key, modifiers)));
 }
 

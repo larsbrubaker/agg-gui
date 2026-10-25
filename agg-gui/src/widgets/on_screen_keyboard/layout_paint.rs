@@ -1,7 +1,9 @@
 //! The paint pass of a keyboard [`Layout`]: places every key, gives each its
 //! hit area, draws the keys, the key in the strip below them (Gboard's
-//! hide-keyboard chevron, the iPhone's emoji key), the preview over a
-//! pressed letter and the long-press alternates popup.
+//! hide-keyboard chevron, the iPhone's emoji key), the microphone key and
+//! the dictation status while a voice provider is registered (placed and
+//! drawn by [`super::voice_paint`]), the preview over a pressed letter and
+//! the long-press alternates popup.
 //!
 //! Split out of [`super::layouts`] so the layout tables stay pure data. The
 //! hit areas come from [`super::hit`]; one key's look from [`super::paint`].
@@ -18,6 +20,8 @@ use super::key::{KeyAction, KeyCap, KeyGlyph, PaintedKey};
 use super::layouts::{KeyKind, KeySpec, Layer, Layout, LayoutFamily};
 use super::paint::{paint_chevron, paint_key, paint_preview};
 use super::style::Style;
+use super::voice_paint::{paint_status, paint_voice_key, strip_mic_rects, toolbar_rects};
+use super::voice_session::VoiceView;
 
 /// What the paint pass needs to know about the keyboard's state.
 #[derive(Debug, Clone)]
@@ -35,6 +39,8 @@ pub(super) struct PaintState {
     pub family: LayoutFamily,
     /// The open long-press alternates popup.
     pub alternates: Option<AlternatesPopup>,
+    /// The microphone key's state; `None` without a voice provider (no key).
+    pub voice: Option<VoiceView>,
 }
 
 /// The Enter key's cap and colours for what Enter does: Gboard draws an
@@ -63,8 +69,9 @@ fn enter_cap(family: LayoutFamily, action: EnterAction) -> (KeyCap, KeyKind) {
 
 impl Layout {
     /// Paint every key and return the painted keys with their hit areas
-    /// (used by the tap dispatcher). The hide-keyboard chevron is the last
-    /// painted key.
+    /// (used by the tap dispatcher). The hide-keyboard chevron follows the
+    /// rows' keys, then the voice keys when there is a provider: the
+    /// microphone, and on Gboard the inert rest of its toolbar row.
     pub(super) fn paint(
         &self,
         ctx: &mut dyn DrawCtx,
@@ -79,7 +86,15 @@ impl Layout {
         // of the panel is at panel.y + panel.height.
         let mut faces: Vec<Vec<Rect>> = Vec::with_capacity(self.rows.len());
         let mut specs: Vec<Vec<&KeySpec>> = Vec::with_capacity(self.rows.len());
-        let mut row_top_y = panel.y + panel.height - style.panel_padding_top;
+        // Gboard's toolbar row, while it has the microphone, sits above the
+        // keys; the keys and their hit areas fill the panel below it.
+        let toolbar_h = if state.voice.is_some() {
+            self.toolbar_height(style)
+        } else {
+            0.0
+        };
+        let keys_area = Rect::new(panel.x, panel.y, panel.width, panel.height - toolbar_h);
+        let mut row_top_y = keys_area.y + keys_area.height - style.panel_padding_top;
         for row in &self.rows {
             let row_bottom_y = row_top_y - style.row_height;
             // Each unit of width is one key pitch (a key and one gap), so a
@@ -107,9 +122,14 @@ impl Layout {
         // Hit areas tile the whole panel: the bottom row reaches down
         // through the chevron strip, except the strip's left end, which is
         // the chevron's own.
-        let mut hits = assign_row_hits(&faces, panel);
+        let mut hits = assign_row_hits(&faces, keys_area);
         let strip_top = panel.y + style.bottom_strip_height;
         let chevron = chevron_rects(&faces, &mut hits, panel, strip_top, style);
+        // The iPhone's microphone takes the strip's right end the same way.
+        let strip_mic = match (&state.voice, state.family) {
+            (Some(_), LayoutFamily::Ios) => strip_mic_rects(&faces, &mut hits, panel, style),
+            _ => None,
+        };
 
         let mut painted = Vec::with_capacity(faces.iter().map(Vec::len).sum::<usize>() + 1);
         for ((row_faces, row_specs), row_hits) in faces.iter().zip(&specs).zip(&hits) {
@@ -150,6 +170,27 @@ impl Layout {
             });
         }
 
+        if let Some(voice) = &state.voice {
+            if toolbar_h > 0.0 {
+                let bar = toolbar_rects(panel, toolbar_h, style);
+                let pressed = state.pressed == Some(painted.len());
+                paint_voice_key(ctx, bar.mic_face, voice, pressed, true, style);
+                paint_status(ctx, bar.status_text, voice, false, style);
+                painted.push(voice_key(bar.mic_face, bar.mic_hit));
+                painted.push(inert_key(bar.status_hit));
+            } else if let Some((face, hit)) = strip_mic {
+                let pressed = state.pressed == Some(painted.len());
+                paint_voice_key(ctx, face, voice, pressed, false, style);
+                // The status line sits in the strip between the emoji key
+                // and the microphone, which takes touches and types nothing.
+                let left = chevron.map_or(panel.x, |(_, h)| h.x + h.width);
+                let area = Rect::new(left, panel.y, hit.x - left, style.bottom_strip_height);
+                paint_status(ctx, area, voice, true, style);
+                painted.push(voice_key(face, hit));
+                painted.push(inert_key(area));
+            }
+        }
+
         // The alternates popup replaces the preview while it is open.
         if let Some(popup) = &state.alternates {
             paint_alternates(ctx, panel, popup, style, state.family);
@@ -173,6 +214,27 @@ impl Layout {
             }
         }
         painted
+    }
+}
+
+/// The microphone key's painted entry.
+fn voice_key(rect: Rect, hit: Rect) -> PaintedKey {
+    PaintedKey {
+        rect,
+        hit,
+        action: KeyAction::Voice,
+        cap: KeyCap::Glyph(KeyGlyph::Microphone),
+    }
+}
+
+/// The area beside the microphone that holds the status line: it takes
+/// touches and types nothing.
+fn inert_key(area: Rect) -> PaintedKey {
+    PaintedKey {
+        rect: area,
+        hit: area,
+        action: KeyAction::Inert,
+        cap: KeyCap::Text(String::new()),
     }
 }
 

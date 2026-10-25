@@ -125,12 +125,27 @@ impl Layout {
         }
     }
 
+    /// Height of the toolbar row above the keys: Gboard's, which holds the
+    /// microphone key, while a voice provider is registered and the field
+    /// isn't a password field; `0.0` otherwise, and on the iPhone, whose
+    /// microphone sits below the keys.
+    pub(super) fn toolbar_height(&self, style: &Style) -> f64 {
+        if self.family == LayoutFamily::Gboard && super::voice_session::key_shown() {
+            style.toolbar_height
+        } else {
+            0.0
+        }
+    }
+
     /// Compute the panel height required to render this layout at the
-    /// given viewport width, accounting for vertical padding, row gaps and
-    /// the strip below the keys that holds the hide-keyboard chevron.
+    /// given viewport width, accounting for vertical padding, row gaps, the
+    /// strip below the keys that holds the hide-keyboard chevron, and the
+    /// toolbar row above them while there is one (Gboard's, holding the
+    /// microphone key while a voice provider is registered).
     pub fn compute_panel_height(&self, _viewport_width: f64, style: &Style) -> f64 {
         let rows = self.rows.len() as f64;
-        style.panel_padding_top
+        self.toolbar_height(style)
+            + style.panel_padding_top
             + style.panel_padding_bottom
             + style.bottom_strip_height
             + rows * style.row_height

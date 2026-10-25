@@ -277,6 +277,9 @@ fn paint_glyph(
             ctx.fill();
         }
         KeyGlyph::Emoji => paint_smiley(ctx, center, r * 1.15),
+        // The microphone has no key of this shape: `voice_paint.rs` draws it
+        // with its state.
+        KeyGlyph::Microphone => {}
     }
 }
 

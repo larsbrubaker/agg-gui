@@ -61,6 +61,9 @@ pub const MAGNIFYING_GLASS: char = '\u{F002}';
 pub const SEARCH: char = MAGNIFYING_GLASS;
 pub const XMARK: char = '\u{F00D}';
 pub const CLEAR: char = XMARK;
+// The on-screen keyboard's voice-input key (`widgets/on_screen_keyboard/voice_paint.rs`).
+pub const MICROPHONE: char = '\u{F130}';
+pub const MICROPHONE_SLASH: char = '\u{F131}';
 
 /// Every named constant with its C# name, in declaration order (C# reads
 /// them by reflection).
@@ -99,6 +102,8 @@ pub const NAMED: &[(&str, char)] = &[
     ("Search", SEARCH),
     ("Xmark", XMARK),
     ("Clear", CLEAR),
+    ("Microphone", MICROPHONE),
+    ("MicrophoneSlash", MICROPHONE_SLASH),
 ];
 
 /// The icon face alone, with no fallback chain, parsed on first use (C#'s

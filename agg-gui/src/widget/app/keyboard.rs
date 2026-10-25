@@ -44,6 +44,8 @@ impl App {
     /// widget tree as an unconsumed key if focus ignores it.
     pub fn on_key_down(&mut self, key: Key, mods: Modifiers) {
         self.on_modifiers_changed(mods);
+        // A typed key ends a dictation first, its tail committed before it.
+        self.end_voice_input_for_key(&key);
         // Ctrl/Meta+Tab is a *direct* focus-traversal escape hatch: it advances
         // focus without ever offering the event to the focused widget, so a
         // widget that consumes plain Tab (e.g. the rich-text editor indenting)
@@ -139,10 +141,15 @@ impl App {
     /// keyboard panel clears focus, which then drops the
     /// keyboard-aware screen lift via `notify_focus_change`.
     pub(super) fn drain_keyboard_synthetic_keys(&mut self) {
+        // A key typed during a dictation ended it, committing its tail: that
+        // reaches the field before the key does.
+        self.deliver_voice_text();
         let pending = crate::widgets::on_screen_keyboard::drain_synthetic_keys();
         for (key, mods) in pending {
             self.on_key_down(key, mods);
         }
+        // A tap on the microphone may have started or stopped a dictation.
+        self.pump_voice_input();
         if crate::widgets::on_screen_keyboard::take_dismiss_request() {
             self.set_focus(None);
         }

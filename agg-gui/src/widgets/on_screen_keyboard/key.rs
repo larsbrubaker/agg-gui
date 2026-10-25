@@ -26,6 +26,13 @@ pub enum KeyAction {
     /// downward chevron below the keys' bottom-left corner, where the
     /// phone shows its own hide-keyboard control.
     Dismiss,
+    /// Start or stop dictation: the microphone key, shown while a voice
+    /// provider is registered (`voice.rs`).
+    Voice,
+    /// Takes the touch and does nothing: where the dictation status shows
+    /// beside the microphone (the rest of Gboard's toolbar row, the
+    /// iPhone's strip between the emoji key and the microphone).
+    Inert,
 }
 
 /// Visual label rendered on a key. Either text or a tiny glyph.
@@ -69,6 +76,9 @@ pub enum KeyGlyph {
     Send,
     /// Smiling face — the iPhone's emoji key, below the keys.
     Emoji,
+    /// Microphone — the voice-input key, drawn by `voice_paint.rs` (Font
+    /// Awesome's microphone) in its current state.
+    Microphone,
 }
 
 impl KeyGlyph {

@@ -732,6 +732,7 @@ mod caret_api;
 mod context_menu;
 mod edit_ops;
 mod enabled;
+mod event_impl;
 mod frame;
 mod geometry;
 mod highlight;

@@ -64,12 +64,24 @@ impl Widget for TextField {
         Some(self.text())
     }
 
+    fn text_before_caret(&self) -> Option<String> {
+        Some(self.committed_text_before_caret())
+    }
+
+    fn resume_text_input(&mut self, caret: usize, composition: &str, in_text: bool) -> bool {
+        self.resume_composition(caret, composition, in_text)
+    }
+
     fn text_input_mode(&self) -> crate::widgets::on_screen_keyboard::KeyboardInputMode {
         self.keyboard_mode()
     }
 
     fn text_input_hints(&self) -> crate::widgets::on_screen_keyboard::TextInputHints {
-        self.keyboard_hints
+        // A password field is secure even while its text is revealed.
+        crate::widgets::on_screen_keyboard::TextInputHints {
+            secure: self.password_mode,
+            ..self.keyboard_hints
+        }
     }
 
     /// Composite parents (e.g. `ColorWheelPicker`) use this to push a live
@@ -678,7 +690,7 @@ impl TextField {
     /// matching egui. Shared by the overlay paint and the caret regression test.
     pub(crate) fn caret_x(&self) -> f64 {
         let font = self.active_font();
-        let before = self.text_before_caret();
+        let before = self.shown_text_before_caret();
         let advance = if self.masking_active() {
             const BULLET: char = '•';
             let n = before.chars().count();

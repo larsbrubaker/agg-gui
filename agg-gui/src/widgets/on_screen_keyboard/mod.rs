@@ -136,6 +136,12 @@
 //!   key drawn as the field's action. No predictive bar yet.
 //! - Layout-driven painting via [`layouts::Layout`] so adding a new
 //!   layer or layout is a data change, not a code change.
+//! - Voice input: with a speech-to-text provider registered
+//!   ([`set_voice_input`]), a microphone key where the platform keyboard has
+//!   one (Gboard's toolbar row, the iPhone's strip below the keys) takes
+//!   dictation into the focused field, committed words inserted and the
+//!   unconfirmed tail shown as composition text. The interface, its states
+//!   and how a Web Worker or native recorder plugs in are in [`voice`].
 
 use crate::draw_ctx::DrawCtx;
 use crate::geometry::Rect;
@@ -154,6 +160,9 @@ mod paint;
 mod pointer;
 pub mod state;
 pub mod style;
+pub mod voice;
+mod voice_paint;
+pub(crate) mod voice_session;
 
 pub use enter_action::{EnterAction, TextInputHints};
 use layouts::{Layer, Layout};
@@ -164,6 +173,10 @@ pub use pointer::{
 };
 use state::{with_state_mut, with_state_ref};
 use style::Style;
+pub use voice::{
+    cancel_voice_input, has_voice_input, is_dictating, set_voice_input, voice_state, VoiceContext,
+    VoiceInput, VoicePoll, VoiceState, VoiceText,
+};
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -332,10 +345,11 @@ pub fn set_text_input_focused_with_hints(
     mode: KeyboardInputMode,
     hints: TextInputHints,
 ) {
-    with_state_mut(|s| {
+    let opened = with_state_mut(|s| {
         if !s.enabled {
-            return;
+            return false;
         }
+        let opened = focused && !s.text_input_focused;
         s.text_input_focused = focused;
         if focused {
             s.hints = hints;
@@ -362,13 +376,7 @@ pub fn set_text_input_focused_with_hints(
                 }
                 KeyboardInputMode::Text => {
                     if let Some(text) = existing_text {
-                        let last_non_space = text.trim_end().chars().last();
-                        let sentence_start = match last_non_space {
-                            None => true, // empty
-                            Some(c) if c == '.' || c == '!' || c == '?' || c == '\n' => true,
-                            _ => false,
-                        };
-                        s.current_layer = if sentence_start {
+                        s.current_layer = if is_sentence_start(text) {
                             Layer::Shifted
                         } else {
                             Layer::Letters
@@ -378,7 +386,28 @@ pub fn set_text_input_focused_with_hints(
             }
         }
         crate::animation::request_draw();
+        opened
     });
+    if opened {
+        // The keyboard is coming up: a voice provider starts getting ready
+        // (downloading its model) now, not at the first tap on the mic.
+        voice_session::keyboard_opened();
+    }
+}
+
+/// Whether text ending in `text` (the field's text, or its text before the
+/// caret) leaves the next word starting a sentence: nothing but whitespace,
+/// or, past any trailing whitespace other than line breaks (spaces, tabs, a
+/// no-break or ideographic space), `.`, `!`, `?` or a line break (`\n`,
+/// `\r\n` or `\r`). The rule behind the keyboard opening with Shift on,
+/// and behind [`VoiceContext::sentence_start`].
+pub(crate) fn is_sentence_start(text: &str) -> bool {
+    let line_break = |c: char| c == '\n' || c == '\r';
+    let trimmed = text.trim_end_matches(|c: char| c.is_whitespace() && !line_break(c));
+    match trimmed.chars().last() {
+        None => true,
+        Some(c) => matches!(c, '.' | '!' | '?') || line_break(c),
+    }
 }
 
 /// Programmatic dismiss — used by the keyboard's close key, and by
@@ -413,11 +442,13 @@ pub fn take_dismiss_request() -> bool {
 }
 
 /// `true` if the keyboard wants another frame this paint cycle (slide
-/// animation in flight, or a hold-to-repeat key is active). [`App::wants_draw`]
+/// animation in flight, a hold-to-repeat key is active, or a dictation is
+/// running). [`App::wants_draw`]
 /// consults this so the rAF / event loop keeps pumping while the
 /// keyboard has work to do.
 pub fn needs_draw() -> bool {
     with_state_ref(|s| s.slide.is_animating() || s.key_repeat.is_some())
+        || voice_session::wants_frames()
 }
 
 // ---------------------------------------------------------------------------
@@ -452,6 +483,7 @@ pub fn paint_software_keyboard(ctx: &mut dyn DrawCtx, viewport: crate::geometry:
     pointer::rearm_timed_wakes();
     let layer = with_state_ref(|s| s.current_layer);
     let layout = Layout::for_profile(layer, profile);
+    let voice = voice_session::paint_view();
     let paint_state = with_state_ref(|s| layout_paint::PaintState {
         layer: s.current_layer,
         caps_lock: s.caps_lock,
@@ -459,6 +491,7 @@ pub fn paint_software_keyboard(ctx: &mut dyn DrawCtx, viewport: crate::geometry:
         enter: s.hints.enter_action,
         family: layout.family,
         alternates: s.alternates.clone(),
+        voice,
     });
 
     // Compute panel rect. The fully-extended height is determined by the
@@ -551,6 +584,7 @@ pub(crate) mod test_hook {
         with_state_mut(|s| {
             *s = KeyboardState::default();
         });
+        super::voice_session::reset();
     }
 
     /// Re-export `handle_layer_switch` so caps-lock behaviour can be
@@ -558,6 +592,13 @@ pub(crate) mod test_hook {
     /// full paint pass.
     pub fn simulate_shift_tap() {
         super::pointer::handle_layer_switch(super::Layer::Shifted);
+    }
+
+    /// The dictation status line this frame shows (the voice keys' text).
+    pub fn voice_status() -> Option<String> {
+        super::voice_session::paint_view()
+            .as_ref()
+            .and_then(super::voice_paint::status_text)
     }
 
     /// Read caps-lock state without exposing the full module state.

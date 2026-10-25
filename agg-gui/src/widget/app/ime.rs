@@ -20,6 +20,8 @@ impl App {
         if text.is_empty() {
             return false;
         }
+        // Text from the platform ends a dictation first, its tail committed.
+        self.end_voice_input_keeping_tail();
         self.dispatch_text_event(Event::TextInput {
             text: text.to_string(),
         })
@@ -30,6 +32,10 @@ impl App {
     /// a byte range inside `text`, or `None` for no caret. Returns whether a
     /// widget consumed it.
     pub fn on_ime_preedit(&mut self, text: &str, cursor: Option<(usize, usize)>) -> bool {
+        if !text.is_empty() {
+            // The platform's input method composing ends a dictation first.
+            self.end_voice_input_keeping_tail();
+        }
         self.dispatch_text_event(Event::ImePreedit {
             text: text.to_string(),
             cursor,
@@ -75,7 +81,7 @@ impl App {
 
     /// Route a text event like a key: to a focused widget inside the active
     /// modal, else the modal subtree, else the focused widget.
-    fn dispatch_text_event(&mut self, event: Event) -> bool {
+    pub(super) fn dispatch_text_event(&mut self, event: Event) -> bool {
         self.resolve_tracked_paths();
         let target = match active_modal_path(self.root.as_ref()) {
             Some(path) => match self.focus.clone() {

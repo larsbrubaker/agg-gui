@@ -76,7 +76,7 @@ impl TextField {
         let inner_w = (self.bounds.width - ins.left - ins.right).max(0.0);
         let font = self.active_font();
         let cx = {
-            let before = self.text_before_caret();
+            let before = self.shown_text_before_caret();
             if self.masking_active() {
                 const BULLET: char = '•';
                 let n = before.chars().count();

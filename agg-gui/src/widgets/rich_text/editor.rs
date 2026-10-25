@@ -371,6 +371,17 @@ impl Widget for RichTextEdit {
         Some(self.plain_text())
     }
 
+    fn text_before_caret(&self) -> Option<String> {
+        let core = self.core.borrow();
+        let sel = core.selection();
+        let at = sel.start.min(sel.end);
+        let blocks = &core.doc().blocks;
+        let mut text: Vec<String> = blocks.iter().take(at.block).map(|b| b.text()).collect();
+        let last = blocks.get(at.block).map(|b| b.text()).unwrap_or_default();
+        text.push(last.get(..at.byte).unwrap_or(&last).to_string());
+        Some(text.join("\n"))
+    }
+
     fn margin(&self) -> Insets {
         self.base.margin
     }
