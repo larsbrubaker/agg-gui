@@ -48,6 +48,7 @@ import {
   seedTextEdit,
   waitForState,
   watchModelLoad,
+  pushedEnvelope,
 } from "./dictation_common";
 
 const CLIP =
@@ -78,6 +79,7 @@ test.describe.configure({ retries: 1 });
 test.afterEach(async ({ page }, testInfo) => {
   if (testInfo.status !== testInfo.expectedStatus) {
     console.log(`worker traffic: ${await workerTraffic(page)}`);
+    console.log(`pushed audio: ${await pushedEnvelope(page, 0.5, 50)}`);
   }
 });
 
@@ -241,8 +243,9 @@ test("a tap on the microphone dictates into the TextEdit field", async ({ page }
   // (agg-gui-whistle's own tests check the provider passes on exactly the
   // text whistle commits). So this pins the lowercase first word and the
   // clip's beginning and end, not whistle's reading of its middle.
-  // ("round the top edges" has also come back "round to top edges".)
-  expect(text ?? "").toMatch(/^Edit this text ma[kt]e the .*20.*wide and round \w+ top edges\.$/);
+  // ("round the top edges" has also come back "round to top edges" and
+  // "rounded top edges".)
+  expect(text ?? "").toMatch(/^Edit this text ma[kt]e the .*20.*wide and round(?:ed| \w+) top edges\.$/);
 });
 
 test("a second tap while the model downloads cancels the dictation; the download completes", async ({

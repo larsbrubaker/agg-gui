@@ -23,6 +23,9 @@
  *   is slow (the stream waits for it at most 1.5 s, then a ScriptProcessor
  *   captures), and on a main thread 20 times slower (CI's software-rendered
  *   one lags by seconds), which only delays the cue.
+ * - Main-thread stalls longer than the ScriptProcessor's buffer replay no
+ *   audio: an event that ran too late (its buffer already refilled) is
+ *   dropped, so the stall costs words rather than making some up.
  * - A model download that stalls times out and is an error the next tap
  *   retries.
  *
@@ -48,6 +51,7 @@ import {
   workerTraffic,
   seedTextEdit,
   waitForState,
+  pushedEnvelope,
 } from "./dictation_common";
 
 const CLIP =
@@ -73,8 +77,9 @@ test.use({
  * reading, which varies from run to run ("make" or "mate", "cube 20",
  * "cute 20" or "Q20"; see dictation.test.ts).
  */
-// Its tail too: "round the top edges" has come back "round to top edges".
-const DICTATED = /^Edit this text \w+ the .+ wide and round \w+ top edges\.$/;
+// Its tail too: "round the top edges" has come back "round to top edges"
+// and "rounded top edges".
+const DICTATED = /^Edit this text \w+ the .+ wide and round(?:ed| \w+) top edges\.$/;
 
 
 /**
@@ -153,6 +158,7 @@ async function boot(page: Page): Promise<void> {
 test.afterEach(async ({ page }, testInfo) => {
   if (testInfo.status !== testInfo.expectedStatus) {
     console.log(`worker traffic: ${await workerTraffic(page)}`);
+    console.log(`pushed audio: ${await pushedEnvelope(page, 0.5, 50)}`);
   }
 });
 
@@ -291,6 +297,86 @@ test("an AudioContext that never starts is a microphone error, not listening to 
  * worklet's fetch, so the failure is made here); count the fallback's
  * processors (`__processors`).
  */
+/** Record every sample pushed to the worker, in order, and count the
+ * ScriptProcessor's events (`pushedBlocks`). */
+async function recordPushedSamples(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const win = window as unknown as Record<string, any>;
+    win.__samples = [] as number[];
+    win.__processorEvents = 0;
+    const proto = ScriptProcessorNode.prototype;
+    const handler = Object.getOwnPropertyDescriptor(proto, "onaudioprocess")!;
+    Object.defineProperty(proto, "onaudioprocess", {
+      configurable: true,
+      get() {
+        return handler.get!.call(this);
+      },
+      set(fn) {
+        const counted = (e: AudioProcessingEvent) => {
+          win.__processorEvents++;
+          return fn.call(this, e);
+        };
+        handler.set!.call(this, fn ? counted : null);
+      },
+    });
+    const post = Worker.prototype.postMessage;
+    Worker.prototype.postMessage = function (this: Worker, msg: any, ...rest: any[]) {
+      if (msg && msg.type === "push") for (const v of msg.samples) win.__samples.push(v);
+      return (post as any).call(this, msg, ...rest);
+    };
+  });
+}
+
+/**
+ * The fallback's pushed audio cut into its buffers (16384 frames, pushed
+ * back to back from the start): how many buffers of sound went twice
+ * (replayed), and how many of the processor's events were dropped (ran too
+ * late to hold their own audio, `processor_clock.rs`), their audio replaced
+ * by a quiet room's noise (no sample above 0.002, not exact zeros: no
+ * second of the clip is that quiet), or not pushed at all.
+ */
+async function pushedBlocks(page: Page): Promise<{ repeated: number; dropped: number }> {
+  return page.evaluate(() => {
+    const win = window as unknown as Record<string, any>;
+    const all = win.__samples as number[];
+    const frames = 16_384;
+    const seen = new Set<string>();
+    let repeated = 0;
+    let blocks = 0;
+    let filled = 0;
+    for (let i = 0; i + frames <= all.length; i += frames) {
+      blocks++;
+      const block = all.slice(i, i + frames);
+      if (block.every((v) => v === 0)) continue;
+      if (block.every((v) => Math.abs(v) <= 0.002)) {
+        filled++;
+        continue;
+      }
+      const key = block.filter((_, j) => j % 61 === 0).join(",");
+      if (seen.has(key)) repeated++;
+      seen.add(key);
+    }
+    const unpushed = Math.max(0, (win.__processorEvents as number) - blocks);
+    return { repeated, dropped: filled + unpushed };
+  });
+}
+
+/** The words of a dictation that aren't the clip's, as whistle reads it
+ * ("Q20", "cute", "queue"; replayed audio on CI read "money", "Madison",
+ * "then", "twenty-th"). */
+function strangers(text: string | null): string[] {
+  const clipWords = new Set(
+    "make mate the cube cute queue q q20 20 twenty mm millimeters meters wide and round rounded to top edges".split(
+      " ",
+    ),
+  );
+  return (text ?? "")
+    .replace(/^Edit this text/, "")
+    .toLowerCase()
+    .split(/[^a-z0-9-]+/)
+    .filter((w) => w.length > 0 && !clipWords.has(w));
+}
+
 async function withoutWorklet(page: Page): Promise<void> {
   await page.addInitScript(() => {
     const win = window as unknown as Record<string, any>;
@@ -315,6 +401,7 @@ test("without an AudioWorklet the ScriptProcessor fallback dictates and says so 
     // Ours, not Chrome's own deprecation notice for ScriptProcessorNode.
     if (m.text().startsWith("agg-gui-whistle: no AudioWorklet")) warnings.push(m.text());
   });
+  await recordPushedSamples(page);
   await boot(page);
   // Stalls of 300 ms: a 64 ms buffer came out shuffled and repeated
   // ("je trouve que je trouve que ..." on CI).
@@ -323,8 +410,21 @@ test("without an AudioWorklet the ScriptProcessor fallback dictates and says so 
   await dictateClip(page);
   await endStalls(page);
   const text = await fieldText(page);
-  console.log(`field text: ${JSON.stringify(text)}`);
-  expect(text ?? "").toMatch(DICTATED);
+  const { repeated, dropped } = await pushedBlocks(page);
+  console.log(
+    `field text: ${JSON.stringify(text)}; ${dropped} event(s) dropped, ` +
+      `${repeated} buffer(s) pushed twice`,
+  );
+  expect(repeated, "a buffer of audio pushed twice").toBe(0);
+  if (dropped === 0) {
+    // The main thread kept within the buffer: every word.
+    expect(text ?? "").toMatch(DICTATED);
+  } else {
+    // On top of these stalls, CI's own lag ran some events later than the
+    // buffer allows: their audio is lost, never replayed into made-up
+    // words.
+    expect(strangers(text), JSON.stringify(text)).toEqual([]);
+  }
   // A second dictation (the clip is over: silence) falls back again,
   // without another message.
   await page.touchscreen.tap(FIELD.x, FIELD.y);
@@ -338,6 +438,34 @@ test("without an AudioWorklet the ScriptProcessor fallback dictates and says so 
     () => (window as unknown as Record<string, any>).__processors as number,
   );
   expect(processors, "both dictations captured with a ScriptProcessor").toBe(2);
+});
+
+test("without an AudioWorklet, main-thread stalls longer than its buffer replay no audio", async ({
+  page,
+}) => {
+  test.skip(!existsSync(CLIP), `no clip at ${CLIP}`);
+  test.setTimeout(180_000);
+  await withoutWorklet(page);
+  await recordPushedSamples(page);
+  await boot(page);
+  // Stalls of 2.5 s every 3 s: the events that wait one out run more than
+  // a buffer (1.024 s) late, when Chrome has refilled their buffer with
+  // later audio; pushed as read, that audio went twice ("cute twenty the
+  // top edges").
+  await startStalls(page, 2_500, 3_000);
+  await page.touchscreen.tap(MIC.x, MIC.y);
+  await dictateClip(page);
+  await endStalls(page);
+  const text = await fieldText(page);
+  const { repeated, dropped } = await pushedBlocks(page);
+  console.log(
+    `field text: ${JSON.stringify(text)}; ${dropped} event(s) dropped, ` +
+      `${repeated} buffer(s) pushed twice`,
+  );
+  expect(repeated, "a buffer of audio pushed twice").toBe(0);
+  expect(dropped, "the stalls ran events too late").toBeGreaterThan(0);
+  // What a stall held back is missing, not made up.
+  expect(strangers(text), JSON.stringify(text)).toEqual([]);
 });
 
 /**

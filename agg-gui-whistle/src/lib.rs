@@ -88,6 +88,8 @@ mod machine;
 mod model_check;
 #[cfg(all(feature = "provider", not(target_arch = "wasm32")))]
 mod native;
+#[cfg(any(all(feature = "provider", target_arch = "wasm32"), test))]
+mod processor_clock;
 pub mod protocol;
 #[cfg(feature = "provider")]
 mod provider;

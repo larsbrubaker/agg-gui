@@ -201,13 +201,20 @@ export async function liveTracks(page: Page): Promise<number> {
  * `MediaStreamAudioDestinationNode`) that plays silence until the app
  * reports Listening ("Speak now"), then the clip once. The tests that use it
  * then check what a user who waits for the cue gets, independent of when
- * Chrome's fake device would start its file. The time the clip started is
+ * Chrome's fake device would start its file. With `start` "wired" the clip
+ * starts instead the moment the app wires the stream into its graph (the
+ * earliest any page can hear it, while the model may still download). The
+ * time the clip started is
  * `__cue.startedAt` (`performance.now()` ms); the calls, `__cue.asked`, as
  * [`MicRequest`]s (made inside a tap's touchend dispatch or not).
  */
-export async function speakAtCue(page: Page, clipPath: string): Promise<void> {
+export async function speakAtCue(
+  page: Page,
+  clipPath: string,
+  start: "cue" | "wired" = "cue",
+): Promise<void> {
   const clip = readFileSync(clipPath).toString("base64");
-  await page.addInitScript((clip: string) => {
+  await page.addInitScript(([clip, start]: [string, string]) => {
     const win = window as unknown as Record<string, any>;
     win.__cue = { asked: [], startedAt: 0 };
     let inTap = false;
@@ -227,6 +234,19 @@ export async function speakAtCue(page: Page, clipPath: string): Promise<void> {
       source.buffer = buffer;
       source.connect(destination);
       const stream = destination.stream;
+      let started = false;
+      const speak = () => {
+        if (started) return;
+        started = true;
+        win.__cue.startedAt = performance.now();
+        source.start();
+      };
+      if (start === "wired") {
+        // The moment the app wires the stream into its graph: the earliest
+        // a page can hear anything, model or no model.
+        win.__cueWired = { stream, speak };
+        return stream;
+      }
       const watch = setInterval(() => {
         if (stream.getTracks().every((t) => t.readyState === "ended")) {
           clearInterval(watch);
@@ -235,13 +255,23 @@ export async function speakAtCue(page: Page, clipPath: string): Promise<void> {
         const state = win.__wasm?.["dictation_state"]?.();
         if (typeof state === "string" && state.startsWith("Listening")) {
           clearInterval(watch);
-          win.__cue.startedAt = performance.now();
-          source.start();
+          speak();
         }
       }, 5);
       return stream;
     };
-  }, clip);
+    if (start === "wired") {
+      const create = AudioContext.prototype.createMediaStreamSource;
+      AudioContext.prototype.createMediaStreamSource = function (
+        this: AudioContext,
+        stream: MediaStream,
+      ) {
+        const node = create.call(this, stream);
+        if (win.__cueWired && win.__cueWired.stream === stream) win.__cueWired.speak();
+        return node;
+      };
+    }
+  }, [clip, start] as [string, string]);
 }
 
 /**
@@ -254,6 +284,10 @@ export async function recordWorkerTraffic(page: Page): Promise<void> {
   await page.addInitScript(() => {
     const win = window as unknown as Record<string, any>;
     const t = (win.__traffic = { sent: {} as Record<string, number>, pushed: 0, peak: 0, replies: {} as Record<string, number>, text: [] as string[] });
+    // The first seconds of audio pushed, with when each push went
+    // (`pushedEnvelope`).
+    win.__pushedAudio = [] as { at: number; rate: number; samples: Float32Array }[];
+    let kept = 0;
     const post = Worker.prototype.postMessage;
     Worker.prototype.postMessage = function (this: Worker, msg: any, ...rest: any[]) {
       if (msg && typeof msg === "object" && "type" in msg) {
@@ -261,6 +295,11 @@ export async function recordWorkerTraffic(page: Page): Promise<void> {
         if (msg.type === "push" && msg.samples) {
           t.pushed += msg.samples.length / msg.rate;
           for (const v of msg.samples) t.peak = Math.max(t.peak, Math.abs(v));
+          if (kept < 6) {
+            // A copy: the push transfers its buffer to the worker.
+            win.__pushedAudio.push({ at: performance.now(), rate: msg.rate, samples: Float32Array.from(msg.samples) });
+            kept += msg.samples.length / msg.rate;
+          }
         }
       }
       return (post as any).call(this, msg, ...rest);
@@ -285,6 +324,46 @@ export async function recordWorkerTraffic(page: Page): Promise<void> {
 export async function workerTraffic(page: Page): Promise<string> {
   return page
     .evaluate(() => JSON.stringify((window as unknown as Record<string, any>).__traffic))
+    .catch((e) => `unavailable: ${e}`);
+}
+
+/**
+ * The audio pushed first, as recorded by [`recordWorkerTraffic`]: its RMS per
+ * `stepMs` over its first `seconds`, how many samples were exactly zero, when
+ * the first push went and (with [`speakAtCue`]) when the clip started, both
+ * in `performance.now()` ms. What a recogniser heard before the speech.
+ */
+export async function pushedEnvelope(
+  page: Page,
+  seconds = 2,
+  stepMs = 50,
+): Promise<string> {
+  return page
+    .evaluate(
+      ([seconds, stepMs]) => {
+        const win = window as unknown as Record<string, any>;
+        const pushes = win.__pushedAudio as { at: number; rate: number; samples: Float32Array }[];
+        if (!pushes || pushes.length === 0) return "no audio pushed";
+        const rate = pushes[0].rate;
+        const all: number[] = [];
+        for (const p of pushes) for (const v of p.samples) all.push(v);
+        const step = Math.round((rate * stepMs) / 1000);
+        const rms: string[] = [];
+        for (let i = 0; i + step <= Math.min(all.length, rate * seconds); i += step) {
+          let sum = 0;
+          for (let j = i; j < i + step; j++) sum += all[j] * all[j];
+          rms.push(Math.sqrt(sum / step).toFixed(4));
+        }
+        const head = all.slice(0, rate * seconds);
+        const zeros = head.filter((v) => v === 0).length;
+        return (
+          `rate ${rate}, first push at ${pushes[0].at.toFixed(0)} ms, clip at ` +
+          `${(win.__cue?.startedAt ?? 0).toFixed(0)} ms, ${zeros} of ${head.length} ` +
+          `samples exactly 0; RMS per ${stepMs} ms: ${rms.join(" ")}`
+        );
+      },
+      [seconds, stepMs],
+    )
     .catch((e) => `unavailable: ${e}`);
 }
 

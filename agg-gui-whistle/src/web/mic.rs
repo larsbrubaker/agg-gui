@@ -50,7 +50,10 @@
 //! events that waited run back to back on the same buffers: shuffled and
 //! repeated speech, which whistle reads as other words or a loop of them.
 //! Its buffer is therefore the longest the browser allows
-//! ([`PROCESSOR_FRAMES`]), however coarse that makes its pushes and level.
+//! ([`PROCESSOR_FRAMES`]), however coarse that makes its pushes and level,
+//! and an event that ran later than its buffer allows is dropped
+//! (`processor_clock.rs`): a stall longer than the buffer costs the words
+//! said meanwhile, never adds made-up ones.
 
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
@@ -67,6 +70,7 @@ use web_sys::{
 
 use super::{ask, dispatch, drain, post, worklet_module, Shared};
 use crate::machine::MicError;
+use crate::processor_clock::ProcessorClock;
 use crate::protocol::ToWorker;
 
 /// Audio per push, in seconds.
@@ -569,6 +573,19 @@ fn worklet_node(
     Ok((node.unchecked_into(), port, handler))
 }
 
+/// `len` samples of a quiet room (about -60 dBFS white noise): what stands
+/// in for a dropped event's audio. Not digital silence, amid which a
+/// recogniser hears words of its own ("you"); not nothing either, which
+/// splices the speech either side of the gap into one word.
+fn noise_floor(len: usize, seed: &mut u32) -> Vec<f32> {
+    (0..len)
+        .map(|_| {
+            *seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            (*seed as f32 / u32::MAX as f32 * 2.0 - 1.0) * 0.0017
+        })
+        .collect()
+}
+
 /// The `ScriptProcessor` fallback. After a stop, the first event
 /// [`Mic::drain_processor`] waits for ends the drain, once fed.
 fn processor_node(
@@ -580,12 +597,30 @@ fn processor_node(
             PROCESSOR_FRAMES, 1, 1,
         )?;
     let chunker = chunker.clone();
+    let period_ms = f64::from(PROCESSOR_FRAMES) / f64::from(ctx.sample_rate()) * 1000.0;
+    let mut clock = ProcessorClock::new(period_ms);
+    let mut seed: u32 = 0x9e37_79b9;
+    let performance = web_sys::window().and_then(|w| w.performance());
     let ctx = ctx.clone();
     let handler =
         Closure::<dyn FnMut(AudioProcessingEvent)>::new(move |e: AudioProcessingEvent| {
+            // A stale event's buffer holds newer audio (`processor_clock.rs`):
+            // it is dropped, so a stall costs words rather than making some
+            // up. (Not replaced by silence: digital silence amid speech is
+            // what a recogniser hears words in, "you".)
+            let fresh = performance
+                .as_ref()
+                .map(|p| clock.fresh(p.now()))
+                .unwrap_or(true);
             if let Ok(buffer) = e.input_buffer() {
                 if let Ok(samples) = buffer.get_channel_data(0) {
-                    chunker.borrow_mut().feed(&samples);
+                    if fresh {
+                        chunker.borrow_mut().feed(&samples);
+                    } else {
+                        chunker
+                            .borrow_mut()
+                            .feed(&noise_floor(samples.len(), &mut seed));
+                    }
                 }
             }
             let drained = {
