@@ -265,7 +265,7 @@ impl App {
     }
 
     /// Paste a system clipboard read that finished since the last frame
-    /// (`clipboard::system_paste`: the touch toolbar's Paste in a browser)
+    /// (`clipboard::system_paste`: a Paste button in a browser)
     /// into the focused widget, as a browser `paste` event is delivered: the
     /// text goes into the page's clipboard and the widget gets `Ctrl+V`.
     pub(super) fn deliver_system_paste(&mut self) {
@@ -275,10 +275,14 @@ impl App {
         if !self.has_focus() {
             return;
         }
-        #[cfg(target_arch = "wasm32")]
-        crate::wasm_clipboard::set_paste(&text, None);
-        #[cfg(not(target_arch = "wasm32"))]
-        crate::clipboard::set_text(&text);
+        // The app's own last copy keeps its rich flavour (a RichTextEdit's
+        // styled fragment); anything else replaces the page's clipboard.
+        if crate::clipboard::get_text().as_deref() != Some(text.as_str()) {
+            #[cfg(target_arch = "wasm32")]
+            crate::wasm_clipboard::set_paste(&text, None);
+            #[cfg(not(target_arch = "wasm32"))]
+            crate::clipboard::set_text(&text);
+        }
         let ctrl = Modifiers {
             ctrl: true,
             ..Modifiers::default()

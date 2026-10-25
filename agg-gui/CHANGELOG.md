@@ -10,6 +10,11 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- In a browser the right-click menu's Paste in `TextField`, `TextArea` and `RichTextEdit` reads
+  the system clipboard too, as the touch toolbar's does (`navigator.clipboard.readText()` inside
+  the click, pasted when the read resolves), so text copied in another app pastes. The app's own
+  last copy keeps its rich flavour.
+
 - In a browser the touch toolbar always offers Paste in an editable field and pastes what the
   phone's system clipboard holds: the tap reads it with `navigator.clipboard.readText()` and the
   text lands in the field when the read resolves (a refused or empty read pastes nothing and is

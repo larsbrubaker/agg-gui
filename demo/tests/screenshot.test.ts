@@ -57,7 +57,7 @@ test("WASM demo paints a non-blank canvas", async ({ page }) => {
   // The GL canvas isn't allocated with preserveDrawingBuffer, so toDataURL
   // can return blank if called outside the rAF tick that did the draw.
   // Force a fresh render in the SAME synchronous JS task that calls
-  // toDataURL, mirroring the existing visual.test.ts trick.
+  // toDataURL.
   const dataUrl = await page.evaluate(() => {
     const w = window as unknown as Record<string, unknown>;
     const wasm = w.__wasm as Record<string, (...a: unknown[]) => unknown> | undefined;

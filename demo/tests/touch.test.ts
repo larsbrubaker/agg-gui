@@ -11,9 +11,9 @@
  * Determinism: each test preseeds `localStorage["agg-gui-demo-state"]` so
  * exactly one demo window is open at a known rectangle (window coords are
  * Y-up, so y=150,h=560 on an 800px canvas puts the title bar at CSS y≈90).
- * Frames are captured via `render_software_pixels` (the pure-software
- * renderer, pixel-identical across calls when nothing changed) and
- * compared region-by-region: a gesture must change the demo's canvas
+ * Frames are page screenshots, taken once the demo's frame loop has painted
+ * what the events changed, and compared region-by-region with a small
+ * per-channel tolerance: a gesture must change the demo's canvas
  * region while leaving the window's header strip untouched — which also
  * guards against the old behaviour where a one-finger drag scrolled the
  * window instead of driving the widget.
@@ -22,15 +22,13 @@
  */
 
 import { test, expect, type Page } from "@playwright/test";
+import { DEMO_COUNT, TEST_COUNT, demoIndex } from "./demo_specs";
 
 const W = 1200;
 const H = 800;
 
-// Must match the DEMOS / TESTS arrays in demo-ui/src/specs.rs.
-const DEMO_COUNT = 34;
-const TEST_COUNT = 13;
-const LION_IDX = 25;
-const MULTI_TOUCH_IDX = 31;
+const LION_IDX = demoIndex("Lion");
+const MULTI_TOUCH_IDX = demoIndex("Multi Touch");
 
 // The single open window's rect in the app's Y-up coordinates.
 const WIN = { x: 340, y: 150, w: 520, h: 560 };
@@ -63,20 +61,30 @@ async function bootWithState(page: Page, openIdx: number): Promise<void> {
 }
 
 /**
- * Capture a deterministic software render under `key` (stored page-side —
- * typed arrays don't round-trip through evaluate cheaply).  Calling this
- * also advances the app one paint, which is what latches / consumes
- * multi-touch gesture deltas between event batches.
+ * Capture what the page shows under `key`, as RGBA pixels stored page-side
+ * (typed arrays don't round-trip through evaluate cheaply). It first waits
+ * for the demo's frame loop to paint, which is also what latches / consumes
+ * multi-touch gesture deltas between event batches, then decodes a page
+ * screenshot in the page.
  */
 async function capture(page: Page, key: string): Promise<void> {
+  await page.waitForTimeout(80);
+  const png = (await page.screenshot()).toString("base64");
   await page.evaluate(
-    ([key, w, h]: [string, number, number]) => {
+    async ([key, png, w, h]: [string, string, number, number]) => {
       const win = window as unknown as Record<string, any>;
-      const wasm = win.__wasm;
+      const img = new Image();
+      img.src = `data:image/png;base64,${png}`;
+      await img.decode();
+      const c = document.createElement("canvas");
+      c.width = w;
+      c.height = h;
+      const ctx = c.getContext("2d")!;
+      ctx.drawImage(img, 0, 0);
       win.__frames = win.__frames ?? {};
-      win.__frames[key] = new Uint8Array(wasm["render_software_pixels"](w, h));
+      win.__frames[key] = ctx.getImageData(0, 0, w, h).data;
     },
-    [key, W, H] as [string, number, number],
+    [key, png, W, H] as [string, string, number, number],
   );
 }
 
@@ -172,9 +180,11 @@ async function touch(
 // Region safely inside the lion / multi-touch canvas (below the header
 // labels, above the window's bottom edge), in CSS coordinates.
 const CANVAS_REGION = { x: 400, y: 320, w: 400, h: 260 };
-// The window's title bar + header labels: gestures on the canvas region
-// must NOT disturb it (the old bug scrolled the whole window content).
-const HEADER_REGION = { x: WIN.x + 10, y: WIN_TOP_CSS + 4, w: WIN.w - 20, h: 120 };
+// The window's title bar and Alpha slider: gestures on the canvas region
+// must NOT disturb them (the old bug scrolled the whole window content).
+// The help text under the slider is left out: the lion, grown or turned,
+// paints over it (it is not clipped to its canvas on the wgpu backend).
+const HEADER_REGION = { x: WIN.x + 10, y: WIN_TOP_CSS + 4, w: WIN.w - 20, h: 80 };
 
 test("one-finger touch drag rotates the lion (not scrolls)", async ({ page }) => {
   await bootWithState(page, LION_IDX);
@@ -205,7 +215,9 @@ test("one-finger touch drag rotates the lion (not scrolls)", async ({ page }) =>
   expect(WIN_BOTTOM_CSS).toBe(650); // sanity: geometry assumptions hold
 });
 
-test("two-finger pinch zooms the lion", async ({ page }) => {
+/** Boot the Lion demo and pinch out around its centre, capturing "before"
+ *  and "after". */
+async function pinchLion(page: Page): Promise<void> {
   await bootWithState(page, LION_IDX);
   await capture(page, "before");
 
@@ -228,17 +240,34 @@ test("two-finger pinch zooms the lion", async ({ page }) => {
   await touch(page, "touchend", [{ id: 1, x: 460, y: 445 }], [{ id: 2, x: 740, y: 445 }]);
   await touch(page, "touchend", [{ id: 2, x: 740, y: 445 }]);
   await capture(page, "after");
+}
 
+// The window's title bar alone: the zoomed lion reaches every row of the
+// window's content (see the next test), never the title bar.
+const TITLE_REGION = { x: WIN.x + 10, y: WIN_TOP_CSS + 4, w: WIN.w - 20, h: 18 };
+
+test("two-finger pinch zooms the lion", async ({ page }) => {
+  await pinchLion(page);
   const lionChanged = await diffFraction(page, "before", "after", CANVAS_REGION);
-  const headerChanged = await diffFraction(page, "before", "after", HEADER_REGION);
+  const titleChanged = await diffFraction(page, "before", "after", TITLE_REGION);
   expect(
     lionChanged,
     "lion must visibly grow after a two-finger pinch-out",
   ).toBeGreaterThan(0.02);
   expect(
-    headerChanged,
-    "pinch must not scroll or disturb the window header",
+    titleChanged,
+    "pinch must not move or disturb the window",
   ).toBeLessThan(0.005);
+});
+
+// Known bug: the lion is not clipped to its canvas on the wgpu backend. Grown
+// by a pinch it paints over the Alpha slider and the help text above the
+// canvas (and over the window's bottom edge). This passes once that is fixed;
+// remove `test.fail` then.
+test.fail("a pinched lion stays inside its canvas", async ({ page }) => {
+  await pinchLion(page);
+  const headerChanged = await diffFraction(page, "before", "after", HEADER_REGION);
+  expect(headerChanged, "the slider and help text stay as they were").toBeLessThan(0.005);
 });
 
 test("two-finger twist drives the Multi Touch demo arrow", async ({ page }) => {

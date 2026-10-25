@@ -29,9 +29,17 @@ impl RichTextEdit {
     }
 
     /// Paste the clipboard (styled fragment when it matches our last copy,
-    /// else external plain text) — same as Ctrl+V.
+    /// else external plain text) — same as Ctrl+V. A browser reads the
+    /// system clipboard for it first, asynchronously
+    /// (`clipboard::system_paste`), then delivers it as that Ctrl+V.
     pub(super) fn menu_paste(&mut self) {
-        self.paste_clipboard();
+        crate::clipboard::system_paste::paste_or_request(|| self.paste_clipboard());
+    }
+
+    /// The middle of the open right-click menu's `action` row, for tests.
+    #[cfg(test)]
+    pub(crate) fn menu_action_center(&self, action: TextMenuAction) -> Option<Point> {
+        self.context_menu.action_row_center(action)
     }
 
     /// Select the whole document (Ctrl+A).

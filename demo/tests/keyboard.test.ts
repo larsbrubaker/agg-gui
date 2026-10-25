@@ -27,16 +27,14 @@
  */
 
 import { test, expect, type Page } from "@playwright/test";
+import { DEMO_COUNT, TEST_COUNT, demoIndex } from "./demo_specs";
 
 const W = 1200;
 const H = 800;
 
-// Must match the DEMOS / TESTS arrays in demo-ui/src/specs.rs.
-const DEMO_COUNT = 34;
-const TEST_COUNT = 13;
 // Index of the "Code Editor" demo in DEMOS (a large editable text widget —
 // clicking its centre reliably lands in the editor body, clear of any gutter).
-const CODE_EDITOR_IDX = 10;
+const CODE_EDITOR_IDX = demoIndex("Code Editor");
 
 // The single open window's rect in the app's Y-up coordinates.
 const WIN = { x: 300, y: 120, w: 600, h: 560 };

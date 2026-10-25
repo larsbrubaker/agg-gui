@@ -11,6 +11,7 @@
  */
 
 import { devices, type Page } from "@playwright/test";
+import { DEMO_COUNT, TEST_COUNT, demoIndex } from "./demo_specs";
 
 /** The phone profile every dictation test runs on (Chrome, touch). */
 const pixel = devices["Pixel 7"];
@@ -37,10 +38,7 @@ export const OUTSIDE = { x: 200, y: 135 };
  */
 export const KEYBOARD_SETTLES_MS = 800;
 
-// Must match the DEMOS / TESTS arrays in demo-ui/src/specs.rs.
-const DEMO_COUNT = 34;
-const TEST_COUNT = 13;
-export const TEXT_EDIT_IDX = 2;
+export const TEXT_EDIT_IDX = demoIndex("TextEdit");
 
 /** A saved state with only demo `openIdx` open, filling a `w` x `h` window. */
 export function seedState(openIdx: number, w: number, h: number): string {

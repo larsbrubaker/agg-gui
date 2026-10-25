@@ -77,7 +77,10 @@ impl TextArea {
         match action {
             TextMenuAction::Cut => self.clipboard_cut(),
             TextMenuAction::Copy => self.clipboard_copy(),
-            TextMenuAction::Paste => self.clipboard_paste(),
+            // A browser reads the system clipboard for it, asynchronously.
+            TextMenuAction::Paste => {
+                crate::clipboard::system_paste::paste_or_request(|| self.clipboard_paste())
+            }
             TextMenuAction::SelectAll => self.select_all_text(),
         }
         self.ensure_cursor_visible();

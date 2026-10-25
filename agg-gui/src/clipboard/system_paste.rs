@@ -1,5 +1,7 @@
 //! Paste from the system clipboard where it can only be read asynchronously:
-//! in a browser, `navigator.clipboard.readText()`.
+//! in a browser, `navigator.clipboard.readText()`. The text editors' Paste
+//! buttons (the touch toolbar and the right-click menu) go through
+//! [`paste_or_request`].
 //!
 //! A native build reads the clipboard on the spot ([`super::get_text`]), so
 //! a Paste button just pastes. In a browser the page's own clipboard
@@ -51,6 +53,17 @@ pub(crate) fn reads_asynchronously() -> bool {
         return true;
     }
     cfg!(target_arch = "wasm32")
+}
+
+/// A Paste button's paste: `paste_now` (which reads the clipboard on the
+/// spot) where the clipboard is read synchronously, else a [`request`] for
+/// the system clipboard, delivered to the focused widget when it resolves.
+pub(crate) fn paste_or_request(paste_now: impl FnOnce()) {
+    if reads_asynchronously() {
+        request();
+    } else {
+        paste_now();
+    }
 }
 
 /// Start reading the system clipboard for a paste into the focused widget.

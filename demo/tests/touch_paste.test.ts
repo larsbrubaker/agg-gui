@@ -18,14 +18,12 @@
  */
 
 import { test, expect, devices, type Page, type CDPSession } from "@playwright/test";
+import { DEMO_COUNT, TEST_COUNT, demoIndex } from "./demo_specs";
 
 const { defaultBrowserType: _ignored, ...PIXEL } = devices["Pixel 7"];
 test.use({ ...PIXEL, channel: "chrome" });
 
-// Must match the DEMOS / TESTS arrays in demo-ui/src/specs.rs.
-const DEMO_COUNT = 34;
-const TEST_COUNT = 13;
-const TEXT_EDIT_IDX = 2;
+const TEXT_EDIT_IDX = demoIndex("TextEdit");
 
 /** The word "this" in the multi-line editor's "Edit this text". */
 const WORD = { x: 101, y: 287 };

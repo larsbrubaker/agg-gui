@@ -25,6 +25,7 @@
  */
 
 import { test, expect, devices, type Page } from "@playwright/test";
+import { DEMO_COUNT, TEST_COUNT, demoIndex } from "./demo_specs";
 
 // The Pixel 7 profile: 412 × 839 CSS px at DPR 2.625, an Android UA, touch.
 const { defaultBrowserType: _browser, ...PIXEL } = devices["Pixel 7"];
@@ -35,10 +36,7 @@ const BAR_SHOWN = PIXEL.viewport.height; // 839: innerHeight with the bar
 const BAR = 56; // Android Chrome's address bar, CSS px
 const LARGE_VH = BAR_SHOWN + BAR; // what 100vh measures: the bar hidden
 
-// Must match the DEMOS / TESTS arrays in demo-ui/src/specs.rs.
-const DEMO_COUNT = 35;
-const TEST_COUNT = 13;
-const MOBILE_KEYBOARD_IDX = 4;
+const MOBILE_KEYBOARD_IDX = demoIndex("Mobile Keyboard");
 
 // The one open window, in the app's Y-up coordinates. On a phone the demo
 // docks it under the menu bar whatever the canvas's height.

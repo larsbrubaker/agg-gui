@@ -21,6 +21,12 @@ impl TextArea {
         &self.touch_selection
     }
 
+    /// The middle of the open right-click menu's `action` row, for tests.
+    #[cfg(test)]
+    pub(crate) fn menu_action_center(&self, action: TextMenuAction) -> Option<Point> {
+        self.context_menu.action_row_center(action)
+    }
+
     /// The visual line under the widget-local `y`, `None` below the last.
     fn line_at_y(&self, y: f64) -> Option<usize> {
         if self.cached_lines.is_empty() || self.cached_line_h <= 0.0 {

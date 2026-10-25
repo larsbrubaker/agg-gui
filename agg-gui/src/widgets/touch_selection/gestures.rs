@@ -314,13 +314,9 @@ fn tap_down<W: TouchSelectable>(w: &mut W, pos: Point) -> Option<EventResult> {
 /// Android collapses it to its end, and Cut and Paste leave a caret.
 fn apply_action<W: TouchSelectable>(w: &mut W, action: TextMenuAction) {
     let (a, c) = w.ts_anchor_cursor();
-    if action == TextMenuAction::Paste && crate::clipboard::system_paste::reads_asynchronously() {
-        // A browser: read the system clipboard inside this tap; the text
-        // arrives as a paste into the focused field when the read resolves.
-        crate::clipboard::system_paste::request();
-    } else {
-        w.ts_apply(action);
-    }
+    // The host's Paste reads the system clipboard inside this tap in a
+    // browser (`clipboard::system_paste`), pasting when the read resolves.
+    w.ts_apply(action);
     match action {
         TextMenuAction::SelectAll => {
             let toolbar = w.ts_toolbar_allowed();

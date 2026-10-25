@@ -38,6 +38,12 @@ impl TextField {
     pub(crate) fn menu_action_enabled(&self, action: TextMenuAction) -> Option<bool> {
         self.context_menu.action_enabled(action)
     }
+
+    /// The middle of the open right-click menu's `action` row, for tests.
+    #[cfg(test)]
+    pub(crate) fn menu_action_center(&self, action: TextMenuAction) -> Option<Point> {
+        self.context_menu.action_row_center(action)
+    }
 }
 
 impl TouchSelectable for TextField {
