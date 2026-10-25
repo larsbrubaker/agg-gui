@@ -1,3 +1,8 @@
+//! The `Widget` impl for [`TextArea`]: focus and input-method hooks, layout
+//! and the cached paint, the overlay pass (frame in band mode, scroll bar,
+//! caret), and the app-level overlays (context menu, touch selection
+//! handles and toolbar). Event handling is `event_impl.rs`.
+
 use super::*;
 
 pub(crate) use super::geometry::caret_visible_segment;
@@ -136,6 +141,9 @@ impl Widget for TextArea {
         if !self.enabled_now() && self.focused {
             self.release_focus_state();
         }
+        if !self.enabled_now() {
+            self.touch_selection.hide();
+        }
         // Fill the slot we're given.  A parent that allocates us via
         // a flex-weight gets everything; a parent that asks for our
         // natural size gets the same (the caller is opting into
@@ -163,6 +171,10 @@ impl Widget for TextArea {
             self.ensure_cursor_visible();
         }
         self.last_layout_cursor = Some(cursor);
+
+        // A touch handle held past the top or bottom edge keeps scrolling
+        // (before the band is planned, so it plans for the new offset).
+        crate::widgets::touch_selection::tick(self);
 
         // Re-plan the over-scan band now that wrap + offset are settled. This
         // only re-anchors (and thus changes the sig → re-raster) when the offset
@@ -398,6 +410,9 @@ impl Widget for TextArea {
     }
 
     fn paint_overlay(&mut self, ctx: &mut dyn DrawCtx) {
+        // Where the touch handles go, and whether a scrolled ancestor hides
+        // the area (this pass runs inside the tree's clips).
+        self.touch_selection.note_paint(ctx);
         // Band mode: the border + padding-ring bg live here (fixed) instead of
         // in the scrolling cache. Drawn first so the scrollbar + caret land on
         // top, matching the plain path's z-order.
@@ -477,6 +492,9 @@ impl Widget for TextArea {
         if self.scrollbar_animating() {
             return true;
         }
+        if self.touch_selection.needs_draw() {
+            return true;
+        }
         if !self.focused {
             return false;
         }
@@ -494,7 +512,12 @@ impl Widget for TextArea {
         let t = self.focus_time?;
         let ms = crate::clock::since(t).as_millis() as u64;
         let next_phase = (ms / 500) + 1;
-        Some(t + std::time::Duration::from_millis(next_phase * 500))
+        let blink = t + std::time::Duration::from_millis(next_phase * 500);
+        // Android's caret handle fades on its own schedule.
+        Some(match self.touch_selection.deadline() {
+            Some(fade) => blink.min(fade),
+            None => blink,
+        })
     }
 
     /// While the right-click menu is open it must capture every event (clicks
@@ -509,11 +532,18 @@ impl Widget for TextArea {
         self.context_menu.named_row_targets(name, out);
     }
 
-    /// The context menu paints at app level so it can overflow the editor
-    /// bounds and clamp to the viewport.
+    /// The context menu and the touch selection's handles and toolbar paint
+    /// at app level so they can overflow the editor bounds.
     fn paint_global_overlay(&mut self, ctx: &mut dyn DrawCtx) {
+        crate::widgets::touch_selection::paint(self, ctx);
         let font =
             crate::font_settings::current_system_font().unwrap_or_else(|| Arc::clone(&self.font));
         self.context_menu.paint(ctx, font, self.font_size);
+    }
+
+    /// Presses on the touch handles and toolbar, which reach outside the
+    /// editor, come to it.
+    fn hit_test_global_overlay(&self, local_pos: Point) -> bool {
+        crate::widgets::touch_selection::hit_test(self, local_pos)
     }
 }

@@ -300,7 +300,7 @@ impl TextArea {
 
     /// Place the caret at `cursor` with the selection anchored at `anchor`
     /// (both clamped to the text length).
-    fn set_caret_anchor(&mut self, cursor: usize, anchor: usize) {
+    pub(super) fn set_caret_anchor(&mut self, cursor: usize, anchor: usize) {
         let mut st = self.edit.borrow_mut();
         let len = st.text.len();
         st.cursor = cursor.min(len);

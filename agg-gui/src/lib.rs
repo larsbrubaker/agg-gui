@@ -208,9 +208,9 @@ pub use theme::{
 };
 pub use timestep::{FixedTimestep, StepBatch, FIXED_DT, MAX_STEPS_PER_DRAW, SIMULATION_HZ};
 pub use touch_emulation::{
-    last_press_was_touch, long_press_cue, on_long_press, set_long_press_ring_drawn,
-    touch_pan_travel, EmuCmd, LongPressCue, TouchMouseEmu, LONG_PRESS_CUE_DELAY, LONG_PRESS_DELAY,
-    LONG_PRESS_SLOP, TOUCH_SCROLL_THRESHOLD,
+    claim_long_press_drag, last_press_was_touch, long_press_cue, on_long_press,
+    set_long_press_ring_drawn, touch_pan_travel, EmuCmd, LongPressCue, TouchMouseEmu,
+    LONG_PRESS_CUE_DELAY, LONG_PRESS_DELAY, LONG_PRESS_SLOP, TOUCH_SCROLL_THRESHOLD,
 };
 pub use touch_state::{current_multi_touch, MultiTouchInfo, TouchDeviceId, TouchId, TouchPhase};
 pub use trackpad_pinch_fingers::{

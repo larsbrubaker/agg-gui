@@ -10,6 +10,26 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- Touch text selection in `TextField` and `TextArea`, as on Android and iOS: a long press selects
+  the word under the finger and sliding on extends by whole words; a handle at each end (Android's
+  teardrop, iOS's lollipop, by input profile) drags that end by character, never past the other,
+  scrolling a `TextArea` when dragged past its edge; a floating Cut / Copy / Paste / Select all
+  toolbar (the text menu's actions) shows above the selection on release and hides while a handle
+  moves; a tap on the selection toggles it, a tap elsewhere places the caret, which on Android gets
+  a draggable caret handle for four seconds; a long press past the text places the caret and offers
+  Paste (offered only with text on the clipboard). A long press takes the character under the
+  finger; handles move by whole characters (emoji with skin tones, flags, ZWJ sequences and
+  combining accents stay whole) and a long press on an emoji selects just it; a password field is
+  selected whole and never offers Cut or Copy. Handles whose caret a ScrollView scrolled away are
+  neither drawn nor hit; a handle held past a `TextArea`'s edge keeps scrolling, faster the
+  further out; the toolbar stays above the on-screen keyboard and inside the window, and a swipe
+  that starts on one of its buttons presses nothing. Typing, a mouse press, losing focus and being
+  disabled hide it all. The mouse is unchanged.
+
+- `claim_long_press_drag()`: a widget handling a long press's right press keeps the finger, so the
+  right button stays down, the slide arrives as moves and the lift as the right release
+  (`TouchMouseEmu::hold_long_press`).
+
 - `animation::schedule_draw_after(delay) -> ScheduledDraw`: a scheduled draw that can be withdrawn.
   `ScheduledDraw::cancel()`, or dropping the handle, takes the deadline back, so a watchdog for
   work that finished early no longer paints an idle window once more for nothing. Several can be
@@ -94,6 +114,10 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Fixed
 
+- A password `TextField` no longer copies or cuts its text: Ctrl+C / Ctrl+X, Ctrl+Insert,
+  Shift+Delete and the right-click menu (whose Cut and Copy are now disabled there) all leave
+  the clipboard alone.
+
 - A paint no longer discards a future scheduled draw: `clear_draw_request`
   (which `App::paint` starts with) clears a `request_draw_after` deadline only
   once it is due. The idle queue's drain arms a timed draw for its next
@@ -137,6 +161,9 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   app.
 
 ### Changed
+
+- A long press in a `TextField` or `TextArea` selects text (see Added) instead of opening the
+  right-click menu; a right click still opens it.
 
 - `TOUCH_SCROLL_THRESHOLD`, the finger's tap tolerance, is 10 points (was 8). It is also the long
   press's slop, so a held finger that drifts never starts a scroll; a tap may now wobble 10 points.

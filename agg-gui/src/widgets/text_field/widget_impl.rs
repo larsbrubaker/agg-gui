@@ -1,8 +1,9 @@
 //! The `Widget` impl for [`TextField`]: layout (with the backbuffer cache
 //! signature), the cached body paint, the blinking caret overlay, the
-//! app-level overlays (context menu, caret suggestion list), the named
+//! app-level overlays (context menu, caret suggestion list, touch selection
+//! handles and toolbar), the named
 //! targets automation finds in them, and event routing. Key handling proper
-//! is `text_field.rs::handle_key`; pointer helpers are `pointer.rs`,
+//! is `keys.rs` (`handle_key`); pointer helpers are `pointer.rs`,
 //! suggestions `suggestions.rs`.
 
 use super::*;
@@ -111,6 +112,9 @@ impl Widget for TextField {
     /// is closed / collapsed / tab not selected — so an invisible focused
     /// field does NOT keep the loop awake.
     fn needs_draw(&self) -> bool {
+        if self.touch_selection.needs_draw() {
+            return true;
+        }
         if !self.focused {
             return false;
         }
@@ -128,7 +132,12 @@ impl Widget for TextField {
         let t = self.focus_time?;
         let ms = crate::clock::since(t).as_millis() as u64;
         let next_phase = (ms / 500) + 1;
-        Some(t + std::time::Duration::from_millis(next_phase * 500))
+        let blink = t + std::time::Duration::from_millis(next_phase * 500);
+        // Android's caret handle fades on its own schedule.
+        Some(match self.touch_selection.deadline() {
+            Some(fade) => blink.min(fade),
+            None => blink,
+        })
     }
 
     /// While the right-click menu is open it must capture every event (clicks
@@ -151,6 +160,7 @@ impl Widget for TextField {
     /// and clamp to the viewport.
     fn paint_global_overlay(&mut self, ctx: &mut dyn DrawCtx) {
         self.suggest_paint(ctx);
+        crate::widgets::touch_selection::paint(self, ctx);
         let font = self.active_font();
         self.context_menu.paint(ctx, font, self.font_size);
     }
@@ -160,6 +170,7 @@ impl Widget for TextField {
     fn hit_test_global_overlay(&self, local_pos: crate::geometry::Point) -> bool {
         self.text_suggestions()
             .is_some_and(|c| c.contains(local_pos))
+            || crate::widgets::touch_selection::hit_test(self, local_pos)
     }
 
     /// The suggestion list is drawn unclipped over the window, so a scroll
@@ -211,6 +222,9 @@ impl Widget for TextField {
         // drops its focus path at the end of its own layout.
         if !self.enabled_now() && self.focused {
             self.release_focus_state();
+        }
+        if !self.enabled_now() {
+            self.touch_selection.hide();
         }
         self.sync_from_text_cell();
         // Sig excludes cursor-blink phase.  Cursor paints in
@@ -390,6 +404,9 @@ impl Widget for TextField {
     /// same edit state `paint()` does so cursor lands on the glyph the
     /// cached text shows.
     fn paint_overlay(&mut self, ctx: &mut dyn DrawCtx) {
+        // Where the touch handles go, and whether a scrolled ancestor hides
+        // the field (this pass runs inside the tree's clips).
+        self.touch_selection.note_paint(ctx);
         // Record the blink phase being drawn this frame.  The next tree
         // walk's `needs_draw` will compare against this and report dirty
         // once wall-clock time crosses the next 500 ms boundary — no
@@ -461,10 +478,15 @@ impl Widget for TextField {
         if let Some(result) = self.route_context_menu(event) {
             return result;
         }
+        // A finger's presses, handle drags and taps on the toolbar.
+        if let Some(result) = crate::widgets::touch_selection::route(self, event) {
+            return result;
+        }
         if let Some(result) = self.suggest_pointer(event) {
             return result;
         }
         let result = self.on_event_inner(event);
+        crate::widgets::touch_selection::after_event(self, event);
         match event {
             // A typed character asks for suggestions; any other edit or caret
             // move refilters a list that is already open (C#

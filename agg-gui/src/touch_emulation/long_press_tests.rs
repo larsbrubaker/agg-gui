@@ -2,6 +2,9 @@
 //! clock so every hold is timed exactly: a still finger becomes a right
 //! click at its touch-down point after [`super::LONG_PRESS_DELAY`], and a
 //! drag, a second finger or an early lift keep today's tap and drag rules.
+//! A long press a widget holds on to ([`TouchMouseEmu::hold_long_press`])
+//! keeps its right button down: the finger's moves reach the widget and
+//! its lift releases the button.
 
 use std::time::Duration;
 
@@ -164,4 +167,70 @@ fn the_cue_appears_after_its_delay_and_fills_to_the_deadline() {
     emu.on_end(DEV, F1);
     assert_eq!(emu.long_press_deadline(), None);
     assert_eq!(emu.long_press_progress(), None);
+}
+
+#[test]
+fn a_held_long_press_moves_the_pointer_and_releases_the_right_button_on_lift() {
+    let (mut emu, _clock) = setup();
+    emu.on_start(DEV, F1, 100.0, 100.0);
+    assert!(!emu.hold_long_press(), "nothing to hold before it fires");
+    crate::clock::advance(ms(500));
+    assert_eq!(emu.poll(), right_click_at(100.0, 100.0));
+    assert!(emu.hold_long_press());
+    assert_eq!(
+        emu.on_move(DEV, F1, 160.0, 104.0),
+        vec![EmuCmd::MouseMove(160.0, 104.0)]
+    );
+    assert_eq!(
+        emu.on_end(DEV, F1),
+        vec![
+            EmuCmd::MouseUp(160.0, 104.0, MouseButton::Right),
+            EmuCmd::MouseLeave,
+        ]
+    );
+    // The next finger is a fresh gesture that holds nothing.
+    emu.on_start(DEV, F2, 10.0, 10.0);
+    assert_eq!(
+        emu.on_move(DEV, F2, 12.0, 10.0),
+        vec![EmuCmd::MouseMove(12.0, 10.0)]
+    );
+    assert!(has_press(&emu.on_end(DEV, F2), MouseButton::Left));
+}
+
+#[test]
+fn a_held_long_press_is_cancelled_by_a_second_finger_or_a_platform_cancel() {
+    let (mut emu, _clock) = setup();
+    emu.on_start(DEV, F1, 100.0, 100.0);
+    crate::clock::advance(ms(500));
+    emu.poll();
+    assert!(emu.hold_long_press());
+    assert_eq!(
+        emu.on_start(DEV, F2, 200.0, 100.0),
+        vec![EmuCmd::CancelPress]
+    );
+    assert_eq!(emu.on_move(DEV, F1, 150.0, 100.0), Vec::<EmuCmd>::new());
+    assert_eq!(emu.on_end(DEV, F1), vec![EmuCmd::MouseLeave]);
+    emu.on_end(DEV, F2);
+
+    emu.on_start(DEV, F1, 100.0, 100.0);
+    crate::clock::advance(ms(500));
+    emu.poll();
+    assert!(emu.hold_long_press());
+    assert_eq!(
+        emu.on_cancel(DEV, F1),
+        vec![EmuCmd::CancelPress, EmuCmd::MouseLeave]
+    );
+}
+
+#[test]
+fn a_long_press_that_fires_on_the_lift_cannot_be_held() {
+    let (mut emu, _clock) = setup();
+    emu.on_start(DEV, F1, 100.0, 100.0);
+    crate::clock::advance(ms(700));
+    let cmds = emu.on_end(DEV, F1);
+    assert_eq!(
+        cmds,
+        [right_click_at(100.0, 100.0), vec![EmuCmd::MouseLeave]].concat()
+    );
+    assert!(!emu.hold_long_press(), "the finger has already lifted");
 }

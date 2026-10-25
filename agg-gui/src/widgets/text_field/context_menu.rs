@@ -12,17 +12,19 @@ use crate::widgets::text_context_menu::TextMenuAction;
 
 impl TextField {
     /// Copy the current selection to the clipboard (no-op without a selection).
-    /// Available even when read-only.
+    /// Available even when read-only; never from a password field, whose
+    /// text must not leave it (every entry point — shortcut, menu, touch
+    /// toolbar — comes through here).
     pub(super) fn clipboard_copy(&mut self) {
-        if self.has_selection() {
+        if self.has_selection() && !self.password_mode {
             clipboard_set(&self.selection());
         }
     }
 
     /// Cut = copy the selection then delete it. Only mutates when editable and a
-    /// selection exists.
+    /// selection exists, and never in a password field (see `clipboard_copy`).
     pub(super) fn clipboard_cut(&mut self) {
-        if !self.read_only && self.has_selection() {
+        if !self.read_only && self.has_selection() && !self.password_mode {
             clipboard_set(&self.selection());
             self.do_delete(false, false);
         }
@@ -66,7 +68,8 @@ impl TextField {
             st.cursor = click;
             st.anchor = click;
         }
-        let has_sel = self.has_selection();
+        // A password's selection is not offered to Cut or Copy.
+        let has_sel = self.has_selection() && !self.password_mode;
         let editable = !self.read_only;
         self.context_menu.open(pos, has_sel, editable);
         // Keep the caret solid while the menu is up.

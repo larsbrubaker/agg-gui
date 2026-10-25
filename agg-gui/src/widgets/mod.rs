@@ -88,6 +88,7 @@ pub mod text_suggestion;
 pub mod toast;
 pub mod toggle_switch;
 pub mod tooltip;
+pub(crate) mod touch_selection;
 pub mod tree_view;
 pub mod tumble_cube;
 pub mod window;

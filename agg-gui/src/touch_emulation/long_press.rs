@@ -19,7 +19,10 @@
 //!     ([`last_press_was_touch`]), so a menu opened by it gets
 //!     finger-sized rows and a menu the mouse opens does not;
 //!   - listeners told when a long press fires ([`on_long_press`]), which is
-//!     where a shell plays a haptic tick.
+//!     where a shell plays a haptic tick;
+//!   - the claim a widget makes on the finger while it handles the right
+//!     press ([`claim_long_press_drag`]), so the press stays down and the
+//!     finger's slide reaches it (a text field extends a word selection).
 //!
 //! `App` drives it (`widget/app/touch.rs`): it polls the emulator at the
 //! start of every layout, keeps a wake-up armed for the deadline so an idle
@@ -70,6 +73,30 @@ thread_local! {
     static EMULATING: Cell<bool> = const { Cell::new(false) };
     static LAST_PRESS_FROM_TOUCH: Cell<bool> = const { Cell::new(false) };
     static LISTENERS: RefCell<Listeners> = RefCell::new(Vec::new());
+    static DRAG_CLAIMED: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Called by a widget while it handles a long press's right press (a
+/// `MouseDown` with [`MouseButton::Right`](crate::MouseButton::Right) for
+/// which [`last_press_was_touch`] is true) to keep the finger: instead of
+/// releasing the right button at once, `App` holds it down, the finger's
+/// later moves arrive as `MouseMove`s at the widget (it holds the capture
+/// because it consumed the press), and the lift is a right `MouseUp` where
+/// the finger let go. A second finger or a platform cancel ends it with
+/// `MouseCaptureLost`. Outside a long press it does nothing.
+pub fn claim_long_press_drag() {
+    DRAG_CLAIMED.with(|c| c.set(true));
+}
+
+/// Forget any claim, before `App` dispatches a long press's right press.
+pub(crate) fn clear_drag_claim() {
+    DRAG_CLAIMED.with(|c| c.set(false));
+}
+
+/// Whether the widget that handled the right press claimed the finger
+/// ([`claim_long_press_drag`]); clears the claim.
+pub(crate) fn take_drag_claim() -> bool {
+    DRAG_CLAIMED.with(|c| c.replace(false))
 }
 
 /// The long press now under way, once its cue has appeared; `None` when no

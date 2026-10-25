@@ -45,6 +45,13 @@
 //!     and every touch event checks the deadline first, so a late frame
 //!     never turns a hold into a tap or a drag. The cue, the touch-origin
 //!     flag and the listeners are in [`long_press`].
+//!   - A widget that wants the finger after its long press (a text field
+//!     selecting words as the finger slides) claims it while handling the
+//!     right press ([`long_press::claim_long_press_drag`]). `App` then holds
+//!     the right button down instead of releasing it at once
+//!     ([`TouchMouseEmu::hold_long_press`]): the finger's moves are mouse
+//!     moves to the widget that took the press, its lift releases the right
+//!     button there, and a second finger or a cancel cancels the press.
 //!   - A finger that lands on a `ScrollView` while it flings catches it
 //!     ([`fling`]): the content stops, and the touch is neither a tap nor a
 //!     long press, though it can still drag.
@@ -63,8 +70,8 @@ use crate::touch_state::{TouchDeviceId, TouchId};
 pub mod fling;
 pub mod long_press;
 pub use long_press::{
-    last_press_was_touch, long_press_cue, long_press_ring_drawn, on_long_press,
-    set_long_press_ring_drawn, LongPressCue, LONG_PRESS_CUE_DELAY, LONG_PRESS_DELAY,
+    claim_long_press_drag, last_press_was_touch, long_press_cue, long_press_ring_drawn,
+    on_long_press, set_long_press_ring_drawn, LongPressCue, LONG_PRESS_CUE_DELAY, LONG_PRESS_DELAY,
     LONG_PRESS_RING_RADIUS, LONG_PRESS_SLOP,
 };
 
@@ -138,8 +145,16 @@ pub struct TouchMouseEmu {
     /// (no drag, no second finger, not fired yet).
     held_since: Option<Instant>,
     /// True once the long press fired: the finger's later moves and its
-    /// lift emit nothing.
+    /// lift emit nothing, unless the press is [`Self::held`].
     spent: bool,
+    /// True while a fired long press keeps its right button down
+    /// ([`Self::hold_long_press`]): moves are mouse moves and the lift
+    /// releases the right button.
+    held: bool,
+    /// True from the lift that released a held long press until `App` asks
+    /// ([`Self::take_held_lift`]): that release goes nowhere when the press
+    /// lost its capture meanwhile.
+    held_lift: bool,
     /// The touch-down point of a long press that fired since the last
     /// [`Self::take_long_press`].
     fired: Option<(f64, f64)>,
@@ -167,6 +182,7 @@ impl TouchMouseEmu {
             self.suppressed = false;
             self.held_since = Some(crate::clock::now());
             self.spent = false;
+            self.held = false;
             self.caught = false;
             return vec![EmuCmd::MouseMove(x, y)];
         }
@@ -179,10 +195,11 @@ impl TouchMouseEmu {
         // ScrollView doesn't keep panning while the user pinches.
         if self.primary.is_some() && !self.suppressed {
             self.suppressed = true;
-            if self.pressed {
+            if self.pressed || self.held {
                 // A widget's own drag (or a press whose release a host
-                // dropped) lets go without clicking.
+                // dropped, or a held long press) lets go without clicking.
                 self.pressed = false;
+                self.held = false;
                 cmds.push(EmuCmd::CancelPress);
             } else if self.scrolling {
                 self.scrolling = false;
@@ -204,6 +221,10 @@ impl TouchMouseEmu {
         // before this move counts.
         let mut cmds = self.poll();
         if self.spent {
+            if self.held {
+                self.last_pos = (x, y);
+                cmds.push(EmuCmd::MouseMove(x, y));
+            }
             return cmds;
         }
         if !self.scrolling && !self.pressed {
@@ -289,7 +310,18 @@ impl TouchMouseEmu {
             self.primary = None;
             self.held_since = None;
             let (x, y) = self.last_pos;
-            if self.suppressed || self.spent {
+            if self.held {
+                // A held long press: the lift releases its right button where
+                // the finger is; a cancel lets go without a release.
+                self.held = false;
+                self.held_lift = allow_tap;
+                cmds.push(if allow_tap {
+                    EmuCmd::MouseUp(x, y, MouseButton::Right)
+                } else {
+                    EmuCmd::CancelPress
+                });
+                cmds.push(EmuCmd::MouseLeave);
+            } else if self.suppressed || self.spent {
                 // Also the lift after a long press: its right click
                 // already happened, so the lift only clears hover.
                 // The gesture went multi-touch: the middle button was
@@ -321,6 +353,7 @@ impl TouchMouseEmu {
             self.pressed = false;
             self.suppressed = false;
             self.spent = false;
+            self.held = false;
             self.caught = false;
             self.held_since = None;
         }
@@ -345,6 +378,27 @@ impl TouchMouseEmu {
             EmuCmd::MouseDown(x, y, MouseButton::Right),
             EmuCmd::MouseUp(x, y, MouseButton::Right),
         ]
+    }
+
+    /// Keep the right button of the long press that just fired held down,
+    /// because the widget that took its press claimed the finger
+    /// ([`long_press::claim_long_press_drag`]): the finger's moves become
+    /// mouse moves and its lift releases the right button. `App` calls it
+    /// right after dispatching the press and then skips the release that
+    /// came with it. `false` (and nothing changes) when no fired long press
+    /// has a finger still down.
+    pub fn hold_long_press(&mut self) -> bool {
+        if self.primary.is_none() || !self.spent || self.suppressed {
+            return false;
+        }
+        self.held = true;
+        true
+    }
+
+    /// Whether the right release being replayed ends a held long press
+    /// (rather than coming with its press); clears the mark.
+    pub(crate) fn take_held_lift(&mut self) -> bool {
+        std::mem::take(&mut self.held_lift)
     }
 
     /// This hold will not long press (the finger is on a surface where a

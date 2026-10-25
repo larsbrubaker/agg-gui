@@ -27,7 +27,12 @@
 //! pass with no input: `layout` polls the emulator every frame
 //! (`tick_long_press`), and `paint` keeps a wake-up armed for the next
 //! moment that matters, publishes the cue and draws the default ring
-//! (`paint_long_press_cue`), so an idle app still fires on time.
+//! (`paint_long_press_cue`), so an idle app still fires on time. A widget
+//! that claims the finger while handling the long press's right press
+//! ([`crate::touch_emulation::claim_long_press_drag`]) keeps the button
+//! down: `replay_emu_cmds` skips the release that came with the press and
+//! the emulator turns the finger's slide into moves and its lift into the
+//! release.
 
 use super::super::keyboard_scroll;
 use crate::draw_ctx::DrawCtx;
@@ -204,10 +209,32 @@ impl App {
     }
 
     fn replay_emu_cmds(&mut self, cmds: Vec<EmuCmd>) {
+        // Set once a long press's right press was claimed and held: the
+        // release the emulator sent with it is then the lift's to send.
+        let mut held = false;
         for cmd in cmds {
             match cmd {
                 EmuCmd::MouseMove(x, y) => self.on_mouse_move(x, y),
                 EmuCmd::MouseDown(x, y, MouseButton::Middle) => self.touch_drag_press(x, y),
+                EmuCmd::MouseDown(x, y, MouseButton::Right) => {
+                    // Only a long press makes a right press.
+                    long_press::clear_drag_claim();
+                    self.on_mouse_down(x, y, MouseButton::Right, Modifiers::default());
+                    held = long_press::take_drag_claim()
+                        && self.has_captured_pointer()
+                        && self.touch_mouse_emu.hold_long_press();
+                }
+                EmuCmd::MouseUp(_, _, MouseButton::Right) if held => held = false,
+                EmuCmd::MouseUp(x, y, MouseButton::Right) => {
+                    // A held long press's lift releases where its press was
+                    // captured; when that capture was dropped meanwhile (the
+                    // window deactivated, say) the release has no owner and
+                    // must not land on whatever is under the finger.
+                    let lift = self.touch_mouse_emu.take_held_lift();
+                    if !lift || self.has_captured_pointer() {
+                        self.on_mouse_up(x, y, MouseButton::Right, Modifiers::default());
+                    }
+                }
                 EmuCmd::MouseDown(x, y, btn) => self.on_mouse_down(x, y, btn, Modifiers::default()),
                 EmuCmd::MouseUp(x, y, btn) => self.on_mouse_up(x, y, btn, Modifiers::default()),
                 EmuCmd::MouseLeave => self.on_mouse_leave(),

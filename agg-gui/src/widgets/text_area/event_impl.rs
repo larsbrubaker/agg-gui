@@ -2,6 +2,8 @@
 //! bar, keys, clipboard chords, focus, and the input-method events (routed
 //! on to `ime.rs`). The body of `Widget::on_event`, which `widget_impl.rs`
 //! delegates here; split out of it to keep both under the 800-line cap.
+//! A finger's presses go through touch selection first
+//! (`touch_select.rs`, [`crate::widgets::touch_selection`]).
 
 use super::*;
 
@@ -22,6 +24,17 @@ impl TextArea {
         if let Some(result) = self.route_context_menu(event) {
             return result;
         }
+        // A finger's presses, handle drags and taps on the toolbar.
+        if let Some(result) = crate::widgets::touch_selection::route(self, event) {
+            return result;
+        }
+        let result = self.handle_input(event);
+        crate::widgets::touch_selection::after_event(self, event);
+        result
+    }
+
+    /// Pointer, wheel, focus, input-method and key handling proper.
+    fn handle_input(&mut self, event: &Event) -> EventResult {
         match event {
             Event::MouseMove { pos } => {
                 // Scroll bar takes priority: continue a thumb drag, or update

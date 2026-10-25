@@ -327,6 +327,9 @@ pub struct TextArea {
     /// [`with_context_menu(false)`](Self::with_context_menu).
     context_menu: crate::widgets::text_context_menu::TextContextMenu,
     context_menu_enabled: bool,
+    /// Handles and edit toolbar for a selection made by touch; see
+    /// `text_area/touch_select.rs`.
+    touch_selection: crate::widgets::touch_selection::TouchSelection,
 
     /// Paint the background fill and the border (the default). `false` leaves
     /// both to the host; see [`with_frame`](Self::with_frame) in `frame.rs`.
@@ -401,6 +404,7 @@ impl TextArea {
             render_dirty_lines: Cell::new(None),
             context_menu: crate::widgets::text_context_menu::TextContextMenu::new(),
             context_menu_enabled: true,
+            touch_selection: Default::default(),
             frame: true,
             theme: crate::widgets::TextFieldTheme::default(),
             word_wrap: true,
@@ -739,6 +743,7 @@ mod highlight;
 mod ime;
 mod no_wrap;
 mod scroll;
+mod touch_select;
 mod undo;
 mod widget_impl;
 mod wrap;
