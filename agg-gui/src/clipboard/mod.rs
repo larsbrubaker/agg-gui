@@ -29,9 +29,12 @@
 //! simulated clipboards keep both, so [`get_html`] reads the HTML back.
 //!
 //! `router.rs` decides between the in-process and the system clipboard;
-//! `backend.rs` holds the per-build instance it runs on.
+//! `backend.rs` holds the per-build instance it runs on; `system_paste.rs`
+//! reads the system clipboard for a Paste button where that is asynchronous
+//! (the browser).
 
 mod backend;
+pub(crate) mod system_paste;
 // The router only exists where there is a native clipboard to route.
 #[cfg(all(not(target_arch = "wasm32"), any(feature = "clipboard", test)))]
 mod router;

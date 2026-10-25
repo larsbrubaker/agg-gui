@@ -115,6 +115,7 @@ pub fn platform_from_name(name: &str) -> Platform {
         || name.contains("darwin")
         || name.contains("iphone")
         || name.contains("ipad")
+        || crate::input_profile::names_ios(&name)
     {
         Platform::MacOS
     } else if name.contains("win") {

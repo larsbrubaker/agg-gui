@@ -1,5 +1,6 @@
-//! WASM clipboard, text-input focus and dictation exports (its state, and
-//! removing or reinstalling its provider) — mirror of
+//! WASM clipboard, text-input focus (and the focused field's text) and
+//! dictation exports (its state, and removing or reinstalling its provider)
+//! — mirror of
 //! `demo-wasm/src/clipboard_exports.rs`.
 
 use wasm_bindgen::prelude::*;
@@ -31,6 +32,22 @@ pub fn text_input_focused() -> bool {
             .as_ref()
             .map(|app| app.focused_is_text_input())
             .unwrap_or(false)
+    })
+}
+
+/// The focused text widget's text, `None` when no text widget has focus:
+/// for page automation (`demo/tests/touch_paste.test.ts` reads back what a
+/// touch Paste put in the field).
+#[wasm_bindgen]
+pub fn focused_text() -> Option<String> {
+    crate::DEMO_APP.with(|cell| {
+        let app = cell.borrow();
+        let app = app.as_ref()?;
+        let mut w: &dyn agg_gui::Widget = app.root();
+        for &i in app.focused_path()? {
+            w = w.children().get(i)?.as_ref();
+        }
+        w.text_input_value()
     })
 }
 

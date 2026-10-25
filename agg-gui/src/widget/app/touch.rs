@@ -27,7 +27,10 @@
 //! pass with no input: `layout` polls the emulator every frame
 //! (`tick_long_press`), and `paint` keeps a wake-up armed for the next
 //! moment that matters, publishes the cue and draws the default ring
-//! (`paint_long_press_cue`), so an idle app still fires on time. A widget
+//! (`paint_long_press_cue`), so an idle app still fires on time.
+//!
+//! `layout` also delivers a system clipboard read the touch toolbar's Paste
+//! started in a browser (`deliver_system_paste`), once the read resolves. A widget
 //! that claims the finger while handling the long press's right press
 //! ([`crate::touch_emulation::claim_long_press_drag`]) keeps the button
 //! down: `replay_emu_cmds` skips the release that came with the press and
@@ -259,6 +262,28 @@ impl App {
             self.touch_mouse_emu.press_instead();
             self.on_mouse_down(x, y, MouseButton::Left, Modifiers::default());
         }
+    }
+
+    /// Paste a system clipboard read that finished since the last frame
+    /// (`clipboard::system_paste`: the touch toolbar's Paste in a browser)
+    /// into the focused widget, as a browser `paste` event is delivered: the
+    /// text goes into the page's clipboard and the widget gets `Ctrl+V`.
+    pub(super) fn deliver_system_paste(&mut self) {
+        let Some(text) = crate::clipboard::system_paste::take_ready() else {
+            return;
+        };
+        if !self.has_focus() {
+            return;
+        }
+        #[cfg(target_arch = "wasm32")]
+        crate::wasm_clipboard::set_paste(&text, None);
+        #[cfg(not(target_arch = "wasm32"))]
+        crate::clipboard::set_text(&text);
+        let ctrl = Modifiers {
+            ctrl: true,
+            ..Modifiers::default()
+        };
+        self.on_key_down(crate::event::Key::Char('v'), ctrl);
     }
 
     /// Fire a long press that has come due (start of every layout, so the

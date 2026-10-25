@@ -164,7 +164,7 @@ pub fn touch_ui_active() -> bool {
 /// MacBook trackpad. Set it to `false` if you don't have a reliable read.
 pub fn input_profile_from_hint(user_agent_or_platform: &str, pointer_coarse: bool) -> InputProfile {
     let ua = user_agent_or_platform.to_ascii_lowercase();
-    if ua.contains("iphone") || ua.contains("ipad") || ua.contains("ipod") {
+    if ua.contains("iphone") || ua.contains("ipad") || ua.contains("ipod") || names_ios(&ua) {
         return InputProfile::MobileIOS;
     }
     if ua.contains("android") {
@@ -179,6 +179,14 @@ pub fn input_profile_from_hint(user_agent_or_platform: &str, pointer_coarse: boo
         return InputProfile::MobileOther;
     }
     InputProfile::Desktop
+}
+
+/// Whether the (lower-case) hint names Apple's mobile OS as a word: the
+/// `navigator.userAgentData.platform` of an iPhone or iPad is `"iOS"` (or
+/// `"iPadOS"`), with no device name in it.
+pub(crate) fn names_ios(hint: &str) -> bool {
+    hint.split(|c: char| !c.is_ascii_alphanumeric())
+        .any(|word| word == "ios" || word == "ipados")
 }
 
 const fn profile_code(p: InputProfile) -> u8 {
@@ -255,6 +263,35 @@ mod tests {
         assert_eq!(
             input_profile_from_hint("CrOS x86_64", true),
             InputProfile::MobileOther
+        );
+    }
+
+    #[test]
+    fn a_platform_named_ios_is_an_iphone_or_ipad() {
+        // Chrome's `userAgentData.platform` on an (emulated) iPhone.
+        for hint in [
+            "iOS",
+            "iPadOS",
+            "iOS Mozilla/5.0 (iPhone; CPU iPhone OS 15_0)",
+        ] {
+            assert_eq!(
+                input_profile_from_hint(hint, true),
+                InputProfile::MobileIOS,
+                "{hint}"
+            );
+            assert_eq!(
+                crate::platform::platform_from_name(hint),
+                crate::platform::Platform::MacOS
+            );
+        }
+        // A word, not any "ios" inside one.
+        assert_eq!(
+            input_profile_from_hint("Kiosk Linux", true),
+            InputProfile::MobileOther
+        );
+        assert_eq!(
+            input_profile_from_hint("Android Mozilla/5.0 (Linux; Android 14)", true),
+            InputProfile::MobileAndroid
         );
     }
 

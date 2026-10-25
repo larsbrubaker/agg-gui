@@ -260,3 +260,32 @@ fn the_caret_handle_schedules_its_own_fade() {
         "faded and idle"
     );
 }
+
+#[test]
+fn in_a_browser_paste_is_always_offered_and_reads_the_system_clipboard_on_tap() {
+    let reads = crate::clipboard::system_paste::simulate();
+    let mut p = phone(InputProfile::MobileAndroid);
+    // The page's own clipboard is empty: nothing was copied in the app.
+    crate::clipboard::set_text("");
+    let at = char_at::<TextField>(&mut p, 8);
+    long_press_and_lift(&mut p, at);
+    let paste = button::<TextField>(&mut p, TextMenuAction::Paste);
+    p.tap(paste);
+    assert_eq!(
+        reads.pending(),
+        1,
+        "the tap started a system clipboard read"
+    );
+    assert_eq!(p.widget::<TextField>().text(), TEXT, "nothing yet");
+    reads.resolve(Some("bold"));
+    p.frame();
+    assert_eq!(p.widget::<TextField>().text(), "hello bold new world");
+    // A refused read pastes nothing.
+    let at = char_at::<TextField>(&mut p, 2);
+    long_press_and_lift(&mut p, at);
+    let paste = button::<TextField>(&mut p, TextMenuAction::Paste);
+    p.tap(paste);
+    reads.resolve(None);
+    p.frame();
+    assert_eq!(p.widget::<TextField>().text(), "hello bold new world");
+}

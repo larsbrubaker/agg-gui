@@ -207,6 +207,7 @@ impl App {
     /// per frame before [`paint`][Self::paint].
     pub fn layout(&mut self, viewport: Size) {
         self.tick_long_press();
+        self.deliver_system_paste();
         // Snapshot BEFORE laying out: a signal arriving mid-layout is then
         // treated as post-layout and earns a follow-up frame (see `paint`).
         self.layout_async_state_epoch = Some(crate::animation::async_state_epoch());

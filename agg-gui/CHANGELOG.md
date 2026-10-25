@@ -10,6 +10,11 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- In a browser the touch toolbar always offers Paste in an editable field and pastes what the
+  phone's system clipboard holds: the tap reads it with `navigator.clipboard.readText()` and the
+  text lands in the field when the read resolves (a refused or empty read pastes nothing and is
+  logged once). Native builds still read the clipboard directly.
+
 - Touch text selection in `TextField` and `TextArea`, as on Android and iOS: a long press selects
   the word under the finger and sliding on extends by whole words; a handle at each end (Android's
   teardrop, iOS's lollipop, by input profile) drags that end by character, never past the other,
@@ -113,6 +118,10 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   unchanged (it owns every key).
 
 ### Fixed
+
+- `input_profile_from_hint` and `platform_from_name` recognise a platform named `iOS` or `iPadOS`
+  (Chrome's `userAgentData.platform` on an iPhone), which used to read as an unknown touch device;
+  the demo passes the user agent along as a fallback.
 
 - A password `TextField` no longer copies or cuts its text: Ctrl+C / Ctrl+X, Ctrl+Insert,
   Shift+Delete and the right-click menu (whose Cut and Copy are now disabled there) all leave

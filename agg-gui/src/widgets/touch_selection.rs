@@ -253,7 +253,10 @@ impl TouchSelection {
     /// (read once here, not every frame).
     pub(crate) fn set_toolbar(&mut self, shown: bool) {
         if shown && !self.toolbar {
-            self.paste_available = crate::clipboard::get_text().is_some_and(|t| !t.is_empty());
+            // A browser reads the system clipboard only when Paste is
+            // tapped, so there it is always offered.
+            self.paste_available = crate::clipboard::system_paste::reads_asynchronously()
+                || crate::clipboard::get_text().is_some_and(|t| !t.is_empty());
         }
         self.toolbar = shown;
     }

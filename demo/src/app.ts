@@ -102,16 +102,15 @@ function updateCanvasSize(): boolean {
 }
 
 function detectClientPlatform(): string {
-  // Pass the full UA string when available — both the OS-family detector
-  // (Cmd vs. Ctrl) and the input-profile detector (mobile-touch
-  // keyboard) live in agg-gui and parse the same string.
+  // Pass the platform name and the full UA string — both the OS-family
+  // detector (Cmd vs. Ctrl) and the input-profile detector (mobile-touch
+  // keyboard) live in agg-gui and parse the same string. The UA backs up a
+  // platform name they don't know (Chrome reports "iOS" for an iPhone).
   const nav = navigator as Navigator & { userAgentData?: { platform?: string } };
-  return (
-    nav.userAgentData?.platform ||
-    navigator.userAgent ||
-    navigator.platform ||
-    "other"
-  );
+  const hint = [nav.userAgentData?.platform, navigator.userAgent || navigator.platform]
+    .filter((s) => s)
+    .join(" ");
+  return hint || "other";
 }
 
 function detectPointerCoarse(): boolean {

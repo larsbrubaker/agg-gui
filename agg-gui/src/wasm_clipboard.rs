@@ -24,6 +24,10 @@
 //!   Ctrl+V, so the paste handler reads them through `clipboard::get_text`,
 //!   `clipboard::get_html` and `clipboard::get_image_rgba`.
 //!
+//! * **Paste button**: the touch toolbar's Paste reads the system clipboard
+//!   itself ([`read_system`], `navigator.clipboard.readText()`), since no
+//!   `paste` event comes with a tap; `clipboard::system_paste` delivers it.
+//!
 //! This module is compiled only when `target_arch = "wasm32"`.
 
 use std::cell::{Cell, RefCell};
@@ -157,4 +161,28 @@ fn rich_item(text: &str, html: &str) -> Option<JsValue> {
     web_sys::ClipboardItem::new_with_record_from_str_to_blob_promise(&record)
         .ok()
         .map(JsValue::from)
+}
+
+/// Read the system clipboard's text through the browser's asynchronous
+/// Clipboard API and hand it to `done` when the promise settles: `None` when
+/// the browser refuses (no secure context, no user gesture, permission
+/// denied) or has no Clipboard API. Call it inside the user's gesture.
+pub(crate) fn read_system(done: impl FnOnce(Option<String>) + 'static) {
+    let clipboard = web_sys::window()
+        .and_then(|w| Reflect::get(&w.navigator(), &JsValue::from_str("clipboard")).ok())
+        .filter(|c| !c.is_undefined() && !c.is_null());
+    let Some(clipboard) = clipboard else {
+        done(None);
+        return;
+    };
+    let clipboard: web_sys::Clipboard = clipboard.unchecked_into();
+    // Started now, inside the gesture; only the wait is deferred.
+    let promise = clipboard.read_text();
+    wasm_bindgen_futures::spawn_local(async move {
+        let text = wasm_bindgen_futures::JsFuture::from(promise)
+            .await
+            .ok()
+            .and_then(|v| v.as_string());
+        done(text);
+    });
 }
