@@ -12,6 +12,9 @@
 //!   (the preferred one on a tie) and scrolls within that room.
 //! - A context menu or a submenu keeps its clamp into the window; one taller
 //!   than the window fills it, shows its top, and scrolls.
+//! - A submenu that fits beside its parent on neither side (a phone-width
+//!   window) hangs from its row by the bar rule instead ([`place_hanging`]),
+//!   so it is never clamped back over the row that closes it.
 //!
 //! agg-gui keeps every popup a window margin clear of the window edge
 //! ([`super::MenuMetrics::window_margin`], 4 px by default) where C# sits
@@ -129,6 +132,27 @@ pub(crate) fn place_vertical(
         MenuAnchorKind::Bar | MenuAnchorKind::Context => anchor_y - h,
     };
     (raw_y.clamp(floor, (ceiling - h).max(floor)), h)
+}
+
+/// One panel's bottom and height for a submenu that hangs from the row that
+/// opened it (`anchor_y` its bottom for `Bar` / `Context`, its top for
+/// `BottomBar`; `span` the row's height), as a phone-width window places
+/// one that fits beside its parent on neither side.  The row must stay
+/// visible, since a tap on it is the way back out of the submenu (`state.rs`
+/// `handle_left_down`), so the panel follows the bar rule rather than the
+/// submenu clamp: it opens toward the side it fits on, else scrolls in the
+/// roomier one, and is never pushed back over the row.
+pub(crate) fn place_hanging(
+    h: f64,
+    anchor_y: f64,
+    kind: MenuAnchorKind,
+    vis: Rect,
+    span: f64,
+    margin: f64,
+) -> (f64, f64) {
+    let floor = vis.y + margin;
+    let ceiling = vis.y + vis.height - margin;
+    place_from_bar(h, anchor_y, kind, floor, ceiling, span)
 }
 
 /// C#'s `PopupLayoutEngine` direction rule for a menu opened from a bar

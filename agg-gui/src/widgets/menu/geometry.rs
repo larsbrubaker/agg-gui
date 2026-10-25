@@ -13,7 +13,9 @@
 use crate::geometry::{Point, Rect, Size};
 
 use super::model::{MenuEntry, MenuItem};
-use super::overflow::{current_scroll_gutter, place_vertical, PopupScroll, StackPlacement};
+use super::overflow::{
+    current_scroll_gutter, place_hanging, place_vertical, PopupScroll, StackPlacement,
+};
 use super::state::MenuAnchorKind;
 
 pub const ROW_H: f64 = 24.0;
@@ -313,20 +315,30 @@ pub(crate) fn stack_layout_placed(
     let mut x = anchor.x;
     let mut y_top = anchor.y;
     let mut prefix = Vec::new();
+    // Height of the row this level hangs from, when it fits beside its
+    // parent on neither side (see the end of the loop).
+    let mut hang_span: Option<f64> = None;
 
     loop {
         let w = width(items, &m);
         let content_h = popup_height(items, &m);
-        let (y, h) = place_vertical(
-            content_h,
-            y_top,
-            anchor_kind,
-            vis,
-            prefix.is_empty(),
-            placement.anchor_span,
-            bar_legacy,
-            m.window_margin,
-        );
+        let (y, h) = match hang_span {
+            // The legacy bar placement has no window in the menu's space to
+            // place against; it keeps hanging unclamped.
+            Some(span) if !(bar_legacy && anchor_kind == MenuAnchorKind::Bar) => {
+                place_hanging(content_h, y_top, anchor_kind, vis, span, m.window_margin)
+            }
+            _ => place_vertical(
+                content_h,
+                y_top,
+                anchor_kind,
+                vis,
+                prefix.is_empty(),
+                placement.anchor_span,
+                bar_legacy,
+                m.window_margin,
+            ),
+        };
         let scrolls = h < content_h - 1e-9;
         let gutter = if scrolls {
             current_scroll_gutter()
@@ -334,6 +346,12 @@ pub(crate) fn stack_layout_placed(
             0.0
         };
         let margin = m.window_margin;
+        // No panel is wider than the window less its margins, scroll bar
+        // strip included: a touch-grown fixed width (about 357 logical px)
+        // overran a phone's 358 px window.  The rows narrow with it and
+        // their labels elide before the shortcut / chevron column
+        // (`widget/labels.rs`).
+        let w = w.min(max_panel_w(vis, margin) - gutter).max(0.0);
         let left = vis.x + margin;
         let panel_w = w + gutter;
         let px = x.clamp(left, (vis.x + vis.width - panel_w - margin).max(left));
@@ -376,7 +394,7 @@ pub(crate) fn stack_layout_placed(
         };
         prefix.push(next_idx);
         items = &item.submenu;
-        let sub_w = width(items, &m);
+        let sub_w = width(items, &m).min(max_panel_w(vis, margin));
         let cascade_x = rect.x + rect.width - 2.0;
         let fits_right = cascade_x + sub_w <= vis.x + vis.width - margin;
         let fits_left = rect.x - sub_w >= vis.x + margin;
@@ -406,16 +424,33 @@ pub(crate) fn stack_layout_placed(
         // its parent, and clamping it back on screen would lay it right
         // over the row that opened it (agg-sharp
         // `NarrowSubMenuPlacementTests`). Hang it from the row instead:
-        // below it when the menu opens downward, above it when upward.
+        // below it when the menu opens downward, above it when upward, and
+        // flipped or scrolled rather than slid back over the row when it
+        // does not fit there (`overflow.rs` `place_hanging`): a tap on the
+        // row is how a finger closes the submenu again.
+        hang_span = None;
         if !fits_right && !fits_left {
             y_top = match anchor_kind {
                 MenuAnchorKind::BottomBar => row_rect.y + row_rect.height,
                 _ => row_rect.y,
             };
+            hang_span = Some(row_rect.height);
         }
     }
 
     layouts
+}
+
+/// The widest a popup panel may be in the window `vis`: its width less a
+/// `margin` on each side.  Unbounded while the window is not known yet (a
+/// zero or non-finite viewport), so a panel laid out before the first
+/// frame keeps its natural width instead of collapsing.
+fn max_panel_w(vis: Rect, margin: f64) -> f64 {
+    if vis.width > 0.0 && vis.width.is_finite() {
+        (vis.width - 2.0 * margin).max(0.0)
+    } else {
+        f64::INFINITY
+    }
 }
 
 /// `r` cut vertically to `panel` (unchanged when it lies inside).
@@ -505,6 +540,10 @@ fn row_layouts(items: &[MenuEntry], rect: Rect, m: &MenuMetrics) -> Vec<RowLayou
     }
     rows
 }
+
+#[cfg(test)]
+#[path = "geometry_narrow_tests.rs"]
+mod narrow_tests;
 
 #[cfg(test)]
 mod metrics_tests {

@@ -10,6 +10,15 @@
 //! C#'s "sub menu still open / same instance" is agg-gui's `open_path` still
 //! naming the row, with its panel still in the layout stack.
 //!
+//! DEVIATION: C#'s `TappingTheRowOfAnOpenSubMenuAgainKeepsItOpen` pinned
+//! agg-gui's old behaviour, where `handle_left_down` set `open_path` to the
+//! pressed row on every press.  Lars reported (Android phone, Chrome) that a
+//! finger then had no way to close a submenu and get back to its siblings,
+//! so a tap on the row of an open submenu now closes it
+//! (`tapping_the_row_of_an_open_sub_menu_again_closes_it`), and a tap on a
+//! sibling's row switches to that sibling's submenu.  A mouse click keeps
+//! the old behaviour, since hover reopens the submenu anyway.
+//!
 //! `TappingAnotherTitleWhileAMenuIsOpenSwitchesToIt` is a duplicate of
 //! `tests_2.rs::mobile_tap_sequence_keeps_other_top_menu_open` (the same
 //! touch tap on Edit while File is open switches `open_index` to 1) with
@@ -37,6 +46,8 @@ const VIEWPORT: Size = Size {
 const FILE: Point = Point { x: 8.0, y: 8.0 };
 /// Index of the Recent row in File's popup.
 const RECENT: usize = 1;
+/// Index of the Export row in File's popup.
+const EXPORT: usize = 2;
 
 fn test_font() -> Arc<Font> {
     const FONT_BYTES: &[u8] = include_bytes!("../../../../../demo/assets/CascadiaCode.ttf");
@@ -47,7 +58,8 @@ fn centre(r: Rect) -> Point {
     Point::new(r.x + r.width * 0.5, r.y + r.height * 0.5)
 }
 
-/// A bar with a File (New, Recent > Report) and Edit (Copy) menu.
+/// A bar with a File (New, Recent > Report, Export > PDF) and Edit (Copy)
+/// menu.
 struct Harness {
     bar: MenuBar,
     actions: Rc<RefCell<Vec<String>>>,
@@ -73,6 +85,8 @@ impl Harness {
                             vec![MenuItem::action("Report", "Report").into()],
                         )
                         .into(),
+                        MenuItem::submenu("Export", vec![MenuItem::action("PDF", "PDF").into()])
+                            .into(),
                     ],
                 ),
                 TopMenu::new("Edit", vec![MenuItem::action("Copy", "Copy").into()]),
@@ -170,21 +184,47 @@ fn tapping_a_sub_menu_row_opens_it_and_it_stays_open_after_the_finger_lifts() {
 }
 
 #[test]
-fn tapping_the_row_of_an_open_sub_menu_again_keeps_it_open() {
+fn tapping_the_row_of_an_open_sub_menu_again_closes_it() {
     let _guard = crate::input_profile::profile_test_lock();
     let mut h = Harness::show();
     h.tap(FILE);
     h.tap(h.row(0, RECENT));
     assert_eq!(h.open_panels(), 2);
 
-    // handle_left_down sets open_path to the pressed row: a second tap is
-    // not a toggle
+    h.tap(h.row(0, RECENT));
+    assert!(
+        h.bar.popup.state.open_path.is_empty(),
+        "a second tap on the row closes its sub menu, got {:?}",
+        h.bar.popup.state.open_path
+    );
+    assert_eq!(h.open_panels(), 1, "the parent menu stays up");
+    assert_eq!(h.bar.open_index, Some(0));
+
+    // and a third tap opens it again
     h.tap(h.row(0, RECENT));
     assert_eq!(h.bar.popup.state.open_path, vec![RECENT]);
-    assert_eq!(h.open_panels(), 2);
-
     h.tap(h.row(1, 0));
     assert_eq!(h.actions.borrow().as_slice(), ["Report"]);
+    crate::touch_state::clear_last_touch_event_for_testing();
+}
+
+#[test]
+fn tapping_a_sibling_row_switches_to_its_sub_menu() {
+    let _guard = crate::input_profile::profile_test_lock();
+    let mut h = Harness::show();
+    h.tap(FILE);
+    h.tap(h.row(0, RECENT));
+    assert_eq!(h.bar.popup.state.open_path, vec![RECENT]);
+
+    h.tap(h.row(0, EXPORT));
+    assert_eq!(
+        h.bar.popup.state.open_path,
+        vec![EXPORT],
+        "a tap on a sibling's row opens its sub menu in place of the open one"
+    );
+    assert_eq!(h.open_panels(), 2);
+    h.tap(h.row(1, 0));
+    assert_eq!(h.actions.borrow().as_slice(), ["PDF"]);
     crate::touch_state::clear_last_touch_event_for_testing();
 }
 
@@ -231,4 +271,46 @@ fn a_mouse_still_opens_a_sub_menu_on_hover_and_clicks_its_row() {
     h.mouse_click(report);
     assert_eq!(h.actions.borrow().as_slice(), ["Report"]);
     assert_eq!(h.open_panels(), 0);
+}
+
+#[test]
+fn a_mouse_click_on_the_row_of_an_open_sub_menu_keeps_it_open() {
+    let _guard = crate::input_profile::profile_test_lock();
+    let mut h = Harness::show();
+    crate::touch_emulation::long_press::set_last_press_was_touch_for_testing(false);
+    // Clicks only, no hover moves: the press alone decides.
+    h.mouse_click(FILE);
+    h.mouse_click(h.row(0, RECENT));
+    assert_eq!(h.bar.popup.state.open_path, vec![RECENT]);
+
+    h.mouse_click(h.row(0, RECENT));
+    assert_eq!(
+        h.bar.popup.state.open_path,
+        vec![RECENT],
+        "a mouse click is not a toggle: the sub menu stays open"
+    );
+    assert_eq!(h.open_panels(), 2);
+}
+
+#[test]
+fn a_press_the_touch_emulator_replays_closes_an_open_sub_menu() {
+    let _guard = crate::input_profile::profile_test_lock();
+    let mut h = Harness::show();
+    h.tap(FILE);
+    h.tap(h.row(0, RECENT));
+    assert_eq!(h.bar.popup.state.open_path, vec![RECENT]);
+
+    // No touch-event stamp this time: only the emulator's mark on the press
+    // (`touch_emulation::last_press_was_touch`) says a finger made it.
+    crate::touch_state::clear_last_touch_event_for_testing();
+    crate::touch_emulation::long_press::set_last_press_was_touch_for_testing(true);
+    let recent = h.row(0, RECENT);
+    h.press(recent);
+    h.release(recent);
+    crate::touch_emulation::long_press::set_last_press_was_touch_for_testing(false);
+    assert!(
+        h.bar.popup.state.open_path.is_empty(),
+        "a finger's press, marked by the emulator, closes the sub menu"
+    );
+    assert_eq!(h.open_panels(), 1);
 }

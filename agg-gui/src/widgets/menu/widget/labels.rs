@@ -1,7 +1,10 @@
 //! Label caches for the menu bar and popup.
 //!
 //! Menus compose their text rendering out of [`Label`] widgets so glyphs flow
-//! through the framework's standard backbuffer + LCD subpixel path.  Each
+//! through the framework's standard backbuffer + LCD subpixel path.  A popup
+//! row's icon glyph (`MenuItem::icon`) is a `Label` too, laid out in the same
+//! line box as the row's text, so the two share a baseline pixel row under
+//! every line box and device scale.  Each
 //! cache stores its `Label`s by stable identity (bar-button index, or
 //! `(layout_index, row_index)` for popup rows) and rebuilds them lazily when
 //! the source text changes.
@@ -15,6 +18,7 @@ use crate::text::Font;
 use crate::widget::{paint_subtree, Widget};
 use crate::widgets::label::{Label, LabelAlign};
 
+use super::super::fit_width::{menu_text_width, SHORTCUT_GAP};
 use super::super::geometry::PopupLayout;
 use super::super::model::MenuEntry;
 use super::super::paint::popup_row_text_color;
@@ -86,6 +90,8 @@ impl Default for BarLabels {
 pub struct PopupRowLabels {
     pub label: Label,
     pub shortcut: Option<Label>,
+    /// The row's icon glyph, when it has one.
+    pub icon: Option<Label>,
 }
 
 /// Cache of `Label`s for every visible popup row, keyed by
@@ -105,6 +111,9 @@ pub struct PopupLabels {
     /// depend on that to stay correct).
     last_font_id: u64,
     last_font_size: f64,
+    /// The font the labels were last built with, for measuring a shortcut's
+    /// column the way a fitted row was sized (`fit_width::menu_text_width`).
+    font: Option<Arc<Font>>,
 }
 
 impl PopupLabels {
@@ -113,6 +122,7 @@ impl PopupLabels {
             rows: Vec::new(),
             last_font_id: 0,
             last_font_size: 0.0,
+            font: None,
         }
     }
 
@@ -136,6 +146,7 @@ impl PopupLabels {
             self.rows.clear();
             self.last_font_id = font_id;
             self.last_font_size = font_size;
+            self.font = Some(Arc::clone(font));
         }
         // Resize outer vec to one entry per layout.
         if self.rows.len() != layouts.len() {
@@ -163,6 +174,7 @@ impl PopupLabels {
                 // `⌘X` on a Mac, `Ctrl+X` elsewhere), never the raw
                 // declaration string of a parsed shortcut.
                 let shortcut_text = item.shortcut_text_formatted(platform, font, shortcut_format);
+                let icon_text = item.icon.map(String::from);
                 match &mut level[row_idx] {
                     Some(existing) => {
                         if existing.label.text_str() != item.label {
@@ -180,13 +192,24 @@ impl PopupLabels {
                             }
                             (None, None) => {}
                         }
+                        match (&mut existing.icon, icon_text.as_deref()) {
+                            (Some(slot), Some(text)) => {
+                                if slot.text_str() != text {
+                                    slot.set_text(text);
+                                }
+                            }
+                            (slot, text) => {
+                                *slot = text.map(|t| make_label(t, font, font_size));
+                            }
+                        }
                     }
                     slot @ None => {
                         *slot = Some(PopupRowLabels {
-                            label: make_label(&item.label, font, font_size),
+                            label: make_row_label(&item.label, font, font_size),
                             shortcut: shortcut_text
                                 .as_deref()
                                 .map(|s| make_shortcut_label(s, font, font_size)),
+                            icon: icon_text.as_deref().map(|t| make_label(t, font, font_size)),
                         });
                     }
                 }
@@ -205,6 +228,17 @@ impl PopupLabels {
             .map(|row| &row.label)
     }
 
+    /// The shortcut label of row `row_idx` in popup level `level_idx`, once
+    /// built and when the row has one.
+    #[cfg(test)]
+    pub(super) fn row_shortcut(&self, level_idx: usize, row_idx: usize) -> Option<&Label> {
+        self.rows
+            .get(level_idx)?
+            .get(row_idx)?
+            .as_ref()
+            .and_then(|row| row.shortcut.as_ref())
+    }
+
     /// Paint a single popup row's text (label + optional shortcut).
     /// Background, icon, check / radio glyph, and submenu chevron are
     /// painted by the caller.  `color` is applied to BOTH the label and
@@ -220,6 +254,7 @@ impl PopupLabels {
         shortcut_right_pad: f64,
         color: Color,
     ) {
+        let (font, font_size) = (self.font.clone(), self.last_font_size);
         let Some(level) = self.rows.get_mut(level_idx) else {
             return;
         };
@@ -227,9 +262,30 @@ impl PopupLabels {
             return;
         };
 
+        // The shortcut first: the label gets what the row has left beside
+        // it, the gap a fitted popup keeps (`fit_width::SHORTCUT_GAP`)
+        // included, and the right-hand column the chevron and right-edge
+        // checks sit in.  On a window too narrow for the row's natural width
+        // (a phone) the label then ends in an ellipsis instead of running
+        // under the shortcut or off the panel.  The column is the shortcut's
+        // unsnapped advance, the width a fitted row was sized with, not its
+        // laid-out width (rounded up to device pixels under
+        // `LineBox::EmSnapped`), so a fitted row never elides.
+        let shortcut_size = row.shortcut.as_mut().map(|shortcut| {
+            shortcut.set_color(color);
+            shortcut.layout(Size::new(row_rect.width, row_rect.height))
+        });
+        let shortcut_w = match (&row.shortcut, shortcut_size, &font) {
+            (Some(shortcut), Some(_), Some(font)) => {
+                menu_text_width(font, font_size, shortcut.text_str()) + SHORTCUT_GAP
+            }
+            (_, Some(size), None) => size.width + SHORTCUT_GAP,
+            _ => 0.0,
+        };
+
         // Main label.
         row.label.set_color(color);
-        let inner_w = (row_rect.width - label_x).max(0.0);
+        let inner_w = (row_rect.width - label_x - shortcut_right_pad - shortcut_w).max(0.0);
         let size = row.label.layout(Size::new(inner_w, row_rect.height));
         row.label
             .set_bounds(Rect::new(0.0, 0.0, size.width, size.height));
@@ -241,9 +297,7 @@ impl PopupLabels {
         ctx.restore();
 
         // Optional shortcut, right-aligned.
-        if let Some(shortcut) = row.shortcut.as_mut() {
-            shortcut.set_color(color);
-            let s_size = shortcut.layout(Size::new(row_rect.width, row_rect.height));
+        if let (Some(shortcut), Some(s_size)) = (row.shortcut.as_mut(), shortcut_size) {
             shortcut.set_bounds(Rect::new(0.0, 0.0, s_size.width, s_size.height));
             let sx = row_rect.x + row_rect.width - shortcut_right_pad - s_size.width;
             let sy = row_rect.y + (row_rect.height - s_size.height) * 0.5;
@@ -252,6 +306,41 @@ impl PopupLabels {
             paint_subtree(shortcut, ctx);
             ctx.restore();
         }
+    }
+
+    /// Paint row `row_idx`'s icon glyph in popup level `level_idx` with its
+    /// left edge `icon_x` into `row_rect`, in `color`.  Its line box is
+    /// centred on the row exactly as the row's label's is, so both stand on
+    /// one baseline.  `false` when the row has no icon label.
+    pub fn paint_icon(
+        &mut self,
+        ctx: &mut dyn DrawCtx,
+        level_idx: usize,
+        row_idx: usize,
+        row_rect: Rect,
+        icon_x: f64,
+        color: Color,
+    ) -> bool {
+        let Some(icon) = self
+            .rows
+            .get_mut(level_idx)
+            .and_then(|level| level.get_mut(row_idx))
+            .and_then(|row| row.as_mut())
+            .and_then(|row| row.icon.as_mut())
+        else {
+            return false;
+        };
+        icon.set_color(color);
+        let size = icon.layout(Size::new(row_rect.width, row_rect.height));
+        icon.set_bounds(Rect::new(0.0, 0.0, size.width, size.height));
+        ctx.save();
+        ctx.translate(
+            row_rect.x + icon_x,
+            row_rect.y + (row_rect.height - size.height) * 0.5,
+        );
+        paint_subtree(icon, ctx);
+        ctx.restore();
+        true
     }
 
     /// Convenience: re-resolve the per-row text colour from the
@@ -302,6 +391,13 @@ fn make_label(text: &str, font: &Arc<Font>, font_size: f64) -> Label {
     Label::new(text, Arc::clone(font))
         .with_font_size(font_size)
         .with_align(LabelAlign::Left)
+}
+
+/// A popup row's label: ends in an ellipsis when its row is too narrow for
+/// it ([`PopupLabels::paint_row`]).  Bar titles keep [`make_bar_label`]'s
+/// clipping; the bar scrolls its titles instead.
+fn make_row_label(text: &str, font: &Arc<Font>, font_size: f64) -> Label {
+    make_label(text, font, font_size).with_ellipsis_if_clipped(true)
 }
 
 /// Build a menu-**bar** button label.

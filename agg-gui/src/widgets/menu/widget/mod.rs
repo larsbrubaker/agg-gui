@@ -297,11 +297,15 @@ mod tests_finger_scroll;
 #[cfg(test)]
 mod tests_fit;
 #[cfg(test)]
+mod tests_fit_elide;
+#[cfg(test)]
 mod tests_focus;
 #[cfg(test)]
 mod tests_font_swap;
 #[cfg(test)]
 mod tests_hover;
+#[cfg(test)]
+mod tests_icon_baseline;
 #[cfg(test)]
 mod tests_image_icon;
 #[cfg(test)]
@@ -322,5 +326,9 @@ mod tests_style;
 mod tests_tooltip;
 #[cfg(test)]
 mod tests_tooltip_show_menu;
+#[cfg(test)]
+mod tests_touch_icon;
+#[cfg(test)]
+mod tests_touch_narrow;
 #[cfg(test)]
 mod tests_touch_tap;

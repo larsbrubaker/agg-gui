@@ -55,6 +55,19 @@ pub const SHORTCUT_GAP: f64 = 20.0;
 /// Narrowest fitted popup at desktop metrics (logical px).
 pub const FIT_MIN_W: f64 = 156.0;
 
+/// Unsnapped advance of `text` as a popup row's `Label` draws it with
+/// `font` at `font_size`: the system font override and font-size scale
+/// applied, as `Label` applies them.  Fitted rows are sized from it, and the
+/// row painter (`widget/labels.rs`) reserves a shortcut's column with it,
+/// so a label in a row sized to hold it always fits.  (A `Label`'s own
+/// laid-out width can be rounded up to whole device pixels, which would
+/// leave the label a fraction of a pixel short.)
+pub(crate) fn menu_text_width(font: &Arc<Font>, font_size: f64, text: &str) -> f64 {
+    let font = crate::font_settings::current_system_font().unwrap_or_else(|| Arc::clone(font));
+    let size = font_size * crate::font_settings::current_font_size_scale();
+    measure_advance(&font, text, size)
+}
+
 /// How wide a popup menu is.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum MenuWidth {
@@ -103,10 +116,7 @@ impl FitMeasure {
 
     /// Advance width of `text` as the row `Label` will measure it.
     fn text_width(&self, text: &str) -> f64 {
-        let font =
-            crate::font_settings::current_system_font().unwrap_or_else(|| Arc::clone(&self.font));
-        let size = self.font_size * crate::font_settings::current_font_size_scale();
-        measure_advance(&font, text, size)
+        menu_text_width(&self.font, self.font_size, text)
     }
 
     /// Natural width of one item row: label, optional shortcut and padding.

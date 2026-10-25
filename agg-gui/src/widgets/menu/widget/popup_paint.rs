@@ -2,10 +2,10 @@
 //! that file under the 800-line cap.
 //!
 //! `paint_popup_level` draws one open popup panel — hover / open
-//! backgrounds, separators, inline icon / check / radio glyphs (in their
+//! backgrounds, separators, inline check / radio marks (in their
 //! own leading column under a `MenuStyle::selection_column`, or in a row's
 //! own `MenuIconSlot`), submenu
-//! chevrons — and delegates the row text to the shared [`PopupLabels`]
+//! chevrons — and delegates the row text and icon glyphs to the shared [`PopupLabels`]
 //! cache so every glyph flows through the framework's backbuffer + LCD
 //! path.  It consumes the row rects produced by
 //! [`super::super::geometry::stack_layout`], so it automatically paints at
@@ -84,9 +84,8 @@ pub(super) fn paint_popup_level(
         // Hover / open backdrop sits underneath the row's content.
         paint_item_row_bg(ctx, row_layout.rect, hovered, open, item.enabled);
 
-        // Inline glyphs (icon / check / radio) — single chars that
-        // change infrequently; keeping them direct `fill_text` avoids
-        // a Label per glyph at the cost of a single rasterise call.
+        // Inline marks (swatch / image / check / radio) are painted
+        // directly; an icon glyph goes through its own row `Label`.
         let inline_color = popup_row_text_color(ctx, item.enabled, open && item.enabled);
         ctx.set_fill_color(inline_color);
         if let Some(color) = item.swatch {
@@ -147,12 +146,19 @@ pub(super) fn paint_popup_level(
             if !item.enabled {
                 ctx.restore();
             }
-        } else if let Some(icon) = item.icon {
-            let icon = icon.to_string();
-            ctx.fill_text(
-                &icon,
-                row_layout.rect.x + row_icon_x(style, item),
-                row_layout.rect.y + 7.0,
+        } else if item.icon.is_some() {
+            // A `Label` in the same line box as the row's text, centred on
+            // the row as the text is, so the glyph stands on the label's
+            // baseline at any row height (finger-sized rows are far taller
+            // than the 24 px desktop row) and on the same device pixel row
+            // under a snapped line box.
+            labels.paint_icon(
+                ctx,
+                level_idx,
+                row_idx,
+                row_layout.rect,
+                row_icon_x(style, item),
+                inline_color,
             );
         }
         // Selection indicator. Vector-drawn check mark shared by both

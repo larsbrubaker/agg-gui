@@ -27,6 +27,13 @@ fn is_touch_synthesized() -> bool {
         .unwrap_or(false)
 }
 
+/// Whether the press now being handled is a finger's: a touch shell's tap
+/// (stamped through [`crate::touch_state`]) or a press the touch emulator
+/// replays (`touch_emulation::last_press_was_touch`).
+fn press_is_finger() -> bool {
+    is_touch_synthesized() || crate::touch_emulation::last_press_was_touch()
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MenuAnchorKind {
     Context,
@@ -528,7 +535,15 @@ impl PopupMenuState {
                 }
                 self.hover_path = Some(path.clone());
                 if has_submenu {
-                    self.open_path = path;
+                    // A finger has no hover to back out of a submenu with,
+                    // and on a phone the submenu hangs over the rows below
+                    // its own (`geometry.rs`): a tap on the row of an open
+                    // submenu closes it, back to that row's level.
+                    if press_is_finger() && self.open_path.starts_with(&path) {
+                        self.open_path.truncate(path.len() - 1);
+                    } else {
+                        self.open_path = path;
+                    }
                     crate::animation::request_draw();
                     (EventResult::Consumed, MenuResponse::None)
                 } else if let Some(action) = action {
