@@ -13,12 +13,21 @@
 # of a build, so the worker builds on its own, into its own target dir so
 # the two builds don't invalidate each other's cache. Always a release
 # build: an unoptimised model is too slow to dictate with.
+# The target dir is made absolute (a relative CARGO_TARGET_DIR is taken from
+# the repository root): wasm-pack runs cargo from the crate's directory, so
+# cargo would resolve a relative one there, while wasm-pack 0.13 looks for
+# the .wasm under the workspace root.
 # Usage: demo/build-whistle.sh
 set -euo pipefail
 cd "$(dirname "$0")/.."
 out=demo/public/whistle
+target_dir="${CARGO_TARGET_DIR:-target}"
+case "$target_dir" in
+  /*) ;;
+  *) target_dir="$PWD/$target_dir" ;;
+esac
 RUSTFLAGS="${RUSTFLAGS:-} -C target-feature=+simd128" \
-CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-target}/wasm-simd128" \
+CARGO_TARGET_DIR="$target_dir/wasm-simd128" \
   wasm-pack build agg-gui-whistle-worker --release --target web \
     --out-dir "../$out" --no-typescript
 cp agg-gui-whistle/web/worker.js agg-gui-whistle/web/capture-worklet.js "$out/"
