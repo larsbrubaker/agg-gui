@@ -26,6 +26,7 @@ fn rec(text: &str, continues: bool, pending: &str) -> Recognised {
         text: text.into(),
         continues,
         pending: pending.into(),
+        pending_continues: false,
     }
 }
 

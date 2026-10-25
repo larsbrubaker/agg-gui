@@ -196,6 +196,7 @@ fn rec(text: &str, continues: bool, pending: &str) -> Recognised {
         text: text.into(),
         continues,
         pending: pending.into(),
+        pending_continues: false,
     }
 }
 
@@ -232,4 +233,22 @@ fn merged_updates_read_as_the_two_in_a_row() {
             );
         }
     }
+}
+
+/// The merged update's tail is the second update's, glued or not.
+#[test]
+fn a_merged_tail_keeps_whether_it_continues_the_last_word() {
+    let glued = Recognised {
+        pending_continues: true,
+        ..rec("", false, "0 mm")
+    };
+    let merged = merge(rec("make 2", false, "0"), glued.clone());
+    assert!(merged.pending_continues);
+    let mut apart = TextMapper::new(true);
+    apart.update(&rec("make 2", false, "0"));
+    apart.update(&glued);
+    let mut together = TextMapper::new(true);
+    together.update(&merged);
+    assert_eq!(together.take(), apart.take());
+    assert!(!merge(glued, rec("", false, "0 mm")).pending_continues);
 }

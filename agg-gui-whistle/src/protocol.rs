@@ -101,6 +101,9 @@ pub struct Recognised {
     pub continues: bool,
     /// The unconfirmed tail.
     pub pending: String,
+    /// `pending` begins with the rest of the last committed word ("0 mm"
+    /// after a committed "2"): show it with no space before it.
+    pub pending_continues: bool,
 }
 
 /// Engine to provider.
@@ -174,6 +177,7 @@ impl Reader<'_> {
             text: self.str("text")?,
             continues: self.bool("continues")?,
             pending: self.str("pending")?,
+            pending_continues: self.bool("pending_continues")?,
         })
     }
 }
@@ -192,6 +196,7 @@ fn recognised_fields(fields: &mut Fields, r: &Recognised) {
     fields.push(("text", Field::Str(r.text.clone())));
     fields.push(("continues", Field::Bool(r.continues)));
     fields.push(("pending", Field::Str(r.pending.clone())));
+    fields.push(("pending_continues", Field::Bool(r.pending_continues)));
 }
 
 impl ToWorker {

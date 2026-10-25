@@ -9,6 +9,15 @@ fn rec(text: &str, continues: bool, pending: &str) -> Recognised {
         text: text.into(),
         continues,
         pending: pending.into(),
+        pending_continues: false,
+    }
+}
+
+/// `rec` whose tail carries on the last committed word.
+fn rec_glued(text: &str, continues: bool, pending: &str) -> Recognised {
+    Recognised {
+        pending_continues: true,
+        ..rec(text, continues, pending)
     }
 }
 
@@ -65,6 +74,35 @@ fn the_tail_after_committed_words_starts_with_a_space() {
     let mut m = TextMapper::new(true);
     m.update(&rec("good", false, "morning"));
     assert_eq!(m.take(), delivery("good", " morning"));
+}
+
+#[test]
+fn a_tail_that_continues_the_last_word_has_no_space_before_it() {
+    let mut m = TextMapper::new(true);
+    m.update(&rec_glued("2", false, "0 mm"));
+    assert_eq!(m.take(), delivery("2", "0 mm"), "previews as 20 mm");
+    // Ending the dictation while the tail shows commits it glued on.
+    m.finish();
+    assert_eq!(m.take(), delivery("0 mm", ""), "20 mm in all");
+}
+
+#[test]
+fn a_tail_that_continues_only_glues_while_it_is_the_tail() {
+    let mut m = TextMapper::new(true);
+    m.update(&rec_glued("2", false, "0 mm"));
+    assert_eq!(m.take(), delivery("2", "0 mm"));
+    // A later update whose tail starts a new word spaces it again.
+    m.update(&rec("0", true, "mm wide"));
+    assert_eq!(m.take(), delivery("0", " mm wide"));
+    m.finish();
+    assert_eq!(m.take(), delivery(" mm wide", ""));
+}
+
+#[test]
+fn a_continuing_tail_with_nothing_committed_is_just_the_tail() {
+    let mut m = TextMapper::new(true);
+    m.update(&rec_glued("", false, "0 mm"));
+    assert_eq!(m.take(), delivery("", "0 mm"));
 }
 
 #[test]

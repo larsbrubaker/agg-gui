@@ -58,6 +58,7 @@ pub(crate) fn merge(first: Recognised, second: Recognised) -> Recognised {
         text,
         continues: first.continues,
         pending: second.pending,
+        pending_continues: second.pending_continues,
     }
 }
 
@@ -67,6 +68,7 @@ impl From<&StreamUpdate> for Recognised {
             text: update.text.clone(),
             continues: update.continues,
             pending: update.pending.clone(),
+            pending_continues: update.pending_continues,
         }
     }
 }

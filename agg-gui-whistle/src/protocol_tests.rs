@@ -57,6 +57,7 @@ fn every_message_from_the_worker_round_trips() {
         text: "hello \"world\"\n".into(),
         continues: true,
         pending: "and more".into(),
+        pending_continues: true,
     };
     for msg in [
         FromWorker::Progress {

@@ -3,11 +3,14 @@
 //!
 //! The engine (`engine.rs`, whistle's `Stream`) reports each pass as the
 //! words it committed (`text`, with `continues` when they carry on the last
-//! committed word) and the unconfirmed tail (`pending`). The keyboard puts a
+//! committed word) and the unconfirmed tail (`pending`, with
+//! `pending_continues` when it carries on the last committed word). The keyboard puts a
 //! space before a dictation's first insertion itself; between the
 //! provider's own updates the spacing is this module's: one space before
 //! each new run of committed words, none when it `continues`, and one before
-//! the tail once anything is committed. Several updates between two polls
+//! the tail once anything is committed (none when the tail
+//! `pending_continues`, so "2" with "0 mm" pending previews as "20 mm" and
+//! a dictation that ends there commits "20 mm"). Several updates between two polls
 //! accumulate: the committed runs join in order and the last tail wins.
 //!
 //! When the dictation does not start a sentence (the caret follows text
@@ -38,6 +41,8 @@ pub(crate) struct TextMapper {
     pending: String,
     /// The tail the last take delivered.
     delivered_pending: String,
+    /// The tail carries on the last committed word (no space before it).
+    pending_continues: bool,
 }
 
 /// The first word of `text`, lowercased unless it should keep its capital:
@@ -104,8 +109,11 @@ impl TextMapper {
     pub fn update(&mut self, update: &Recognised) {
         self.commit(&update.text, update.continues);
         let tail = update.pending.trim();
+        self.pending_continues = !tail.is_empty() && self.any_committed && update.pending_continues;
         self.pending = if tail.is_empty() {
             String::new()
+        } else if self.pending_continues {
+            tail.to_string()
         } else if self.any_committed {
             format!(" {tail}")
         } else {
@@ -116,7 +124,8 @@ impl TextMapper {
     /// The dictation is over: whatever tail is left becomes final.
     pub fn finish(&mut self) {
         let tail = std::mem::take(&mut self.pending);
-        self.commit(&tail, false);
+        let glued = std::mem::take(&mut self.pending_continues);
+        self.commit(&tail, glued);
     }
 
     /// What changed since the last take; `None` when nothing did.
