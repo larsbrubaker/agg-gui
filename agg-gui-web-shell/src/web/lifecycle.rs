@@ -136,8 +136,10 @@ pub(super) fn install_window_activation() {
     });
 }
 
-/// Window resizes / monitor moves / browser zoom. The rAF tick re-syncs
-/// size and DPR anyway; this just makes sure the next tick paints.
+/// Window resizes / monitor moves / browser zoom, and Android Chrome's
+/// address bar showing or hiding (`innerHeight` changes). The tick re-syncs
+/// size, DPR and the canvas's visible-viewport cap ([`super::viewport_fit`]);
+/// this makes sure there is a next tick, and that it paints.
 pub(super) fn install_resize() {
     let Some(window) = web_sys::window() else {
         return;

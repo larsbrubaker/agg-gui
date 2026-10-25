@@ -188,6 +188,12 @@ pub struct WebShellConfig {
     /// Off by default: a full-window app owns every key on its page. Turn it
     /// on for a canvas embedded in a larger page, so the page's own keyboard
     /// scrolling, find and copy keep working while it has focus.
+    ///
+    /// A full-window app's canvas (this off) is also kept inside the visible
+    /// viewport: the shell caps its `max-height` at the window's bottom, so a
+    /// `100vh` canvas on Android Chrome with the address bar showing is not
+    /// laid out under the bottom edge, on-screen keyboard and all. An
+    /// embedded canvas (this on) is left at the size the page gives it.
     pub keyboard_needs_focus: bool,
     /// Ctrl/Cmd shortcuts (by key, with or without Shift) the app handles
     /// itself and takes from the browser, beyond the clipboard and undo set

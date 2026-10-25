@@ -26,7 +26,10 @@
 //!   scale reduced uniformly when that would exceed the device's texture
 //!   limit) and DPR tracking every tick, woken by a canvas `ResizeObserver`
 //!   and a `devicePixelRatio` media query (browser zoom and a move to
-//!   another monitor change DPR without a resize event);
+//!   another monitor change DPR without a resize event); a full-window
+//!   canvas is capped at the visible viewport's bottom (`innerHeight`), so a
+//!   page sized with `100vh` keeps the app, and its on-screen keyboard, on
+//!   screen while Android Chrome's address bar shows;
 //! - DOM pointer (mouse / pen / multi-touch), wheel, context-menu, and
 //!   pointer-leave listeners; physical keyboard **plus the copy/cut/paste
 //!   clipboard bridge** via `agg_gui::web_adapter`;

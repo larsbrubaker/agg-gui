@@ -133,6 +133,17 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Fixed
 
+- A full-window app on a page that sizes its canvas with `100vh` no longer
+  runs under the bottom of the screen on Android Chrome while the address bar
+  shows (`100vh` there is the viewport with the bar hidden, about 56 CSS px
+  taller), which cut off the on-screen keyboard's bottom row. Each tick the
+  shell caps the canvas's inline `max-height` at the visible viewport's
+  bottom (`innerHeight` less the canvas's top), so the CSS box, the backing
+  store and the app's logical height are what shows; the bar showing or
+  hiding fires `resize`, and the next tick moves the cap. A canvas laid out
+  to fit is unaffected, the page's scrolling is left alone, and an embedded
+  canvas (`keyboard_needs_focus`) is never capped. Host pages should still
+  use `100dvh` (with a `100vh` fallback) so the page itself fits.
 - A slow GPU no longer builds a backlog of frames: the frame loop counts each
   presented frame until its `onSubmittedWorkDone()` resolves and keeps at
   most two on the GPU, one while the device's recent frames take longer than

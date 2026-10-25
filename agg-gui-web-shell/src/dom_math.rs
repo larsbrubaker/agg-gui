@@ -1,6 +1,7 @@
 //! DOM → agg-gui input and sizing math: mouse-button codes, the `buttons`
 //! bitmask, CSS-pixel → physical-pixel positions, canvas backing-store size,
-//! device-pixel-ratio sanitising, and whether the keyboard is the app's.
+//! device-pixel-ratio sanitising, the cap that keeps a full-window canvas
+//! inside the visible viewport, and whether the keyboard is the app's.
 //!
 //! Pure functions over plain numbers so they are unit-testable natively; the
 //! wasm listeners (the crate's `web::input` module) read the numbers off the
@@ -103,6 +104,28 @@ pub(crate) fn fit_backing(
     }
     let size = clamp_to_max_dim(backing_size(client_w, client_h, scale), max_dim);
     (size, scale)
+}
+
+/// The tallest a full-window app's canvas may be laid out, in CSS px, so its
+/// bottom edge sits on the bottom of the visible viewport: `viewport_height`
+/// (the window's `innerHeight`) less the canvas's `getBoundingClientRect().top`.
+///
+/// A page that sizes its canvas with `100vh` lays it out at the *large*
+/// viewport on Android Chrome (address bar hidden); while the bar shows, the
+/// bottom of that canvas, where the on-screen keyboard sits, is off screen.
+/// The shell writes this as the canvas's `max-height`, so the CSS box, the
+/// backing store ([`fit_backing`]) and the app's logical height are the part
+/// the user can see, and follow the bar as it shows and hides.
+///
+/// `None` (leave the canvas as the page laid it out) without a usable reading,
+/// or when the canvas starts at or below the viewport's bottom: it is not on
+/// screen, and capping it would collapse it.
+pub(crate) fn visible_max_height(canvas_top: f64, viewport_height: f64) -> Option<f64> {
+    if !canvas_top.is_finite() || !viewport_height.is_finite() || viewport_height <= 0.0 {
+        return None;
+    }
+    let room = viewport_height - canvas_top;
+    (room > 0.0).then_some(room)
 }
 
 /// Canvas-local pointer position in physical pixels, Y-down — the input space
@@ -265,6 +288,55 @@ mod tests {
         let ((w, h), scale) = fit_backing(400.0, 1500.0, 2.0, 2048);
         assert!(h <= 2048 && w < 2048);
         assert!(scale < 2.0);
+    }
+
+    // A Pixel 7 in Chrome: 100vh is the large viewport (bar hidden, 787 CSS
+    // px tall), while `innerHeight` is 731 with the address bar showing.
+    const LARGE_VH: f64 = 787.0;
+    const BAR_SHOWN: f64 = 731.0;
+
+    #[test]
+    fn a_canvas_laid_out_at_100vh_is_held_to_the_visible_viewport() {
+        // The canvas's CSS box is what the backing store, and so the app's
+        // logical height and the on-screen keyboard's bottom edge, come
+        // from: once the max-height applies, it is the visible height.
+        let max = visible_max_height(0.0, BAR_SHOWN).expect("canvas on screen");
+        assert_eq!(max, BAR_SHOWN);
+        let laid_out = LARGE_VH.min(max);
+        let ((w, h), scale) = fit_backing(412.0, laid_out, 2.625, 8192);
+        assert_eq!((w, h), (1081, 1918));
+        // The bottom row of the keyboard sits on the canvas's bottom edge,
+        // which is now within the window.
+        assert!(h as f64 / scale <= BAR_SHOWN);
+    }
+
+    #[test]
+    fn the_cap_follows_the_bar_showing_and_hiding() {
+        assert_eq!(visible_max_height(0.0, BAR_SHOWN), Some(BAR_SHOWN));
+        // Bar hidden: the cap grows back to the whole large viewport, so a
+        // 100vh canvas is its full height again.
+        assert_eq!(visible_max_height(0.0, LARGE_VH), Some(LARGE_VH));
+    }
+
+    #[test]
+    fn the_cap_ends_the_canvas_at_the_visible_bottom_wherever_it_starts() {
+        // Below a 50 px page header.
+        assert_eq!(visible_max_height(50.0, BAR_SHOWN), Some(BAR_SHOWN - 50.0));
+        // The page scrolled up by 20 px: the canvas's bottom still lands on
+        // the viewport's bottom.
+        assert_eq!(visible_max_height(-20.0, BAR_SHOWN), Some(BAR_SHOWN + 20.0));
+    }
+
+    #[test]
+    fn no_cap_without_a_usable_reading_or_an_on_screen_canvas() {
+        assert_eq!(visible_max_height(0.0, 0.0), None);
+        assert_eq!(visible_max_height(0.0, -5.0), None);
+        assert_eq!(visible_max_height(0.0, f64::NAN), None);
+        assert_eq!(visible_max_height(f64::NAN, BAR_SHOWN), None);
+        // Starting at or below the window's bottom, the canvas is not on
+        // screen; collapsing it would only hide it for good.
+        assert_eq!(visible_max_height(BAR_SHOWN, BAR_SHOWN), None);
+        assert_eq!(visible_max_height(900.0, BAR_SHOWN), None);
     }
 
     #[test]

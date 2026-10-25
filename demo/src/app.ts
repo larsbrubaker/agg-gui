@@ -57,8 +57,34 @@ document.body.appendChild(mobileTextInput);
 // changes, or the tab moves to a different-DPI monitor.
 let lastDpr = 0;
 
+// Android Chrome measures 100vh with its address bar hidden, so a wrapper
+// sized with it (index.html uses 100dvh, but a page embedding this harness may
+// not) is taller than the window while the bar shows, and the app's bottom,
+// where the on-screen keyboard sits, is under the screen's edge. Cap the
+// wrapper at the window's bottom (innerHeight: the layout viewport, which
+// follows the bar but not a pinch zoom) so the canvas, and the app's height,
+// are what the user sees. agg-gui-web-shell does the same for its apps
+// (web/viewport_fit.rs). A max-height only removes the part below the window,
+// and the page is never scrolled.
+let wrapCap: number | null = null;
+
+function capToVisibleViewport(wrap: HTMLElement): void {
+  const room = window.innerHeight - wrap.getBoundingClientRect().top;
+  const cap = Number.isFinite(room) && room > 0 ? room : null;
+  if (cap === wrapCap) return;
+  wrapCap = cap;
+  if (cap === null) wrap.style.removeProperty("max-height");
+  else wrap.style.maxHeight = `${cap}px`;
+}
+
+// The bar showing or hiding (or any window resize) changes the cap: the next
+// animation frame renders at the new size even if nothing else wants a draw.
+let viewportChanged = false;
+window.addEventListener("resize", () => { viewportChanged = true; });
+
 function updateCanvasSize(): boolean {
   const wrap = canvas.parentElement!;
+  capToVisibleViewport(wrap);
   const dpr  = window.devicePixelRatio || 1;
   const w    = Math.floor(wrap.clientWidth  * dpr);
   const h    = Math.floor(wrap.clientHeight * dpr);
@@ -132,7 +158,8 @@ function animationLoop(now: number) {
     // returns true; otherwise fall through to the normal reactive render.
     if (!tickScreenShare(now, render)) {
       const needs = (wasmModule["needs_draw"] as (() => boolean) | undefined);
-      if (!needs || needs()) {
+      if (!needs || needs() || viewportChanged) {
+        viewportChanged = false;
         render();
       }
     }

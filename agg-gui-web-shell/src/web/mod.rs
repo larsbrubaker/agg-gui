@@ -17,7 +17,9 @@
 //! - [`file_drop`] — canvas file drag-hover and drop listeners;
 //! - [`lifecycle`] — window-level pointer-release resync, page-hide flush;
 //! - [`platform`] — client-platform detection, fullscreen, fatal panel;
-//! - [`sensors`] — tilt + gamepad (moved from `demo-wgpu`).
+//! - [`sensors`] — tilt + gamepad (moved from `demo-wgpu`);
+//! - [`viewport_fit`] — caps a full-window canvas at the visible viewport's
+//!   bottom (a `100vh` page on Android Chrome with the address bar showing).
 //!
 //! State lives in separate thread-locals (the browser main thread owns the
 //! whole shell) so a host callback that receives `&mut App` can still call
@@ -49,6 +51,7 @@ mod lifecycle;
 mod platform;
 mod schedule;
 mod sensors;
+mod viewport_fit;
 mod wake_sources;
 
 pub use schedule::request_tick;
@@ -269,6 +272,7 @@ where
     // The page's thread runs the frame loop, so its `ui_thread` queue is the
     // one each tick drains.
     agg_gui::ui_thread::mark_current_thread_as_ui_thread();
+    viewport_fit::set_enabled(!config.keyboard_needs_focus);
     let (_, scale, _) = frame::size_backing_store(&canvas);
     agg_gui::set_device_scale(scale);
     POLICY.with(|p| p.set(config.redraw_policy));

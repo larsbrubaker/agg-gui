@@ -13,7 +13,12 @@
       margin: 0;
       padding: 0;
       width: 100vw;
+      /* 100dvh follows Android Chrome's address bar; 100vh there is the
+         viewport with the bar hidden, which puts the bottom of the canvas
+         (and the on-screen keyboard) under the screen's edge. 100vh is the
+         fallback for browsers without dvh. */
       height: 100vh;
+      height: 100dvh;
       overflow: hidden;
     }
 
@@ -21,6 +26,7 @@
     .canvas-wrap {
       width: 100vw;
       height: 100vh;
+      height: 100dvh;
       display: flex;
       align-items: stretch;
       justify-content: stretch;

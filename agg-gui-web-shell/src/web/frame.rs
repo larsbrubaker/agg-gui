@@ -6,8 +6,9 @@
 //!
 //! Owns the GPU-side state ([`Painter`]) in its own thread-local; the app and
 //! host live in [`super`]'s cells. Order per tick mirrors the native shell's
-//! loop: size → sensors/fullscreen → `on_tick` → drain `agg_gui::ui_thread`
-//! → decide → (`on_frame` → `paint` → `end_frame` → `after_paint` → present →
+//! loop: size (capped at the visible viewport, [`super::viewport_fit`]) →
+//! sensors/fullscreen → `on_tick` → drain `agg_gui::ui_thread` → decide →
+//! (`on_frame` → `paint` → `end_frame` → `after_paint` → present →
 //! `after_present`) → `on_idle` → run on or sleep. Every decision is delegated
 //! to a platform-neutral module (`dom_math::fit_backing`, `policy`,
 //! `frames_in_flight`, `recovery`, `frame_schedule`) that is unit tested.
@@ -131,8 +132,11 @@ pub(super) fn input_scale() -> f64 {
 /// Match the canvas backing store to `clientSize × DPR`, fitted to the
 /// device's texture limit ([`fit_backing`] — the single source of truth, so
 /// the surface `configure` never disagrees with it and resizes every tick).
+/// A full-window canvas is first capped at the visible viewport's bottom
+/// ([`super::viewport_fit`]), so the client size read here is what shows.
 /// Returns the size, the scale it was built at, and whether it changed.
 pub(super) fn size_backing_store(canvas: &web_sys::HtmlCanvasElement) -> ((u32, u32), f64, bool) {
+    super::viewport_fit::fit(canvas);
     let ((w, h), scale) = fit_backing(
         canvas.client_width() as f64,
         canvas.client_height() as f64,
