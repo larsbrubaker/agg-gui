@@ -331,6 +331,8 @@ impl Widget for TextArea {
         tt.sel_loop_ms = pt::ms(&t);
         t = pt::start();
         let text_color = self.text_color(&v);
+        // Muted text is the hint's colour, the theme's "not real text yet".
+        let muted_color = self.theme.placeholder_color_for(self.focused, v.text_dim);
         ctx.set_fill_color(text_color);
         for (i, line) in self.cached_lines.iter().enumerate() {
             if line.text.is_empty() {
@@ -345,11 +347,11 @@ impl Widget for TextArea {
             tt.painted_lines += 1;
             let baseline_y = self.line_baseline_y(i);
             let x0 = self.line_x_start(line);
-            match &self.highlighter {
-                // Syntax-highlighted path: paint each coloured run at its
-                // measured x offset; gaps stay in the ambient text colour.
-                Some(hl) => {
-                    let spans = hl(&line.text);
+            match self.line_spans(line, muted_color) {
+                // Highlighted or muted path (`muted.rs`): paint each coloured
+                // run at its measured x offset; gaps stay in the ambient
+                // text colour.
+                Some(spans) => {
                     let th = pt::start();
                     self.paint_highlighted_line(
                         ctx, &line.text, &spans, x0, baseline_y, text_color,

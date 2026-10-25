@@ -171,6 +171,9 @@ struct TextAreaSig {
     h_offset_bits: u64,
     /// Whether the area is enabled: a disabled area draws its hint faded.
     enabled: bool,
+    /// The muted byte range (`muted.rs`): text that turns final keeps its
+    /// bytes, so only the range says the colour changed.
+    muted: Option<(usize, usize)>,
 }
 
 /// A callback handed the current text.
@@ -216,6 +219,8 @@ pub struct TextArea {
     /// present, each wrapped line is painted as coloured runs instead of a
     /// single ambient-colour string.
     highlighter: Option<Rc<LineHighlighter>>,
+    /// Bytes of the buffer painted in the muted (hint) colour (`muted.rs`).
+    muted: Option<muted::MutedRange>,
 
     /// Fired after any text mutation (typing, delete, paste, cut, and
     /// key-intercept edits that advance the content epoch). Mirrors
@@ -370,6 +375,7 @@ impl TextArea {
             focus_request_id: None,
             on_key_chord: None,
             highlighter: None,
+            muted: None,
             on_change: None,
             on_edit_complete: None,
             text_on_focus: String::new(),
@@ -441,6 +447,7 @@ impl TextArea {
             },
             h_offset_bits: self.h_offset.to_bits(),
             enabled: self.enabled_now(),
+            muted: self.muted_range(),
         }
     }
 
@@ -741,6 +748,7 @@ mod frame;
 mod geometry;
 mod highlight;
 mod ime;
+mod muted;
 mod no_wrap;
 mod scroll;
 mod touch_select;
@@ -760,6 +768,8 @@ mod disabled_tests;
 mod edit_complete_tests;
 #[cfg(test)]
 mod frame_tests;
+#[cfg(test)]
+mod muted_tests;
 #[cfg(test)]
 mod no_wrap_tests;
 #[cfg(test)]
