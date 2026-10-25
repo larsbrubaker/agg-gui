@@ -113,10 +113,14 @@
 //!   path; the keyboard either consumes them (a key tap) or returns
 //!   `false` so they continue to the widget tree.
 //! - Key taps push synthesized `(Key, Modifiers)` pairs into a queue;
-//!   [`App`] drains the queue after each event handler and dispatches
-//!   them through the normal [`App::on_key_down`] code path. The
-//!   focused [`TextField`] receives `KeyDown { Key::Char('a') }` exactly
-//!   like a physical key press.
+//!   [`App`] drains the queue after each pointer or touch event the
+//!   keyboard handles (a press, a move, a lift, a cancel) and at the start
+//!   of every layout (where a held Backspace's repeat fires, since a finger
+//!   held still sends no events), and dispatches them through the normal
+//!   [`App::on_key_down`] code path. The focused [`TextField`] receives
+//!   `KeyDown { Key::Char('a') }` exactly like a physical key press. The
+//!   caret gestures queue caret operations beside them (`caret_ops.rs`),
+//!   which the App runs at the same moments and answers.
 //! - Show / hide is driven by the focused widget — when the App's focus
 //!   changes to a widget whose [`Widget::accepts_text_input`] returns
 //!   `true`, the keyboard slides up. Losing focus slides it down.
@@ -134,6 +138,10 @@
 //! - Tap and slide to type, a preview over the pressed letter, long-press
 //!   alternates, hold-to-repeat Backspace, Shift / Caps Lock, and an Enter
 //!   key drawn as the field's action. No predictive bar yet.
+//! - Caret control (`cursor_slide.rs`): on Gboard a slide along the space
+//!   bar moves the caret a character a step and a slide left from Backspace
+//!   selects words to delete; on the iPhone a held space bar turns the
+//!   keyboard into a trackpad. The caret moves as synthetic arrow keys.
 //! - Layout-driven painting via [`layouts::Layout`] so adding a new
 //!   layer or layout is a data change, not a code change.
 //! - Voice input: with a speech-to-text provider registered
@@ -149,6 +157,8 @@ use crate::input_profile::current_input_profile;
 
 pub mod alternates;
 mod alternates_paint;
+pub(crate) mod caret_ops;
+pub(crate) mod cursor_slide;
 pub mod enter_action;
 pub mod events;
 mod hit;
@@ -164,12 +174,13 @@ pub mod voice;
 mod voice_paint;
 pub(crate) mod voice_session;
 
+pub use caret_ops::on_haptic_tick;
 pub use enter_action::{EnterAction, TextInputHints};
 use layouts::{Layer, Layout};
 use pointer::tick_key_repeat;
 pub use pointer::{
     cancel_press, contains_point, handle_software_keyboard_mouse_down,
-    handle_software_keyboard_mouse_move, handle_software_keyboard_mouse_up,
+    handle_software_keyboard_mouse_move, handle_software_keyboard_mouse_up, overlap_cancels_press,
 };
 use state::{with_state_mut, with_state_ref};
 use style::Style;
@@ -455,6 +466,16 @@ pub fn needs_draw() -> bool {
 // Paint
 // ---------------------------------------------------------------------------
 
+/// Fire a held key's repeat when it is due (a held Backspace). Its keys go on
+/// the synthetic queue; [`App::layout`](crate::widget::App::layout) calls
+/// this as a frame starts and hands them to the focused field before the
+/// tree is laid out, so a finger held still deletes while it is down and the
+/// field lays out and shows the edit that frame. Nothing else delivers them:
+/// a still finger sends no events.
+pub(crate) fn tick_held_keys() {
+    tick_key_repeat();
+}
+
 /// Paint the keyboard panel and its keys. Called by [`App::paint`] last,
 /// after all other global-overlay drains, so the keyboard always sits on
 /// top of normal content, combo popups, tooltips, and modal overlays.
@@ -463,10 +484,6 @@ pub fn needs_draw() -> bool {
 /// caller is responsible for any `ctx.scale(device_scale, …)` save/restore
 /// wrap (mirrors how combo popups are drained).
 pub fn paint_software_keyboard(ctx: &mut dyn DrawCtx, viewport: crate::geometry::Size) {
-    // Advance the hold-to-repeat state machine first so it has a chance
-    // to fire before the next paint reuses cached key positions.
-    tick_key_repeat();
-
     let visible_fraction = with_state_mut(|s| s.slide.tick());
     if visible_fraction <= 0.001 {
         // Hidden — also clear cached key hit-rects so a stale layout
@@ -480,6 +497,8 @@ pub fn paint_software_keyboard(ctx: &mut dyn DrawCtx, viewport: crate::geometry:
     // A key held long enough opens its alternates before the keys are laid
     // out again.
     pointer::tick_long_press(&style, viewport.width);
+    // A space bar held still on the iPhone becomes the trackpad.
+    cursor_slide::tick();
     pointer::rearm_timed_wakes();
     let layer = with_state_ref(|s| s.current_layer);
     let layout = Layout::for_profile(layer, profile);
@@ -492,6 +511,7 @@ pub fn paint_software_keyboard(ctx: &mut dyn DrawCtx, viewport: crate::geometry:
         family: layout.family,
         alternates: s.alternates.clone(),
         voice,
+        label_alpha: cursor_slide::label_alpha(s),
     });
 
     // Compute panel rect. The fully-extended height is determined by the
@@ -585,6 +605,13 @@ pub(crate) mod test_hook {
             *s = KeyboardState::default();
         });
         super::voice_session::reset();
+        super::caret_ops::clear_listeners();
+        super::caret_ops::clear();
+    }
+
+    /// Whether the iPhone's space-bar trackpad is on.
+    pub fn trackpad_active() -> bool {
+        with_state_ref(super::cursor_slide::trackpad_active)
     }
 
     /// Re-export `handle_layer_switch` so caps-lock behaviour can be

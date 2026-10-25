@@ -10,7 +10,8 @@
 //!   and [`request_tick`]: the loop sleeps while nothing needs a frame;
 //! - [`wake_sources`] — browser events that only wake the loop (canvas
 //!   resize, DPR change, fullscreen change, gamepad connected);
-//! - [`haptics`] — a vibrate tick when a finger's long press fires;
+//! - [`haptics`] — a vibrate tick when a finger's long press fires and
+//!   for each step of a keyboard caret slide;
 //! - [`ime`] — the hidden input that carries browser input-method
 //!   composition and committed text to the focused text widget;
 //! - [`input`] — canvas pointer / wheel / context-menu listeners;

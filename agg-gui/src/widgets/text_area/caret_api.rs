@@ -3,7 +3,9 @@
 //! `TypeFacePrinter.LineSpacing`), the caret's offset from the start of the
 //! text (`InsertBarPosition`), the caret and selection-start character indices
 //! with C#'s out-of-range-tolerant setters (`CharIndexToInsertBefore`,
-//! `SelectionIndexToStartBefore`) and `CopySelection`. The laid-out content
+//! `SelectionIndexToStartBefore`) and `CopySelection`; and the raw byte
+//! selection the on-screen keyboard's caret gestures read and put back
+//! ([`Widget::text_selection`](crate::widget::Widget::text_selection)). The laid-out content
 //! height (C#'s auto-sized `Height`) is `content_height` in `scroll.rs`.
 //!
 //! Split out of `text_area.rs` (the widget) next to `geometry.rs` (the
@@ -115,5 +117,23 @@ impl TextArea {
     /// copied when nothing is selected.
     pub fn copy_selection(&mut self) {
         self.clipboard_copy();
+    }
+
+    /// The selection as `(anchor, caret)` byte offsets.
+    pub(super) fn anchor_and_caret(&self) -> (usize, usize) {
+        let st = self.edit.borrow();
+        (st.anchor, st.cursor)
+    }
+
+    /// Put the selection at `(anchor, caret)` byte offsets (clamped to the
+    /// text and its character boundaries) and keep the caret in view.
+    pub(super) fn set_anchor_and_caret(&mut self, anchor: usize, caret: usize) {
+        {
+            let mut st = self.edit.borrow_mut();
+            st.anchor = crate::widgets::text_field_core::floor_char_boundary(&st.text, anchor);
+            st.cursor = crate::widgets::text_field_core::floor_char_boundary(&st.text, caret);
+        }
+        self.ensure_cursor_visible();
+        crate::animation::request_draw();
     }
 }

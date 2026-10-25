@@ -362,6 +362,21 @@ impl Widget for RichMarkdownEditWidget {
         true
     }
 
+    fn is_multi_line_text(&self) -> bool {
+        true
+    }
+
+    fn text_selection(&self) -> Option<crate::widget::TextSelection> {
+        self.selection_offsets()
+    }
+
+    fn set_text_selection(&mut self, selection: crate::widget::TextSelection) -> bool {
+        self.set_selection_offsets(selection);
+        let _ = self.state.scroll_caret_into_view();
+        self.after_input();
+        true
+    }
+
     fn needs_draw(&self) -> bool {
         if !self.is_visible() {
             return false;

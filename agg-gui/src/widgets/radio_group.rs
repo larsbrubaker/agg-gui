@@ -745,8 +745,18 @@ mod tests {
         assert!(rows > 1, "expected multiple rows, got {rows}");
     }
 
+    /// The row height follows the input profile's touch-target minimum, a
+    /// process-wide setting the keyboard tests change: hold the lock and
+    /// lay out as on the desktop.
+    fn desktop_profile() -> std::sync::MutexGuard<'static, ()> {
+        let lock = crate::input_profile::profile_test_lock();
+        crate::input_profile::set_input_profile(crate::input_profile::InputProfile::Desktop);
+        lock
+    }
+
     #[test]
     fn single_wide_row_does_not_wrap() {
+        let _profile = desktop_profile();
         let mut g = empty_group(4);
         let size = g.layout(Size::new(2000.0, 0.0));
         assert_eq!(
@@ -774,6 +784,7 @@ mod tests {
 
     #[test]
     fn vertical_mode_is_unaffected() {
+        let _profile = desktop_profile();
         let mut g = RadioGroup::new(vec!["a", "b", "c"], 0, test_font());
         let size = g.layout(Size::new(200.0, 0.0));
         assert_eq!(size.height, 3.0 * ROW_H);

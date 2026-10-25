@@ -41,6 +41,9 @@ pub(super) struct PaintState {
     pub alternates: Option<AlternatesPopup>,
     /// The microphone key's state; `None` without a voice provider (no key).
     pub voice: Option<VoiceView>,
+    /// How opaque the key labels draw (`0.0` while the iPhone's trackpad
+    /// has faded them).
+    pub label_alpha: f64,
 }
 
 /// The Enter key's cap and colours for what Enter does: Gboard draws an

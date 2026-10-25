@@ -24,7 +24,7 @@ use crate::geometry::{Point, Rect, Size};
 
 mod widget_trait;
 
-pub use widget_trait::Widget;
+pub use widget_trait::{TextSelection, Widget};
 
 mod app;
 mod backbuffer;

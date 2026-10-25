@@ -27,6 +27,15 @@ pub fn prev_char_boundary(s: &str, byte_pos: usize) -> usize {
     }
 }
 
+/// `byte_pos` clamped to `s` and moved back to a character boundary.
+pub fn floor_char_boundary(s: &str, byte_pos: usize) -> usize {
+    let mut pos = byte_pos.min(s.len());
+    while !s.is_char_boundary(pos) {
+        pos -= 1;
+    }
+    pos
+}
+
 pub fn next_char_boundary(s: &str, byte_pos: usize) -> usize {
     let mut pos = byte_pos + 1;
     while pos <= s.len() {
@@ -271,5 +280,22 @@ mod word_line_tests {
         let s = "a\n\nb";
         // Offset 2 is the empty line between the two newlines.
         assert_eq!(paragraph_range_at(s, 2), (2, 2));
+    }
+}
+
+#[cfg(test)]
+mod floor_char_boundary_tests {
+    use super::floor_char_boundary;
+
+    #[test]
+    fn floor_char_boundary_clamps_and_steps_back_into_whole_characters() {
+        let s = "héllo"; // é is two bytes: 1..3
+        assert_eq!(floor_char_boundary(s, 0), 0);
+        assert_eq!(floor_char_boundary(s, 1), 1);
+        assert_eq!(floor_char_boundary(s, 2), 1, "inside é");
+        assert_eq!(floor_char_boundary(s, 3), 3);
+        assert_eq!(floor_char_boundary(s, 6), 6);
+        assert_eq!(floor_char_boundary(s, 99), 6, "past the end");
+        assert_eq!(floor_char_boundary("", 5), 0);
     }
 }

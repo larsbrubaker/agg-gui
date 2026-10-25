@@ -13,6 +13,7 @@ use web_time::Instant;
 use crate::animation::Tween;
 
 use super::alternates::AlternatesPopup;
+use super::cursor_slide::CursorGesture;
 use super::enter_action::TextInputHints;
 use super::key::PaintedKey;
 use super::layouts::Layer;
@@ -89,6 +90,9 @@ pub struct KeyboardState {
     /// The key last released and until when it stays drawn pressed (with
     /// its preview), so a quick tap still flashes it.
     pub linger: Option<(usize, Instant)>,
+    /// A press that can move the caret (the space bar, Gboard's Backspace),
+    /// and the slide or trackpad it became (see `cursor_slide.rs`).
+    pub cursor: Option<CursorGesture>,
 }
 
 /// A press on a key with long-press alternates, timed from when the finger
@@ -102,10 +106,10 @@ pub struct HoldState {
 }
 
 /// Hold-to-repeat state captured the moment the user presses a
-/// repeat-eligible key (currently Backspace only). Polled from
-/// [`super::paint_software_keyboard`] every frame so the firing cadence
-/// happens in lockstep with the animation loop — no separate timer
-/// thread, fully WASM-friendly.
+/// repeat-eligible key (currently Backspace only). Polled at the start of
+/// every layout ([`super::tick_held_keys`], from `App::layout`) so the
+/// firing cadence happens in lockstep with the animation loop — no separate
+/// timer thread, fully WASM-friendly.
 #[derive(Debug, Clone, Copy)]
 pub struct KeyRepeatState {
     /// Index into `last_painted_keys`. We re-check the key still exists
@@ -150,6 +154,7 @@ impl Default for KeyboardState {
             hold: None,
             alternates: None,
             linger: None,
+            cursor: None,
         }
     }
 }

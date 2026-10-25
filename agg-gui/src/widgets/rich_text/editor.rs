@@ -43,6 +43,7 @@ mod context_menu;
 pub mod core;
 mod geometry;
 mod input;
+mod offsets;
 mod paint;
 mod scroll;
 
@@ -369,6 +370,19 @@ impl Widget for RichTextEdit {
     }
     fn text_input_value(&self) -> Option<String> {
         Some(self.plain_text())
+    }
+
+    fn is_multi_line_text(&self) -> bool {
+        true
+    }
+
+    fn text_selection(&self) -> Option<crate::widget::TextSelection> {
+        Some(self.selection_offsets())
+    }
+
+    fn set_text_selection(&mut self, selection: crate::widget::TextSelection) -> bool {
+        self.set_selection_offsets(selection);
+        true
     }
 
     fn text_before_caret(&self) -> Option<String> {

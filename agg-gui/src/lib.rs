@@ -226,8 +226,8 @@ pub use widget::{
     find_widget_by_id, find_widget_by_id_mut, find_widget_by_type, find_widget_screen_rect,
     logical_root_transform, observe_events, under_mouse_state_of, visible_root_rect, App,
     BackbufferKind, BackbufferSpec, BackbufferState, EventObserver, InspectorNode,
-    InspectorOverlay, NamedTarget, UnderMouseState, Widget, WidgetAnchor, WidgetBaseEdit,
-    WidgetBaseField, WidgetId,
+    InspectorOverlay, NamedTarget, TextSelection, UnderMouseState, Widget, WidgetAnchor,
+    WidgetBaseEdit, WidgetBaseField, WidgetId,
 };
 pub use widget_background::{render_background, render_progress_fill};
 pub use widgets::{

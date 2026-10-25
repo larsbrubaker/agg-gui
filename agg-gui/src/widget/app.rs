@@ -7,6 +7,7 @@ mod gesture;
 mod hover_chain;
 mod ime;
 mod keyboard;
+mod keyboard_caret;
 mod path_anchor;
 mod pinch;
 pub use path_anchor::WidgetAnchor;
@@ -207,6 +208,9 @@ impl App {
     /// per frame before [`paint`][Self::paint].
     pub fn layout(&mut self, viewport: Size) {
         self.tick_long_press();
+        // A held Backspace repeats while the finger rests: the edit is laid
+        // out this frame.
+        self.deliver_held_key_repeats();
         self.deliver_system_paste();
         // Snapshot BEFORE laying out: a signal arriving mid-layout is then
         // treated as post-layout and earns a follow-up frame (see `paint`).

@@ -69,6 +69,16 @@ impl Widget for TextField {
         Some(self.committed_text_before_caret())
     }
 
+    fn text_selection(&self) -> Option<crate::widget::TextSelection> {
+        let (anchor, caret) = self.anchor_and_caret();
+        Some(crate::widget::TextSelection { anchor, caret })
+    }
+
+    fn set_text_selection(&mut self, selection: crate::widget::TextSelection) -> bool {
+        self.set_anchor_and_caret(selection.anchor, selection.caret);
+        true
+    }
+
     fn resume_text_input(&mut self, caret: usize, composition: &str, in_text: bool) -> bool {
         self.resume_composition(caret, composition, in_text)
     }

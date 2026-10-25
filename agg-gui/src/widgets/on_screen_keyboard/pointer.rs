@@ -7,12 +7,15 @@
 //! key, and a finger sliding across the keys types the one under it when
 //! it lifts, as on the phone's own keyboard. Holding a key with long-press
 //! alternates opens them (`alternates.rs`): the finger then picks one by
-//! sliding along the popup's row and types it by lifting.
+//! sliding along the popup's row and types it by lifting. A press on the
+//! space bar (and Gboard's Backspace) may instead become a caret slide or the
+//! iPhone's trackpad, which `cursor_slide.rs` runs from these handlers.
 
 use crate::event::{Key, Modifiers, MouseButton};
 use crate::geometry::Point;
 
 use super::alternates::{alternates_for, AlternatesPopup, LONG_PRESS_DELAY};
+use super::cursor_slide;
 use super::events::push_synthetic_key;
 use super::layouts::{Layer, LayoutFamily};
 use super::state::{self, with_state_mut, with_state_ref, HoldState, KeyboardState};
@@ -60,6 +63,7 @@ pub fn handle_software_keyboard_mouse_down(
         s.alternates = None;
         s.linger = None;
         s.hold = hold_for(s, hit);
+        cursor_slide::arm(s, hit, pos, family());
         // Register a hold-to-repeat tracker if the pressed key supports
         // it (currently Backspace only).
         s.key_repeat = hit.and_then(|i| {
@@ -85,6 +89,10 @@ pub(super) const PRESS_LINGER: std::time::Duration = std::time::Duration::from_m
 /// The key drawn pressed: the one under the finger, else one released
 /// less than [`PRESS_LINGER`] ago.
 pub(super) fn drawn_pressed(s: &KeyboardState) -> Option<usize> {
+    if cursor_slide::trackpad_active(s) {
+        // The iPhone's trackpad shows no key pressed.
+        return None;
+    }
     s.pressed_key_index.or_else(|| {
         s.linger
             .filter(|(_, until)| crate::clock::now() < *until)
@@ -106,6 +114,7 @@ pub(super) fn rearm_timed_wakes() {
         [
             s.linger.map(|(_, until)| until),
             s.hold.map(|h| h.pressed_at + LONG_PRESS_DELAY),
+            cursor_slide::due(s),
         ]
     });
     for when in due.into_iter().flatten() {
@@ -145,6 +154,10 @@ pub fn handle_software_keyboard_mouse_move(pos: Point) -> bool {
     let captured = with_state_ref(|s| s.captured_pointer);
     if !captured {
         return false;
+    }
+    // A caret slide or trackpad owns the finger once it has begun.
+    if cursor_slide::track(pos) {
+        return true;
     }
     // With the alternates open the finger picks along their row.
     let tracked = with_state_mut(|s| match s.alternates.as_mut() {
@@ -189,6 +202,10 @@ pub fn handle_software_keyboard_mouse_up(
     let captured = with_state_ref(|s| s.captured_pointer);
     if !captured {
         return false;
+    }
+    // A caret slide ends with the lift and types nothing.
+    if cursor_slide::release() {
+        return true;
     }
     // Lifting with the alternates open types the highlighted one (or
     // nothing, away from the row) and nothing else.
@@ -261,7 +278,8 @@ pub fn handle_software_keyboard_mouse_up(
 }
 
 /// Let go of the pressed key without typing it (the platform cancelled the
-/// touch): closes the alternates and stops a repeat.
+/// touch, or a second finger cancelled it): closes the alternates, stops a
+/// repeat and cancels a caret gesture.
 pub fn cancel_press() {
     with_state_mut(|s| {
         s.pressed_key_index = None;
@@ -269,8 +287,16 @@ pub fn cancel_press() {
         s.key_repeat = None;
         s.hold = None;
         s.alternates = None;
+        cursor_slide::cancel(s);
     });
     crate::animation::request_draw();
+}
+
+/// Whether a second finger landing now should cancel the press under the
+/// first (a Backspace slide or the iPhone trackpad under way) rather than
+/// finish it with a lift.
+pub fn overlap_cancels_press() -> bool {
+    with_state_ref(cursor_slide::overlap_cancels)
 }
 
 /// The key that owns `pos`: the one whose hit area (see [`super::hit`])
@@ -419,10 +445,11 @@ pub(super) fn handle_layer_switch(target: Layer) {
     }
 }
 
-/// Advance the hold-to-repeat state machine. Called once per paint so
-/// the cadence rides on the animation loop. When the held key has been
-/// down long enough we synthesize a `Backspace` and request another
-/// draw so the loop keeps pumping for the next repeat.
+/// Advance the hold-to-repeat state machine. Called once per frame (at the
+/// start of `App::layout`, through [`super::tick_held_keys`]) so
+/// the cadence rides on the animation loop, which [`super::needs_draw`]
+/// keeps running while a repeat is held. When the held key has been down
+/// long enough we synthesize a `Backspace`.
 pub(super) fn tick_key_repeat() {
     let now = crate::clock::now();
     let action = with_state_mut(|s| {
@@ -449,7 +476,9 @@ pub(super) fn tick_key_repeat() {
         if let key::KeyAction::Backspace = action {
             push_synthetic_key(Key::Backspace, Modifiers::default());
         }
-        // Keep the loop hot for the next tick.
+        // The field changed: draw it. (Frames keep coming between repeats
+        // because `needs_draw` is true while a repeat is held, not because
+        // of this request, which the next paint clears as it starts.)
         crate::animation::request_draw();
     }
 }

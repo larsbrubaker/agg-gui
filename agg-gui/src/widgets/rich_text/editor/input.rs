@@ -132,10 +132,13 @@ impl RichTextEdit {
     fn handle_key(&mut self, key: &Key, modifiers: &crate::event::Modifiers) -> EventResult {
         let shift = modifiers.shift;
         let cmd = modifiers.ctrl || modifiers.meta;
+        // A word step: Ctrl (or Cmd), and Option under the Mac bindings, as
+        // in `TextField` and `TextArea`.
+        let word = cmd || (crate::platform::use_mac_key_bindings() && modifiers.alt);
         let caret = self.core.borrow().caret();
         match key {
             Key::ArrowLeft => {
-                let target = if cmd {
+                let target = if word {
                     self.word_target(caret, -1)
                 } else {
                     self.char_target(caret, -1)
@@ -143,7 +146,7 @@ impl RichTextEdit {
                 self.core.borrow_mut().set_caret(target, shift);
             }
             Key::ArrowRight => {
-                let target = if cmd {
+                let target = if word {
                     self.word_target(caret, 1)
                 } else {
                     self.char_target(caret, 1)

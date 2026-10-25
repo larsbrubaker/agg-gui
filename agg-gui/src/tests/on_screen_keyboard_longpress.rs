@@ -142,12 +142,27 @@ fn a_key_without_alternates_types_once_however_long_it_is_held() {
     assert_eq!(popup(), None);
     assert!(drain_synthetic_keys().is_empty(), "nothing repeats");
     assert!(matches!(up(b)[..], [Key::Char('b')]));
-    // Backspace still repeats while held.
+    // Backspace still repeats while held: each frame hands the repeats to
+    // the field (`App::paint`), so they delete as the finger rests.
+    let field = phone
+        .app
+        .root_mut()
+        .as_any_mut()
+        .and_then(|a| a.downcast_mut::<TextField>())
+        .expect("the root is the field");
+    field.set_text("abcdefgh");
+    field.set_cursor_position(8);
     let bs = center(key_of("Backspace").rect);
     hold(&mut phone, bs, Duration::from_millis(1000));
-    let repeated = drain_synthetic_keys();
-    assert!(repeated.len() >= 3, "Backspace repeats: {}", repeated.len());
-    assert!(repeated.iter().all(|(k, _)| matches!(k, Key::Backspace)));
+    let left = phone
+        .app
+        .root_mut()
+        .as_any_mut()
+        .and_then(|a| a.downcast_mut::<TextField>())
+        .map(|f| f.text())
+        .expect("the root is the field");
+    assert!(left.len() <= 5, "Backspace repeats while held: {left:?}");
+    assert!(left.starts_with("ab"), "no runaway repeat: {left:?}");
     assert!(up(bs).is_empty(), "the lift adds no extra Backspace");
 }
 

@@ -125,7 +125,9 @@ impl App {
     /// A finger landing on the on-screen keyboard presses the key under it
     /// and is the keyboard's until it lifts. A second finger on the keyboard
     /// first types the key the first one is on, as a fast typist's fingers
-    /// overlap. `false` when the finger is not on the keyboard.
+    /// overlap (a space-bar slide under it just ends; a Backspace slide or
+    /// the iPhone trackpad is cancelled). `false` when the finger is not on
+    /// the keyboard.
     fn keyboard_touch_start(
         &mut self,
         device: crate::touch_state::TouchDeviceId,
@@ -139,7 +141,10 @@ impl App {
             return false;
         }
         if let Some((d, i, _)) = self.keyboard_touch {
-            self.keyboard_touch_end(d, i, true);
+            // A Backspace slide or the trackpad under the first finger is
+            // cancelled (the selection put back), not finished by the lift.
+            let finish = !osk::overlap_cancels_press();
+            self.keyboard_touch_end(d, i, finish);
         }
         osk::handle_software_keyboard_mouse_down(at, MouseButton::Left, Modifiers::default());
         self.keyboard_touch = Some((device, id, at));
@@ -147,7 +152,8 @@ impl App {
     }
 
     /// The keyboard's finger moved: the pressed key (or the highlighted
-    /// alternate) follows it. `false` for any other finger.
+    /// alternate) follows it, and a caret slide's arrow keys reach the
+    /// focused field at once. `false` for any other finger.
     fn keyboard_touch_move(
         &mut self,
         device: crate::touch_state::TouchDeviceId,
@@ -160,6 +166,8 @@ impl App {
             Some((d, i, last)) if *d == device && *i == id => {
                 *last = at;
                 crate::widgets::on_screen_keyboard::handle_software_keyboard_mouse_move(at);
+                // A space-bar slide moves the caret while the finger moves.
+                self.drain_keyboard_synthetic_keys();
                 true
             }
             _ => false,
@@ -168,7 +176,8 @@ impl App {
 
     /// The keyboard's finger lifted (`lifted`) or was cancelled: a lift
     /// types the key under it and hands the key to the focused field; a
-    /// cancel types nothing. `false` for any other finger.
+    /// cancel types nothing (and cancels a caret gesture). `false` for any
+    /// other finger.
     fn keyboard_touch_end(
         &mut self,
         device: crate::touch_state::TouchDeviceId,
@@ -188,6 +197,8 @@ impl App {
                     self.drain_keyboard_synthetic_keys();
                 } else {
                     osk::cancel_press();
+                    // A cancelled caret gesture puts the selection back.
+                    self.drain_keyboard_synthetic_keys();
                 }
                 true
             }

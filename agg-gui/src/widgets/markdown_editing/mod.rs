@@ -155,6 +155,7 @@ pub(crate) mod pipe_tables;
 pub mod raw_hosts;
 pub mod rich_markdown_editor;
 pub mod selection;
+mod selection_offsets;
 pub mod style_operations;
 pub mod table_code_operations;
 pub mod table_layout;

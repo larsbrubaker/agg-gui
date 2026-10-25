@@ -76,6 +76,11 @@ pub(super) fn paint_key(
     ctx.rounded_rect(rect.x, rect.y, rect.width, rect.height, radius);
     ctx.fill();
 
+    // The iPhone's trackpad fades the labels off the keys.
+    let text_color = text_color.with_alpha(text_color.a * state.label_alpha as f32);
+    if text_color.a <= 0.0 {
+        return;
+    }
     ctx.set_fill_color(text_color);
     let center = Point::new(rect.x + rect.width / 2.0, rect.y + rect.height / 2.0);
 

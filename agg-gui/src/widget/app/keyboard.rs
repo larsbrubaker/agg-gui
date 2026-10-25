@@ -142,17 +142,22 @@ impl App {
     /// keyboard-aware screen lift via `notify_focus_change`.
     pub(super) fn drain_keyboard_synthetic_keys(&mut self) {
         // A key typed during a dictation ended it, committing its tail: that
-        // reaches the field before the key does.
-        self.deliver_voice_text();
-        let pending = crate::widgets::on_screen_keyboard::drain_synthetic_keys();
-        for (key, mods) in pending {
-            self.on_key_down(key, mods);
-        }
+        // reaches the field before the key does (`dispatch_keyboard_queue`).
+        self.dispatch_keyboard_queue();
         // A tap on the microphone may have started or stopped a dictation.
         self.pump_voice_input();
         if crate::widgets::on_screen_keyboard::take_dismiss_request() {
             self.set_focus(None);
         }
+    }
+
+    /// A held key's repeat is due on the clock, not on an event: fire it and
+    /// hand its keys to the focused field. Called as `layout` starts, so the
+    /// edit is laid out and painted in this frame. `on_key_down` ends a
+    /// dictation before the key, as for a tap.
+    pub(super) fn deliver_held_key_repeats(&mut self) {
+        crate::widgets::on_screen_keyboard::tick_held_keys();
+        self.dispatch_keyboard_queue();
     }
 
     /// Test-only mirror of the end-of-event-loop drain.

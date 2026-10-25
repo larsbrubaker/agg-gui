@@ -1,5 +1,7 @@
 //! Setting a [`TextField`]'s text and caret from outside: the external text
-//! cell binding, and C# agg-sharp's `SetCursorPosition`.
+//! cell binding, C# agg-sharp's `SetCursorPosition`, and the raw selection
+//! the on-screen keyboard's caret gestures read and put back
+//! ([`Widget::text_selection`](crate::widget::Widget::text_selection)).
 
 use super::*;
 
@@ -44,5 +46,24 @@ impl TextField {
         self.ensure_cursor_visible();
         crate::animation::request_draw();
         self.suggest_after_edit();
+    }
+
+    /// The selection as `(anchor, caret)` byte offsets.
+    pub(super) fn anchor_and_caret(&self) -> (usize, usize) {
+        let st = self.edit.borrow();
+        (st.anchor, st.cursor)
+    }
+
+    /// Put the selection at `(anchor, caret)` byte offsets (clamped to the
+    /// text and its character boundaries) and keep the caret in view.
+    pub(super) fn set_anchor_and_caret(&mut self, anchor: usize, caret: usize) {
+        self.flush_pending();
+        {
+            let mut st = self.edit.borrow_mut();
+            st.anchor = crate::widgets::text_field_core::floor_char_boundary(&st.text, anchor);
+            st.cursor = crate::widgets::text_field_core::floor_char_boundary(&st.text, caret);
+        }
+        self.ensure_cursor_visible();
+        crate::animation::request_draw();
     }
 }

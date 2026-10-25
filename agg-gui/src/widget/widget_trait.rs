@@ -26,6 +26,32 @@ use super::{
 };
 
 // ---------------------------------------------------------------------------
+// Text selection
+// ---------------------------------------------------------------------------
+
+/// A text widget's selection as [`Widget::text_selection`] reports it: the
+/// fixed end (`anchor`) and the caret, equal when nothing is selected.
+///
+/// The offsets number positions in the widget's committed text; an
+/// input-method composition is not part of it (none is open while a keyboard
+/// caret gesture runs, as the gesture ends a dictation first). They are only
+/// compared with each other and handed back to the same widget's
+/// [`Widget::set_text_selection`], so each widget numbers its own text:
+/// - `TextField`, `TextArea`: byte offsets into the text;
+/// - `RichTextEdit`: byte offsets into its plain text, the blocks joined
+///   with one `\n` each;
+/// - `RichMarkdownEditWidget`: character offsets over its text positions in
+///   document order (each block, or each table cell row by row), one
+///   between each; a whole-block selection reports `None`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TextSelection {
+    /// Where the selection started.
+    pub anchor: usize,
+    /// Where the caret is.
+    pub caret: usize,
+}
+
+// ---------------------------------------------------------------------------
 // Widget trait
 // ---------------------------------------------------------------------------
 
@@ -399,6 +425,37 @@ pub trait Widget {
     /// `TextField`, `TextArea` and `RichTextEdit` override it.
     fn text_before_caret(&self) -> Option<String> {
         None
+    }
+
+    /// The selection, if this widget is text-bearing and can say. The
+    /// on-screen keyboard's caret gestures (`on_screen_keyboard/cursor_slide.rs`)
+    /// read it to tell whether a step moved the caret, and put it back with
+    /// [`set_text_selection`](Self::set_text_selection) when a gesture is
+    /// taken back or cancelled. See [`TextSelection`] for what the offsets
+    /// count. Default is `None`: every step then counts as a move, and the
+    /// gestures fall back to giving words back with the inverse keys.
+    /// `TextField`, `TextArea`, `RichTextEdit` and `RichMarkdownEditWidget`
+    /// override it.
+    fn text_selection(&self) -> Option<TextSelection> {
+        None
+    }
+
+    /// Put the selection back to `selection`, as
+    /// [`text_selection`](Self::text_selection) reported it (each end clamped
+    /// to the text). Returns whether it did; the default can't, and a widget
+    /// that can't must return `false` so the gestures fall back.
+    fn set_text_selection(&mut self, _selection: TextSelection) -> bool {
+        false
+    }
+
+    /// Whether the text holds more than one line, so Up and Down move the
+    /// caret between lines: the iPhone keyboard's trackpad sends its line
+    /// steps only to such a widget (a one-line field may take Up and Down
+    /// for something else, a number's step say). Default `false`: a
+    /// multi-line text widget must opt in. `TextArea`, `RichTextEdit` and
+    /// `RichMarkdownEditWidget` do.
+    fn is_multi_line_text(&self) -> bool {
+        false
     }
 
     /// Take over a dictation from the field this widget replaced: the app
