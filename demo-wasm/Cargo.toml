@@ -17,6 +17,9 @@ reflect = ["agg-gui/reflect", "demo-wgpu/reflect", "demo-ui/reflect"]
 agg-gui                  = { path = "../agg-gui" }
 demo-wgpu                = { path = "../demo-wgpu" }
 demo-ui                  = { path = "../demo-ui" }
+# Dictation for the on-screen keyboard (whistle speech-to-text in a Web
+# Worker); demo/build-wasm.sh builds the worker module beside the UI module.
+agg-gui-whistle          = { path = "../agg-gui-whistle" }
 wasm-bindgen             = "0.2"
 wasm-bindgen-futures     = "0.4"
 js-sys                   = "0.3"

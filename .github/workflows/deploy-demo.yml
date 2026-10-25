@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   # Checks agg-gui out into `agg-gui/` with its path-dependency siblings
-  # (agg-rust, tess2-rust) next to it, as ci.yml does.
+  # (agg-rust, tess2-rust, whistle-rust) next to it, as ci.yml does.
   build:
     runs-on: ubuntu-26.04
     defaults:
@@ -40,6 +40,12 @@ jobs:
           repository: larsbrubaker/tess2-rust
           path: tess2-rust
 
+      - name: Checkout whistle-rust
+        uses: actions/checkout@v7
+        with:
+          repository: larsbrubaker/whistle-rust
+          path: whistle-rust
+
       - name: Checkout SVG test fixtures
         run: git submodule update --init tests/resvg-test-suite
 
@@ -57,8 +63,36 @@ jobs:
       - name: Install demo dependencies
         run: cd demo && bun install
 
+      # The on-screen keyboard's dictation model, served from the site itself
+      # (public/whistle/whistle.cact); demo/build-whistle.sh copies it.
+      # The Whistle model (16.9 MB), cached under its pinned SHA-256
+      # (whistle-rust/scripts/weights.sha256). On a miss it is fetched from
+      # whistle-rust's GitHub Pages copy, falling back to Hugging Face;
+      # fetch-weights.sh checks the SHA-256 of whatever is there (a cached or
+      # Pages copy) and downloads from Hugging Face only when the file is
+      # missing, so a bad copy is deleted and fetched again from there.
+      - name: Model checksum
+        id: model-sha
+        run: echo "sha=$(awk '$2 == "models/whistle.cact" { print $1 }' ../whistle-rust/scripts/weights.sha256)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache the Whistle model
+        uses: actions/cache@v6
+        with:
+          path: whistle-rust/models/whistle.cact
+          key: whistle-cact-${{ steps.model-sha.outputs.sha }}
+
+      - name: Fetch the Whistle model
+        run: |
+          model=../whistle-rust/models/whistle.cact
+          if [ ! -f "$model" ]; then
+            mkdir -p "$(dirname "$model")"
+            curl -sSfL https://larsbrubaker.github.io/whistle-rust/whistle.cact -o "$model" || rm -f "$model"
+          fi
+          ../whistle-rust/scripts/fetch-weights.sh || { rm -f "$model"; ../whistle-rust/scripts/fetch-weights.sh; }
+
+      # The UI module and the dictation worker module (simd128).
       - name: Build WASM
-        run: wasm-pack build demo-wasm --target web --out-dir ../demo/public/pkg --no-typescript
+        run: demo/build-wasm.sh
 
       - name: Bundle TypeScript
         run: cd demo && bun run build
@@ -77,7 +111,10 @@ jobs:
 
   # Browser smoke test — boots the built WASM demo in headless Chrome and
   # asserts a real, non-blank canvas paints (screenshot) plus that desktop
-  # typing and the Ctrl+C system-clipboard chord work (keyboard).  Deploy is
+  # typing and the Ctrl+C system-clipboard chord work (keyboard), and that
+  # the on-screen keyboard's microphone dictates a whistle-rust test clip
+  # into a field, downloads the model with progress, retries a failed
+  # download and reports a denied microphone (dictation*).  Deploy is
   # gated on this so a broken WASM build (panic on init, blank canvas,
   # font-load failure, shader regression) or an input regression (dead editors,
   # broken clipboard chords) cannot ship to GitHub Pages.
@@ -86,6 +123,14 @@ jobs:
     runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v7
+
+      # The speech clip the dictation test plays as the microphone.
+      - name: Checkout whistle-rust
+        uses: actions/checkout@v7
+        with:
+          repository: larsbrubaker/whistle-rust
+          path: whistle-rust
+          sparse-checkout: test-data/clips
 
       - name: Install Bun
         uses: oven-sh/setup-bun@v2
@@ -109,12 +154,15 @@ jobs:
 
       - name: Stage built site for dev server
         run: |
-          mkdir -p demo/public/pkg demo/public/dist
+          mkdir -p demo/public/pkg demo/public/dist demo/public/whistle
           cp -r demo/dist/public/pkg/. demo/public/pkg/
           cp -r demo/dist/public/dist/. demo/public/dist/
+          cp -r demo/dist/public/whistle/. demo/public/whistle/
 
       - name: Run browser tests
-        run: cd demo && bunx playwright test screenshot keyboard
+        env:
+          DICTATION_CLIP: ${{ github.workspace }}/whistle-rust/test-data/clips/en_samantha.wav
+        run: cd demo && bunx playwright test screenshot keyboard dictation
 
       - name: Upload screenshot artifact on failure
         if: failure()

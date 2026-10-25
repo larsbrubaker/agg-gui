@@ -11,3 +11,4 @@ demo/test-results/
 .claude/worktrees/
 agg-gui/reference-egui-main/
 test-results/.last-run.json
+demo/public/whistle/

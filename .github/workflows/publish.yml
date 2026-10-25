@@ -47,6 +47,14 @@ jobs:
         with:
           repository: larsbrubaker/tess2-rust
           path: tess2-rust
+
+      # agg-gui-whistle (publish = false) depends on whistle-rust by path
+      # only; the workspace does not load without it.
+      - name: Checkout whistle-rust
+        uses: actions/checkout@v7
+        with:
+          repository: larsbrubaker/whistle-rust
+          path: whistle-rust
       - uses: dtolnay/rust-toolchain@stable
       - name: cargo publish
         env:

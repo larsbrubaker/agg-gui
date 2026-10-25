@@ -1,0 +1,104 @@
+# agg-gui-whistle: on-device dictation for agg-gui's on-screen keyboard, on
+# whistle-rust (a pure-Rust port of Cactus Compute's Whistle speech-to-text
+# model). An app opts in with one call, `agg_gui_whistle::install(Config)`;
+# agg-gui itself never depends on this crate or on whistle-rust.
+#
+# One crate, two roles:
+# - `provider` (default): the `VoiceInput` the keyboard drives. On wasm it owns
+#   a Web Worker and the microphone; natively, an engine thread and (with
+#   `native-mic`) a recorder thread.
+# - `worker`: the Web Worker's side, wasm only and without agg-gui, built into
+#   its own module by `agg-gui-whistle-worker` (with simd128, which the UI's
+#   module can't use; see that crate).
+[package]
+name = "agg-gui-whistle"
+version = "0.1.0"
+edition = "2021"
+# agg-rust (through agg-gui) requires 1.88.
+rust-version = "1.88"
+authors = ["Lars Brubaker <larsbrubaker@matterhackers.com>"]
+license = "MIT"
+description = "On-device dictation for agg-gui's on-screen keyboard, on whistle-rust speech-to-text"
+repository = "https://github.com/larsbrubaker/agg-gui"
+readme = "README.md"
+# whistle-rust is a path-only dependency until it is on crates.io.
+publish = false
+
+[features]
+default = ["provider"]
+provider = ["dep:agg-gui"]
+worker = []
+# Native microphone capture through cpal (CoreAudio, WASAPI, ALSA). Without it
+# the native provider reports that it has no microphone.
+native-mic = ["provider", "dep:cpal"]
+# Native model download (when no path is configured and the cache is empty),
+# through the same pure-Rust ureq + rustls stack agg-gui's http_fetch uses.
+native-download = ["dep:ureq", "dep:rustls-rustcrypto"]
+
+[dependencies]
+agg-gui = { path = "../agg-gui", default-features = false, optional = true }
+# Imported as `whistle`. A sibling checkout next to agg-gui (../whistle-rust),
+# like agg-rust and tess2-rust. Apache-2.0 (THIRD_PARTY_NOTICES.md).
+whistle-rust = { path = "../../whistle-rust/crates/whistle-rust" }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# The model's checksum, natively (the browser has SubtleCrypto).
+sha2 = "0.10"
+cpal = { version = "0.17", optional = true }
+ureq = { version = "3", optional = true, default-features = false, features = ["rustls-no-provider", "rustls-webpki-roots"] }
+rustls-rustcrypto = { version = "0.0.2-alpha", optional = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+web-sys = { version = "0.3.82", features = [
+    "console",
+    "Window",
+    "Document",
+    "Navigator",
+    "Location",
+    "Url",
+    "MessageEvent",
+    "ErrorEvent",
+    "Event",
+    "EventTarget",
+    # The worker the provider starts (web/)
+    "Worker",
+    "WorkerOptions",
+    "WorkerType",
+    # The microphone (web/mic.rs)
+    "MediaDevices",
+    "MediaStream",
+    "MediaStreamTrack",
+    "MediaStreamConstraints",
+    "AudioContext",
+    "AudioContextOptions",
+    "AudioContextState",
+    "BaseAudioContext",
+    "AudioNode",
+    "AudioDestinationNode",
+    "MediaStreamAudioSourceNode",
+    "AudioWorklet",
+    "Worklet",
+    "WorkletOptions",
+    "AudioWorkletNode",
+    "AudioWorkletNodeOptions",
+    "MessagePort",
+    "ScriptProcessorNode",
+    "AudioProcessingEvent",
+    "AudioBuffer",
+    "DomException",
+    # The worker's model download, check and cache (worker/)
+    "DedicatedWorkerGlobalScope",
+    "WorkerGlobalScope",
+    "Response",
+    "Headers",
+    "ReadableStream",
+    "ReadableStreamDefaultReader",
+    "CacheStorage",
+    "Cache",
+    "Crypto",
+    "SubtleCrypto",
+    "Performance",
+] }

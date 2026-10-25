@@ -1,0 +1,249 @@
+//! The native host (feature `provider`, not wasm): runs the state machine's
+//! commands with an engine thread and, with the `native-mic` feature, a
+//! recorder (`mic.rs`, cpal).
+//!
+//! The engine thread starts with the first `Load`: it loads the model
+//! (`model.rs`: the configured path, the cache, then a download), builds the
+//! engine once per process, and answers session messages from its channel
+//! in order (`protocol::next_job` skips cancelled work).
+//! Replies and microphone events come back over one channel that every call
+//! drains first, and each sender wakes the UI thread through the queue
+//! captured when the provider was made (`ui_thread::current_queue`), so an
+//! idle app paints the news. A load that fails ends the thread; the next
+//! `Load` starts another.
+//!
+//! Without `native-mic` the machine reports that there is no microphone and
+//! nothing starts: the seam for another audio source is `mic.rs`'s
+//! `Recorder` (open a session, stream `Push`es to the engine, close with or
+//! without its last chunk).
+
+#[cfg(feature = "native-mic")]
+mod mic;
+mod model;
+
+use std::cell::RefCell;
+use std::collections::VecDeque;
+use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::OnceLock;
+
+use agg_gui::ui_thread::{current_queue, UiQueue};
+use whistle::Whistle;
+
+use crate::config::Config;
+use crate::engine::Engine;
+use crate::machine::{Command, Machine, MicError};
+use crate::protocol::{next_job, FromWorker, LoadFailure, ToWorker};
+use crate::provider::Host;
+
+/// What the threads tell the UI thread (the microphone events only come
+/// with `native-mic`).
+#[cfg_attr(not(feature = "native-mic"), allow(dead_code))]
+pub(crate) enum Event {
+    Worker(FromWorker),
+    MicOpened(u32),
+    MicFailed(u32, MicError),
+    Level(u32, f32),
+}
+
+/// A sender of [`Event`]s that wakes the UI thread.
+#[derive(Clone)]
+pub(crate) struct Notifier {
+    events: Sender<Event>,
+    queue: UiQueue,
+}
+
+impl Notifier {
+    pub(crate) fn send(&self, event: Event) {
+        if self.events.send(event).is_ok() {
+            self.queue.signal_async_state_change();
+        }
+    }
+}
+
+struct Inner {
+    machine: Machine,
+    events: Receiver<Event>,
+    notifier: Notifier,
+    /// The engine thread's inbox, while it runs.
+    engine: Option<Sender<ToWorker>>,
+    #[cfg(feature = "native-mic")]
+    recorder: mic::Recorder,
+    model: model::Source,
+}
+
+/// See the module docs.
+pub(crate) struct NativeHost {
+    inner: RefCell<Inner>,
+}
+
+impl NativeHost {
+    pub(crate) fn new(config: Config) -> NativeHost {
+        let (tx, rx) = mpsc::channel();
+        let notifier = Notifier {
+            events: tx,
+            queue: current_queue(),
+        };
+        let machine = if cfg!(feature = "native-mic") {
+            Machine::new(config.model_urls.clone(), config.language.clone())
+        } else {
+            Machine::unsupported("Built without microphone support")
+        };
+        NativeHost {
+            inner: RefCell::new(Inner {
+                machine,
+                events: rx,
+                #[cfg(feature = "native-mic")]
+                recorder: mic::Recorder::new(notifier.clone()),
+                notifier,
+                engine: None,
+                model: model::Source::from_config(&config),
+            }),
+        }
+    }
+}
+
+impl Host for NativeHost {
+    fn dispatch(&self, f: &mut dyn FnMut(&mut Machine)) {
+        let Ok(mut inner) = self.inner.try_borrow_mut() else {
+            return;
+        };
+        let inner = &mut *inner;
+        while let Ok(event) = inner.events.try_recv() {
+            match event {
+                Event::Worker(msg) => {
+                    if matches!(msg, FromWorker::LoadFailed { .. }) {
+                        // The thread ended; the next load starts another.
+                        inner.engine = None;
+                    }
+                    inner.machine.on_worker(msg);
+                }
+                Event::MicOpened(s) => inner.machine.on_mic_opened(s),
+                Event::MicFailed(s, err) => inner.machine.on_mic_failed(s, err),
+                Event::Level(s, level) => inner.machine.on_level(s, level),
+            }
+        }
+        f(&mut inner.machine);
+        // A command can feed the machine an event (a microphone that can't
+        // open), which may queue more.
+        loop {
+            let commands = inner.machine.take_commands();
+            if commands.is_empty() {
+                break;
+            }
+            for command in commands {
+                inner.run(command);
+            }
+        }
+    }
+}
+
+impl Inner {
+    fn run(&mut self, command: Command) {
+        match command {
+            Command::Worker(msg) => {
+                if matches!(msg, ToWorker::Load { .. }) && self.engine.is_none() {
+                    self.engine = Some(spawn_engine(self.model.clone(), self.notifier.clone()));
+                }
+                let lost = match &self.engine {
+                    Some(engine) => engine.send(msg).is_err(),
+                    None => false,
+                };
+                if lost {
+                    self.engine = None;
+                    self.machine.worker_lost("the engine thread stopped");
+                }
+            }
+            #[cfg(feature = "native-mic")]
+            Command::OpenMic { session } => match &self.engine {
+                Some(engine) => self.recorder.open(session, engine.clone()),
+                None => self
+                    .machine
+                    .on_mic_failed(session, MicError::Other("no engine".into())),
+            },
+            #[cfg(feature = "native-mic")]
+            Command::CloseMic { session, flush } => self.recorder.close(session, flush),
+            // Never queued: without a microphone the machine is unsupported.
+            #[cfg(not(feature = "native-mic"))]
+            Command::OpenMic { .. } | Command::CloseMic { .. } => {}
+        }
+    }
+}
+
+/// The model, built once per process (it is leaked: see `engine.rs`).
+static MODEL: OnceLock<&'static Whistle> = OnceLock::new();
+
+fn spawn_engine(source: model::Source, notifier: Notifier) -> Sender<ToWorker> {
+    let (tx, rx) = mpsc::channel::<ToWorker>();
+    let failed = notifier.clone();
+    let spawned = std::thread::Builder::new()
+        .name("agg-gui-whistle-engine".into())
+        .spawn(move || engine_thread(source, rx, notifier));
+    if let Err(err) = spawned {
+        failed.send(Event::Worker(FromWorker::LoadFailed {
+            reason: LoadFailure::Startup,
+            detail: err.to_string(),
+        }));
+    }
+    tx
+}
+
+/// The model, from memory or loaded now.
+fn whistle(
+    source: &model::Source,
+    notifier: &Notifier,
+) -> Result<(&'static Whistle, String), FromWorker> {
+    if let Some(whistle) = MODEL.get() {
+        return Ok((whistle, "memory".into()));
+    }
+    let progress =
+        |loaded, total| notifier.send(Event::Worker(FromWorker::Progress { loaded, total }));
+    let (bytes, from) = source
+        .load(&progress)
+        .map_err(|(reason, detail)| FromWorker::LoadFailed { reason, detail })?;
+    let built = Whistle::from_cact(&bytes).map_err(|e| FromWorker::LoadFailed {
+        reason: LoadFailure::Model,
+        detail: e.to_string(),
+    })?;
+    Ok((*MODEL.get_or_init(|| Box::leak(Box::new(built))), from))
+}
+
+fn engine_thread(source: model::Source, inbox: Receiver<ToWorker>, notifier: Notifier) {
+    let mut engine = None;
+    let mut queue = VecDeque::new();
+    loop {
+        // Block for one message, then take every one already waiting, so
+        // the next job is chosen knowing them all.
+        match inbox.recv() {
+            Ok(msg) => queue.push_back(msg),
+            Err(_) => return,
+        }
+        queue.extend(inbox.try_iter());
+        while let Some(job) = next_job(&mut queue) {
+            if let ToWorker::Load { .. } = job {
+                match whistle(&source, &notifier) {
+                    Ok((whistle, from)) => {
+                        engine.get_or_insert_with(|| Engine::new(whistle));
+                        notifier.send(Event::Worker(FromWorker::Loaded { source: from }));
+                    }
+                    Err(failed) => {
+                        notifier.send(Event::Worker(failed));
+                        return;
+                    }
+                }
+                continue;
+            }
+            let reply = match engine.as_mut() {
+                Some(engine) => engine.handle(job),
+                None => None,
+            };
+            if let Some(reply) = reply {
+                notifier.send(Event::Worker(reply));
+            }
+            queue.extend(inbox.try_iter());
+        }
+    }
+}
+
+#[cfg(test)]
+#[path = "native_tests.rs"]
+mod tests;

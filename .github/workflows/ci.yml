@@ -1,7 +1,8 @@
 # agg-rust and tess2-rust are `{ version, path }` dependencies
-# on sibling checkouts (`../../agg-rust` from each crate). Every job that runs
-# cargo therefore checks agg-gui out into `agg-gui/` and the siblings next to
-# it, matching a dev machine's `rust-apps/` layout, and runs from `agg-gui/`.
+# on sibling checkouts (`../../agg-rust` from each crate), and agg-gui-whistle
+# a path dependency on whistle-rust's. Every job that runs cargo therefore
+# checks agg-gui out into `agg-gui/` and the siblings next to it, matching a
+# dev machine's `rust-apps/` layout, and runs from `agg-gui/`.
 # The siblings are public repos, so the default token covers every checkout.
 name: CI
 
@@ -38,6 +39,12 @@ jobs:
           repository: larsbrubaker/tess2-rust
           path: tess2-rust
 
+      - name: Checkout whistle-rust
+        uses: actions/checkout@v7
+        with:
+          repository: larsbrubaker/whistle-rust
+          path: whistle-rust
+
       - name: Checkout SVG test fixtures
         run: git submodule update --init tests/resvg-test-suite
 
@@ -62,6 +69,22 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
+      # agg-gui-whistle's native microphone (cpal; ALSA here) and download
+      # features, which no workspace member turns on.
+      - name: Install ALSA headers
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+
+      - name: Clippy (agg-gui-whistle, native features)
+        run: cargo clippy -p agg-gui-whistle --all-targets --features native-mic,native-download -- -D warnings
+
+      # Its browser halves: the provider in the UI module, and the worker
+      # module, built with simd128 as demo/build-whistle.sh builds it.
+      - name: Clippy (agg-gui-whistle, wasm)
+        run: |
+          cargo clippy -p agg-gui-whistle --target wasm32-unknown-unknown -- -D warnings
+          RUSTFLAGS="-C target-feature=+simd128" CARGO_TARGET_DIR=target/wasm-simd128 \
+            cargo clippy -p agg-gui-whistle-worker --target wasm32-unknown-unknown -- -D warnings
+
   test:
     runs-on: ubuntu-26.04
     defaults:
@@ -84,6 +107,12 @@ jobs:
         with:
           repository: larsbrubaker/tess2-rust
           path: tess2-rust
+
+      - name: Checkout whistle-rust
+        uses: actions/checkout@v7
+        with:
+          repository: larsbrubaker/whistle-rust
+          path: whistle-rust
 
       - name: Checkout SVG test fixtures
         run: git submodule update --init tests/resvg-test-suite
@@ -126,6 +155,36 @@ jobs:
       - name: Run wgpu renderer + shell tests
         run: cargo test -p agg-gui-wgpu -p agg-gui-shell -p demo-wgpu
 
+      # The model lets agg-gui-whistle's engine and native tests run on real
+      # speech instead of skipping.
+      # The Whistle model (16.9 MB), cached under its pinned SHA-256
+      # (whistle-rust/scripts/weights.sha256). On a miss it is fetched from
+      # whistle-rust's GitHub Pages copy, falling back to Hugging Face;
+      # fetch-weights.sh checks the SHA-256 of whatever is there (a cached or
+      # Pages copy) and downloads from Hugging Face only when the file is
+      # missing, so a bad copy is deleted and fetched again from there.
+      - name: Model checksum
+        id: model-sha
+        run: echo "sha=$(awk '$2 == "models/whistle.cact" { print $1 }' ../whistle-rust/scripts/weights.sha256)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache the Whistle model
+        uses: actions/cache@v6
+        with:
+          path: whistle-rust/models/whistle.cact
+          key: whistle-cact-${{ steps.model-sha.outputs.sha }}
+
+      - name: Fetch the Whistle model
+        run: |
+          model=../whistle-rust/models/whistle.cact
+          if [ ! -f "$model" ]; then
+            mkdir -p "$(dirname "$model")"
+            curl -sSfL https://larsbrubaker.github.io/whistle-rust/whistle.cact -o "$model" || rm -f "$model"
+          fi
+          ../whistle-rust/scripts/fetch-weights.sh || { rm -f "$model"; ../whistle-rust/scripts/fetch-weights.sh; }
+
+      - name: Run dictation tests
+        run: cargo test -p agg-gui-whistle --features native-download
+
   # The clipboard feature's per-platform code (`clipboard::has_image` asks the
   # Windows and macOS clipboards for a picture format directly). A check, not
   # a test run, to keep these runners cheap.
@@ -156,6 +215,12 @@ jobs:
           repository: larsbrubaker/tess2-rust
           path: tess2-rust
 
+      - name: Checkout whistle-rust
+        uses: actions/checkout@v7
+        with:
+          repository: larsbrubaker/whistle-rust
+          path: whistle-rust
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
@@ -170,6 +235,10 @@ jobs:
 
       - name: Check clipboard feature
         run: cargo check -p agg-gui --features clipboard
+
+      # agg-gui-whistle's cpal microphone on CoreAudio and WASAPI.
+      - name: Check native dictation
+        run: cargo check -p agg-gui-whistle --features native-mic,native-download
 
   build-wasm:
     runs-on: ubuntu-26.04
@@ -194,6 +263,12 @@ jobs:
           repository: larsbrubaker/tess2-rust
           path: tess2-rust
 
+      - name: Checkout whistle-rust
+        uses: actions/checkout@v7
+        with:
+          repository: larsbrubaker/whistle-rust
+          path: whistle-rust
+
       - name: Checkout SVG test fixtures
         run: git submodule update --init tests/resvg-test-suite
 
@@ -205,5 +280,6 @@ jobs:
       - name: Install wasm-pack
         run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
 
+      # The UI module and the dictation worker module (simd128).
       - name: Build WASM
-        run: wasm-pack build demo-wasm --target web --out-dir ../demo/public/pkg --no-typescript
+        run: demo/build-wasm.sh

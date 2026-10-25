@@ -1,4 +1,4 @@
-//! WASM clipboard and text-input focus exports — mirror of
+//! WASM clipboard, text-input focus and dictation-state exports — mirror of
 //! `demo-wasm/src/clipboard_exports.rs`.
 
 use wasm_bindgen::prelude::*;
@@ -31,4 +31,12 @@ pub fn text_input_focused() -> bool {
             .map(|app| app.focused_is_text_input())
             .unwrap_or(false)
     })
+}
+
+/// The on-screen keyboard's dictation state as text (`Ready`, `Listening {
+/// level: .. }`, ...), or `None` without a voice provider: for page
+/// automation (`demo/tests/dictation.test.ts`) and console debugging.
+#[wasm_bindgen]
+pub fn dictation_state() -> Option<String> {
+    agg_gui::widgets::on_screen_keyboard::voice_state().map(|s| format!("{s:?}"))
 }

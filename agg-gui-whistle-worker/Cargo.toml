@@ -1,0 +1,29 @@
+# agg-gui-whistle-worker: the transcription Web Worker's wasm module for
+# agg-gui-whistle. It holds the speech model and nothing of the GUI: it
+# depends on agg-gui-whistle without its `provider` feature (so without
+# agg-gui) and exports the worker's entry point, which
+# agg-gui-whistle/web/worker.js calls.
+#
+# Built on its own with simd128 (demo/build-wasm.sh): the model's kernels use
+# it, while the UI module must be built without it (rustc 1.99's LLVM fails
+# to select a simd128 instruction in agg-gui; whistle-rust/demo/README.md,
+# "simd128 and the UI module"). RUSTFLAGS reach every crate in a build, which
+# is why the worker is a separate module. Natively the crate is empty.
+[package]
+name = "agg-gui-whistle-worker"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.88"
+authors = ["Lars Brubaker <larsbrubaker@matterhackers.com>"]
+license = "MIT"
+description = "The transcription Web Worker module of agg-gui-whistle"
+repository = "https://github.com/larsbrubaker/agg-gui"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+agg-gui-whistle = { path = "../agg-gui-whistle", default-features = false, features = ["worker"] }
+wasm-bindgen = "0.2"
+js-sys = "0.3"

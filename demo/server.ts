@@ -71,6 +71,7 @@ async function serveFile(pathname: string): Promise<Response | null> {
 let building = false;
 let pendingRust = false;
 let pendingTs = false;
+let pendingWhistle = false;
 
 async function runCommand(cmd: string[], cwd: string, label: string): Promise<boolean> {
   console.log(`\x1b[36m[${label}]\x1b[0m Building…`);
@@ -90,6 +91,12 @@ async function buildWasm(): Promise<boolean> {
   );
 }
 
+// The dictation worker (agg-gui-whistle-worker, simd128, always release):
+// see build-whistle.sh.
+async function buildWhistle(): Promise<boolean> {
+  return runCommand(["bash", join(DEMO_DIR, "build-whistle.sh")], PROJECT_ROOT, "whistle");
+}
+
 async function buildTs(): Promise<boolean> {
   // Dev build: bundle directly into public/dist/ so the static server can find it.
   return runCommand(
@@ -101,12 +108,15 @@ async function buildTs(): Promise<boolean> {
 async function rebuild() {
   if (building) return;
   building = true;
-  while (pendingRust || pendingTs) {
+  while (pendingRust || pendingTs || pendingWhistle) {
     const doRust = pendingRust;
     const doTs = pendingTs;
+    const doWhistle = pendingWhistle;
     pendingRust = false;
     pendingTs = false;
+    pendingWhistle = false;
     let changed = false;
+    if (doWhistle) { if (await buildWhistle()) changed = true; }
     if (doRust) { if (await buildWasm()) changed = true; }
     if (doTs || doRust) { if (await buildTs()) changed = true; }
     if (changed) notifyReload();
@@ -121,6 +131,8 @@ function debounce(fn: () => void, ms: number) {
 
 const triggerRust = debounce(() => { pendingRust = true; rebuild(); }, 300);
 const triggerTs   = debounce(() => { pendingTs   = true; rebuild(); }, 200);
+// agg-gui-whistle is in both modules: the UI's provider and the worker.
+const triggerWhistle = debounce(() => { pendingWhistle = true; pendingRust = true; rebuild(); }, 300);
 
 // --- Watch ---
 for (const dir of [
@@ -131,6 +143,15 @@ for (const dir of [
 ]) {
   watch(dir, { recursive: true }, (_, f) => {
     if (f?.endsWith(".rs")) { console.log(`\x1b[33m[watch]\x1b[0m Rust: ${f}`); triggerRust(); }
+  });
+}
+
+for (const dir of [join(PROJECT_ROOT, "agg-gui-whistle"), join(PROJECT_ROOT, "agg-gui-whistle-worker")]) {
+  watch(dir, { recursive: true }, (_, f) => {
+    if (f?.endsWith(".rs") || f?.endsWith(".js")) {
+      console.log(`\x1b[33m[watch]\x1b[0m whistle: ${f}`);
+      triggerWhistle();
+    }
   });
 }
 
@@ -170,5 +191,5 @@ const server = Bun.serve({
 });
 
 console.log(`\x1b[32magg-gui demo running at http://localhost:${server.port}\x1b[0m`);
-console.log("Watching: agg-gui/src/**/*.rs, demo-wasm/src/**/*.rs, demo/src/**/*.ts");
+console.log("Watching: agg-gui/src/**/*.rs, demo-wasm/src/**/*.rs, agg-gui-whistle*/**, demo/src/**/*.ts");
 console.log("Press Ctrl+C to stop.");

@@ -134,6 +134,7 @@ pub fn wasm_start() {
     // wasm32-unknown-unknown has no unwinder runtime and panics always
     // abort, making catch_unwind a no-op.
     agg_gui::gl_renderer::install_tess_panic_logger();
+    install_dictation();
     wasm_bindgen_futures::spawn_local(async {
         match init_wgpu_async().await {
             Ok(init) => WGPU_INIT.with(|c| *c.borrow_mut() = Some(init)),
@@ -143,6 +144,25 @@ pub fn wasm_start() {
         }
         // Force a redraw so the first frame paints once init resolves.
         mark_dirty();
+    });
+}
+
+/// Give the on-screen keyboard a microphone key: whistle speech-to-text in a
+/// Web Worker. `demo/build-wasm.sh` puts the worker (and, when the sibling
+/// whistle-rust checkout has it, the model) in `public/whistle/`; the deploy
+/// adds the model there too. The model falls back to whistle-rust's GitHub
+/// Pages copy, then Hugging Face. Nothing loads until the keyboard first
+/// comes up.
+fn install_dictation() {
+    agg_gui_whistle::install(agg_gui_whistle::Config {
+        model_urls: vec![
+            "./public/whistle/whistle.cact".into(),
+            agg_gui_whistle::WHISTLE_PAGES_MODEL_URL.into(),
+            agg_gui_whistle::HUGGING_FACE_MODEL_URL.into(),
+        ],
+        worker_url: "./public/whistle/worker.js".into(),
+        worklet_url: "./public/whistle/capture-worklet.js".into(),
+        ..agg_gui_whistle::Config::default()
     });
 }
 

@@ -154,6 +154,12 @@ wrap app chrome in `ReserveInset`), and `card::paint_anchored` measures,
 word-wraps, flips, and clamps anchored info cards so floating content never
 renders under sibling chrome or off-screen.
 
+The on-screen keyboard takes dictation from any provider an app registers
+(`on_screen_keyboard::set_voice_input`). The in-repo `agg-gui-whistle` crate is one:
+on-device speech-to-text on [whistle-rust](https://github.com/larsbrubaker/whistle-rust),
+in a Web Worker in the browser, installed with `agg_gui_whistle::install(Config::default())`.
+The web demo uses it, so the TextEdit demo dictates on a phone.
+
 ### Platform Adapters
 
 The core crate owns its event, cursor, clipboard, font, device-scale, screenshot,
@@ -202,6 +208,8 @@ and feature set using agg-gui's own widgets:
 | `agg-gui-wgpu` | Hardware-accelerated wgpu `DrawCtx` backend — pipelines, SSAA, screenshot capture, custom render-pass hook |
 | `agg-gui-shell` | Turn-key native shell — winit window + event loop + wgpu present, input forwarding, window-bounds persistence, device-loss recovery |
 | `agg-gui-web-shell` | Turn-key browser shell — canvas + WebGPU/WebGL2 surface, rAF loop (reactive/continuous), DOM input, page lifecycle, localStorage settings |
+| `agg-gui-whistle` | Dictation for the on-screen keyboard on whistle-rust speech-to-text (opt-in; Web Worker in the browser, cpal + threads natively) |
+| `agg-gui-whistle-worker` | The dictation Web Worker's wasm module (built with simd128 by `demo/build-whistle.sh`) |
 | `demo-ui` | Shared demo widget tree (identical for native and WASM) |
 | `demo-wgpu` | wgpu demo widgets on top of `agg-gui-wgpu` (its `native_shell` / `web_shell` are deprecated wrappers over `agg-gui-shell` / `agg-gui-web-shell`) |
 | `demo-native` | Desktop demo shim on `agg-gui-shell` |
@@ -229,8 +237,9 @@ cargo dev
 ### WASM dev server
 
 ```sh
-# Build WASM
-wasm-pack build demo-wasm --dev --target web --out-dir ../demo/public/pkg --no-typescript
+# Build WASM: the UI module, and the dictation worker (and model, when
+# ../whistle-rust has fetched it with scripts/fetch-weights.sh)
+demo/build-wasm.sh --dev
 
 # Install JS deps (first time)
 cd demo && bun install
@@ -258,7 +267,8 @@ cargo test -p agg-gui
 
 agg-rust and tess2-rust are `{ version, path }` dependencies on sibling checkouts next to this
 repo (`../agg-rust`, `../tess2-rust`). Local builds and CI use the sibling sources; `cargo publish`
-uses the crates.io versions:
+uses the crates.io versions. agg-gui-whistle depends on a `../whistle-rust` checkout by path only
+(it is not published until whistle-rust is):
 
 ```toml
 agg-rust   = { version = "1.1.0", path = "../../agg-rust" }
@@ -268,3 +278,9 @@ tess2-rust = { version = "1.1.8", path = "../../tess2-rust" }
 ## License
 
 MIT
+
+Third-party: `agg-gui-whistle` links whistle-rust and downloads the Whistle model weights, both
+Apache-2.0 (Cactus Compute, Inc. for the weights). Their notices are in
+[`agg-gui-whistle/THIRD_PARTY_NOTICES.md`](agg-gui-whistle/THIRD_PARTY_NOTICES.md), with the
+license text in `agg-gui-whistle/LICENSE-APACHE`; the web demo serves both beside the model
+(`public/whistle/`).
