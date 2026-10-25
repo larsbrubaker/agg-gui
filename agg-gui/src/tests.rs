@@ -127,6 +127,7 @@ mod on_screen_keyboard;
 mod on_screen_keyboard_cursor;
 mod on_screen_keyboard_cursor_edges;
 mod on_screen_keyboard_cursor_editors;
+mod on_screen_keyboard_cursor_snapshot;
 mod on_screen_keyboard_longpress;
 mod on_screen_keyboard_preview;
 mod on_screen_keyboard_touch;

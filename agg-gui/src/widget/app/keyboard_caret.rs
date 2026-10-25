@@ -8,8 +8,10 @@
 //! every text widget follows; the App compares the focused widget's
 //! [`Widget::text_selection`] before and after to answer whether it moved
 //! the caret. A line step reaches only a multi-line widget
-//! ([`Widget::is_multi_line_text`]). Split out of `keyboard.rs` beside the
-//! typed-key drain it runs with.
+//! ([`Widget::is_multi_line_text`]). The snapshot remembers the widget it
+//! was taken in (its focus path); once focus moves to another widget, the
+//! gesture's steps, restore and delete go nowhere. Split out of
+//! `keyboard.rs` beside the typed-key drain it runs with.
 
 use super::tree_paths::{widget_at_path, widget_at_path_ref};
 use crate::event::{Key, Modifiers};
@@ -33,17 +35,29 @@ impl App {
     fn run_caret_op(&mut self, op: CaretOp) {
         // The focus path may name a widget the app has since replaced.
         self.resolve_tracked_paths();
+        // A gesture's caret work belongs to the widget its snapshot was
+        // taken in: if focus has moved to another since, it goes nowhere
+        // (the lift deletes nothing there, a cancel restores nothing there).
+        let moved_away = caret_ops::owner().is_some_and(|o| self.focus.as_ref() != Some(&o));
         match op {
             CaretOp::Snapshot => {
                 // Only a selection the widget can also put back is kept
-                // (setting it to itself is the proof); otherwise the gesture
-                // falls back to the inverse keys.
+                // (putting back the selection it has, which must change
+                // nothing, is the proof); otherwise the gesture falls back to
+                // the inverse keys.
                 let restorable = self.focused_widget_mut().and_then(|w| {
                     let selection = w.text_selection()?;
                     w.set_text_selection(selection).then_some(selection)
                 });
                 caret_ops::record_snapshot(restorable);
+                caret_ops::record_owner(self.focus.clone());
             }
+            CaretOp::EndGesture => {
+                caret_ops::record_snapshot(None);
+                caret_ops::record_owner(None);
+            }
+            CaretOp::Step { kind, .. } if moved_away => caret_ops::report_step(kind, false),
+            CaretOp::Restore { .. } | CaretOp::DeleteSelection if moved_away => {}
             CaretOp::Restore { give_back } => match caret_ops::snapshot() {
                 Some(selection) => {
                     if let Some(w) = self.focused_widget_mut() {
@@ -58,7 +72,6 @@ impl App {
                 }
             },
             CaretOp::DeleteSelection => self.on_key_down(Key::Backspace, Modifiers::default()),
-            CaretOp::EndGesture => caret_ops::record_snapshot(None),
             CaretOp::Step { key, mods, kind } => {
                 let moved = self.run_step(key, mods, kind);
                 caret_ops::report_step(kind, moved);

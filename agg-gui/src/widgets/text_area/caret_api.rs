@@ -126,12 +126,20 @@ impl TextArea {
     }
 
     /// Put the selection at `(anchor, caret)` byte offsets (clamped to the
-    /// text and its character boundaries) and keep the caret in view.
+    /// text and its character boundaries) and keep the caret in view. The
+    /// selection it already has changes nothing.
     pub(super) fn set_anchor_and_caret(&mut self, anchor: usize, caret: usize) {
+        let target = {
+            let st = self.edit.borrow();
+            let floor = crate::widgets::text_field_core::floor_char_boundary;
+            (floor(&st.text, anchor), floor(&st.text, caret))
+        };
+        if target == self.anchor_and_caret() {
+            return;
+        }
         {
             let mut st = self.edit.borrow_mut();
-            st.anchor = crate::widgets::text_field_core::floor_char_boundary(&st.text, anchor);
-            st.cursor = crate::widgets::text_field_core::floor_char_boundary(&st.text, caret);
+            (st.anchor, st.cursor) = target;
         }
         self.ensure_cursor_visible();
         crate::animation::request_draw();

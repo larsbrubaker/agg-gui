@@ -56,13 +56,15 @@ pub(crate) enum CaretOp {
     Restore { give_back: u32 },
     /// Delete the selection: the Backspace slide's lift.
     DeleteSelection,
-    /// The gesture is over: forget the snapshot.
+    /// The gesture is over: forget the snapshot and the widget it was taken
+    /// in.
     EndGesture,
 }
 
 thread_local! {
     static QUEUE: RefCell<Vec<CaretOp>> = const { RefCell::new(Vec::new()) };
     static SNAPSHOT: Cell<Option<TextSelection>> = const { Cell::new(None) };
+    static OWNER: RefCell<Option<Vec<usize>>> = const { RefCell::new(None) };
 }
 
 /// Shift with the platform's word modifier (Option on a Mac's bindings,
@@ -107,6 +109,18 @@ pub(crate) fn record_snapshot(selection: Option<TextSelection>) {
 /// its selection back.
 pub(crate) fn snapshot() -> Option<TextSelection> {
     SNAPSHOT.with(|s| s.get())
+}
+
+/// The App ran a [`CaretOp::Snapshot`]: the focus path of the widget it
+/// was taken in, which alone the gesture's steps, restore and delete reach
+/// (`None` when the gesture ends).
+pub(crate) fn record_owner(path: Option<Vec<usize>>) {
+    OWNER.with(|o| *o.borrow_mut() = path);
+}
+
+/// The focus path of the widget the gesture's snapshot was taken in.
+pub(crate) fn owner() -> Option<Vec<usize>> {
+    OWNER.with(|o| o.borrow().clone())
 }
 
 /// The App ran a [`CaretOp::Step`] of `kind`: whether the caret moved.
@@ -157,4 +171,5 @@ pub(super) fn clear_listeners() {
 pub(super) fn clear() {
     QUEUE.with(|q| q.borrow_mut().clear());
     SNAPSHOT.with(|s| s.set(None));
+    OWNER.with(|o| *o.borrow_mut() = None);
 }

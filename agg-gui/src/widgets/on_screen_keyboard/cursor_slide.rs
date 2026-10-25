@@ -120,7 +120,8 @@ fn on_screen(p: Point) -> Point {
 /// On a press of painted key `hit` at `pos`: remember it if the key can
 /// become a caret gesture on this keyboard.
 pub(super) fn arm(s: &mut KeyboardState, hit: Option<usize>, pos: Point, family: LayoutFamily) {
-    s.cursor = None;
+    // A gesture still here lost its lift: it ends now.
+    drop_lost(s);
     let pos = on_screen(pos);
     let Some(index) = hit else {
         return;
@@ -454,6 +455,14 @@ pub(super) fn cancel(s: &mut KeyboardState) {
     }
 }
 
+/// Drop a gesture whose lift never came (the keyboard lost the pointer, or a
+/// new press arrived first), ending it so its snapshot is forgotten.
+fn drop_lost(s: &mut KeyboardState) {
+    if s.cursor.take().is_some_and(|g| g.engaged()) {
+        caret_ops::push(CaretOp::EndGesture);
+    }
+}
+
 /// Whether ending `g` without its lift puts the selection back.
 fn cancel_restores(g: CursorGesture) -> bool {
     g.engaged() && matches!(g.kind, GestureKind::DeleteSelect | GestureKind::Trackpad)
@@ -475,7 +484,7 @@ pub(super) fn tick() {
             return (false, false);
         };
         if !s.captured_pointer {
-            s.cursor = None;
+            drop_lost(s);
             return (false, false);
         }
         let mut started = false;

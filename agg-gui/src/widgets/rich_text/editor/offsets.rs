@@ -15,7 +15,7 @@ fn flat_offset(doc: &RichDoc, pos: DocPos) -> usize {
         .blocks
         .iter()
         .take(pos.block)
-        .map(|b| b.text().len() + 1)
+        .map(|b| b.text_len() + 1)
         .sum();
     before + pos.byte
 }
@@ -41,17 +41,22 @@ impl RichTextEdit {
     pub(super) fn selection_offsets(&self) -> TextSelection {
         let core = self.core.borrow();
         let sel = core.selection();
-        TextSelection {
-            anchor: flat_offset(core.doc(), sel.start),
-            caret: flat_offset(core.doc(), sel.end),
-        }
+        TextSelection::new(
+            flat_offset(core.doc(), sel.start),
+            flat_offset(core.doc(), sel.end),
+        )
     }
 
-    /// Put the selection at flat offsets (clamped).
+    /// Put the selection at flat offsets (clamped). The selection it already
+    /// has changes nothing: a pending caret style stays armed.
     pub(super) fn set_selection_offsets(&mut self, selection: TextSelection) {
         let mut core = self.core.borrow_mut();
         let anchor = doc_pos_at(core.doc(), selection.anchor);
         let caret = doc_pos_at(core.doc(), selection.caret);
+        let now = core.selection();
+        if (now.start, now.end) == (anchor, caret) {
+            return;
+        }
         core.set_selection(anchor, caret);
         drop(core);
         crate::animation::request_draw();
@@ -79,5 +84,36 @@ mod tests {
             DocPos::new(1, 2),
             "past the end: its end"
         );
+    }
+
+    #[test]
+    fn every_position_round_trips_with_empty_blocks() {
+        let doc = RichDoc::from_blocks(vec![
+            Block::plain("héllo"),
+            Block::new(),
+            Block::plain("🎉x"),
+            Block::new(),
+        ]);
+        let plain = doc.plain_text();
+        assert_eq!(plain, "héllo\n\n🎉x\n");
+        let mut last = None;
+        for offset in 0..=plain.len() + 2 {
+            let pos = doc_pos_at(&doc, offset);
+            let back = flat_offset(&doc, pos);
+            if offset <= plain.len() && plain.is_char_boundary(offset) {
+                assert_eq!(back, offset, "{offset} -> {pos:?}");
+                if let Some(prev) = last {
+                    assert!(pos > prev, "positions in order: {prev:?} then {pos:?}");
+                }
+                last = Some(pos);
+            } else if offset <= plain.len() {
+                // Inside a character: back to its start.
+                assert!(back < offset && plain.is_char_boundary(back), "{offset}");
+            } else {
+                assert_eq!(pos, DocPos::new(3, 0), "past the end: the empty last block");
+            }
+        }
+        assert_eq!(doc_pos_at(&doc, 7), DocPos::new(1, 0), "the empty block");
+        assert_eq!(flat_offset(&doc, DocPos::new(3, 0)), plain.len());
     }
 }

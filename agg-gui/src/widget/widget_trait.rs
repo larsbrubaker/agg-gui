@@ -49,6 +49,23 @@ pub struct TextSelection {
     pub anchor: usize,
     /// Where the caret is.
     pub caret: usize,
+    /// At a soft line wrap, where one offset is both the end of a line and
+    /// the start of the next, whether the caret shows at the end of the
+    /// earlier line (its affinity). Only `RichMarkdownEditWidget` tracks
+    /// it; the others report `false` and ignore it.
+    pub caret_at_line_end: bool,
+}
+
+impl TextSelection {
+    /// A selection from `anchor` to `caret`, the caret on the later line at
+    /// a soft wrap.
+    pub const fn new(anchor: usize, caret: usize) -> Self {
+        Self {
+            anchor,
+            caret,
+            caret_at_line_end: false,
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -444,6 +461,18 @@ pub trait Widget {
     /// [`text_selection`](Self::text_selection) reported it (each end clamped
     /// to the text). Returns whether it did; the default can't, and a widget
     /// that can't must return `false` so the gestures fall back.
+    ///
+    /// Putting back the selection the widget already has must change
+    /// nothing (no undo-run break, no dropped pending style, no wrap side
+    /// lost): the keyboard does exactly that to learn whether a widget can
+    /// put its selection back, as a gesture starts.
+    ///
+    /// Implementing this pair is what makes a Backspace slide's cancel (a
+    /// second finger, a cancelled touch) lossless. Without it the gestures
+    /// give words back with the inverse key, Shift + word + Right, which is
+    /// no exact inverse: under Ctrl-style bindings it also skips the spaces
+    /// after a word, so a space can be left selected for the next key to
+    /// replace.
     fn set_text_selection(&mut self, _selection: TextSelection) -> bool {
         false
     }

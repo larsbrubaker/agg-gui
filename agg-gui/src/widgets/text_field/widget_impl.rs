@@ -71,7 +71,7 @@ impl Widget for TextField {
 
     fn text_selection(&self) -> Option<crate::widget::TextSelection> {
         let (anchor, caret) = self.anchor_and_caret();
-        Some(crate::widget::TextSelection { anchor, caret })
+        Some(crate::widget::TextSelection::new(anchor, caret))
     }
 
     fn set_text_selection(&mut self, selection: crate::widget::TextSelection) -> bool {

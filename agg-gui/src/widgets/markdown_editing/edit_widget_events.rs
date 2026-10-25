@@ -371,9 +371,10 @@ impl Widget for RichMarkdownEditWidget {
     }
 
     fn set_text_selection(&mut self, selection: crate::widget::TextSelection) -> bool {
-        self.set_selection_offsets(selection);
-        let _ = self.state.scroll_caret_into_view();
-        self.after_input();
+        if self.set_selection_offsets(selection) {
+            let _ = self.state.scroll_caret_into_view();
+            self.after_input();
+        }
         true
     }
 

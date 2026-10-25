@@ -90,7 +90,7 @@ fn set_selection(phone: &mut Phone, anchor: usize, caret: usize) {
     let done = phone
         .app
         .root_mut()
-        .set_text_selection(TextSelection { anchor, caret });
+        .set_text_selection(TextSelection::new(anchor, caret));
     assert!(done, "the editor puts its selection where it is told");
 }
 
@@ -125,22 +125,13 @@ fn giving_a_word_back_shrinks_the_selection_in_the_rich_editors() {
         let start = backspace();
         let mut finger = Finger::down(&mut phone, start);
         finger.slide_by(&mut phone, -2.0 * DELETE_WORD_STEP - 1.0, 0.0);
-        let two = TextSelection {
-            anchor: 13,
-            caret: 4,
-        };
+        let two = TextSelection::new(13, 4);
         assert_eq!(selection(&phone), two, "{editor:?}: two words");
         finger.slide_by(&mut phone, DELETE_WORD_STEP + 1.0, 0.0);
-        let one = TextSelection {
-            anchor: 13,
-            caret: 8,
-        };
+        let one = TextSelection::new(13, 8);
         assert_eq!(selection(&phone), one, "{editor:?}: one word back");
         finger.slide_to(&mut phone, start);
-        let none = TextSelection {
-            anchor: 13,
-            caret: 13,
-        };
+        let none = TextSelection::new(13, 13);
         assert_eq!(selection(&phone), none, "{editor:?}: all back");
         finger.slide_by(&mut phone, -DELETE_WORD_STEP - 1.0, 0.0);
         finger.lift(&mut phone);
@@ -169,10 +160,7 @@ fn a_second_finger_or_a_cancel_deletes_nothing_in_the_rich_editors() {
         phone.app.on_touch_cancel(FINGER.0, FINGER.1);
         phone.paint();
         assert_eq!(text(&phone), "one two three", "{editor:?}: cancel");
-        let back = TextSelection {
-            anchor: 13,
-            caret: 13,
-        };
+        let back = TextSelection::new(13, 13);
         assert_eq!(selection(&phone), back, "{editor:?}: cancel");
     }
 }
@@ -333,12 +321,6 @@ fn a_selection_put_back_clamps_to_a_character_boundary() {
     let mut phone = android("héllo", 0);
     // Byte 2 is inside the two-byte é: back to its start.
     set_selection(&mut phone, 2, 99);
-    assert_eq!(
-        selection(&phone),
-        TextSelection {
-            anchor: 1,
-            caret: 6
-        }
-    );
+    assert_eq!(selection(&phone), TextSelection::new(1, 6));
     assert_eq!(text_field(&mut phone).selection(), "éllo");
 }
