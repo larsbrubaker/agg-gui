@@ -72,6 +72,8 @@ mod rust_only_pipe_table_tests;
 mod rust_only_raw_host_theme_tests;
 #[path = "markdown_editing/rust_only_rich_editor_auto_scroll_tests.rs"]
 mod rust_only_rich_editor_auto_scroll_tests;
+#[path = "markdown_editing/rust_only_rich_editor_wheel_tests.rs"]
+mod rust_only_rich_editor_wheel_tests;
 #[path = "markdown_editing/rust_only_toolbar_look_tests.rs"]
 mod rust_only_toolbar_look_tests;
 #[path = "markdown_editing/rust_only_writer_group_tests.rs"]

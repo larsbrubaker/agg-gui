@@ -313,8 +313,11 @@ impl Widget for RichMarkdownEditWidget {
             Event::MouseMove { pos } => self.mouse_move(*pos),
             Event::MouseUp { .. } => self.mouse_up(),
             Event::MouseWheel { delta_y, .. } => {
+                // The wheel's delta is in notches; a notch moves the text as
+                // far as it moves a `ScrollView`, so the editor scrolls at
+                // the same speed as everything else in the app.
                 let before = self.state.scroll_offset_from_top();
-                self.set_scroll_offset_from_top(before - delta_y);
+                self.set_scroll_offset_from_top(before - delta_y * crate::wheel::PIXELS_PER_NOTCH);
                 if self.state.scroll_offset_from_top() != before {
                     EventResult::Consumed
                 } else {
