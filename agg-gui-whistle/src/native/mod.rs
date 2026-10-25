@@ -176,15 +176,30 @@ impl Inner {
     }
 }
 
-/// The model, built once per process (it is leaked: see `engine.rs`).
+/// Where an engine thread keeps the model once built (it is leaked: see
+/// `engine.rs`).
+type ModelCell = &'static OnceLock<&'static Whistle>;
+
+/// The model, built once per process.
 static MODEL: OnceLock<&'static Whistle> = OnceLock::new();
 
 fn spawn_engine(source: model::Source, notifier: Notifier) -> Sender<ToWorker> {
+    spawn_engine_with(source, &MODEL, notifier)
+}
+
+/// [`spawn_engine`] keeping the model in `model`: a test that needs a load
+/// to really fail passes its own empty cell, since one already holding the
+/// model (another test's) answers every load from memory.
+fn spawn_engine_with(
+    source: model::Source,
+    model: ModelCell,
+    notifier: Notifier,
+) -> Sender<ToWorker> {
     let (tx, rx) = mpsc::channel::<ToWorker>();
     let failed = notifier.clone();
     let spawned = std::thread::Builder::new()
         .name("agg-gui-whistle-engine".into())
-        .spawn(move || engine_thread(source, rx, notifier));
+        .spawn(move || engine_thread(source, model, rx, notifier));
     if let Err(err) = spawned {
         failed.send(Event::Worker(FromWorker::LoadFailed {
             reason: LoadFailure::Startup,
@@ -194,12 +209,13 @@ fn spawn_engine(source: model::Source, notifier: Notifier) -> Sender<ToWorker> {
     tx
 }
 
-/// The model, from memory or loaded now.
+/// The model, from `model` or loaded now (and kept there).
 fn whistle(
     source: &model::Source,
+    model: ModelCell,
     notifier: &Notifier,
 ) -> Result<(&'static Whistle, String), FromWorker> {
-    if let Some(whistle) = MODEL.get() {
+    if let Some(whistle) = model.get() {
         return Ok((whistle, "memory".into()));
     }
     let progress =
@@ -211,7 +227,7 @@ fn whistle(
         reason: LoadFailure::Model,
         detail: e.to_string(),
     })?;
-    Ok((*MODEL.get_or_init(|| Box::leak(Box::new(built))), from))
+    Ok((*model.get_or_init(|| Box::leak(Box::new(built))), from))
 }
 
 /// Reports the engine lost if its thread panics (dropped while unwinding),
@@ -227,7 +243,12 @@ impl Drop for LostGuard {
     }
 }
 
-fn engine_thread(source: model::Source, inbox: Receiver<ToWorker>, notifier: Notifier) {
+fn engine_thread(
+    source: model::Source,
+    model: ModelCell,
+    inbox: Receiver<ToWorker>,
+    notifier: Notifier,
+) {
     let _guard = LostGuard(notifier.clone());
     let mut engine = None;
     let mut queue = VecDeque::new();
@@ -241,7 +262,7 @@ fn engine_thread(source: model::Source, inbox: Receiver<ToWorker>, notifier: Not
         queue.extend(inbox.try_iter());
         while let Some(job) = next_job(&mut queue) {
             if let ToWorker::Load { .. } = job {
-                match whistle(&source, &notifier) {
+                match whistle(&source, model, &notifier) {
                     Ok((whistle, from)) => {
                         engine.get_or_insert_with(|| Engine::new(whistle));
                         notifier.send(Event::Worker(FromWorker::Loaded { source: from }));

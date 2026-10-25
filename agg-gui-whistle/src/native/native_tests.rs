@@ -47,20 +47,28 @@ fn load() -> ToWorker {
     ToWorker::Load { urls: Vec::new() }
 }
 
+/// Its own model cell: the process's may already hold the model another
+/// test loaded, which answers every load from memory (CI, where the model
+/// is fetched and the dictation test can run first).
 #[test]
 fn a_failed_load_reports_and_ends_the_thread() {
     let missing = std::env::temp_dir().join("agg-gui-whistle-no-such-model.cact");
     let source = model::Source::from_config(&config(Some(missing)));
     let (notifier, events) = notifier();
-    let engine = spawn_engine(source, notifier);
+    let empty: ModelCell = Box::leak(Box::new(OnceLock::new()));
+    let engine = spawn_engine_with(source, empty, notifier);
     engine.send(load()).expect("send");
-    assert!(matches!(
-        reply(&events),
-        FromWorker::LoadFailed {
-            reason: LoadFailure::Download,
-            ..
-        }
-    ));
+    let msg = reply(&events);
+    assert!(
+        matches!(
+            msg,
+            FromWorker::LoadFailed {
+                reason: LoadFailure::Download,
+                ..
+            }
+        ),
+        "{msg:?}"
+    );
     // The thread is gone: its inbox no longer takes messages.
     std::thread::sleep(Duration::from_millis(100));
     assert!(engine.send(load()).is_err());

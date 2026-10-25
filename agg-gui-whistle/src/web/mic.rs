@@ -21,8 +21,17 @@
 //! is aborted: when the prompt resolves, the stream is released at once and
 //! nothing is reported. Releasing a microphone clears its handlers before
 //! they are dropped, closes the worklet's port, stops the tracks and closes
-//! the context ([`Mic`]'s and [`Live`]'s `Drop`); a stop drains the worklet
-//! first (`drain.rs`), so the audio it already posted reaches the engine.
+//! the context ([`Mic`]'s and [`Live`]'s `Drop`); a stop drains the capture
+//! node first (`drain.rs`), so the audio it already holds reaches the
+//! engine.
+//!
+//! A `ScriptProcessor` hands its audio to the main thread from a double
+//! buffer that the audio thread refills one buffer later, so an event the
+//! main thread runs later than that reads newer audio than its own, and the
+//! events that waited run back to back on the same buffers: shuffled and
+//! repeated speech, which whistle reads as other words or a loop of them.
+//! Its buffer is therefore the longest the browser allows
+//! ([`PROCESSOR_FRAMES`]), however coarse that makes its pushes and level.
 
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
@@ -45,9 +54,13 @@ use crate::protocol::ToWorker;
 const CHUNK_SECONDS: f64 = 0.25;
 /// The rate asked of the `AudioContext`: the model's.
 const MODEL_RATE: f32 = 16_000.0;
-/// The `ScriptProcessor` fallback's buffer, in frames: 64 ms at 16 kHz.
-/// Its partial buffer can't be flushed at a stop, so it is kept small.
-const PROCESSOR_FRAMES: u32 = 1024;
+/// The `ScriptProcessor` fallback's buffer, in frames: the most the Web
+/// Audio API allows, 1.024 s at 16 kHz. The main thread may run an event up
+/// to this late before its audio is overwritten (see the module docs);
+/// 1024 frames (64 ms) came out garbled on CI's busy main thread, which ran
+/// about 800 ms behind. At a stop its partly filled buffer comes with its
+/// next event ([`Mic::drain_processor`]).
+const PROCESSOR_FRAMES: u32 = 16_384;
 /// How long a resume may take after `getUserMedia` before the context
 /// counts as suspended, in ms.
 const RESUME_MS: i32 = 1_000;
@@ -88,6 +101,16 @@ impl Mic {
             let _ = live.source.disconnect();
             stop_tracks(&live.stream);
         }
+    }
+
+    /// At a stop, with a `ScriptProcessor` capturing: the buffer it is
+    /// filling now is handed over at most one buffer's time from now, so
+    /// its first event that late or later ends the drain (`drain.rs`).
+    /// Returns that time, in ms.
+    pub(super) fn drain_processor(&self) -> i32 {
+        let period = f64::from(PROCESSOR_FRAMES) / f64::from(self.ctx.sample_rate());
+        self.chunker.borrow_mut().drain_at = Some(self.ctx.current_time() + period);
+        (period * 1000.0).ceil() as i32
     }
 }
 
@@ -136,6 +159,9 @@ pub(super) struct Chunker {
     buffer: Vec<f32>,
     chunk: usize,
     level: f32,
+    /// While a `ScriptProcessor` drains: the context time from which its
+    /// next event ends the drain ([`Mic::drain_processor`]).
+    drain_at: Option<f64>,
 }
 
 impl Chunker {
@@ -240,6 +266,7 @@ pub(crate) fn open(shared: &Rc<Shared>, session: u32) {
         buffer: Vec::new(),
         chunk: (ctx.sample_rate() as f64 * CHUNK_SECONDS) as usize,
         level: 0.0,
+        drain_at: None,
     }));
     *shared.mic.borrow_mut() = Some(Mic {
         session,
@@ -521,7 +548,8 @@ async fn worklet_node(
     Ok((node.unchecked_into(), port, handler))
 }
 
-/// The `ScriptProcessor` fallback.
+/// The `ScriptProcessor` fallback. After a stop, the first event
+/// [`Mic::drain_processor`] waits for ends the drain, once fed.
 fn processor_node(
     ctx: &AudioContext,
     chunker: &Rc<RefCell<Chunker>>,
@@ -531,12 +559,26 @@ fn processor_node(
             PROCESSOR_FRAMES, 1, 1,
         )?;
     let chunker = chunker.clone();
+    let ctx = ctx.clone();
     let handler =
         Closure::<dyn FnMut(AudioProcessingEvent)>::new(move |e: AudioProcessingEvent| {
             if let Ok(buffer) = e.input_buffer() {
                 if let Ok(samples) = buffer.get_channel_data(0) {
                     chunker.borrow_mut().feed(&samples);
                 }
+            }
+            let drained = {
+                let mut c = chunker.borrow_mut();
+                match c.drain_at {
+                    Some(at) if ctx.current_time() >= at => {
+                        c.drain_at = None;
+                        Some((c.shared.clone(), c.session))
+                    }
+                    _ => None,
+                }
+            };
+            if let Some((shared, session)) = drained {
+                drain::drained(shared, session);
             }
         });
     node.set_onaudioprocess(Some(handler.as_ref().unchecked_ref()));
@@ -545,9 +587,8 @@ fn processor_node(
 
 /// Close the session's microphone (the machine's `CloseMic`). With `flush`
 /// its last audio goes to the worker before the `Finish` the machine sends
-/// next: a worklet is drained first (`drain.rs`, which holds that
-/// `Finish` back until then), a `ScriptProcessor`'s buffered chunk goes at
-/// once.
+/// next: a capture node is drained first (`drain.rs`, which holds that
+/// `Finish` back until then).
 pub(crate) fn close(shared: &Rc<Shared>, session: u32, flush: bool) {
     let mic = {
         let mut slot = shared.mic.borrow_mut();
@@ -560,10 +601,11 @@ pub(crate) fn close(shared: &Rc<Shared>, session: u32, flush: bool) {
         return;
     };
     if flush {
-        if mic.worklet_port().is_some() {
+        if mic.live.is_some() {
             drain::start(shared, mic);
             return;
         }
+        // Not wired up yet: nothing is held but the chunker's audio.
         mic.chunker.borrow_mut().flush(shared);
     }
     drop(mic);
