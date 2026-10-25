@@ -174,6 +174,8 @@ fn the_host_ends_the_dictation_when_the_engine_is_lost() {
         m.take_commands();
         let s = m.current_session().expect("a session");
         m.on_mic_opened(s);
+        // Its first audio: listening.
+        m.on_level(s, 0.0);
         session = Some(s);
     });
     let mut state = None;
@@ -183,6 +185,10 @@ fn the_host_ends_the_dictation_when_the_engine_is_lost() {
         "{state:?}"
     );
 
+    // The engine thread it was talking to (the commands were dropped, so
+    // none was started): only a running engine can be lost.
+    let (engine, _inbox) = mpsc::channel::<ToWorker>();
+    host.inner.borrow_mut().engine = Some(engine);
     let notifier = host.inner.borrow().notifier.clone();
     notifier.send(Event::EngineLost("panicked".into()));
     let mut current = session;
@@ -196,4 +202,80 @@ fn the_host_ends_the_dictation_when_the_engine_is_lost() {
         "{state:?}"
     );
     assert!(host.inner.borrow().engine.is_none());
+}
+
+/// What the engine thread does with its inbox while the model loads (from
+/// the download's progress): it takes in what arrived, drops the work of
+/// cancelled sessions and keeps a session's latest 30 s past 60 s, so a
+/// long load holds about a minute of audio at most, not all of it.
+#[test]
+fn the_inbox_is_bounded_while_the_model_loads() {
+    let (tx, rx) = mpsc::channel::<ToWorker>();
+    let mut queue = VecDeque::new();
+    let second = |session| ToWorker::Push {
+        session,
+        rate: 10,
+        samples: vec![0.0; 10],
+    };
+    let queued = |q: &VecDeque<ToWorker>, session: u32| {
+        q.iter()
+            .filter(|m| matches!(m, ToWorker::Push { session: s, .. } if *s == session))
+            .count()
+    };
+    tx.send(ToWorker::Start {
+        session: 1,
+        language: String::new(),
+    })
+    .unwrap();
+    for _ in 0..200 {
+        tx.send(second(1)).unwrap();
+        if queue.len() % 7 == 0 {
+            absorb(&mut queue, &rx);
+        }
+    }
+    absorb(&mut queue, &rx);
+    assert!(queued(&queue, 1) <= 61, "{} s held", queued(&queue, 1));
+    assert!(queued(&queue, 1) >= 30);
+
+    tx.send(ToWorker::Cancel { session: 1 }).unwrap();
+    absorb(&mut queue, &rx);
+    assert_eq!(
+        queue,
+        VecDeque::from(vec![ToWorker::Cancel { session: 1 }]),
+        "a cancelled session's audio is released at once"
+    );
+}
+
+/// A failed load ends the engine thread; the microphone's next push then
+/// finds it gone and reports the engine lost. The host has no engine by
+/// then and ignores that, so the load's error stays for the user to see.
+#[cfg(feature = "native-mic")]
+#[test]
+fn an_engine_lost_after_a_failed_load_changes_nothing() {
+    use agg_gui::widgets::on_screen_keyboard::VoiceState;
+    let host = NativeHost::new(config(None));
+    host.dispatch(&mut |m| {
+        m.start(&agg_gui::widgets::on_screen_keyboard::VoiceContext::default());
+        m.take_commands();
+    });
+    let notifier = host.inner.borrow().notifier.clone();
+    notifier.send(Event::Worker(FromWorker::LoadFailed {
+        reason: LoadFailure::Download,
+        detail: "offline".into(),
+    }));
+    host.inner.borrow_mut().engine = None;
+    notifier.send(Event::EngineLost("a push found the engine gone".into()));
+    let mut state = None;
+    host.dispatch(&mut |m| {
+        m.take_commands();
+        state = Some(m.poll().state);
+        state = Some(m.poll().state);
+    });
+    match state {
+        Some(VoiceState::Error { message, retry }) => {
+            assert!(message.contains("download"), "{message}");
+            assert!(retry);
+        }
+        other => panic!("the load's error was erased: {other:?}"),
+    }
 }

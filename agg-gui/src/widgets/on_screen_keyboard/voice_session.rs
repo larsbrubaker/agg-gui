@@ -1,5 +1,8 @@
-//! Drives the registered voice provider (`voice.rs`): when to prepare,
-//! start, stop and cancel it, and what its text does to the focused field.
+//! Drives the registered voice provider (`voice.rs`): when to start, stop
+//! and cancel it, and what its text does to the focused field. The keyboard
+//! never calls [`VoiceInput::prepare`]: a provider loads nothing until the
+//! first tap on the microphone, which starts a dictation that waits for the
+//! load (a second tap meanwhile cancels it).
 //!
 //! A dictation is a session: it starts with a tap on the microphone key and
 //! ends when the provider is done (after a stop, on its own, or with an
@@ -134,9 +137,7 @@ pub(super) fn set_provider(provider: Option<Box<dyn VoiceInput>>) {
         h.banner = None;
         h.start_requested = false;
     });
-    if keyboard_up() {
-        with_provider(|p| p.prepare());
-    }
+    // Not prepared, even with the keyboard up: nothing loads before a tap.
     poll();
     if had != has_provider() {
         // The Gboard toolbar that holds the key comes or goes with the
@@ -169,17 +170,21 @@ pub(super) fn is_dictating() -> bool {
     with_hub(|h| h.session.is_some())
 }
 
-/// The keyboard came up: let the provider get ready ahead of the first tap.
+/// The keyboard came up. The provider is not asked to do anything: it loads
+/// on the first tap, not when the keyboard shows (the module docs of
+/// `voice.rs`). The key repaints with the state of the last poll.
 pub(super) fn keyboard_opened() {
-    if with_provider(|p| p.prepare()).is_some() {
+    if has_provider() {
         crate::animation::request_draw();
     }
 }
 
 /// A tap on the microphone key, decided on the state of the last poll:
-/// stop a dictation in progress; ask for one when ready, or after an error
-/// that may be retried; show again an error that may not. Taps while the
-/// provider prepares or finishes, or is unavailable, do nothing.
+/// stop a dictation in progress, or cancel one still waiting for the
+/// provider to load or begin; ask for one when ready or preparing (it
+/// begins once the provider has loaded), or after an error that may be
+/// retried; show again an error that may not. Taps while finishing, or
+/// while the provider is unavailable, do nothing.
 pub(super) fn toggle() {
     let state = with_hub(|h| h.state.clone());
     let running = with_hub(|h| h.session.as_ref().map(|s| s.stopping));
@@ -194,7 +199,14 @@ pub(super) fn toggle() {
             with_provider(|p| p.stop());
         }
         (Some(true), _) => return,
-        (None, Some(VoiceState::Ready | VoiceState::Error { retry: true, .. })) => {
+        (
+            None,
+            Some(
+                VoiceState::Ready
+                | VoiceState::Preparing { .. }
+                | VoiceState::Error { retry: true, .. },
+            ),
+        ) => {
             with_hub(|h| h.start_requested = true);
         }
         (None, Some(VoiceState::Error { message, .. })) => {
@@ -481,6 +493,8 @@ pub(super) struct VoiceView {
     /// How far the listening key is swollen, 0..=1: the input level, or a
     /// slow pulse without one.
     pub pulse: f64,
+    /// A dictation is in progress (started and not yet ended).
+    pub dictating: bool,
 }
 
 /// The view for this frame's paint, from the state the last poll cached;
@@ -515,6 +529,7 @@ pub(super) fn paint_view() -> Option<VoiceView> {
             state,
             banner,
             pulse,
+            dictating: h.session.is_some(),
         })
     })
 }

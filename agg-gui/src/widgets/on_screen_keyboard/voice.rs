@@ -10,8 +10,8 @@
 //! [`TextField`](crate::widgets::TextField) or
 //! [`TextArea`](crate::widgets::TextArea).
 //!
-//! `voice_session.rs` drives a provider (when to prepare, start, stop and
-//! poll it, and where its text goes), `voice_paint.rs` draws the microphone
+//! `voice_session.rs` drives a provider (when to start, stop and poll it,
+//! and where its text goes), `voice_paint.rs` draws the microphone
 //! key and the status line, and `widget/app/voice.rs` delivers the text to
 //! the focused widget.
 //!
@@ -46,17 +46,47 @@
 //! | state        | key                                   | tap               |
 //! |--------------|---------------------------------------|-------------------|
 //! | `Unavailable`| slashed microphone, dimmed            | nothing           |
-//! | `Preparing`  | dimmed, with a progress ring when the provider knows its progress | nothing |
-//! | `Ready`      | microphone                            | start listening   |
-//! | `Listening`  | lit, pulsing with the input level     | stop (commit)     |
+//! | `Ready`      | microphone                            | dictate: `start` (the provider may load first) |
+//! | `Preparing`  | dimmed, with a progress ring (and the percentage in the status line) when the provider knows its progress; "Starting…" for a dictation waiting without one | a dictation waiting for it: cancel it (`stop`); none: dictate (`start`) |
+//! | `Listening`  | lit, pulsing with the input level; "Speak now", only once audio flows | stop (commit) |
 //! | `Finishing`  | lit                                   | nothing           |
 //! | `Error`      | slashed microphone; the message shows for a few seconds | `retry`: start again; otherwise show the message again |
 //!
-//! [`prepare`](VoiceInput::prepare) is called each time the keyboard comes up
-//! (and when a provider is registered while it is up), so a model downloads
-//! while the user is still reading the field, not after the first tap on the
-//! microphone. It must be cheap and idempotent once prepared, and may retry
-//! after an error.
+//! ### Loading on the first tap
+//!
+//! The keyboard never calls [`prepare`](VoiceInput::prepare): opening it,
+//! registering a provider and every frame ask the provider for nothing but
+//! [`poll`](VoiceInput::poll), so a page that shows the keyboard but never
+//! dictates downloads nothing. A provider that hasn't loaded yet reports
+//! `Ready` ("tap to dictate"), not `Preparing`; `Unavailable` is only for a
+//! provider that can never dictate here.
+//!
+//! The first tap means "dictate": the keyboard calls
+//! [`start`](VoiceInput::start), and a provider that has to load first does
+//! so, reporting `Preparing` (with its progress) meanwhile, then begins
+//! listening by itself: the user is not asked to tap again. A tap while that
+//! dictation waits calls [`stop`](VoiceInput::stop), which aborts the start:
+//! nothing listens when the load completes, though the load may carry on so
+//! the next tap is quick. What belongs to the tap the provider does
+//! synchronously inside that `start`, which runs in the tap's input event,
+//! even when listening has to wait for the load: starting audio, which iOS
+//! Safari allows only inside a user gesture, and asking for the microphone,
+//! so the browser sees the gesture and its prompt shows at the tap rather
+//! than after a download (an awaited step before the request would lose
+//! the gesture). A provider may capture from then on, keeping what is said
+//! during the load for when it can recognise it, so a user who speaks at
+//! once isn't cut off; it then catches up, its text trailing the speech by
+//! as long as recognising that backlog takes. A stop or cancel meanwhile
+//! releases the microphone and drops that audio. A provider whose
+//! microphone is refused while it loads reports the error, which ends the
+//! dictation.
+//!
+//! An app that wants the model warm before the first tap calls `prepare`
+//! itself: on the provider before registering it, or through a handle it
+//! keeps (agg-gui-whistle's `WhistleVoice::prepare`). It must be cheap and
+//! idempotent once prepared, and may retry after an error; a provider
+//! loading for it may report `Preparing` or `Ready`, and a tap then still
+//! means "dictate".
 //!
 //! The keyboard keeps the provider and its own session in step: a provider
 //! it finds listening or finishing with no dictation in progress (a start
@@ -113,16 +143,20 @@
 //! ### Plugging in a provider
 //!
 //! - **Web (Web Worker).** The provider object lives on the UI thread and
-//!   owns the Worker. `prepare` posts "load" (the worker downloads and caches
-//!   the model, posting progress); `start` asks for the microphone
-//!   (`getUserMedia`, an `AudioWorklet` resampling to the engine's rate) and
-//!   streams audio to the worker; the worker posts `{committed, pending}`
+//!   owns the Worker. `start`, inside the tap, posts "load" the first time
+//!   (the worker downloads and caches the model, posting progress), posts
+//!   the stream's start, and calls `getUserMedia` in that same task (the
+//!   dictation's one request, so its prompt shows at the tap), wiring the
+//!   stream to an `AudioWorklet` (its module prefetched with the provider)
+//!   the moment it arrives and streaming its audio to the worker, which
+//!   queues it behind the load; the worker posts `{committed, pending}`
 //!   updates. `onmessage` accumulates them, updates the state and calls
 //!   `request_draw`; `poll` hands over what accumulated. `stop` posts
 //!   "finish"; `cancel` posts "cancel" and drops any update still in flight.
-//! - **Native (recorder thread).** `prepare` loads the model on a background
-//!   thread; `start` opens the audio device; a worker thread feeds the
-//!   engine and sends updates over a channel. `poll` drains the channel
+//! - **Native (recorder thread).** The first `start` loads the model on a
+//!   background thread and opens the audio device at once, its audio
+//!   queueing behind the load; a worker thread feeds the engine and sends
+//!   updates over a channel. `poll` drains the channel
 //!   without blocking; the worker wakes the UI thread through its queue
 //!   handle.
 //!
@@ -135,24 +169,34 @@ use super::voice_session;
 /// table in the module docs.
 #[derive(Debug, Clone, PartialEq)]
 pub enum VoiceState {
-    /// Voice input can't be used here (no microphone, an unsupported
-    /// browser). The key shows a slashed microphone and does nothing.
+    /// Voice input can never be used here (the platform has no way to
+    /// record or recognise speech), known before any tap. The key shows a
+    /// slashed microphone and does nothing. A provider that can tell only
+    /// once tapped, or wants to say why, reports `Ready` and then, at the
+    /// tap, a [`VoiceState::Error`] without `retry`.
     Unavailable,
-    /// Not ready to listen yet: downloading or loading a model. Also the
-    /// state to report before the first [`VoiceInput::prepare`], when the
-    /// provider hasn't begun. `progress` runs 0..=1 when the provider knows
-    /// it.
+    /// Getting ready to listen: downloading or loading a model, or opening
+    /// the microphone, for a dictation a tap started (perhaps capturing
+    /// already, for when the model is in), or for an app's
+    /// [`VoiceInput::prepare`]. `progress` runs 0..=1 when the provider
+    /// knows it.
     Preparing { progress: Option<f32> },
-    /// Ready to listen.
+    /// A tap may dictate: [`VoiceInput::start`] listens at once, or first
+    /// loads what it needs (reporting `Preparing`). The state of a provider
+    /// that has loaded nothing yet.
     Ready,
-    /// Listening. `level` is the input level 0..=1 when the provider measures
-    /// it; the key pulses with it (or on a timer without one).
+    /// Listening: the cue to speak (the status line says "Speak now").
+    /// Report it only once audio is flowing (the microphone's first audio
+    /// has reached the recogniser's pipeline), not merely once it opened,
+    /// so nothing said after the cue is lost. `level` is the input level
+    /// 0..=1 when the provider measures it; the key pulses with it (or on a
+    /// timer without one).
     Listening { level: Option<f32> },
     /// Stopped listening; finishing the audio it already has.
     Finishing,
     /// Something failed. The keyboard shows `message` for a few seconds.
     /// With `retry`, a tap on the key calls [`VoiceInput::start`] again;
-    /// without (a microphone permission the user denied), a tap only shows
+    /// without (a platform that can't record at all), a tap only shows
     /// the message again.
     Error { message: String, retry: bool },
 }
@@ -210,23 +254,28 @@ pub struct VoiceContext {
 /// A provider must not call back into this module ([`set_voice_input`] and
 /// friends) from inside these methods.
 pub trait VoiceInput {
-    /// The keyboard came up: get ready to listen (download or load a model).
-    /// Called on every show; cheap and idempotent once prepared, and free to
-    /// retry what failed before.
+    /// Get ready to listen ahead of the first tap (download or load a
+    /// model). Opt-in: the keyboard never calls it (it loads nothing before
+    /// a tap; see the module docs); an app that wants the model warm early
+    /// calls it. Cheap and idempotent once prepared, and free to retry what
+    /// failed before.
     fn prepare(&mut self);
-    /// Start listening. Called when the user taps the key in
-    /// [`VoiceState::Ready`], or in a [`VoiceState::Error`] with `retry`.
-    /// The provider may go on reporting its old state for a while and report
-    /// [`VoiceState::Listening`] at a later poll; after an error it may first
-    /// retry what failed (reporting [`VoiceState::Preparing`]). A provider
-    /// that can't start reports [`VoiceState::Error`].
+    /// Start a dictation. Called when the user taps the key in
+    /// [`VoiceState::Ready`] or [`VoiceState::Preparing`], or in a
+    /// [`VoiceState::Error`] with `retry`, inside the tap's input event (a
+    /// user gesture). A provider that hasn't loaded yet loads first,
+    /// reporting [`VoiceState::Preparing`] with its progress, then begins
+    /// listening with no further call. The provider may go on reporting its
+    /// old state for a while and report [`VoiceState::Listening`] at a later
+    /// poll; after an error it may first retry what failed. A provider that
+    /// can't start reports [`VoiceState::Error`].
     fn start(&mut self, ctx: &VoiceContext);
     /// Stop listening and finish: recognise the audio already captured,
     /// deliver it as committed text (the pending tail included), then return
     /// to [`VoiceState::Ready`]. Report [`VoiceState::Finishing`] meanwhile.
     /// Deliver the text no later than the poll that reports `Ready`. A start
-    /// still in flight is aborted: the provider must not begin listening
-    /// after this.
+    /// still in flight, one waiting for a load included, is aborted: the
+    /// provider must not begin listening after this (the load may go on).
     fn stop(&mut self);
     /// Stop listening and discard: no more text, pending or committed, is
     /// delivered for this dictation, and a start still in flight is aborted.
@@ -239,9 +288,10 @@ pub trait VoiceInput {
 }
 
 /// Register the voice provider for this UI thread (`None` removes it). The
-/// microphone key shows while one is registered. Registering while the
-/// keyboard is up prepares the provider at once; replacing or removing a
-/// provider during a dictation cancels it, removing the tail it showed.
+/// microphone key shows while one is registered. Registering asks nothing
+/// of the provider but a poll (it loads on the first tap); replacing or
+/// removing a provider during a dictation cancels it, removing the tail it
+/// showed.
 pub fn set_voice_input(provider: Option<Box<dyn VoiceInput>>) {
     voice_session::set_provider(provider);
 }

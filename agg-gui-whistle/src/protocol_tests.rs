@@ -203,3 +203,81 @@ fn work_for_a_session_cancelled_later_is_skipped() {
         ]
     );
 }
+
+/// `seconds` of silence at 10 Hz for `session`, as one push.
+fn seconds_of(session: u32, seconds: usize) -> ToWorker {
+    push(session, 10, &vec![0.0; seconds * 10])
+}
+
+fn queued_seconds(q: &VecDeque<ToWorker>, session: u32) -> usize {
+    q.iter()
+        .map(|m| match m {
+            ToWorker::Push {
+                session: s,
+                samples,
+                rate,
+            } if *s == session => samples.len() / *rate as usize,
+            _ => 0,
+        })
+        .sum()
+}
+
+/// Audio queued behind a slow load: past 60 s a session keeps only its
+/// latest 30 s (its oldest pushes go); other messages, and another
+/// session's audio, stay; up to 60 s nothing is dropped.
+#[test]
+fn a_long_backlog_keeps_its_latest_30_seconds() {
+    let start = ToWorker::Start {
+        session: 1,
+        language: String::new(),
+    };
+    let mut q: VecDeque<ToWorker> = [ToWorker::Load { urls: vec![] }, start.clone()].into();
+    for _ in 0..60 {
+        q.push_back(seconds_of(1, 1));
+        cap_backlog(&mut q);
+    }
+    assert_eq!(queued_seconds(&q, 1), 60, "60 s is kept whole");
+    q.push_back(seconds_of(1, 1));
+    q.push_back(seconds_of(2, 5));
+    cap_backlog(&mut q);
+    assert_eq!(queued_seconds(&q, 1), 30, "past 60 s, the latest 30 s");
+    assert_eq!(queued_seconds(&q, 2), 5, "another session's audio stays");
+    assert_eq!(q[0], ToWorker::Load { urls: vec![] });
+    assert_eq!(q[1], start, "the stream's start stays");
+    // The newest push is the one kept last.
+    assert_eq!(q.back(), Some(&seconds_of(2, 5)));
+}
+
+/// A cancel queued behind a slow load drops its session's queued work at
+/// once (its start, audio and finish), releasing that memory instead of
+/// holding it until the load is done; the cancel itself and other work stay.
+#[test]
+fn a_queued_cancel_drops_its_sessions_work_at_once() {
+    let start = |s| ToWorker::Start {
+        session: s,
+        language: String::new(),
+    };
+    let mut q: VecDeque<ToWorker> = [
+        ToWorker::Load { urls: vec![] },
+        start(1),
+        seconds_of(1, 3),
+        start(2),
+        seconds_of(2, 1),
+        seconds_of(1, 2),
+        ToWorker::Finish { session: 1 },
+    ]
+    .into();
+    drop_cancelled(&mut q);
+    assert_eq!(q.len(), 7, "nothing cancelled yet");
+    q.push_back(ToWorker::Cancel { session: 1 });
+    drop_cancelled(&mut q);
+    assert_eq!(
+        q,
+        VecDeque::from(vec![
+            ToWorker::Load { urls: vec![] },
+            start(2),
+            seconds_of(2, 1),
+            ToWorker::Cancel { session: 1 },
+        ])
+    );
+}

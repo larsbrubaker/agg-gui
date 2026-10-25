@@ -1,9 +1,9 @@
 //! Voice input on the on-screen keyboard (`widgets/on_screen_keyboard/voice.rs`):
 //! where the microphone key shows (only with a provider registered, never
 //! on a password field; Gboard's toolbar, the iPhone's strip), that the hit
-//! areas still tile the panel around it, that the provider is prepared when
-//! the keyboard opens, and that the field stays above the keyboard when the
-//! toolbar appears.
+//! areas still tile the panel around it, that opening the keyboard asks
+//! nothing of the provider (a model loads only after the first tap), and
+//! that the field stays above the keyboard when the toolbar appears.
 //!
 //! Also the scripted provider and the phone rig the dictation tests in
 //! `on_screen_keyboard_voice_session.rs` share. The fake changes state
@@ -437,30 +437,33 @@ fn password_fields_get_no_microphone() {
     );
 }
 
+/// Nothing loads, downloads or reads a cache until the user taps the
+/// microphone: the keyboard coming up (or going and coming back) and its
+/// frames never prepare or start the provider.
 #[test]
-fn the_provider_is_prepared_when_the_keyboard_opens() {
+fn opening_the_keyboard_calls_nothing_on_the_provider() {
     let (mut rig, voice, _) = dictation_rig();
-    assert_eq!(voice.calls(), vec!["prepare"], "before any tap");
     rig.paint();
     rig.paint();
-    assert_eq!(voice.count("prepare"), 1, "once per opening, not per frame");
+    assert_eq!(voice.calls(), Vec::<&str>::new(), "before any tap");
+    assert!(mic_key().is_some(), "the key shows, ready to tap");
 
-    // Closed and opened again: prepared again (a failed download retries).
     rig.tap(key_where(|a| matches!(a, KeyAction::Dismiss)).rect);
     assert!(!rig.app.has_focus());
     rig.app.on_key_down(Key::Tab, Modifiers::default());
-    assert_eq!(voice.count("prepare"), 2);
+    rig.paint();
+    assert_eq!(voice.calls(), Vec::<&str>::new(), "nor when it opens again");
 }
 
 #[test]
-fn a_provider_registered_while_the_keyboard_is_up_is_prepared_at_once() {
+fn a_provider_registered_while_the_keyboard_is_up_is_not_prepared() {
     let (field, _) = bound_field("");
     let mut rig = Rig::new(field, InputProfile::MobileAndroid, None);
     let voice = FakeVoice::new(VoiceState::Ready);
     osk::set_voice_input(Some(Box::new(voice.clone())));
-    assert_eq!(voice.calls(), vec!["prepare"]);
     rig.paint();
     assert!(mic_key().is_some());
+    assert_eq!(voice.calls(), Vec::<&str>::new());
 }
 
 #[test]

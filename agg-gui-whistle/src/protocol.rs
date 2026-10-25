@@ -351,6 +351,84 @@ pub fn next_job(queue: &mut VecDeque<ToWorker>) -> Option<ToWorker> {
     }
 }
 
+/// Drop the work (start, audio, finish) of every session cancelled later in
+/// the queue, at once: what [`next_job`] would skip, released now rather
+/// than when the job is reached (behind a slow load, that is minutes of
+/// audio). The cancels stay, for a stream the engine may already have open.
+pub fn drop_cancelled(queue: &mut VecDeque<ToWorker>) {
+    let cancelled: Vec<u32> = queue
+        .iter()
+        .filter_map(|m| match m {
+            ToWorker::Cancel { session } => Some(*session),
+            _ => None,
+        })
+        .collect();
+    if cancelled.is_empty() {
+        return;
+    }
+    // A session's work after its last cancel (a later dictation reusing
+    // the number) is kept.
+    let mut seen_cancel: Vec<u32> = Vec::new();
+    let mut keep: Vec<bool> = vec![true; queue.len()];
+    for (i, m) in queue.iter().enumerate().rev() {
+        match m {
+            ToWorker::Cancel { session } => seen_cancel.push(*session),
+            ToWorker::Start { session, .. }
+            | ToWorker::Push { session, .. }
+            | ToWorker::Finish { session } => {
+                if seen_cancel.contains(session) {
+                    keep[i] = false;
+                }
+            }
+            ToWorker::Load { .. } => {}
+        }
+    }
+    let mut flags = keep.into_iter();
+    queue.retain(|_| flags.next().unwrap_or(true));
+}
+
+/// Audio a session may queue behind a load before its oldest goes, and how
+/// much of it is kept then, in seconds.
+pub const BACKLOG_LIMIT_SECONDS: f64 = 60.0;
+pub const BACKLOG_KEEP_SECONDS: f64 = 30.0;
+
+/// Bound the audio queued behind a slow load: a session whose queued pushes
+/// pass [`BACKLOG_LIMIT_SECONDS`] loses its oldest ones down to the latest
+/// [`BACKLOG_KEEP_SECONDS`]. Everything else stays, in order. The engine's
+/// resampler takes the gap like any other boundary between pushes.
+pub fn cap_backlog(queue: &mut VecDeque<ToWorker>) {
+    let seconds = |m: &ToWorker| match m {
+        ToWorker::Push { samples, rate, .. } if *rate > 0 => {
+            Some(samples.len() as f64 / *rate as f64)
+        }
+        _ => None,
+    };
+    let session_of = |m: &ToWorker| match m {
+        ToWorker::Push { session, .. } => Some(*session),
+        _ => None,
+    };
+    let mut sessions: Vec<u32> = queue.iter().filter_map(session_of).collect();
+    sessions.sort_unstable();
+    sessions.dedup();
+    for session in sessions {
+        let mut total: f64 = queue
+            .iter()
+            .filter(|m| session_of(m) == Some(session))
+            .filter_map(seconds)
+            .sum();
+        if total <= BACKLOG_LIMIT_SECONDS {
+            continue;
+        }
+        queue.retain(|m| {
+            if session_of(m) != Some(session) || total <= BACKLOG_KEEP_SECONDS {
+                return true;
+            }
+            total -= seconds(m).unwrap_or(0.0);
+            false
+        });
+    }
+}
+
 #[cfg(test)]
 #[path = "protocol_tests.rs"]
 mod tests;

@@ -9,10 +9,16 @@ Polish). agg-gui knows nothing of whistle; an app opts in with one call on its U
 agg_gui_whistle::install(agg_gui_whistle::Config::default());
 ```
 
-The keyboard then shows a microphone key on every text field. When the keyboard first comes up
-the model (16.9 MB) downloads once, is checked against its pinned SHA-256 and is cached; the key
-shows the progress. The first tap asks for the microphone, and the words appear as you speak:
-the unconfirmed tail as composition text, committed words as they are confirmed.
+The keyboard then shows a microphone key on every text field. Installing fetches only the
+capture worklet's module (about a kilobyte); the model waits for the first tap on the key, which
+asks for the microphone inside the tap (the browser's prompt shows at once) and downloads the
+model (16.9 MB) once, checked against its pinned SHA-256 and cached, while the key shows the
+progress. Speech is captured from the tap: what is said during the download is recognised once
+the model is in, the text trailing the speech until that backlog is caught up (a second tap
+meanwhile cancels the dictation and drops it; the download carries on). Then the words appear
+as you speak, with no second tap: the unconfirmed tail as composition text, committed words as
+they are confirmed. An app that wants the model warm sooner
+calls `VoiceInput::prepare` on a `WhistleVoice` before registering it with `set_voice_input`.
 
 ## Web
 

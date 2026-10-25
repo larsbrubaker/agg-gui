@@ -5,7 +5,11 @@
 //! worker, queues the messages that arrive meanwhile, and calls [`run`] with
 //! them. From then on every message goes into one queue that a single task
 //! works through in order (`protocol::next_job` picks the next job, skipping
-//! cancelled work). `Load` downloads, checks and caches
+//! cancelled work). A dictation's stream and audio may arrive while the
+//! model still loads: they wait in the queue (the latest 30 s of a long
+//! wait, `protocol::cap_backlog`; a cancel drops its session's at once,
+//! `protocol::drop_cancelled`) and go to the engine once it is built.
+//! `Load` downloads, checks and caches
 //! the model (`model_load.rs`) and builds the [`Engine`]; every other message
 //! goes to the engine, whose reply is posted back. Between jobs the task
 //! yields to the event loop, so a cancel posted while a pass ran joins the
@@ -25,7 +29,9 @@ use web_sys::{DedicatedWorkerGlobalScope, MessageEvent};
 
 use crate::engine::Engine;
 use crate::js_fields::{from_object, to_object};
-use crate::protocol::{next_job, FromWorker, LoadFailure, Recognised, ToWorker};
+use crate::protocol::{
+    cap_backlog, drop_cancelled, next_job, FromWorker, LoadFailure, Recognised, ToWorker,
+};
 
 struct Worker {
     scope: DedicatedWorkerGlobalScope,
@@ -65,7 +71,20 @@ pub fn run(queued: Array) {
 
 fn enqueue(worker: &Shared, message: &JsValue) {
     match from_object(message, ToWorker::from_fields) {
-        Ok(msg) => worker.borrow_mut().queue.push_back(msg),
+        Ok(msg) => {
+            let cancel = matches!(msg, ToWorker::Cancel { .. });
+            let mut w = worker.borrow_mut();
+            w.queue.push_back(msg);
+            // A cancelled session's queued work goes at once (behind a slow
+            // load, that is its whole backlog of audio).
+            if cancel {
+                drop_cancelled(&mut w.queue);
+            }
+            // Audio waiting behind the model's load is bounded.
+            if w.engine.is_none() {
+                cap_backlog(&mut w.queue);
+            }
+        }
         Err(err) => web_sys::console::error_1(&JsValue::from_str(&err.to_string())),
     }
 }

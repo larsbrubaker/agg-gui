@@ -5,7 +5,12 @@
 //! The engine thread starts with the first `Load`: it loads the model
 //! (`model.rs`: the configured path, the cache, then a download), builds the
 //! engine once per process, and answers session messages from its channel
-//! in order (`protocol::next_job` skips cancelled work).
+//! in order (`protocol::next_job` skips cancelled work). A dictation started
+//! while the model loads opens the microphone at once; its stream and audio
+//! wait in the channel and run once the model is built. The thread takes
+//! them in with each step of the download, dropping cancelled sessions'
+//! work and keeping a session's latest 30 s past 60 s ([`absorb`]), so a
+//! long load holds about a minute of audio at most.
 //! Replies and microphone events come back over one channel that every call
 //! drains first, and each sender wakes the UI thread through the queue
 //! captured when the provider was made (`ui_thread::current_queue`), so an
@@ -32,7 +37,7 @@ use whistle::Whistle;
 use crate::config::Config;
 use crate::engine::Engine;
 use crate::machine::{Command, Machine, MicError};
-use crate::protocol::{next_job, FromWorker, LoadFailure, ToWorker};
+use crate::protocol::{cap_backlog, drop_cancelled, next_job, FromWorker, LoadFailure, ToWorker};
 use crate::provider::Host;
 
 /// What the threads tell the UI thread (the microphone events only come
@@ -122,7 +127,14 @@ impl Host for NativeHost {
                 }
                 Event::MicOpened(s) => inner.machine.on_mic_opened(s),
                 Event::MicFailed(s, err) => inner.machine.on_mic_failed(s, err),
-                Event::Level(s, level) => inner.machine.on_level(s, level),
+                // The first level turns the key to listening; the event
+                // already woke the UI thread to show it.
+                Event::Level(s, level) => {
+                    inner.machine.on_level(s, level);
+                }
+                // Already gone (a failed load ended the thread, and a push
+                // found it so): the machine was told how, by the load.
+                Event::EngineLost(_) if inner.engine.is_none() => {}
                 Event::EngineLost(detail) => {
                     inner.engine = None;
                     inner.machine.worker_lost(&detail);
@@ -210,16 +222,21 @@ fn spawn_engine_with(
 }
 
 /// The model, from `model` or loaded now (and kept there).
+/// `meanwhile` runs with each step of a download's progress (the engine
+/// thread keeps its inbox bounded there, [`absorb`]).
 fn whistle(
     source: &model::Source,
     model: ModelCell,
     notifier: &Notifier,
+    meanwhile: &dyn Fn(),
 ) -> Result<(&'static Whistle, String), FromWorker> {
     if let Some(whistle) = model.get() {
         return Ok((whistle, "memory".into()));
     }
-    let progress =
-        |loaded, total| notifier.send(Event::Worker(FromWorker::Progress { loaded, total }));
+    let progress = |loaded, total| {
+        notifier.send(Event::Worker(FromWorker::Progress { loaded, total }));
+        meanwhile();
+    };
     let (bytes, from) = source
         .load(&progress)
         .map_err(|(reason, detail)| FromWorker::LoadFailed { reason, detail })?;
@@ -243,6 +260,15 @@ impl Drop for LostGuard {
     }
 }
 
+/// Take in what waits in `inbox`, drop the work of sessions cancelled
+/// meanwhile, and keep a session's latest 30 s of audio once more than
+/// 60 s has queued (`protocol::cap_backlog`).
+fn absorb(queue: &mut VecDeque<ToWorker>, inbox: &Receiver<ToWorker>) {
+    queue.extend(inbox.try_iter());
+    drop_cancelled(queue);
+    cap_backlog(queue);
+}
+
 fn engine_thread(
     source: model::Source,
     model: ModelCell,
@@ -262,10 +288,19 @@ fn engine_thread(
         queue.extend(inbox.try_iter());
         while let Some(job) = next_job(&mut queue) {
             if let ToWorker::Load { .. } = job {
-                match whistle(&source, model, &notifier) {
+                // A dictation's stream and audio arrive while the model
+                // loads: taken in as the download goes, their memory
+                // bounded ([`absorb`]).
+                let held = RefCell::new(std::mem::take(&mut queue));
+                let loaded = whistle(&source, model, &notifier, &|| {
+                    absorb(&mut held.borrow_mut(), &inbox)
+                });
+                queue = held.into_inner();
+                match loaded {
                     Ok((whistle, from)) => {
                         engine.get_or_insert_with(|| Engine::new(whistle));
                         notifier.send(Event::Worker(FromWorker::Loaded { source: from }));
+                        absorb(&mut queue, &inbox);
                     }
                     Err(failed) => {
                         notifier.send(Event::Worker(failed));

@@ -389,8 +389,8 @@ pub fn set_text_input_focused_with_hints(
         opened
     });
     if opened {
-        // The keyboard is coming up: a voice provider starts getting ready
-        // (downloading its model) now, not at the first tap on the mic.
+        // The keyboard is coming up. A voice provider is asked for nothing
+        // here: it loads its model on the first tap on the mic, not now.
         voice_session::keyboard_opened();
     }
 }

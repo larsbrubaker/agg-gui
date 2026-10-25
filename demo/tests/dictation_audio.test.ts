@@ -6,9 +6,10 @@
  * - iOS Safari only lets an AudioContext start inside a user gesture. The
  *   page's AudioContext is wrapped so that it does the same (a context made
  *   or resumed outside a tap's touchend/pointerup stays suspended), and a
- *   start the tap defers (the model still downloading after a failed try)
- *   must still hear the microphone; a context that never starts must be a
- *   microphone error, not Listening to silence.
+ *   start the tap defers (the first tap, which downloads the model; a tap
+ *   that retries a failed download) must still hear the microphone; a
+ *   context that never starts must be a microphone error, not Listening to
+ *   silence.
  * - Without an AudioWorklet (its module fails to load) the provider falls
  *   back to a ScriptProcessor, says so once in the console, and dictates,
  *   even while the main thread stalls (as CI's software-rendered one does):
@@ -16,8 +17,14 @@
  *   double buffer the audio thread refills one buffer later. A stop still
  *   delivers the audio up to it, which that buffer (about a second) holds
  *   until its next event.
- * - A model download that stalls times out and is an error the next show
- *   of the keyboard retries.
+ * - The microphone is asked for inside the tap, and the key says "Speak
+ *   now" only once its audio flows. The user here speaks the clip at that
+ *   cue (`speakAtCue`), so every word must arrive: when the capture module
+ *   is slow (the stream waits for it at most 1.5 s, then a ScriptProcessor
+ *   captures), and on a main thread 20 times slower (CI's software-rendered
+ *   one lags by seconds), which only delays the cue.
+ * - A model download that stalls times out and is an error the next tap
+ *   retries.
  *
  * Needs the dictation worker and model in the served site and the clip, as
  * dictation.test.ts does.
@@ -33,9 +40,12 @@ import {
   FIELD,
   KEYBOARD_SETTLES_MS,
   MIC,
-  OUTSIDE,
   PHONE,
+  cueRequests,
   fieldText,
+  recordWorkerTraffic,
+  speakAtCue,
+  workerTraffic,
   seedTextEdit,
   waitForState,
 } from "./dictation_common";
@@ -63,7 +73,8 @@ test.use({
  * reading, which varies from run to run ("make" or "mate", "cube 20",
  * "cute 20" or "Q20"; see dictation.test.ts).
  */
-const DICTATED = /^Edit this text \w+ the .+ wide and round the top edges\.$/;
+// Its tail too: "round the top edges" has come back "round to top edges".
+const DICTATED = /^Edit this text \w+ the .+ wide and round \w+ top edges\.$/;
 
 
 /**
@@ -103,6 +114,8 @@ async function emulateIosAudio(page: Page, never: boolean): Promise<void> {
       window.addEventListener(type, () => (inGesture = false));
     }
     const Real = window.AudioContext;
+    // For the speaking user's own graph (`speakAtCue`): a real context.
+    (window as unknown as Record<string, unknown>).__RealAudioContext = Real;
     class GestureAudioContext extends Real {
       private unlocked: boolean;
       constructor(options?: AudioContextOptions) {
@@ -120,15 +133,31 @@ async function emulateIosAudio(page: Page, never: boolean): Promise<void> {
   }, never);
 }
 
+/** Open the TextEdit demo and bring the keyboard up on its field (nothing
+ * of the dictation loads yet). The microphone is a user who speaks the
+ * clip at the cue (`speakAtCue`). */
 async function boot(page: Page): Promise<void> {
   page.on("console", (m) => console.log(`[page ${m.type()}] ${m.text()}`));
+  if (existsSync(CLIP)) await speakAtCue(page, CLIP);
+  await recordWorkerTraffic(page);
   await seedTextEdit(page);
   await page.goto(BASE);
   await page.locator("#loading").waitFor({ state: "hidden", timeout: 30_000 });
   await page.waitForTimeout(300);
+  await page.touchscreen.tap(FIELD.x, FIELD.y);
+  await waitForState(page, /^Ready$/);
+  await page.waitForTimeout(KEYBOARD_SETTLES_MS);
 }
 
-/** Listen to the whole clip, stop, and wait for the final text. */
+// A dictation that came out wrong says what the worker was sent and said.
+test.afterEach(async ({ page }, testInfo) => {
+  if (testInfo.status !== testInfo.expectedStatus) {
+    console.log(`worker traffic: ${await workerTraffic(page)}`);
+  }
+});
+
+/** Wait for the cue, let the user say the clip, stop, and wait for the
+ * final text. */
 async function dictateClip(page: Page): Promise<void> {
   await waitForState(page, /^Listening/, 60_000);
   await page.waitForTimeout(5_000);
@@ -136,6 +165,22 @@ async function dictateClip(page: Page): Promise<void> {
   await waitForState(page, /^Ready$/, 30_000);
   await page.waitForTimeout(300);
 }
+
+test("the first tap, which waits for the download, starts the audio inside the tap and dictates once loaded", async ({
+  page,
+}) => {
+  test.skip(!existsSync(CLIP), `no clip at ${CLIP}`);
+  test.setTimeout(180_000);
+  await emulateIosAudio(page, false);
+  await boot(page);
+  // The tap downloads the model; the microphone opens when it is in, after
+  // the tap, from the worker's reply.
+  await page.touchscreen.tap(MIC.x, MIC.y);
+  await dictateClip(page);
+  const text = await fieldText(page);
+  console.log(`field text: ${JSON.stringify(text)}`);
+  expect(text ?? "").toMatch(DICTATED);
+});
 
 test("a tap that retries a failed download starts the audio inside the tap and dictates once loaded", async ({
   page,
@@ -149,10 +194,9 @@ test("a tap that retries a failed download starts the audio inside the tap and d
     blocked ? route.abort("internetdisconnected") : route.continue(),
   );
   await boot(page);
-  await page.touchscreen.tap(FIELD.x, FIELD.y);
+  await page.touchscreen.tap(MIC.x, MIC.y);
   const failed = await waitForState(page, /^Error/);
   expect(failed).toContain("retry: true");
-  await page.waitForTimeout(KEYBOARD_SETTLES_MS);
 
   // The tap retries the download; the microphone opens when the model is
   // in, long after the tap, from the worker's reply.
@@ -164,15 +208,68 @@ test("a tap that retries a failed download starts the audio inside the tap and d
   expect(text ?? "").toMatch(DICTATED);
 });
 
+test("on a main thread 20 times slower the request is still made once, in the tap, and every word said at the cue arrives", async ({
+  page,
+}) => {
+  test.skip(!existsSync(CLIP), `no clip at ${CLIP}`);
+  test.setTimeout(180_000);
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send("Emulation.setCPUThrottlingRate", { rate: 20 });
+  await boot(page);
+  await page.touchscreen.tap(MIC.x, MIC.y);
+  await dictateClip(page);
+  const text = await fieldText(page);
+  console.log(`field text: ${JSON.stringify(text)}`);
+  const asked = await cueRequests(page);
+  expect(asked.length).toBe(1);
+  expect(asked[0].inTap, "made inside the tap's touchend dispatch").toBe(true);
+  // Spoken at the cue: every word arrives, however late the cue came.
+  expect(text ?? "").toMatch(DICTATED);
+});
+
+test("a capture module still loading 1.5 s after the stream gives way to the ScriptProcessor", async ({
+  page,
+}) => {
+  test.skip(!existsSync(CLIP), `no clip at ${CLIP}`);
+  test.setTimeout(180_000);
+  // The worklet's module takes 2.5 s to load; count the processors.
+  await page.addInitScript(() => {
+    const win = window as unknown as Record<string, any>;
+    win.__processors = 0;
+    const addModule = AudioWorklet.prototype.addModule;
+    AudioWorklet.prototype.addModule = function (this: AudioWorklet, url: string, options?: any) {
+      return new Promise((resolve) => setTimeout(resolve, 2_500)).then(() =>
+        addModule.call(this, url, options),
+      );
+    };
+    const create = BaseAudioContext.prototype.createScriptProcessor;
+    BaseAudioContext.prototype.createScriptProcessor = function (...args) {
+      win.__processors++;
+      return create.apply(this, args);
+    };
+  });
+  await boot(page);
+  await page.touchscreen.tap(MIC.x, MIC.y);
+  await dictateClip(page);
+  const text = await fieldText(page);
+  console.log(`field text: ${JSON.stringify(text)}`);
+  const processors = await page.evaluate(
+    () => (window as unknown as Record<string, any>).__processors as number,
+  );
+  expect(processors, "the dictation fell back to a ScriptProcessor").toBe(1);
+  // The cue came once the ScriptProcessor's audio flowed: nothing said
+  // after it is lost.
+  expect(text ?? "").toMatch(DICTATED);
+});
+
 test("an AudioContext that never starts is a microphone error, not listening to silence", async ({
   page,
 }) => {
   test.setTimeout(120_000);
   await emulateIosAudio(page, true);
   await boot(page);
-  await page.touchscreen.tap(FIELD.x, FIELD.y);
-  await waitForState(page, /^Ready$/);
-  await page.waitForTimeout(KEYBOARD_SETTLES_MS);
+  // The tap loads the model first (from the page's copy), then opens the
+  // microphone.
   await page.touchscreen.tap(MIC.x, MIC.y);
   const seen: string[] = [];
   const t0 = Date.now();
@@ -181,7 +278,7 @@ test("an AudioContext that never starts is a microphone error, not listening to 
       (window as unknown as Record<string, any>).__wasm["dictation_state"](),
     )) as string;
     if (seen[seen.length - 1] !== s) seen.push(s);
-    if (s.startsWith("Error") || Date.now() - t0 > 10_000) break;
+    if (s.startsWith("Error") || Date.now() - t0 > 60_000) break;
     await page.waitForTimeout(20);
   }
   console.log("states:", seen.join(" | "));
@@ -219,9 +316,6 @@ test("without an AudioWorklet the ScriptProcessor fallback dictates and says so 
     if (m.text().startsWith("agg-gui-whistle: no AudioWorklet")) warnings.push(m.text());
   });
   await boot(page);
-  await page.touchscreen.tap(FIELD.x, FIELD.y);
-  await waitForState(page, /^Ready$/);
-  await page.waitForTimeout(KEYBOARD_SETTLES_MS);
   // Stalls of 300 ms: a 64 ms buffer came out shuffled and repeated
   // ("je trouve que je trouve que ..." on CI).
   await startStalls(page, 300, 500);
@@ -297,9 +391,6 @@ test("without an AudioWorklet a stop delivers the audio up to the stop", async (
   await withoutWorklet(page);
   await recordProcessorAudio(page);
   await boot(page);
-  await page.touchscreen.tap(FIELD.x, FIELD.y);
-  await waitForState(page, /^Ready$/);
-  await page.waitForTimeout(KEYBOARD_SETTLES_MS);
   await page.touchscreen.tap(MIC.x, MIC.y);
   await waitForState(page, /^Listening/, 60_000);
   // Stop 300 ms after an event, mid-speech: that audio is in the
@@ -324,7 +415,7 @@ test("without an AudioWorklet a stop delivers the audio up to the stop", async (
   expect(pushed).toBeGreaterThanOrEqual(heard - 0.1);
 });
 
-test("a download that stalls times out and the next show of the keyboard retries it", async ({
+test("a download that stalls times out and the next tap retries it", async ({
   page,
   context,
 }) => {
@@ -338,15 +429,15 @@ test("a download that stalls times out and the next show of the keyboard retries
   });
   await boot(page);
   const t0 = Date.now();
-  await page.touchscreen.tap(FIELD.x, FIELD.y);
+  await page.touchscreen.tap(MIC.x, MIC.y);
   const failed = await waitForState(page, /^Error/, 60_000);
   console.log(`stalled download failed after ${Date.now() - t0} ms: ${failed}`);
   expect(failed).toContain("Couldn't download the speech model");
   expect(failed).toContain("retry: true");
 
   stalled = false;
-  await page.touchscreen.tap(OUTSIDE.x, OUTSIDE.y);
-  await page.waitForTimeout(600);
-  await page.touchscreen.tap(FIELD.x, FIELD.y);
-  await waitForState(page, /^Ready$/);
+  await page.touchscreen.tap(MIC.x, MIC.y);
+  await waitForState(page, /^Listening/);
+  await page.touchscreen.tap(MIC.x, MIC.y);
+  await waitForState(page, /^Ready$/, 30_000);
 });

@@ -11,8 +11,30 @@
 //! a session that is over are dropped, so a cancel or an aborted start
 //! never lets late words or a late microphone through.
 //!
-//! The model loads on `prepare` (the keyboard coming up); the microphone
-//! opens on `start` (the first tap), when the browser asks for permission.
+//! Nothing loads until the first `start` (the first tap on the microphone;
+//! the keyboard never calls `prepare`, which an app may call to warm the
+//! model early). Until then the machine reports `Ready`. Every start opens
+//! its session at once, inside the tap: the load if the model isn't in
+//! (`Load`), the engine's stream (`Start`), then the microphone (`OpenMic`,
+//! the one microphone request of the dictation, so the permission prompt
+//! shows at the tap). The engine works through its messages in order and
+//! the load first, so the stream and the audio captured meanwhile wait in
+//! its queue until the model is in (`protocol::cap_backlog` keeps the
+//! latest 30 s of a long wait). Until then the machine reports `Preparing`
+//! with the load's progress, then `Listening`, with no second tap. Listening
+//! (the key's "Speak now") waits for the session's first audio to reach the
+//! pipeline (its first level), not just for the microphone to open: a
+//! starved browser may deliver the stream seconds after the device starts,
+//! and the cue must not come before what is said after it is kept. A stop
+//! or cancel meanwhile ends the session (the microphone closed, its queued
+//! audio skipped by the engine) but not the load, so the model still
+//! arrives and the next start begins at once. A load with no session
+//! waiting for it (an app's `prepare`, or one whose session was cancelled)
+//! reports `Ready`, and fails quietly: the next tap loads afresh. A load a
+//! session waits for that fails ends the session with the error, one a
+//! start retries. Once loaded, the model stays loaded. A refused microphone
+//! is an error a tap retries: the browser is asked again.
+//!
 //! A stop closes the microphone (sending its last audio), asks the engine
 //! to finish, reports `Finishing`, delivers the final text with a
 //! `Finishing` poll, then reports `Ready`.
@@ -59,7 +81,9 @@ impl MicError {
     /// The message the keyboard shows, and whether a tap may retry.
     fn shown(&self) -> (String, bool) {
         match self {
-            MicError::Denied => ("Microphone access was denied".into(), false),
+            // A tap asks the browser again: it refuses at once while the
+            // site is blocked, and prompts or allows once it isn't.
+            MicError::Denied => ("Microphone access was denied".into(), true),
             MicError::NoDevice => ("No microphone found".into(), true),
             MicError::Unsupported => ("This browser can't record audio".into(), false),
             MicError::Suspended => ("Couldn't start the audio; tap to try again".into(), true),
@@ -124,10 +148,12 @@ pub(crate) struct Machine {
     last_session: u32,
     mapper: TextMapper,
     level: Option<f32>,
-    /// The last dictation's error, shown until the next start or prepare.
+    /// The session's audio has reached the pipeline (its first level): only
+    /// then does the key say listening.
+    heard: bool,
+    /// The last dictation's error, shown until the next start (or an app's
+    /// prepare).
     error: Option<(String, bool)>,
-    /// A start waiting for the model to load.
-    start_when_loaded: Option<VoiceContext>,
     /// A poll has reported since the last start (an error that lands before
     /// one is held back a poll, so the keyboard sees the retry begin).
     polled_since_start: bool,
@@ -148,8 +174,8 @@ impl Machine {
             last_session: 0,
             mapper: TextMapper::default(),
             level: None,
+            heard: false,
             error: None,
-            start_when_loaded: None,
             polled_since_start: true,
             commands: Vec::new(),
         }
@@ -181,17 +207,10 @@ impl Machine {
         }
     }
 
-    /// A tap's start is waiting for the model to load.
-    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
-    pub fn start_pending(&self) -> bool {
-        self.start_when_loaded.is_some()
-    }
-
-    /// A microphone is wanted: a start waits for the model, or a session
-    /// is in progress.
-    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
-    pub fn wants_mic(&self) -> bool {
-        self.start_pending() || self.current_session().is_some()
+    /// The session in progress waits for the model: its audio queues in
+    /// the engine behind the load.
+    fn waiting_for_model(&self) -> bool {
+        self.current_session().is_some() && self.model != Model::Loaded
     }
 
     fn load(&mut self) {
@@ -223,21 +242,18 @@ impl Machine {
         }
         self.error = None;
         self.polled_since_start = false;
-        if self.model == Model::Loaded {
-            self.begin(ctx);
-        } else {
-            self.start_when_loaded = Some(ctx.clone());
-            self.load();
-        }
+        self.load();
+        self.begin(ctx);
     }
 
-    /// Open a session: the engine's stream first, so no audio arrives
-    /// before it, then the microphone.
+    /// Open a session: the engine's stream first (behind the load, if the
+    /// model isn't in), so no audio arrives before it, then the microphone.
     fn begin(&mut self, ctx: &VoiceContext) {
         self.last_session = self.last_session.wrapping_add(1);
         let session = self.last_session;
         self.mapper = TextMapper::new(ctx.sentence_start);
         self.level = None;
+        self.heard = false;
         self.dictation = Dictation::Opening { session };
         let language = ctx
             .language
@@ -251,7 +267,6 @@ impl Machine {
 
     /// End the session at once, dropping what it has not delivered.
     fn abort(&mut self) {
-        self.start_when_loaded = None;
         match self.dictation {
             Dictation::Idle => {}
             Dictation::Opening { session } | Dictation::Listening { session } => {
@@ -272,6 +287,12 @@ impl Machine {
     }
 
     pub fn stop(&mut self) {
+        if self.waiting_for_model() {
+            // Nothing recognised yet: the audio queued behind the load is
+            // dropped, as for a cancel.
+            self.abort();
+            return;
+        }
         match self.dictation {
             Dictation::Listening { session } => {
                 self.commands.push(Command::CloseMic {
@@ -332,16 +353,21 @@ impl Machine {
             .push(Command::Worker(ToWorker::Cancel { session }));
     }
 
-    /// The input level, 0..=1.
-    pub fn on_level(&mut self, session: u32, level: f32) {
-        if self.dictation == (Dictation::Listening { session }) {
-            self.level = Some(level.clamp(0.0, 1.0));
+    /// The input level, 0..=1: audio of `session` reached the pipeline.
+    /// Returns whether it is the session's first, which turns the key to
+    /// listening (the host repaints for it).
+    pub fn on_level(&mut self, session: u32, level: f32) -> bool {
+        if self.dictation != (Dictation::Listening { session }) {
+            return false;
         }
+        self.level = Some(level.clamp(0.0, 1.0));
+        !std::mem::replace(&mut self.heard, true)
     }
 
     /// The engine (the worker, or the native thread) is gone.
     pub fn worker_lost(&mut self, detail: &str) {
         log(&format!("engine lost: {detail}"));
+        let waiting = self.waiting_for_model();
         if self.current_session().is_some() {
             self.abort();
             // Its cancel has nowhere to go.
@@ -349,9 +375,16 @@ impl Machine {
                 .retain(|c| !matches!(c, Command::Worker(ToWorker::Cancel { .. })));
             self.error = Some((ENGINE_FAILED.into(), true));
         }
-        self.start_when_loaded = None;
-        self.model = Model::Failed {
-            message: load_failure_message(LoadFailure::Startup).into(),
+        // A session waiting for the model hears why; with nobody waiting the
+        // key stays ready and the next tap loads afresh. A load that already
+        // failed keeps its error: losing the engine after it (natively, the
+        // thread a failed load ended) says nothing new.
+        self.model = match &self.model {
+            Model::Failed { .. } => self.model.clone(),
+            _ if waiting => Model::Failed {
+                message: load_failure_message(LoadFailure::Startup).into(),
+            },
+            _ => Model::Idle,
         };
     }
 
@@ -365,16 +398,22 @@ impl Machine {
                 }
             }
             FromWorker::Loaded { .. } => {
+                // The session's stream and audio, queued behind the load,
+                // go on in the engine now.
                 self.model = Model::Loaded;
-                if let Some(ctx) = self.start_when_loaded.take() {
-                    self.begin(&ctx);
-                }
             }
             FromWorker::LoadFailed { reason, detail } => {
                 log(&format!("model: {detail}"));
-                self.start_when_loaded = None;
-                self.model = Model::Failed {
-                    message: load_failure_message(reason).into(),
+                // Shown only to a session waiting for it, which ends; a load
+                // nobody waits for (an app's prepare, a cancelled tap's)
+                // fails quietly, and the next tap loads afresh.
+                self.model = if self.waiting_for_model() {
+                    self.abort();
+                    Model::Failed {
+                        message: load_failure_message(reason).into(),
+                    }
+                } else {
+                    Model::Idle
                 };
             }
             FromWorker::Update { session, update } => {
@@ -432,8 +471,18 @@ impl Machine {
                 retry: false,
             };
         }
+        let progress = match &self.model {
+            Model::Loading { progress } => *progress,
+            _ => None,
+        };
         match self.dictation {
-            Dictation::Opening { .. } => return VoiceState::Preparing { progress: None },
+            Dictation::Opening { .. } => return VoiceState::Preparing { progress },
+            // Capturing, but not listening until the model is in and the
+            // audio flows: the cue to speak comes when nothing said after it
+            // can be lost.
+            Dictation::Listening { .. } if self.model != Model::Loaded || !self.heard => {
+                return VoiceState::Preparing { progress }
+            }
             Dictation::Listening { .. } => return VoiceState::Listening { level: self.level },
             Dictation::Finishing { .. } => return VoiceState::Finishing,
             Dictation::Idle => {}
@@ -445,11 +494,9 @@ impl Machine {
             };
         }
         match &self.model {
-            Model::Idle => VoiceState::Preparing { progress: None },
-            Model::Loading { progress } => VoiceState::Preparing {
-                progress: *progress,
-            },
-            Model::Loaded => VoiceState::Ready,
+            // Ready for the tap that loads it; loading for nobody yet, a tap
+            // may still ask to dictate.
+            Model::Idle | Model::Loaded | Model::Loading { .. } => VoiceState::Ready,
             Model::Failed { message } => VoiceState::Error {
                 message: message.clone(),
                 retry: true,

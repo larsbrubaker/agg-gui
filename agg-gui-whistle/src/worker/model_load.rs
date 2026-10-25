@@ -7,7 +7,7 @@
 //! Mirrors whistle-rust's demo (`demo/web/src/model.ts`).
 //!
 //! A download silent for [`STALL_MS`] (no response, no bytes) is aborted
-//! and counts as failed, so the keyboard's next show retries it. Progress
+//! and counts as failed, so the next tap retries it. Progress
 //! counts against the model's pinned size, not `Content-Length` (which
 //! counts encoded bytes when the server compresses the body). When every
 //! place fails, the last failure names the reason: a network failure after

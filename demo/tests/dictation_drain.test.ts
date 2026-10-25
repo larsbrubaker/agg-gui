@@ -10,7 +10,7 @@
  *   then its Finish.
  * - A worklet that never answers the flush (a Blob-URL processor that
  *   ignores it) still lets the dictation finish, about 500 ms after the
- *   stop.
+ *   stop, later only by the main thread's measured lag.
  * - A drain still waiting when the next session's stop starts another
  *   (the first session's engine failed during its drain, the user tapped
  *   again and stopped) ends the first drain and runs the second: the web
@@ -36,6 +36,7 @@ import {
   PHONE,
   seedTextEdit,
   waitForState,
+  speakAtCue,
 } from "./dictation_common";
 
 const CLIP =
@@ -69,6 +70,16 @@ async function recordTraffic(page: Page): Promise<void> {
     win.__flushes = [];
     win.__stopAt = 0;
     win.__armed = false;
+    // How late the main thread runs a 20 ms timer, sampled all along
+    // (`__late`: [time, ms late]): CI's software-rendered main thread lags
+    // by hundreds of milliseconds, and the drain's own wait is a timer.
+    win.__late = [];
+    let last = performance.now();
+    setInterval(() => {
+      const now = performance.now();
+      win.__late.push([now, Math.max(0, now - last - 20)]);
+      last = now;
+    }, 20);
     const post = Worker.prototype.postMessage;
     Worker.prototype.postMessage = function (this: Worker, msg: any, ...rest: any[]) {
       if (msg && typeof msg === "object" && "type" in msg) {
@@ -120,6 +131,8 @@ async function lazyWorklet(page: Page): Promise<void> {
 }
 
 async function boot(page: Page, errors: string[]): Promise<void> {
+  // The microphone is a user who speaks the clip at the cue.
+  if (existsSync(CLIP)) await speakAtCue(page, CLIP);
   page.on("console", (m) => {
     console.log(`[page ${m.type()}] ${m.text()}`);
     if (m.type() === "error") errors.push(m.text());
@@ -218,9 +231,28 @@ test("a worklet that never answers the flush still finishes, after the drain's w
   const finish = (await posts(page)).find((p) => p.type === "finish" && p.session === session);
   expect(finish, "a finish was posted").toBeDefined();
   const waited = finish!.t - stopAt;
-  console.log(`finish posted ${waited.toFixed(1)} ms after the stop`);
+  // The finish waits 500 ms for the flush's answer. A lagging main thread
+  // delays it twice at most: the stop's tap reaching the app (a stalled
+  // frame), and the wait's timer firing late. Bound it by the lag measured
+  // meanwhile, not by a guess at CI's speed.
+  const late = await page.evaluate(
+    ([from, to]) =>
+      ((window as unknown as Record<string, any>).__late as [number, number][])
+        .filter(([t]) => t >= from && t <= to + 100)
+        .reduce((max, [, ms]) => Math.max(max, ms), 0),
+    [stopAt, finish!.t],
+  );
+  // The allowance is capped: a stall the app itself causes (a stop that
+  // blocks the main thread for seconds) must still fail.
+  const allowed = Math.min(late, 1_000);
+  const bound = 500 + 2 * allowed + 250;
+  console.log(
+    `finish posted ${waited.toFixed(1)} ms after the stop; main thread up to ` +
+      `${late.toFixed(0)} ms late meanwhile (${allowed.toFixed(0)} allowed); ` +
+      `bound ${bound.toFixed(0)} ms`,
+  );
   expect(waited).toBeGreaterThanOrEqual(450);
-  expect(waited).toBeLessThan(1_500);
+  expect(waited).toBeLessThan(bound);
   expectNoErrors(errors);
 });
 

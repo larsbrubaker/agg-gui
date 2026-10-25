@@ -3,12 +3,15 @@
 //! microphone (`mic.rs`), all on the UI thread.
 //!
 //! The worker (`web/worker.js` and the `agg-gui-whistle-worker` module,
-//! `worker/`) starts with the first `Load`, so a page that never shows the
-//! keyboard never downloads anything. Its replies arrive in `onmessage`,
+//! `worker/`) starts with the first `Load`, which the first tap on the
+//! microphone asks for, so a page whose user never dictates (even with the
+//! keyboard up) downloads neither it nor the model: only the capture
+//! worklet's module, about a kilobyte, is fetched when the provider is made
+//! (`worklet_module.rs`). Its replies arrive in `onmessage`,
 //! go to the machine, and wake the app with `agg_gui::animation::request_draw`.
 //! A worker that fails to start (its script or module missing) is dropped
-//! and started again by the next `Load`, so the keyboard's next show
-//! retries.
+//! and started again by the next `Load`, so the next tap on the
+//! microphone retries.
 //!
 //! Platforms that can't do this at all (no `getUserMedia`, no module
 //! workers, no WebAssembly SIMD for the model's kernels) get a machine that
@@ -20,17 +23,18 @@
 //! microphone's tracks stopped and its `AudioContext` closed (`Drop` for
 //! [`WebHost`] and [`Shared`], and for the microphone in `mic.rs`).
 
+mod ask;
 mod drain;
 mod mic;
+mod worklet_module;
 
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
 
-use agg_gui::widgets::on_screen_keyboard::VoiceContext;
 use js_sys::{Reflect, Uint8Array, WebAssembly};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
-use web_sys::{AudioContext, ErrorEvent, Event, MessageEvent, Worker, WorkerOptions, WorkerType};
+use web_sys::{ErrorEvent, Event, MessageEvent, Worker, WorkerOptions, WorkerType};
 
 use crate::config::Config;
 use crate::drain_book::DrainBook;
@@ -64,9 +68,9 @@ pub(crate) struct Shared {
     mic: RefCell<Option<mic::Mic>>,
     /// A stopped microphone delivering its last audio (`drain.rs`).
     drain: RefCell<DrainBook<drain::Draining>>,
-    /// The context a tap made for a start that waits for the model
-    /// (`mic::warm_up`).
-    warm: RefCell<Option<AudioContext>>,
+    /// The capture worklet's module, prefetched when the provider was made,
+    /// as a Blob URL (`worklet_module.rs`); revoked with the provider.
+    worklet_blob: RefCell<Option<String>>,
     /// The console has been told the worklet failed.
     worklet_warned: Cell<bool>,
     /// Absolute URLs.
@@ -80,13 +84,17 @@ impl Shared {
         let taken = (
             self.drain.try_borrow_mut().ok().and_then(|mut d| d.take()),
             self.mic.try_borrow_mut().ok().and_then(|mut m| m.take()),
-            self.warm.try_borrow_mut().ok().and_then(|mut w| w.take()),
             self.worker.try_borrow_mut().ok().and_then(|mut w| w.take()),
         );
-        if let Some(ctx) = &taken.2 {
-            let _ = ctx.close();
-        }
         drop(taken);
+        let blob = self
+            .worklet_blob
+            .try_borrow_mut()
+            .ok()
+            .and_then(|mut b| b.take());
+        if let Some(blob) = blob {
+            let _ = web_sys::Url::revoke_object_url(&blob);
+        }
     }
 }
 
@@ -152,6 +160,7 @@ fn unsupported() -> Option<&'static str> {
 
 impl WebHost {
     pub(crate) fn new(config: Config) -> WebHost {
+        let supported = unsupported().is_none();
         let machine = match unsupported() {
             Some(reason) => Machine::unsupported(reason),
             None => Machine::new(
@@ -159,39 +168,31 @@ impl WebHost {
                 config.language.clone(),
             ),
         };
-        WebHost {
+        let host = WebHost {
             shared: Rc::new(Shared {
                 machine: RefCell::new(machine),
                 worker: RefCell::new(None),
                 mic: RefCell::new(None),
                 drain: RefCell::new(DrainBook::default()),
-                warm: RefCell::new(None),
+                worklet_blob: RefCell::new(None),
                 worklet_warned: Cell::new(false),
                 worker_url: absolute(&config.worker_url),
                 worklet_url: absolute(&config.worklet_url),
             }),
+        };
+        // The capture module only (about a kilobyte, not the model): the
+        // microphone opens in the tap and is wired the moment its stream
+        // arrives (`worklet_module.rs`).
+        if supported {
+            worklet_module::prefetch(&host.shared);
         }
+        host
     }
 }
 
 impl Host for WebHost {
     fn dispatch(&self, f: &mut dyn FnMut(&mut Machine)) {
         dispatch(&self.shared, f);
-    }
-
-    /// Inside the tap: a start that waits for the model gets its audio
-    /// context now, while the gesture lets it start (`mic.rs`).
-    fn start(&self, ctx: &VoiceContext) {
-        dispatch(&self.shared, &mut |m| m.start(ctx));
-        let pending = self
-            .shared
-            .machine
-            .try_borrow()
-            .map(|m| m.start_pending())
-            .unwrap_or(false);
-        if pending {
-            mic::warm_up(&self.shared);
-        }
     }
 }
 
@@ -207,10 +208,16 @@ pub(crate) fn dispatch(shared: &Rc<Shared>, f: &mut dyn FnMut(&mut Machine)) {
         f(&mut machine);
         machine.take_commands()
     };
-    for command in commands {
+    // The microphone first: opening it starts its capture module's fetch,
+    // which must not queue behind the worker's (the model's) on a slow link.
+    // Its audio reaches the worker only after awaits, so the engine's
+    // stream, posted in this same call, still comes before it.
+    let (mics, rest): (Vec<Command>, Vec<Command>) = commands
+        .into_iter()
+        .partition(|c| matches!(c, Command::OpenMic { .. }));
+    for command in mics.into_iter().chain(rest) {
         run(shared, command);
     }
-    mic::drop_unwanted_warm(shared);
 }
 
 fn run(shared: &Rc<Shared>, command: Command) {

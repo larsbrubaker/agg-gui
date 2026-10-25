@@ -1,15 +1,20 @@
 //! Tests for `machine.rs`: what the provider reports and asks its host to do
-//! through a dictation's life — preparing (progress, failure, retry),
-//! starting (the microphone, aborted starts, denied permission), the text,
-//! stopping (Finishing, then the final text, then Ready), cancelling, and
-//! replies for sessions that are over.
+//! through a dictation's life — starting (the microphone, aborted starts,
+//! denied permission), the text, stopping (Finishing, then the final text,
+//! then Ready), cancelling, and replies for sessions that are over. The
+//! model's load (on the first start, an app's prepare, failures and
+//! retries) is in `machine_load_tests.rs`, a child module sharing the
+//! helpers here.
 
 use agg_gui::widgets::on_screen_keyboard::{VoiceContext, VoicePoll, VoiceState, VoiceText};
 
 use super::*;
-use crate::protocol::{FromWorker, LoadFailure, Recognised, ToWorker};
+use crate::protocol::{FromWorker, Recognised, ToWorker};
 
 const URLS: [&str; 2] = ["https://here/whistle.cact", "https://there/whistle.cact"];
+
+#[path = "machine_load_tests.rs"]
+mod load;
 
 fn machine() -> Machine {
     Machine::new(URLS.iter().map(|u| u.to_string()).collect(), None)
@@ -64,138 +69,11 @@ fn listening(sentence_start: bool) -> (Machine, u32) {
         other => panic!("unexpected commands {other:?}"),
     };
     m.on_mic_opened(s);
+    // The first audio: only now is it listening.
+    m.on_level(s, 0.0);
     assert!(m.take_commands().is_empty());
     assert!(matches!(state(&mut m), VoiceState::Listening { .. }));
     (m, s)
-}
-
-#[test]
-fn before_prepare_it_reports_preparing_and_asks_for_nothing() {
-    let mut m = machine();
-    assert_eq!(state(&mut m), VoiceState::Preparing { progress: None });
-    assert!(m.take_commands().is_empty());
-}
-
-#[test]
-fn prepare_loads_once_with_progress_then_is_ready() {
-    let mut m = machine();
-    m.prepare();
-    assert_eq!(m.take_commands(), vec![load()]);
-    m.prepare();
-    assert!(m.take_commands().is_empty(), "idempotent while loading");
-    m.on_worker(FromWorker::Progress {
-        loaded: 25,
-        total: 100,
-    });
-    assert_eq!(
-        state(&mut m),
-        VoiceState::Preparing {
-            progress: Some(0.25)
-        }
-    );
-    m.on_worker(FromWorker::Loaded {
-        source: "https://here/whistle.cact".into(),
-    });
-    assert_eq!(state(&mut m), VoiceState::Ready);
-    m.prepare();
-    assert!(m.take_commands().is_empty(), "idempotent once loaded");
-}
-
-#[test]
-fn a_failed_download_is_an_error_to_retry_and_the_next_prepare_retries() {
-    let mut m = machine();
-    m.prepare();
-    m.take_commands();
-    m.on_worker(FromWorker::LoadFailed {
-        reason: LoadFailure::Download,
-        detail: "HTTP 503".into(),
-    });
-    let VoiceState::Error { message, retry } = state(&mut m) else {
-        panic!("not an error");
-    };
-    assert!(retry);
-    assert!(message.contains("download"), "{message}");
-    m.prepare();
-    assert_eq!(m.take_commands(), vec![load()]);
-    assert_eq!(state(&mut m), VoiceState::Preparing { progress: None });
-}
-
-#[test]
-fn a_damaged_download_says_so() {
-    let mut m = machine();
-    m.prepare();
-    m.on_worker(FromWorker::LoadFailed {
-        reason: LoadFailure::Checksum,
-        detail: "sha differs".into(),
-    });
-    let VoiceState::Error { message, retry } = state(&mut m) else {
-        panic!("not an error");
-    };
-    assert!(retry);
-    assert!(message.contains("damaged"), "{message}");
-}
-
-#[test]
-fn a_worker_that_dies_is_an_error_and_the_next_prepare_starts_over() {
-    let mut m = machine();
-    m.prepare();
-    m.take_commands();
-    m.worker_lost("script error");
-    assert!(matches!(
-        state(&mut m),
-        VoiceState::Error { retry: true, .. }
-    ));
-    m.prepare();
-    assert_eq!(m.take_commands(), vec![load()]);
-}
-
-#[test]
-fn start_after_a_failed_load_retries_and_listens_once_loaded() {
-    let mut m = machine();
-    m.prepare();
-    m.take_commands();
-    m.on_worker(FromWorker::LoadFailed {
-        reason: LoadFailure::Download,
-        detail: String::new(),
-    });
-    state(&mut m);
-    m.start(&ctx(true));
-    assert_eq!(m.take_commands(), vec![load()]);
-    assert_eq!(state(&mut m), VoiceState::Preparing { progress: None });
-    m.on_worker(FromWorker::Loaded {
-        source: "cache".into(),
-    });
-    assert!(matches!(
-        m.take_commands().as_slice(),
-        [
-            Command::Worker(ToWorker::Start { .. }),
-            Command::OpenMic { .. }
-        ]
-    ));
-}
-
-/// The web host makes the microphone's AudioContext inside the tap that
-/// starts a dictation even when the model is still loading, and releases
-/// it when nothing wants it any more: it asks these.
-#[test]
-fn a_start_waiting_for_the_model_wants_the_microphone_until_it_fails_or_ends() {
-    let mut m = machine();
-    assert!(!m.wants_mic());
-    m.start(&ctx(true));
-    assert!(m.start_pending() && m.wants_mic());
-    m.on_worker(FromWorker::LoadFailed {
-        reason: LoadFailure::Download,
-        detail: "offline".into(),
-    });
-    assert!(!m.start_pending() && !m.wants_mic());
-    m.start(&ctx(true));
-    m.on_worker(FromWorker::Loaded {
-        source: "cache".into(),
-    });
-    assert!(!m.start_pending(), "the start began");
-    assert!(m.wants_mic(), "its session is opening");
-    m.cancel();
-    assert!(!m.wants_mic());
 }
 
 #[test]
@@ -215,6 +93,29 @@ fn start_opens_the_stream_before_the_microphone_and_listens_once_it_opens() {
     m.on_mic_opened(*session);
     m.on_level(*session, 0.4);
     assert_eq!(state(&mut m), VoiceState::Listening { level: Some(0.4) });
+}
+
+/// The key says Listening ("Speak now") only once audio flows: the
+/// microphone open and its graph wired is not enough, its first audio must
+/// have reached the pipeline (its first level). Until then it says
+/// Preparing, so nothing said after the cue is lost, however late a starved
+/// browser delivers the stream.
+#[test]
+fn listening_is_reported_only_once_the_first_audio_arrives() {
+    let mut m = ready();
+    m.start(&ctx(true));
+    let s = m.current_session().expect("a session");
+    m.take_commands();
+    m.on_mic_opened(s);
+    assert_eq!(
+        state(&mut m),
+        VoiceState::Preparing { progress: None },
+        "open, but no audio yet"
+    );
+    assert!(m.on_level(s, 0.0), "the first audio");
+    assert_eq!(state(&mut m), VoiceState::Listening { level: Some(0.0) });
+    assert!(!m.on_level(s, 0.3), "not the first any more");
+    assert!(!m.on_level(s + 1, 0.3), "another session's is none of its");
 }
 
 #[test]
@@ -294,8 +195,11 @@ fn cancel_while_the_microphone_opens_aborts_too() {
     assert_eq!(state(&mut m), VoiceState::Ready);
 }
 
+/// A refused microphone ends the dictation with an error a tap retries:
+/// the browser is asked again, so a user who has since allowed the site
+/// dictates without reloading (and one who hasn't sees the message again).
 #[test]
-fn a_denied_microphone_is_an_error_without_retry_and_cancels_the_stream() {
+fn a_denied_microphone_is_an_error_a_tap_retries_and_cancels_the_stream() {
     let mut m = ready();
     m.start(&ctx(true));
     let s = m.current_session().expect("a session");
@@ -309,11 +213,17 @@ fn a_denied_microphone_is_an_error_without_retry_and_cancels_the_stream() {
     let VoiceState::Error { message, retry } = state(&mut m) else {
         panic!("not an error");
     };
-    assert!(!retry);
+    assert!(retry, "a tap asks the browser again");
     assert!(message.contains("denied"), "{message}");
-    // Reopening the keyboard clears it, so the user can try again.
-    m.prepare();
-    assert_eq!(state(&mut m), VoiceState::Ready);
+    m.start(&ctx(true));
+    let again = m.take_commands();
+    assert!(
+        matches!(
+            again.as_slice(),
+            [Command::Worker(ToWorker::Start { .. }), Command::OpenMic { session }] if *session != s
+        ),
+        "{again:?}"
+    );
 }
 
 /// A microphone that fails mid-dictation (unplugged, its stream broken)

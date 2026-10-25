@@ -5,7 +5,7 @@
 //! (`model_check.rs`) before use; a bad cached copy is deleted.
 //!
 //! A download that stalls (no bytes for [`STALL`], or no answer) times out
-//! and counts as a failed download, which the keyboard's next show retries.
+//! and counts as a failed download, which the next tap retries.
 //! When every place fails, the last failure names the reason: a network
 //! failure after a wrong file is reported as a network failure.
 //!

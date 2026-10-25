@@ -59,6 +59,8 @@ web-sys = { version = "0.3.82", features = [
     "Navigator",
     "Location",
     "Url",
+    "Blob",
+    "BlobPropertyBag",
     "MessageEvent",
     "ErrorEvent",
     "Event",

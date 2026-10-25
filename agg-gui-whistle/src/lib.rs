@@ -27,9 +27,16 @@
 //!   whistle-rust's GitHub Pages copy or Hugging Face
 //!   ([`Config::model_urls`]).
 //!
-//! When the keyboard first comes up the worker downloads the model (16.9 MB,
-//! once: it is checked against its pinned SHA-256 and kept in the Cache API),
-//! and the key shows the progress. The first tap asks for the microphone.
+//! Installing fetches only the capture worklet's module (about a kilobyte),
+//! and nothing more downloads when the keyboard comes up. The first tap on
+//! the microphone asks for the microphone inside the tap (the prompt shows
+//! at once; that stream is the dictation's) and has the worker download the
+//! model (16.9 MB, once: it is checked against its pinned SHA-256 and kept
+//! in the Cache API) while the key shows the progress. What is said
+//! meanwhile waits in the worker and is recognised once the model is in,
+//! when the key listens, with no second tap; the text then catches up,
+//! trailing the speech by as long as recognising that backlog takes. To have the model warm before that tap,
+//! call `VoiceInput::prepare` on a [`WhistleVoice`] before registering it.
 //! Speech streams to the worker, whose partial results fill the field as the
 //! keyboard's composition text, committed words as they are confirmed.
 //! agg-gui's `demo/build-wasm.sh` shows the whole build.
@@ -102,8 +109,9 @@ pub use config::{Config, HUGGING_FACE_MODEL_URL, WHISTLE_PAGES_MODEL_URL};
 pub use provider::WhistleVoice;
 
 /// Register whistle dictation with the on-screen keyboard of this UI thread
-/// (call it on that thread, once). Nothing loads until the keyboard first
-/// comes up.
+/// (call it on that thread, once). On the web it fetches the capture
+/// worklet's module (about a kilobyte); the worker and the model wait for the
+/// first tap on the microphone key.
 #[cfg(feature = "provider")]
 pub fn install(config: Config) {
     agg_gui::widgets::on_screen_keyboard::set_voice_input(Some(Box::new(WhistleVoice::new(

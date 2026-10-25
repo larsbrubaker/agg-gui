@@ -11,15 +11,10 @@ use crate::machine::Machine;
 
 /// A platform's side of the provider.
 pub(crate) trait Host {
-    /// Apply `f` to the machine, then run the commands it queued.
+    /// Apply `f` to the machine, then run the commands it queued. The
+    /// keyboard's `start` comes through here inside the user's tap, so what
+    /// it opens (the web host's audio and microphone request) starts there.
     fn dispatch(&self, f: &mut dyn FnMut(&mut Machine));
-
-    /// The keyboard's `start`, called inside the user's tap: a host may
-    /// do there what only a user gesture allows (the web host starts its
-    /// audio).
-    fn start(&self, ctx: &VoiceContext) {
-        self.dispatch(&mut |m| m.start(ctx));
-    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -30,7 +25,9 @@ type PlatformHost = crate::native::NativeHost;
 /// Dictation for agg-gui's on-screen keyboard on whistle. Register it with
 /// [`crate::install`], or build one with [`WhistleVoice::new`] and pass it
 /// to `agg_gui::widgets::on_screen_keyboard::set_voice_input` yourself.
-/// Create it on the UI thread.
+/// Create it on the UI thread. It loads the model on the first tap on the
+/// microphone; call [`VoiceInput::prepare`] on it before registering it to
+/// load it sooner (the keyboard never does).
 pub struct WhistleVoice {
     host: PlatformHost,
 }
@@ -49,7 +46,7 @@ impl VoiceInput for WhistleVoice {
     }
 
     fn start(&mut self, ctx: &VoiceContext) {
-        self.host.start(ctx);
+        self.host.dispatch(&mut |m| m.start(ctx));
     }
 
     fn stop(&mut self) {

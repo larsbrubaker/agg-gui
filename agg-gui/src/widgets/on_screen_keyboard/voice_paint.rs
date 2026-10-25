@@ -231,6 +231,11 @@ pub(super) fn status_text(view: &VoiceView) -> Option<String> {
             "Preparing voice input\u{2026} {}%",
             (p.clamp(0.0, 1.0) * 100.0).round()
         )),
+        // A dictation waiting for the provider to start listening (its
+        // model in, the microphone opening): the cue to speak comes later.
+        VoiceState::Preparing { progress: None } if view.dictating => {
+            Some("Starting\u{2026}".to_string())
+        }
         VoiceState::Preparing { progress: None } => {
             Some("Preparing voice input\u{2026}".to_string())
         }
