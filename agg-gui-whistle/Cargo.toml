@@ -28,9 +28,10 @@ publish = false
 default = ["provider"]
 provider = ["dep:agg-gui"]
 worker = []
-# Native microphone capture through cpal (CoreAudio, WASAPI, ALSA). Without it
-# the native provider reports that it has no microphone.
-native-mic = ["provider", "dep:cpal"]
+# Native microphone capture through agg-mic (AVAudioEngine on macOS, WASAPI on
+# Windows, the PulseAudio protocol on Linux; pure Rust, no `-sys` crates).
+# Without it the native provider reports that it has no microphone.
+native-mic = ["provider", "dep:agg-mic"]
 # Native model download (when no path is configured and the cache is empty),
 # through the same pure-Rust ureq + rustls stack agg-gui's http_fetch uses.
 native-download = ["dep:ureq", "dep:rustls-rustcrypto"]
@@ -44,7 +45,8 @@ whistle-rust = { path = "../../whistle-rust/crates/whistle-rust" }
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 # The model's checksum, natively (the browser has SubtleCrypto).
 sha2 = "0.10"
-cpal = { version = "0.17", optional = true }
+# The system microphone, in this workspace (../agg-mic). MIT.
+agg-mic = { path = "../agg-mic", optional = true }
 ureq = { version = "3.5", optional = true, default-features = false, features = ["rustls-no-provider", "rustls-webpki-roots"] }
 rustls-rustcrypto = { version = "0.0.2-alpha", optional = true }
 

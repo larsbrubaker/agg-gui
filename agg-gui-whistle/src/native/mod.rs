@@ -1,6 +1,6 @@
 //! The native host (feature `provider`, not wasm): runs the state machine's
 //! commands with an engine thread and, with the `native-mic` feature, a
-//! recorder (`mic.rs`, cpal).
+//! recorder (`mic.rs`, over agg-mic).
 //!
 //! The engine thread starts with the first `Load`: it loads the model
 //! (`model.rs`: the configured path, the cache, then a download), builds the

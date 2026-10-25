@@ -10,6 +10,10 @@ application that ships agg-gui-whistle, or lets it download `whistle.cact`, incl
 - **Whistle weights**, `whistle.cact` (huggingface.co/Cactus-Compute/whistle), Copyright Cactus
   Compute, Inc., Apache-2.0: downloaded and cached at run time, never stored in this repository.
 
+With the `native-mic` feature it also links agg-mic, this workspace's microphone, whose platform
+bindings (objc2 on macOS, windows on Windows, pulseaudio on Linux) are listed in
+`agg-mic/THIRD_PARTY_NOTICES.md`; a native build with the feature includes that notice too.
+
 whistle-rust's own notices follow, verbatim (`whistle-rust/THIRD_PARTY_NOTICES.md`).
 
 ---

@@ -43,8 +43,9 @@
 //!
 //! ## Native
 //!
-//! With the `native-mic` feature (cpal), a recorder thread captures the
-//! default input device and an engine thread runs the model. The model comes
+//! With the `native-mic` feature (agg-mic, this workspace's pure-Rust
+//! microphone), a thread per session opens the default input device and an
+//! engine thread runs the model. The model comes
 //! from [`Config::model_path`], else the cache directory, else (feature
 //! `native-download`) a download into it. Without `native-mic` a tap on the key
 //! says that there is no microphone.
@@ -54,13 +55,13 @@
 //! - `protocol.rs`: the messages between provider and engine; `engine.rs`:
 //!   the model and its stream, answering them (web worker and native thread
 //!   alike); `resample.rs`: the device's audio to the model's 16 kHz, one
-//!   stream per session; `text_map.rs`: stream updates to the keyboard's committed and
+//!   whistle `StreamResampler` per session; `text_map.rs`: stream updates to the keyboard's committed and
 //!   pending text; `model_check.rs`: the model's size and checksum.
 //! - `machine.rs`: the provider's state machine, shared by both hosts;
 //!   `provider.rs`: the `VoiceInput` over it.
 //! - `web/` (the worker and the microphone, on the UI thread; `drain.rs`
 //!   delivers the worklet's last audio at a stop), `worker/`
-//!   (inside the worker), `native/` (threads and cpal).
+//!   (inside the worker), `native/` (threads and agg-mic).
 //!
 //! ## License
 //!

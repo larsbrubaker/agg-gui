@@ -69,11 +69,9 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
-      # agg-gui-whistle's native microphone (cpal; ALSA here) and download
-      # features, which no workspace member turns on.
-      - name: Install ALSA headers
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
-
+      # agg-gui-whistle's native microphone (agg-mic: the PulseAudio protocol
+      # here, pure Rust, so no system headers) and download features, which
+      # no workspace member turns on.
       - name: Clippy (agg-gui-whistle, native features)
         run: cargo clippy -p agg-gui-whistle --all-targets --features native-mic,native-download -- -D warnings
 
@@ -182,8 +180,13 @@ jobs:
           fi
           ../whistle-rust/scripts/fetch-weights.sh || { rm -f "$model"; ../whistle-rust/scripts/fetch-weights.sh; }
 
+      # The microphone crate's plumbing, over a fake device (the live
+      # recording test is ignored: a runner has no microphone).
+      - name: Run microphone tests
+        run: cargo test -p agg-mic
+
       - name: Run dictation tests
-        run: cargo test -p agg-gui-whistle --features native-download
+        run: cargo test -p agg-gui-whistle --features native-mic,native-download
 
   # The clipboard feature's per-platform code (`clipboard::has_image` asks the
   # Windows and macOS clipboards for a picture format directly). A check, not
@@ -236,9 +239,14 @@ jobs:
       - name: Check clipboard feature
         run: cargo check -p agg-gui --features clipboard
 
-      # agg-gui-whistle's cpal microphone on CoreAudio and WASAPI.
+      # agg-gui-whistle's microphone on agg-mic's AVAudioEngine and WASAPI
+      # captures, and agg-mic's own tests there (the live recording is
+      # ignored: a runner has no microphone).
       - name: Check native dictation
         run: cargo check -p agg-gui-whistle --features native-mic,native-download
+
+      - name: Run microphone tests
+        run: cargo test -p agg-mic
 
   build-wasm:
     runs-on: ubuntu-26.04

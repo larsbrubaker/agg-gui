@@ -1,7 +1,8 @@
 //! Tests for `resample.rs`: audio cut into pushes of any size comes out the
 //! same as the whole clip resampled at once, and the whole clip comes out as
-//! whistle's own one-shot resampler makes it (so the filter is whistle's,
-//! and chunk boundaries add no clicks). No model is needed.
+//! whistle's own one-shot resampler makes it (so chunk boundaries add no
+//! clicks), whatever rate changes the session's pushes bring. No model is
+//! needed.
 
 use super::*;
 
@@ -111,7 +112,21 @@ fn a_change_of_rate_ends_the_old_rates_audio_first() {
 fn nothing_pushed_has_no_tail() {
     let mut model_rate = ModelRate::default();
     assert!(model_rate.finish().is_empty());
-    let mut resampler = Resampler::new(48_000, MODEL_RATE).expect("supported");
+    let mut resampler =
+        whistle::audio::StreamResampler::new(48_000, MODEL_RATE).expect("supported");
     assert!(resampler.push(&[]).is_empty());
     assert!(resampler.finish().is_empty());
+}
+
+#[test]
+fn a_push_at_a_rate_that_cannot_be_converted_keeps_the_old_rates_tail() {
+    // Refused, it takes nothing of the push, and the old rate's audio still ends as a whole clip
+    // of it would.
+    let clip = signal(48_000, 0.2);
+    let mut model_rate = ModelRate::default();
+    let mut out = model_rate.push(48_000, clip.clone()).expect("supported");
+    assert_eq!(model_rate.push(0, vec![0.0; 10]), None);
+    out.extend(model_rate.finish());
+    let expected = whistle::audio::resample(&clip, 48_000, MODEL_RATE);
+    assert!(max_difference(&out, &expected) <= 1e-5);
 }

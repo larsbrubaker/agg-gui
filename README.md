@@ -208,8 +208,9 @@ and feature set using agg-gui's own widgets:
 | `agg-gui-wgpu` | Hardware-accelerated wgpu `DrawCtx` backend — pipelines, SSAA, screenshot capture, custom render-pass hook |
 | `agg-gui-shell` | Turn-key native shell — winit window + event loop + wgpu present, input forwarding, window-bounds persistence, device-loss recovery |
 | `agg-gui-web-shell` | Turn-key browser shell — canvas + WebGPU/WebGL2 surface, rAF loop (reactive/continuous), DOM input, page lifecycle, localStorage settings |
-| `agg-gui-whistle` | Dictation for the on-screen keyboard on whistle-rust speech-to-text (opt-in; Web Worker in the browser, cpal + threads natively) |
+| `agg-gui-whistle` | Dictation for the on-screen keyboard on whistle-rust speech-to-text (opt-in; Web Worker in the browser, agg-mic + threads natively) |
 | `agg-gui-whistle-worker` | The dictation Web Worker's wasm module (built with simd128 by `demo/build-whistle.sh`) |
+| `agg-mic` | The system microphone in pure Rust (AVAudioEngine, WASAPI, the PulseAudio protocol; no `-sys` crates): mono `f32` chunks from the default input device, for `agg-gui-whistle` and other apps; no UI |
 | `demo-ui` | Shared demo widget tree (identical for native and WASM) |
 | `demo-wgpu` | wgpu demo widgets on top of `agg-gui-wgpu` (its `native_shell` / `web_shell` are deprecated wrappers over `agg-gui-shell` / `agg-gui-web-shell`) |
 | `demo-native` | Desktop demo shim on `agg-gui-shell` |
@@ -283,4 +284,7 @@ Third-party: `agg-gui-whistle` links whistle-rust and downloads the Whistle mode
 Apache-2.0 (Cactus Compute, Inc. for the weights). Their notices are in
 [`agg-gui-whistle/THIRD_PARTY_NOTICES.md`](agg-gui-whistle/THIRD_PARTY_NOTICES.md), with the
 license text in `agg-gui-whistle/LICENSE-APACHE`; the web demo serves both beside the model
-(`public/whistle/`).
+(`public/whistle/`). `agg-mic` reaches the microphone through objc2 (macOS), windows (Windows)
+and pulseaudio (Linux), all MIT or MIT/Apache-2.0/Zlib; their notices are in
+[`agg-mic/THIRD_PARTY_NOTICES.md`](agg-mic/THIRD_PARTY_NOTICES.md), which ships with
+`agg-gui-whistle`'s `native-mic` builds.

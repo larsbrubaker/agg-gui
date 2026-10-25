@@ -44,8 +44,10 @@ localhost) for the microphone.
 
 ## Native
 
-With the `native-mic` feature, cpal records the default input device on a recorder thread and an
-engine thread runs the model. The model comes from `Config::model_path`, else the cache directory,
+With the `native-mic` feature, agg-mic (this workspace's microphone: AVAudioEngine on macOS, WASAPI
+on Windows, the PulseAudio protocol on Linux, all pure Rust) records the default input device and an
+engine thread runs the model. On macOS a bundled app needs `NSMicrophoneUsageDescription` in its
+Info.plist (agg-mic's docs say what else). The model comes from `Config::model_path`, else the cache directory,
 else (feature `native-download`) a download into it, checked like the web's. Without `native-mic`
 a tap on the key says that the build has no microphone.
 

@@ -1,30 +1,37 @@
-//! The native microphone (feature `native-mic`): a recorder thread per
-//! session that owns a cpal input stream on the default device, mixes it to
-//! mono and hands it to a [`Sink`], which sends ~250 ms `Push`es straight to
-//! the engine thread at the device's rate (the engine resamples) and the
-//! level to the UI thread.
+//! The native microphone (feature `native-mic`): an `agg_mic::Microphone`
+//! per session on the default input device (AVAudioEngine on macOS, WASAPI
+//! on Windows, the PulseAudio protocol on Linux; pure Rust, no `-sys`
+//! crates), whose mono chunks go to a [`Sink`] the chunk handler owns,
+//! which sends ~250 ms `Push`es straight to the engine thread at the
+//! capture's rate (the engine resamples) and the level to the UI thread.
 //!
-//! The thread owns the stream because a cpal stream may not move between
-//! threads; it opens the device (which can take a while), reports
-//! `MicOpened` or `MicFailed`, then waits to be told to stop. Closing takes
-//! the sink's last partial chunk on the UI thread itself, so a stop's last
-//! audio reaches the engine before the `Finish` the machine sends next.
+//! A start asks for permission and opens the device, which can take as long
+//! as the user leaves a prompt up, so a thread per session waits in it and
+//! reports `MicOpened` or `MicFailed`. Closing stops the microphone on the
+//! UI thread. agg-mic drops the chunk handler inside that stop, once the
+//! last audio is in, and the sink's drop sends its last partial chunk (unless
+//! the close discards it), so a stop's last audio reaches the engine before
+//! the `Finish` the machine sends next. While the start still waits, the
+//! stop returns at once and that start stops itself. The close is timed:
+//! one slower than [`SLOW_CLOSE`] is logged, since it holds up a frame.
 //!
-//! A cpal stream error (the device unplugged, the stream invalidated) ends
-//! the dictation with an error (`MicFailed`; while listening the machine
-//! first finishes what was captured, its last chunk included); an overrun
-//! is only logged. A push the engine thread can
-//! no longer take reports the engine lost.
+//! A microphone that ends on its own (unplugged, the sound server gone)
+//! ends the dictation with an error (`MicFailed`; agg-mic drops the chunk
+//! handler first, so what was captured, its last chunk included, is already
+//! on its way to the engine, and the machine finishes with it). A push the
+//! engine thread can no longer take reports the engine lost.
 //!
-//! The OS asks for microphone permission when the stream opens (macOS
-//! wants `NSMicrophoneUsageDescription` in the app bundle); cpal does not
-//! say when it is refused, so a refused microphone listens to silence.
+//! The OS asks for microphone permission at the first start (macOS wants
+//! `NSMicrophoneUsageDescription` in the app bundle, agg-mic's docs say
+//! what else); a refusal ends the dictation with "access denied", and the
+//! console says where to turn the microphone back on.
 
-use std::sync::mpsc::{self, Sender};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::Sender;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
-use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::{FromSample, SampleFormat, SizedSample};
+use agg_mic::Microphone;
 
 use super::{Event, Notifier};
 use crate::machine::MicError;
@@ -34,25 +41,59 @@ use crate::protocol::ToWorker;
 const CHUNK_SECONDS: f32 = 0.25;
 /// Samples between level reports (at most ~20 a second at 48 kHz).
 const LEVEL_EVERY: usize = 2_400;
+/// A close slower than this is logged: it runs on the UI thread.
+const SLOW_CLOSE: Duration = Duration::from_millis(4);
 
-/// Collects the recorder's samples into pushes.
+/// Collects the microphone's chunks into pushes.
 struct Sink {
     session: u32,
+    /// The rate of the audio in `buffer`.
     rate: u32,
     buffer: Vec<f32>,
+    /// Samples per push at `rate`.
     chunk: usize,
     engine: Sender<ToWorker>,
     notifier: Notifier,
-    /// Cleared on close: late callbacks are dropped.
+    /// Cleared once the engine stopped taking audio: later chunks go
+    /// nowhere.
     open: bool,
+    /// Set by a close that drops the last audio (a cancel): the drop then
+    /// sends nothing.
+    discard: Arc<AtomicBool>,
     level: f32,
     since_level: usize,
 }
 
 impl Sink {
-    fn feed(&mut self, mono: &[f32]) {
+    fn new(
+        session: u32,
+        engine: Sender<ToWorker>,
+        notifier: Notifier,
+        discard: Arc<AtomicBool>,
+    ) -> Sink {
+        Sink {
+            session,
+            rate: 0,
+            buffer: Vec::new(),
+            chunk: 0,
+            engine,
+            notifier,
+            open: true,
+            discard,
+            level: 0.0,
+            since_level: 0,
+        }
+    }
+
+    fn feed(&mut self, mono: &[f32], rate: u32) {
         if !self.open || mono.is_empty() {
             return;
+        }
+        if rate != self.rate {
+            // A push carries one rate: the old rate's audio goes first.
+            self.flush();
+            self.rate = rate;
+            self.chunk = (rate as f32 * CHUNK_SECONDS) as usize;
         }
         let power = mono.iter().map(|s| s * s).sum::<f32>() / mono.len() as f32;
         let db = 10.0 * (power + 1e-12).log10();
@@ -88,44 +129,52 @@ impl Sink {
     }
 }
 
-/// cpal's stream error callback: a stream that can't go on fails the
-/// session's microphone (once); an overrun is a glitch and only logged.
-fn on_stream_error(sink: &Mutex<Sink>, err: cpal::StreamError) {
-    if let cpal::StreamError::BufferUnderrun = err {
-        eprintln!("agg-gui-whistle: microphone: {err}");
-        return;
+/// The chunk handler is dropped when the recording ends (inside the stop,
+/// or as it fails): the last partial chunk goes out then.
+impl Drop for Sink {
+    fn drop(&mut self) {
+        if !self.discard.load(Ordering::SeqCst) {
+            self.flush();
+        }
     }
-    let Ok(mut sink) = sink.lock() else {
-        return;
-    };
-    if !sink.open {
-        return;
-    }
-    sink.open = false;
-    let reason = match err {
-        cpal::StreamError::DeviceNotAvailable => MicError::NoDevice,
+}
+
+/// The machine's error for agg-mic's, with its message on the console.
+fn mic_error(err: agg_mic::MicError) -> MicError {
+    eprintln!("agg-gui-whistle: microphone: {err}");
+    match err {
+        agg_mic::MicError::PermissionDenied(_) => MicError::Denied,
+        agg_mic::MicError::NoDevice(_) => MicError::NoDevice,
         other => MicError::Other(other.to_string()),
-    };
-    sink.notifier.send(Event::MicFailed(sink.session, reason));
+    }
 }
 
 struct Capture {
     session: u32,
-    sink: Arc<Mutex<Sink>>,
-    /// Dropping it tells the recorder thread to close the stream.
-    _stop: Sender<()>,
+    /// The sink's: set by a close that drops the last audio.
+    discard: Arc<AtomicBool>,
+    microphone: Arc<Microphone>,
 }
+
+/// Makes a session's microphone: the default input device, or a test's.
+pub(super) type MakeMicrophone = Arc<dyn Fn() -> Microphone + Send + Sync>;
 
 /// Opens and closes the session's microphone (see the module docs).
 pub(super) struct Recorder {
     notifier: Notifier,
+    make: MakeMicrophone,
     current: Option<Capture>,
 }
 
 impl Recorder {
     pub(super) fn new(notifier: Notifier) -> Recorder {
+        Recorder::with_microphones(notifier, Arc::new(Microphone::default_input))
+    }
+
+    pub(super) fn with_microphones(notifier: Notifier, make: MakeMicrophone) -> Recorder {
         Recorder {
             notifier,
+            make,
             current: None,
         }
     }
@@ -134,30 +183,27 @@ impl Recorder {
         if let Some(old) = self.current.take() {
             close_capture(old, false);
         }
-        let sink = Arc::new(Mutex::new(Sink {
-            session,
-            rate: 0,
-            buffer: Vec::new(),
-            chunk: 0,
-            engine,
-            notifier: self.notifier.clone(),
-            open: true,
-            level: 0.0,
-            since_level: 0,
-        }));
-        let (stop_tx, stop_rx) = mpsc::channel::<()>();
+        let discard = Arc::new(AtomicBool::new(false));
+        let mut sink = Sink::new(session, engine, self.notifier.clone(), discard.clone());
+        let microphone = Arc::new((self.make)());
         let notifier = self.notifier.clone();
-        let thread_sink = sink.clone();
+        let failed = self.notifier.clone();
+        let starting = microphone.clone();
         let spawned = std::thread::Builder::new()
             .name("agg-gui-whistle-mic".into())
-            .spawn(move || match open_stream(thread_sink) {
-                Ok(stream) => {
-                    notifier.send(Event::MicOpened(session));
-                    // Until closed (the sender dropped).
-                    let _ = stop_rx.recv();
-                    drop(stream);
+            .spawn(move || {
+                let started = starting.start(
+                    Box::new(move |samples: &[f32], rate: u32| sink.feed(samples, rate)),
+                    // agg-mic reports a recording's end at most once, never
+                    // for a stop, and after the sink has sent what it holds.
+                    Box::new(move |err| failed.send(Event::MicFailed(session, mic_error(err)))),
+                );
+                match started {
+                    Ok(()) => notifier.send(Event::MicOpened(session)),
+                    // Closed while it started: nobody is waiting for it.
+                    Err(agg_mic::MicError::Stopped) => {}
+                    Err(err) => notifier.send(Event::MicFailed(session, mic_error(err))),
                 }
-                Err(err) => notifier.send(Event::MicFailed(session, err)),
             });
         if let Err(err) = spawned {
             self.notifier
@@ -166,8 +212,8 @@ impl Recorder {
         }
         self.current = Some(Capture {
             session,
-            sink,
-            _stop: stop_tx,
+            discard,
+            microphone,
         });
     }
 
@@ -180,70 +226,23 @@ impl Recorder {
     }
 }
 
+/// Stops the session's microphone on the UI thread. agg-mic drops the
+/// chunk handler inside the stop, so the sink's last partial chunk is sent
+/// before this returns, unless `flush` is false (the session's audio is
+/// thrown away).
 fn close_capture(capture: Capture, flush: bool) {
-    if let Ok(mut sink) = capture.sink.lock() {
-        if flush {
-            sink.flush();
-        }
-        sink.open = false;
+    if !flush {
+        capture.discard.store(true, Ordering::SeqCst);
     }
-    // Dropping `capture` drops the stop sender: the thread closes the stream.
-}
-
-/// Open the default input device and start feeding `sink`.
-fn open_stream(sink: Arc<Mutex<Sink>>) -> Result<cpal::Stream, MicError> {
-    let host = cpal::default_host();
-    let device = host.default_input_device().ok_or(MicError::NoDevice)?;
-    let supported = device
-        .default_input_config()
-        .map_err(|e| MicError::Other(e.to_string()))?;
-    let config: cpal::StreamConfig = supported.config();
-    let channels = config.channels.max(1) as usize;
-    if let Ok(mut s) = sink.lock() {
-        s.rate = config.sample_rate;
-        s.chunk = (config.sample_rate as f32 * CHUNK_SECONDS) as usize;
+    let began = Instant::now();
+    capture.microphone.stop();
+    let took = began.elapsed();
+    if took > SLOW_CLOSE {
+        eprintln!(
+            "agg-gui-whistle: stopping the microphone took {:.1} ms",
+            took.as_secs_f64() * 1000.0
+        );
     }
-    let stream = match supported.sample_format() {
-        SampleFormat::F32 => build::<f32>(&device, &config, channels, sink),
-        SampleFormat::I16 => build::<i16>(&device, &config, channels, sink),
-        SampleFormat::U16 => build::<u16>(&device, &config, channels, sink),
-        SampleFormat::I32 => build::<i32>(&device, &config, channels, sink),
-        other => Err(MicError::Other(format!(
-            "unsupported sample format {other}"
-        ))),
-    }?;
-    stream.play().map_err(|e| MicError::Other(e.to_string()))?;
-    Ok(stream)
-}
-
-fn build<T>(
-    device: &cpal::Device,
-    config: &cpal::StreamConfig,
-    channels: usize,
-    sink: Arc<Mutex<Sink>>,
-) -> Result<cpal::Stream, MicError>
-where
-    T: SizedSample,
-    f32: FromSample<T>,
-{
-    let mut mono = Vec::new();
-    let error_sink = sink.clone();
-    device
-        .build_input_stream(
-            config,
-            move |data: &[T], _: &cpal::InputCallbackInfo| {
-                mono.clear();
-                mono.extend(data.chunks(channels).map(|frame| {
-                    frame.iter().map(|&s| s.to_sample::<f32>()).sum::<f32>() / channels as f32
-                }));
-                if let Ok(mut sink) = sink.lock() {
-                    sink.feed(&mono);
-                }
-            },
-            move |err| on_stream_error(&error_sink, err),
-            None,
-        )
-        .map_err(|e| MicError::Other(e.to_string()))
 }
 
 #[cfg(test)]

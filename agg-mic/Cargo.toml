@@ -1,0 +1,58 @@
+# agg-mic: the system microphone in pure Rust, for agg-gui's dictation
+# (agg-gui-whistle), MatterCAD's voice input and whistle-rust's desktop demo.
+# It opens the default input device and hands its audio on as mono f32 chunks
+# with their sample rate while it records; converting the rate, keeping a file
+# and drawing a meter are each consumer's own business. No agg-gui, wgpu or UI.
+#
+# Every platform's capture is pure Rust with no build script and no `-sys`
+# crate: AVFoundation's AVAudioEngine on macOS (objc2), WASAPI on Windows
+# (Microsoft's `windows` bindings, raw-dylib linking), and the PulseAudio
+# native protocol on Linux (spoken by PulseAudio and PipeWire's pulse server,
+# so no libpulse or ALSA). Anywhere else, wasm32 included, it builds and
+# reports that there is no microphone.
+#
+# The recorders come from mattercad-rust's mattercad-ai (`src/audio/`, same
+# author, MIT), where they were first written for MatterCAD's AI chat.
+[package]
+name = "agg-mic"
+version = "0.1.0"
+edition = "2021"
+# `<[T]>::as_chunks` (pulse_frames) is stable from 1.88, which agg-gui needs too.
+rust-version = "1.88"
+authors = ["Lars Brubaker <larsbrubaker@matterhackers.com>"]
+license = "MIT"
+description = "The system microphone in pure Rust: mono f32 chunks from the default input device on macOS, Windows and Linux"
+repository = "https://github.com/larsbrubaker/agg-gui"
+readme = "README.md"
+publish = false
+
+# The macOS capture (`mac`): pure-Rust bindings to the system's
+# AVFoundation/AVFAudio frameworks, no build script; only the classes it uses.
+# objc2 and block2 are already in agg-gui's build through winit.
+# Zlib OR Apache-2.0 OR MIT.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+block2 = "0.6"
+# NSNotification, NSOperation and block2: the observer of the engine's
+# configuration changes (`mac_engine_change`), which reports a lost device.
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "block2", "NSString", "NSError", "NSObject", "NSNotification", "NSOperation"] }
+objc2-av-foundation = { version = "0.3", default-features = false, features = ["std", "block2", "AVCaptureDevice", "AVMediaFormat"] }
+# AVAudioSinkNode (and the core-audio types its receiver block takes): the
+# input node's audio at I/O-buffer granularity, so a stop loses ~10 ms, not a
+# tap's ~85 ms buffer.
+objc2-avf-audio = { version = "0.3", default-features = false, features = ["std", "block2", "objc2-core-audio-types", "AVAudioEngine", "AVAudioFormat", "AVAudioIONode", "AVAudioNode", "AVAudioSinkNode", "AVAudioTypes"] }
+objc2-core-audio-types = { version = "0.3", default-features = false, features = ["std", "CoreAudioBaseTypes"] }
+
+# The Windows capture (`windows`): WASAPI through Microsoft's pure-Rust
+# `windows` bindings (raw-dylib linking through windows-link, no build
+# script), only the COM and audio APIs it calls. Already in agg-gui's build
+# through wgpu. MIT OR Apache-2.0.
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Media_Audio", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Variant"] }
+
+# The Linux capture (`linux`): the PulseAudio native protocol in pure Rust, no
+# build script and no libpulse. Its own dependencies (mio, futures, thiserror,
+# bitflags, byteorder, enum-primitive-derive, num-traits, log) are MIT,
+# Apache-2.0 or Unlicense. MIT.
+[target.'cfg(target_os = "linux")'.dependencies]
+pulseaudio = "0.3"
