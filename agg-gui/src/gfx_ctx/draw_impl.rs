@@ -1,7 +1,7 @@
 //! `DrawCtx` implementation for the software `GfxCtx`, plus the free
 //! rasterization helpers it shares with text and layer code. Framebuffer
 //! compositing and blit culling live in `composite.rs`; layer push/pop in
-//! `layers.rs`.
+//! `layers.rs`; image sampling in `axis_blit.rs` and `rotated_blit.rs`.
 
 use super::*;
 
@@ -440,6 +440,29 @@ impl crate::draw_ctx::DrawCtx for GfxCtx<'_> {
         self.draw_image_rgba(data.as_slice(), img_w, img_h, dst_x, dst_y, dst_w, dst_h);
     }
 
+    fn draw_image_rgba_arc_sampled(
+        &mut self,
+        data: &Arc<Vec<u8>>,
+        img_w: u32,
+        img_h: u32,
+        dst_x: f64,
+        dst_y: f64,
+        dst_w: f64,
+        dst_h: f64,
+        sampling: crate::draw_ctx::ImageSampling,
+    ) {
+        self.blit_image_sampled(
+            data.as_slice(),
+            img_w,
+            img_h,
+            dst_x,
+            dst_y,
+            dst_w,
+            dst_h,
+            sampling,
+        );
+    }
+
     fn draw_lcd_backbuffer_arc(
         &mut self,
         color: &Arc<Vec<u8>>,
@@ -616,106 +639,79 @@ impl crate::draw_ctx::DrawCtx for GfxCtx<'_> {
         dst_w: f64,
         dst_h: f64,
     ) {
-        // Map the logical destination rect through the CTM to its on-screen
-        // (device-pixel) footprint, resample the source image to exactly that
-        // size, then composite it at the transformed origin.  `dst_w`/`dst_h`
-        // are LOGICAL units: under a HiDPI `scale(2, 2)` a backbuffered widget
-        // hands over a bitmap rasterised at 2x with a logical dst rect, and the
-        // blit must land texel-for-pixel.  Resampling to the bare logical size
-        // (as this used to) shrank every CPU backbuffer — Labels, TextFields —
-        // to 1x ink size under a scaled CTM.  Axis-aligned transforms (the
-        // HiDPI / ux-zoom case) map exactly, including mirroring; rotated or
-        // skewed CTMs blit the transformed quad (`rotated_blit.rs`).
+        self.blit_image_sampled(
+            data,
+            img_w,
+            img_h,
+            dst_x,
+            dst_y,
+            dst_w,
+            dst_h,
+            crate::draw_ctx::ImageSampling::Auto,
+        );
+    }
+}
+
+impl GfxCtx<'_> {
+    /// The software image blit behind `draw_image_rgba` and
+    /// `draw_image_rgba_arc_sampled`.
+    ///
+    /// Maps the logical destination rect through the CTM to its on-screen
+    /// (device-pixel) footprint and samples the image there, then composites
+    /// it at the transformed origin.  `dst_w`/`dst_h` are LOGICAL units: under
+    /// a HiDPI `scale(2, 2)` a backbuffered widget hands over a bitmap
+    /// rasterised at 2x with a logical dst rect, and the blit lands
+    /// texel-for-pixel.  Axis-aligned transforms (the HiDPI / ux-zoom case)
+    /// map exactly, including mirroring (`axis_blit.rs`); rotated or skewed
+    /// CTMs blit the transformed quad (`rotated_blit.rs`).  `Auto` samples
+    /// nearest-neighbour, as does `Nearest`; `Smooth` blends bilinearly.
+    ///
+    /// `data` is straight-alpha by the `draw_image_rgba` convention; AGG
+    /// framebuffers store **premultiplied** RGBA, so each sample is
+    /// premultiplied on the way in and `composite_framebuffers` (premultiplied
+    /// SrcOver) blends with correct intensity.
+    // The blit's arguments mirror `DrawCtx::draw_image_rgba_arc_sampled`.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn blit_image_sampled(
+        &mut self,
+        data: &[u8],
+        img_w: u32,
+        img_h: u32,
+        dst_x: f64,
+        dst_y: f64,
+        dst_w: f64,
+        dst_h: f64,
+        sampling: crate::draw_ctx::ImageSampling,
+    ) {
         if img_w == 0 || img_h == 0 {
             return;
         }
         let t = self.transform();
-        let axis_aligned = t.shx.abs() < 1e-9 && t.shy.abs() < 1e-9;
-        if !axis_aligned {
-            let quad = super::rotated_blit::render_rotated(
-                &t, data, img_w, img_h, dst_x, dst_y, dst_w, dst_h,
-            );
-            if let Some((quad, x0, y0)) = quad {
-                let ga = self.state.global_alpha;
-                let clip = self.state.clip;
-                let fb = active_fb(self.base_fb, &mut self.layer_stack);
-                composite_framebuffers(fb, &quad, x0, y0, ga, clip);
-            }
-            return;
-        }
-        let x_a = dst_x * t.sx + t.tx;
-        let x_b = (dst_x + dst_w) * t.sx + t.tx;
-        let y_a = dst_y * t.sy + t.ty;
-        let y_b = (dst_y + dst_h) * t.sy + t.ty;
-        let (flip_x, flip_y) = (x_b < x_a, y_b < y_a);
-        let (left, right) = (x_a.min(x_b), x_a.max(x_b));
-        let (bottom, top) = (y_a.min(y_b), y_a.max(y_b));
-        let out_w = (right - left).round();
-        let out_h = (top - bottom).round();
-        if out_w < 1.0 || out_h < 1.0 {
-            return;
-        }
-        let out_w = out_w as u32;
-        let out_h = out_h as u32;
-        let mut scaled = crate::framebuffer::Framebuffer::new(out_w, out_h);
-
-        // Nearest-neighbour scale — sufficient for README screenshots / badges.
-        // `data` is straight-alpha by the `draw_image_rgba` convention; AGG
-        // framebuffers store **premultiplied** RGBA, so we premultiply each
-        // sampled pixel on the way in so `composite_framebuffers` (which uses
-        // premultiplied SrcOver) blends with correct intensity.
-        let px = scaled.pixels_mut();
-        for dy in 0..out_h {
-            for dx in 0..out_w {
-                // Sample at the destination pixel centre (exact at 1:1).
-                let fx = (dx as f64 + 0.5) / out_w as f64;
-                let fx = if flip_x { 1.0 - fx } else { fx };
-                let sx = (fx * img_w as f64).floor().clamp(0.0, (img_w - 1) as f64) as u32;
-                // Image is top-row-first; Y-up dst means we flip sy.
-                let fy = (dy as f64 + 0.5) / out_h as f64;
-                let fy = if flip_y { 1.0 - fy } else { fy };
-                let sy_img = ((1.0 - fy) * img_h as f64)
-                    .floor()
-                    .clamp(0.0, (img_h - 1) as f64) as u32;
-                let si = ((sy_img * img_w + sx) * 4) as usize;
-                let di = ((dy * out_w + dx) * 4) as usize;
-                if si + 3 < data.len() && di + 3 < px.len() {
-                    let a = data[si + 3] as u32;
-                    if a == 255 {
-                        px[di] = data[si];
-                        px[di + 1] = data[si + 1];
-                        px[di + 2] = data[si + 2];
-                        px[di + 3] = 255;
-                    } else {
-                        // Premultiply: (c * a + 127) / 255 (round-half-up).
-                        px[di] = (((data[si] as u32) * a + 127) / 255) as u8;
-                        px[di + 1] = (((data[si + 1] as u32) * a + 127) / 255) as u8;
-                        px[di + 2] = (((data[si + 2] as u32) * a + 127) / 255) as u8;
-                        px[di + 3] = a as u8;
-                    }
-                }
-            }
-        }
-
-        // Screen-space (device-pixel) origin of the transformed dst rect: the
-        // first pixel whose centre lies inside it, the half-open rule the GPU
-        // rasterizer uses (a rect starting at 40.5 covers pixel 40, whose
-        // centre is on its edge; `round` put it at 41).
-        let screen_x = (left - 0.5).ceil() as i32;
-        let screen_y = (bottom - 0.5).ceil() as i32;
-        // Honor the active `global_alpha` so backbuffered widgets (Labels,
-        // buttons) inside a faded subtree fade uniformly with the rest of the
-        // group — without this the blit composited at full opacity regardless
-        // of `set_global_alpha`.
-        let ga = self.state.global_alpha;
         // Honor the active clip (screen-space Y-up AABB) so image blits are
         // scissored like every other primitive. Over-scan band backbuffers
-        // (see `Widget::backbuffer_band`) rely on this to crop their margins to
-        // the widget bounds; ordinary full-image blits set no tighter clip than
-        // their bounds, so this is a no-op for them.
+        // (see `Widget::backbuffer_band`) rely on this to crop their margins
+        // to the widget bounds. Only the pixels inside it and the target are
+        // sampled, so a picture zoomed far past its frame stays cheap.
         let clip = self.state.clip;
+        // Honor the active `global_alpha` so backbuffered widgets (Labels,
+        // buttons) inside a faded subtree fade uniformly with the rest of the
+        // group.
+        let ga = self.state.global_alpha;
         let fb = active_fb(self.base_fb, &mut self.layer_stack);
-        composite_framebuffers(fb, &scaled, screen_x, screen_y, ga, clip);
+        let window = super::axis_blit::BlitWindow::new(fb.width(), fb.height(), clip);
+        let axis_aligned = t.shx.abs() < 1e-9 && t.shy.abs() < 1e-9;
+        let blit = if axis_aligned {
+            super::axis_blit::render_axis_aligned(
+                &t, data, img_w, img_h, dst_x, dst_y, dst_w, dst_h, sampling, window,
+            )
+        } else {
+            super::rotated_blit::render_rotated(
+                &t, data, img_w, img_h, dst_x, dst_y, dst_w, dst_h, sampling, window,
+            )
+        };
+        if let Some((pixels, x0, y0)) = blit {
+            composite_framebuffers(fb, &pixels, x0, y0, ga, clip);
+        }
     }
 }
 

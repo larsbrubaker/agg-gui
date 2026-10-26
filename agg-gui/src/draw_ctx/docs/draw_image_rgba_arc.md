@@ -10,3 +10,7 @@ trees with unchanged content never re-rasterize OR re-upload.
 Default implementation: forward to [`draw_image_rgba`] via slice
 borrow.  Software backends don't benefit from GPU texture caching so
 the default is usually fine; the GL backend overrides.
+
+To choose how the image is sampled (hard-edged pixels for a picture the
+user zooms into, or smooth), call [`draw_image_rgba_arc_sampled`] with an
+[`ImageSampling`]; this method draws as its `Auto`.

@@ -656,6 +656,7 @@ impl<'a> GfxCtx<'a> {
 }
 
 mod aliased;
+mod axis_blit;
 mod composite;
 mod draw_impl;
 mod draw_path;

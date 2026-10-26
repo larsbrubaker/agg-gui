@@ -313,6 +313,22 @@ impl DrawCtx for WgpuGfxCtx {
         self.draw_image_rgba_arc_impl(data, img_w, img_h, dst_x, dst_y, dst_w, dst_h);
     }
 
+    fn draw_image_rgba_arc_sampled(
+        &mut self,
+        data: &std::sync::Arc<Vec<u8>>,
+        img_w: u32,
+        img_h: u32,
+        dst_x: f64,
+        dst_y: f64,
+        dst_w: f64,
+        dst_h: f64,
+        sampling: agg_gui::draw_ctx::ImageSampling,
+    ) {
+        self.draw_image_rgba_arc_sampled_impl(
+            data, img_w, img_h, dst_x, dst_y, dst_w, dst_h, sampling,
+        );
+    }
+
     fn draw_image_rgba_corners(
         &mut self,
         data: &std::sync::Arc<Vec<u8>>,

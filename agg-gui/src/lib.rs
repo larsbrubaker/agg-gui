@@ -162,7 +162,7 @@ pub use cursor::{
 };
 pub use device_scale::{device_scale, set_device_scale};
 pub use draw_cell::{DrawCell, DrawRefCell, DrawRefMut};
-pub use draw_ctx::{DrawCtx, FillRule, GlPaint};
+pub use draw_ctx::{DrawCtx, FillRule, GlPaint, ImageSampling};
 pub use event::{
     current_modifiers, window_is_active, DroppedFileData, Event, EventResult, Key, Modifiers,
     MouseButton,

@@ -6,7 +6,9 @@
 //!   entries.  Used by callers that hand us a borrowed pixel slice.
 //! - [`WgpuGfxCtx::draw_image_rgba_arc_impl`] — Arc-pointer-keyed hot path for
 //!   `Label` backbuffers; one GPU upload per unique raster, lifetime tied to
-//!   the `Arc<Vec<u8>>` strong-count via a `Weak` sentinel.
+//!   the `Arc<Vec<u8>>` strong-count via a `Weak` sentinel.  Its
+//!   `draw_image_rgba_arc_sampled_impl` form takes the caller's
+//!   [`ImageSampling`] (nearest / smooth / the size rule) over the same cache.
 //!
 //! Images arrive straight-alpha and are uploaded premultiplied, shrunk to
 //! fit when larger than the device's texture limit; see
@@ -14,6 +16,7 @@
 
 use std::sync::Arc;
 
+use agg_gui::draw_ctx::ImageSampling;
 use agg_gui::framebuffer::premultiply_rgba_inplace;
 
 use crate::texture_life::TextureLedger;
@@ -172,6 +175,39 @@ impl WgpuGfxCtx {
         dst_w: f64,
         dst_h: f64,
     ) {
+        self.draw_image_rgba_arc_sampled_impl(
+            data,
+            img_w,
+            img_h,
+            dst_x,
+            dst_y,
+            dst_w,
+            dst_h,
+            ImageSampling::Auto,
+        );
+    }
+
+    /// The Arc-keyed blit with the caller's [`ImageSampling`].
+    ///
+    /// The texture is cached per `Arc` whatever the sampling, and its mip
+    /// chain depends only on the image's size (see [`should_use_mipmaps`]),
+    /// so switching modes or drawing every frame never re-uploads; the mode
+    /// only picks the sampler for this draw. The quad is scissored by the
+    /// active clip on the GPU, so a destination far larger than the frame
+    /// costs only the pixels shown.
+    // Each argument is a distinct drawing/geometry input; a struct would only rename them.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn draw_image_rgba_arc_sampled_impl(
+        &mut self,
+        data: &Arc<Vec<u8>>,
+        img_w: u32,
+        img_h: u32,
+        dst_x: f64,
+        dst_y: f64,
+        dst_w: f64,
+        dst_h: f64,
+        sampling: ImageSampling,
+    ) {
         if img_w == 0 || img_h == 0 || dst_w <= 0.0 || dst_h <= 0.0 {
             return;
         }
@@ -237,7 +273,7 @@ impl WgpuGfxCtx {
             }
         };
 
-        // Sampler choice tracks the upload's mipmap policy:
+        // `Auto` sampler choice tracks the upload's mipmap policy:
         // - Small textures (Label backbuffers, glyph atlases): no mipmaps
         //   were generated, so use the nearest sampler — preserves the
         //   crisp 1:1 pixel-perfect blit the Label / pixel-test paths
@@ -246,7 +282,14 @@ impl WgpuGfxCtx {
         //   uploaded; use the linear (trilinear-with-mipmaps) sampler so
         //   downsampling at draw time picks an appropriate mip level
         //   instead of point-aliasing at the base mip.
-        let use_nearest = !should_use_mipmaps(img_w, img_h);
+        // `Nearest` and `Smooth` override it: the nearest sampler magnifies
+        // with hard-edged texels at any size, and the linear sampler blends at
+        // any size (clamping to the single level a small image carries).
+        let use_nearest = match sampling {
+            ImageSampling::Auto => !should_use_mipmaps(img_w, img_h),
+            ImageSampling::Nearest => true,
+            ImageSampling::Smooth => false,
+        };
         let alpha = self.global_alpha as f32;
         self.commands.push(DrawCommand::Textured {
             verts,

@@ -77,6 +77,7 @@ mod hover_leaves_before_enters;
 mod huge_offset_blit;
 mod icon_font_tests;
 mod image_icons;
+mod image_sampling;
 mod inspector_hover;
 mod inspector_tests;
 mod inspector_tree;

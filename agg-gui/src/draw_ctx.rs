@@ -33,6 +33,7 @@ use agg_rust::trans_affine::TransAffine;
 // The GL paint hook (`draw_ctx/gl_paint.rs`) and the paint definitions are
 // re-exported from `draw_ctx/reexports.rs` under their old paths.
 mod gl_paint;
+mod image_sampling;
 mod paint_nesting;
 mod reexports;
 pub use reexports::*;
@@ -403,6 +404,25 @@ pub trait DrawCtx {
         dst_h: f64,
     ) {
         self.draw_image_rgba(data.as_slice(), img_w, img_h, dst_x, dst_y, dst_w, dst_h);
+    }
+
+    #[doc = include_str!("draw_ctx/docs/draw_image_rgba_arc_sampled.md")]
+    // Public API: the signature is shared with downstream callers.
+    #[allow(clippy::too_many_arguments)]
+    fn draw_image_rgba_arc_sampled(
+        &mut self,
+        data: &std::sync::Arc<Vec<u8>>,
+        img_w: u32,
+        img_h: u32,
+        dst_x: f64,
+        dst_y: f64,
+        dst_w: f64,
+        dst_h: f64,
+        sampling: ImageSampling,
+    ) {
+        // A backend without a choice of sampler draws every mode as `Auto`.
+        let _ = sampling;
+        self.draw_image_rgba_arc(data, img_w, img_h, dst_x, dst_y, dst_w, dst_h);
     }
 
     #[doc = include_str!("draw_ctx/docs/draw_image_rgba_corners.md")]

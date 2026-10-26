@@ -33,6 +33,8 @@ mod headless_options_tests;
 mod headless_tests;
 #[path = "image_blit_readback_tests.rs"]
 mod image_blit_readback_tests;
+#[path = "image_sampling_readback_tests.rs"]
+mod image_sampling_readback_tests;
 #[path = "layer_text_readback_tests.rs"]
 pub(crate) mod layer_text_readback_tests;
 #[path = "lcd_arc_cache_tests.rs"]
