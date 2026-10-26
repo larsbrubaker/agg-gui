@@ -462,3 +462,107 @@ fn cursor_anchored_zoom_reports_pan_and_zoom_to_the_model() {
     assert_eq!(m.pan, editor.pan());
     assert_ne!(m.pan, [0.0, 0.0], "an anchored zoom cannot leave pan at 0");
 }
+
+/// Put node A of the snap fixture into a drag from its start at
+/// `[50, 300]`, the way a press on its title would.
+fn start_dragging_a(editor: &mut NodeEditor) {
+    editor.interaction = CanvasState::DraggingNode {
+        ids: vec![NodeId(1)],
+        start_positions: vec![[50.0, 300.0]],
+        start_canvas: [50.0, 300.0],
+    };
+}
+
+/// A host's "Snap" toggle flips snapping on the live editor: the same
+/// drag near B's left edge snaps with it on, follows the pointer exactly
+/// with it off (and the guides the drag had drawn are gone, with the
+/// cached canvas re-rastered so they leave the screen), and snaps again
+/// once it is back on.
+#[test]
+fn set_snap_guides_switches_snapping_on_the_live_editor() {
+    let (model, memory) = fixture_with_typed_handle();
+    let mut editor = NodeEditor::new(model);
+    editor.set_bounds(Rect::new(0.0, 0.0, 800.0, 600.0));
+    seed_nodes(
+        &mut editor,
+        &memory,
+        vec![
+            mk_node(1, "A", [50.0, 300.0]),
+            mk_node(2, "B", [400.0, 100.0]),
+        ],
+    );
+    agg_gui::snap::set_enabled(true);
+    agg_gui::snap::clear_guides();
+    assert!(editor.snap_guides(), "snapping is on by default");
+
+    // On: 3 px off B's left edge pulls A onto it and draws a guide.
+    start_dragging_a(&mut editor);
+    editor.on_mouse_move(Point::new(403.0, 300.0));
+    assert_eq!(memory.lock().unwrap().nodes[0].position[0], 400.0);
+    assert!(!agg_gui::snap::guides_snapshot().is_empty());
+
+    // Off mid-drag: the drawn guides go at once and the canvas re-rasters.
+    if let Some(state) = editor.backbuffer_state_mut() {
+        state.dirty = false;
+    }
+    editor.set_snap_guides(false);
+    assert!(!editor.snap_guides());
+    assert!(
+        agg_gui::snap::guides_snapshot().is_empty(),
+        "turning snapping off mid-drag must take its guides off screen"
+    );
+    let dirty = editor
+        .backbuffer_state_mut()
+        .map(|s| s.dirty)
+        .unwrap_or(false);
+    assert!(
+        dirty,
+        "the cached canvas still shows the guides until re-rastered"
+    );
+
+    // The same drag now follows the pointer exactly and draws no guide.
+    editor.on_mouse_move(Point::new(403.0, 300.0));
+    assert_eq!(memory.lock().unwrap().nodes[0].position[0], 403.0);
+    assert!(agg_gui::snap::guides_snapshot().is_empty());
+    editor.on_mouse_up(
+        Point::new(403.0, 300.0),
+        MouseButton::Left,
+        Modifiers::default(),
+    );
+    // A fresh drag with snapping off does not snap either.
+    start_dragging_a(&mut editor);
+    editor.on_mouse_move(Point::new(402.0, 300.0));
+    assert_eq!(memory.lock().unwrap().nodes[0].position[0], 402.0);
+    assert!(agg_gui::snap::guides_snapshot().is_empty());
+
+    // Back on, mid-drag: the next move snaps again.
+    editor.set_snap_guides(true);
+    assert!(editor.snap_guides());
+    editor.on_mouse_move(Point::new(403.0, 300.0));
+    assert_eq!(memory.lock().unwrap().nodes[0].position[0], 400.0);
+    assert!(!agg_gui::snap::guides_snapshot().is_empty());
+    editor.on_mouse_up(
+        Point::new(403.0, 300.0),
+        MouseButton::Left,
+        Modifiers::default(),
+    );
+
+    agg_gui::snap::set_enabled(false);
+    agg_gui::snap::clear_guides();
+}
+
+/// Turning snapping off with no node drag in flight leaves the snap
+/// registry alone: guides there belong to some other widget's drag.
+#[test]
+fn set_snap_guides_off_outside_a_drag_leaves_other_guides() {
+    let mut editor = NodeEditor::new(fixture());
+    agg_gui::snap::set_guides(vec![agg_gui::snap::SnapGuide::VLine {
+        x: 0.0,
+        y0: 0.0,
+        y1: 100.0,
+    }]);
+    editor.set_snap_guides(false);
+    assert!(!editor.snap_guides());
+    assert_eq!(agg_gui::snap::guides_snapshot().len(), 1);
+    agg_gui::snap::clear_guides();
+}

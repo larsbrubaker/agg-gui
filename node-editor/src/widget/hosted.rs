@@ -200,6 +200,35 @@ impl NodeEditor {
         self
     }
 
+    /// Turn node-drag snapping on or off on the live editor (see
+    /// [`Self::with_snap_guides`]), e.g. from a host's "Snap" menu toggle.
+    /// The next pointer move of a drag already in flight follows the new
+    /// setting.
+    ///
+    /// Turning it off mid-drag also removes the guides that drag drew:
+    /// they live in agg-gui's thread-local snap registry, which the cached
+    /// canvas image knows nothing about, so the registry is cleared, the
+    /// backbuffer invalidated and a redraw requested, or the last guide
+    /// lines would stay on screen until the drag ends. Guides outside a
+    /// node drag belong to someone else and are left alone.
+    pub fn set_snap_guides(&mut self, enabled: bool) {
+        if self.hosted.snap_guides == enabled {
+            return;
+        }
+        self.hosted.snap_guides = enabled;
+        if !enabled && matches!(self.interaction, super::CanvasState::DraggingNode { .. }) {
+            agg_gui::snap::clear_guides();
+            self.backbuffer.invalidate();
+            agg_gui::animation::request_draw();
+        }
+    }
+
+    /// Whether a node drag snaps to the other cards (the editor's own
+    /// switch; agg-gui's global `snap::is_enabled` gates it as well).
+    pub fn snap_guides(&self) -> bool {
+        self.hosted.snap_guides
+    }
+
     /// Whether a press on a hosted card raises it to the top of the paint
     /// order. On by default. Off keeps the cards in the order the model
     /// lists its nodes (MatterCAD's NodeDesigner keeps its node windows in

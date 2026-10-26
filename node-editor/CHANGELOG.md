@@ -10,6 +10,12 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- `NodeEditor::set_snap_guides(bool)` / `snap_guides()`: turn node-drag
+  snapping on or off on the live editor (until now only
+  `with_snap_guides` at construction), so a host's Snap toggle no longer
+  rebuilds the editor. A drag in flight follows the change on its next
+  move; turning it off mid-drag clears the guides that drag drew and
+  re-rasters the canvas, so none stay on screen.
 - A new noodle let go on empty canvas opens the host's add menu
   (`NodeEditor::with_add_menu`) at the release, with
   `AddMenuRequest::from_socket: Option<SocketRef>` naming the socket it was
