@@ -2,7 +2,8 @@
 //! from an input, or by picking a connected input's noodle up), asking the
 //! model which socket under the pointer accepts it, the refusal note, and
 //! the drop — on a socket, on a card body (the model's auto-pick), or on
-//! empty canvas.
+//! empty canvas, where a new noodle opens the host's add menu
+//! (`add_menu.rs`) with the socket it came from.
 //!
 //! The rules themselves are the model's ([`NodeGraphModel::can_connect`],
 //! [`NodeGraphModel::auto_pick_socket`], [`NodeGraphModel::move_noodle`]);
@@ -130,12 +131,14 @@ impl NodeEditor {
     ) -> EventResult {
         let mut fixed = (node, socket.clone());
         let mut picked_up = None;
+        let mut lifted = false;
         if socket.side == SocketSide::Input {
             // Bound first: a guard in the `if let` would be held through
             // the body, which locks the model again.
             let nearest =
                 nearest_noodle_into(&*self.model.lock().unwrap(), node, socket, canvas_pos);
             if let Some(noodle) = nearest {
+                lifted = true;
                 let source = layouts
                     .iter()
                     .find(|l| l.node_id == noodle.from_node)
@@ -169,6 +172,7 @@ impl NodeEditor {
             from_socket_type: from.socket_type,
             from_side: from.side,
             picked_up,
+            lifted,
             refusal: None,
             cursor_local: local,
         };
@@ -222,15 +226,21 @@ impl NodeEditor {
         }
     }
 
-    /// The drop of a noodle drag at `canvas_pos`. `state` is the
-    /// `DrawingConnection` the drag ended in.
-    pub(super) fn finish_connection(&mut self, canvas_pos: [f64; 2], state: CanvasState) {
+    /// The drop of a noodle drag at `local` (editor-local) and
+    /// `canvas_pos`. `state` is the `DrawingConnection` the drag ended in.
+    pub(super) fn finish_connection(
+        &mut self,
+        local: Point,
+        canvas_pos: [f64; 2],
+        state: CanvasState,
+    ) {
         let CanvasState::DrawingConnection {
             from_node,
             from_socket,
             from_socket_type,
             from_side,
             picked_up,
+            lifted,
             ..
         } = state
         else {
@@ -245,6 +255,24 @@ impl NodeEditor {
         let layouts = self.snapshot_layouts();
         let ends = match self.drop_ends(&layouts, canvas_pos, &fixed, picked_up.as_ref()) {
             DropEnds::Refused => return self.connection_ended(),
+            DropEnds::Empty if !lifted && self.add_menu.builder.is_some() => {
+                // A new noodle let go on open canvas asks the host for a
+                // node to wire it to, unless a socket is ringed there: the
+                // ring said the drop would land, so the menu would surprise.
+                let ringed = find_target_near(
+                    &layouts,
+                    &*self.model.lock().unwrap(),
+                    canvas_pos,
+                    &fixed,
+                    None,
+                )
+                .is_some();
+                self.connection_ended();
+                if !ringed {
+                    self.open_add_menu_for_noodle(local, fixed);
+                }
+                return;
+            }
             DropEnds::Empty => None,
             DropEnds::Connect(ends) => Some(ends),
         };

@@ -10,6 +10,16 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- A new noodle let go on empty canvas opens the host's add menu
+  (`NodeEditor::with_add_menu`) at the release, with
+  `AddMenuRequest::from_socket: Option<SocketRef>` naming the socket it was
+  dragged from (node, side, name, type), so the host can list only nodes
+  that take it and wire the pick to it; Shift+A and a right-click give
+  `None`. The noodle itself is gone, so closing the menu without a pick
+  changes nothing. Drops on a socket or a card, a release beside a ringed
+  socket, a noodle picked up off an input (which disconnects) and editors
+  without `with_add_menu` behave as before. Code that builds an
+  `AddMenuRequest` with a struct literal adds the field.
 - A `reflect` feature (on by default) forwarding to agg-gui's `reflect`.
   agg-gui is now depended on with its default features off, so a consumer
   that sets `default-features = false` on this crate leaves `bevy_reflect`

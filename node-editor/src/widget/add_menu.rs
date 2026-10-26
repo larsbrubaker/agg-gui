@@ -1,7 +1,9 @@
 //! The add menu and the editor's keys beyond Delete: Shift+A, or a click
 //! of the right button on empty canvas, opens the add menu at the pointer
 //! (NodeDesigner's and Blender's gesture), and Escape closes it or goes to
-//! the host (`NodeGraphModel::on_escape`).
+//! the host (`NodeGraphModel::on_escape`). A new noodle let go on empty
+//! canvas opens the host's widget too, naming the socket it came from
+//! (`connect.rs` decides when).
 //!
 //! The add menu comes from one of three places, first match wins:
 //! 1. a host widget from [`NodeEditor::with_add_menu`] (MatterCAD's search
@@ -22,6 +24,7 @@ use std::rc::Rc;
 use agg_gui::{Event, EventResult, Key, Modifiers, Point, PopupMenu, Rect, Size, Widget};
 
 use super::NodeEditor;
+use crate::connection::SocketRef;
 
 /// How far (logical px) the pointer may move between the right press and
 /// its release for the gesture to still be a click rather than a pan.
@@ -42,6 +45,12 @@ pub struct AddMenuRequest {
     pub app_pos: Point,
     /// The editor's size, for a host that sizes its menu to fit.
     pub editor_size: Size,
+    /// The socket a noodle was dragged from when the menu opens because
+    /// the noodle was let go on empty canvas (its node, side, name and
+    /// type), so the host can list only nodes that take it and wire the
+    /// pick to it; `None` for Shift+A and a right-click. The noodle itself
+    /// is gone: closing the menu without a pick changes nothing.
+    pub from_socket: Option<SocketRef>,
     /// Set it to `true` to close the menu (after a pick, or on Escape in
     /// the menu's own search box); the editor drains it on its next event
     /// or layout pass, as for its own floating editors.
@@ -71,8 +80,9 @@ pub(crate) struct AddMenuState {
 
 impl NodeEditor {
     /// Install the host's add menu: `builder` gets an [`AddMenuRequest`]
-    /// whenever Shift+A or a right-click on empty canvas asks for the menu
-    /// and returns the widget to show (or `None`). A widget that comes back
+    /// whenever Shift+A, a right-click on empty canvas, or a new noodle let
+    /// go on empty canvas (with [`AddMenuRequest::from_socket`] set) asks
+    /// for the menu, and returns the widget to show (or `None`). A widget that comes back
     /// with empty bounds is laid out and placed with its top-left at the
     /// pointer, kept inside the editor; non-empty bounds (editor-local) are
     /// kept. With an `overlay_sink` the widget goes to the sink in
@@ -105,7 +115,7 @@ impl NodeEditor {
         self.popup_canvas_pos = canvas_pos;
         self.popup_host_node = None;
         if self.add_menu.builder.is_some() {
-            self.open_host_add_menu(local, canvas_pos);
+            self.open_host_add_menu(local, canvas_pos, None);
             return;
         }
         if self.rebuild_popup_for_empty_canvas() {
@@ -136,7 +146,22 @@ impl NodeEditor {
         }
     }
 
-    fn open_host_add_menu(&mut self, local: Point, canvas_pos: [f64; 2]) {
+    /// Open the host's add-menu widget at `local` (editor-local) for a
+    /// noodle dragged from `from` and let go there on empty canvas.
+    pub(super) fn open_add_menu_for_noodle(&mut self, local: Point, from: SocketRef) {
+        self.close_add_menu();
+        let canvas_pos = self.local_to_canvas(local);
+        self.popup_canvas_pos = canvas_pos;
+        self.popup_host_node = None;
+        self.open_host_add_menu(local, canvas_pos, Some(from));
+    }
+
+    fn open_host_add_menu(
+        &mut self,
+        local: Point,
+        canvas_pos: [f64; 2],
+        from_socket: Option<SocketRef>,
+    ) {
         let (ox, oy) = self.last_abs_origin.get();
         let size = Size::new(self.bounds.width, self.bounds.height);
         let close = Rc::new(Cell::new(false));
@@ -145,6 +170,7 @@ impl NodeEditor {
             local_pos: local,
             app_pos: Point::new(local.x + ox, local.y + oy),
             editor_size: size,
+            from_socket,
             close: Rc::clone(&close),
         };
         let Some(builder) = self.add_menu.builder.as_mut() else {

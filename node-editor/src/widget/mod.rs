@@ -93,6 +93,8 @@ mod tests_inline_editor;
 #[cfg(test)]
 mod tests_noodle;
 #[cfg(test)]
+mod tests_noodle_drop_menu;
+#[cfg(test)]
 mod tests_overlay;
 #[cfg(test)]
 mod tests_palette;

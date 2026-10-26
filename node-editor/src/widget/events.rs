@@ -526,7 +526,7 @@ impl NodeEditor {
                 MouseButton::Left | MouseButton::Middle,
                 state @ CanvasState::DrawingConnection { .. },
             ) => {
-                self.finish_connection(canvas_pos, state);
+                self.finish_connection(pos, canvas_pos, state);
                 EventResult::Consumed
             }
             (_, CanvasState::DraggingNode { .. }) => {

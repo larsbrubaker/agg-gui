@@ -45,6 +45,10 @@ pub(super) enum CanvasState {
         /// keeps it in the model until the drop
         /// (`NodeEditor::with_deferred_noodle_pickup`); not drawn in place.
         picked_up: Option<NoodleView>,
+        /// The drag picked an existing noodle up off the input pressed
+        /// (at once or deferred): a drop on empty canvas disconnects it
+        /// instead of asking the host's add menu for a node to wire to.
+        lifted: bool,
         /// Why the socket under the pointer refuses the noodle, from
         /// [`crate::NodeGraphModel::can_connect`]; shown beside the pointer.
         refusal: Option<String>,
