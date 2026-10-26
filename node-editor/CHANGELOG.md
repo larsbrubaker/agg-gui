@@ -10,6 +10,14 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- `NodeEditor::select_nodes(&[NodeId], bool) -> usize`: make exactly a
+  set of cards the selection, as the user Shift-clicking each in order would
+  (the last existing id becomes the primary selection reported through
+  `on_primary_selection_changed`), so a host can leave every pasted or
+  duplicated card selected. Unknown and repeated ids are ignored; an empty
+  list clears the selection and reports `None`; a single card behaves
+  exactly as `select_node`. With `reveal` the view pans, zoom unchanged, so
+  the cards' bounding box is centred when any of it is off screen.
 - `NodeEditor::set_snap_guides(bool)` / `snap_guides()`: turn node-drag
   snapping on or off on the live editor (until now only
   `with_snap_guides` at construction), so a host's Snap toggle no longer

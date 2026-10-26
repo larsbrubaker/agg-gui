@@ -101,6 +101,8 @@ mod tests_palette;
 #[cfg(test)]
 mod tests_presentation;
 #[cfg(test)]
+mod tests_select_nodes;
+#[cfg(test)]
 mod tests_selection_ring;
 #[cfg(test)]
 mod tests_socket_at;

@@ -39,6 +39,7 @@
 
 use std::sync::{Arc, Mutex};
 
+use crate::draw::NodeLayoutInfo;
 use crate::model::NodeId;
 
 use super::NodeEditor;
@@ -283,8 +284,66 @@ impl NodeEditor {
         true
     }
 
-    /// Pan so the card at canvas `top_left` (Y up, its top edge) of `size`
-    /// sits centred in the pane, unless it is already wholly visible.
+    /// Make exactly the cards in `ids` the selection and return how many
+    /// are now selected. Ids the model doesn't have, and repeats, are
+    /// ignored.
+    ///
+    /// The result matches the user Shift-clicking those cards in order
+    /// after clearing the selection: each click reports its card as the
+    /// primary selection (`NodeGraphModel::on_primary_selection_changed`),
+    /// so the last existing id in `ids` ends up primary, and the hook fires
+    /// once, only when that changes the primary. When exactly one card is
+    /// selected this is [`Self::select_node`] for it. When none is (an
+    /// empty list, or only unknown ids) the selection clears and the
+    /// primary is reported as `None`, as a click on empty canvas does.
+    ///
+    /// With `reveal`, pan the view (instantly, zoom unchanged) so the
+    /// bounding box of the selected cards is centred when any of it is
+    /// outside the pane, the multi-card form of `select_node`'s reveal. A
+    /// box larger than the pane is centred too, leaving its edges off
+    /// screen; zooming out is the host's call (`FitToContent`).
+    pub fn select_nodes(&mut self, ids: &[NodeId], reveal: bool) -> usize {
+        let layouts = self.snapshot_layouts();
+        let mut found: Vec<&NodeLayoutInfo> = Vec::new();
+        for id in ids {
+            if found.iter().any(|l| l.node_id == *id) {
+                continue;
+            }
+            if let Some(layout) = layouts.iter().find(|l| l.node_id == *id) {
+                found.push(layout);
+            }
+        }
+        if let [only] = found.as_slice() {
+            let id = only.node_id;
+            return usize::from(self.select_node(id, reveal));
+        }
+        let primary = found.last().map(|l| l.node_id);
+        self.selected = found.iter().map(|l| l.node_id).collect();
+        if self.model.lock().unwrap().primary_selection() != primary {
+            self.notify_primary_selection(primary);
+        }
+        if reveal && !found.is_empty() {
+            // Canvas Y is up: a card spans top_left.y - size.y .. top_left.y.
+            let mut left = f64::INFINITY;
+            let mut right = f64::NEG_INFINITY;
+            let mut top = f64::NEG_INFINITY;
+            let mut bottom = f64::INFINITY;
+            for l in &found {
+                left = left.min(l.top_left[0]);
+                right = right.max(l.top_left[0] + l.size[0]);
+                top = top.max(l.top_left[1]);
+                bottom = bottom.min(l.top_left[1] - l.size[1]);
+            }
+            self.reveal_layout([left, top], [right - left, top - bottom]);
+        }
+        self.backbuffer.invalidate();
+        agg_gui::animation::request_draw();
+        found.len()
+    }
+
+    /// Pan so the box at canvas `top_left` (Y up, its top edge) of `size`
+    /// (one card, or the bounds of several) sits centred in the pane,
+    /// unless it is already wholly visible.
     fn reveal_layout(&mut self, top_left: [f64; 2], size: [f64; 2]) {
         let (w, h) = (self.bounds.width, self.bounds.height);
         if w <= 0.0 || h <= 0.0 {
