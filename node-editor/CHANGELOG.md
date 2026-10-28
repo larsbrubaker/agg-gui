@@ -8,6 +8,8 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ## [Unreleased]
 
+## [0.0.2] - 2026-10-28
+
 ### Added
 
 - Rubber-band selection: in the Select interaction mode a left drag from
@@ -39,7 +41,12 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   the main noodle into each runs straight and no two cards come closer
   than `row_gap`, long noodles get a lane of their own, separate graphs
   stack top to bottom `component_gap` apart, and the whole keeps its
-  current top-left corner. Positions are whole canvas units. Results are
+  current top-left corner. An Input or Output card with no noodles joins
+  the main graph (the one with the most cards, then the smallest id)
+  rather than being stacked apart: Inputs at the top of the first column
+  (a column of their own unless a wired Input is there), Outputs at the
+  top of the last, likewise; with nothing else, unwired Inputs and
+  Outputs sit in one row, Inputs left. Positions are whole canvas units. Results are
   deterministic, and arranging an arranged graph changes nothing (cyclic
   graphs and positions a host's arithmetic left a rounding error off
   included); cycles, self-loops, duplicate edges, socket indices out of
