@@ -19,10 +19,10 @@ impl super::NodeEditor {
     /// cancelled (the selection held at its press comes back); a pan, zoom,
     /// node drag or property scrub keeps what it already applied live, as a
     /// release would, but opens no menu or inline editor; a noodle drag is
-    /// dropped without connecting. Leaves the editor idle, no snap guides
-    /// or noodle left on screen.
+    /// cancelled as Escape cancels it, a lifted noodle going back where it
+    /// was. Leaves the editor idle, no snap guides or noodle left on screen.
     pub(super) fn abandon_interaction(&mut self) {
-        if self.cancel_rubber_band() {
+        if self.cancel_rubber_band() || self.cancel_connection() {
             return;
         }
         if matches!(self.interaction, CanvasState::Idle) {
@@ -89,10 +89,11 @@ pub(super) enum CanvasState {
         /// keeps it in the model until the drop
         /// (`NodeEditor::with_deferred_noodle_pickup`); not drawn in place.
         picked_up: Option<NoodleView>,
-        /// The drag picked an existing noodle up off the input pressed
-        /// (at once or deferred): a drop on empty canvas disconnects it
-        /// instead of asking the host's add menu for a node to wire to.
-        lifted: bool,
+        /// The noodle the drag picked up off the input pressed (at once or
+        /// deferred), as it was: a drop on empty canvas disconnects it
+        /// instead of asking the host's add menu for a node to wire to, and
+        /// a cancel puts it back (`NodeEditor::cancel_connection`).
+        lifted: Option<NoodleView>,
         /// Why the socket under the pointer refuses the noodle, from
         /// [`crate::NodeGraphModel::can_connect`]; shown beside the pointer.
         refusal: Option<String>,

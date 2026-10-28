@@ -268,8 +268,15 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 - Losing the pointer capture (`Event::MouseCaptureLost`) or the window's
   activation (`Event::WindowDeactivated`) mid-press ends the gesture: a
   pan, zoom, node drag, property scrub or card resize keeps what it
-  applied and stops following the pointer, a noodle drag is dropped
-  without connecting, and no menu or inline editor opens.
+  applied and stops following the pointer, no menu or inline editor opens,
+  and a noodle drag is cancelled as by Escape: switching windows mid-drag
+  never deletes a wire the user did not let go of.
+- Escape during a noodle drag cancels it (it used to go on to the host's
+  `on_escape` with the drag still live): a new noodle is dropped, and one
+  picked up off an input goes back to the same sockets. A deferred
+  pick-up never left the model; one removed at the press is added again
+  through `try_add_noodle`, so among a multi-input's noodles it may come
+  back last.
 - Hit tests agree with what is painted on top: a socket or property row of
   a card lying under another card's body takes no press, no hover and no
   noodle drop ring (the ring uses the press's rule at the pointer, so a

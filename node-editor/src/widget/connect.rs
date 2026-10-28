@@ -135,14 +135,14 @@ impl NodeEditor {
     ) -> EventResult {
         let mut fixed = (node, socket.clone());
         let mut picked_up = None;
-        let mut lifted = false;
+        let mut lifted = None;
         if socket.side == SocketSide::Input {
             // Bound first: a guard in the `if let` would be held through
             // the body, which locks the model again.
             let nearest =
                 nearest_noodle_into(&*self.model.lock().unwrap(), node, socket, canvas_pos);
             if let Some(noodle) = nearest {
-                lifted = true;
+                lifted = Some(noodle.clone());
                 let source = layouts
                     .iter()
                     .find(|l| l.node_id == noodle.from_node)
@@ -259,7 +259,7 @@ impl NodeEditor {
         let layouts = self.snapshot_layouts();
         let ends = match self.drop_ends(&layouts, canvas_pos, &fixed, picked_up.as_ref()) {
             DropEnds::Refused => return self.connection_ended(),
-            DropEnds::Empty if !lifted && self.add_menu.builder.is_some() => {
+            DropEnds::Empty if lifted.is_none() && self.add_menu.builder.is_some() => {
                 // A new noodle let go on open canvas asks the host for a
                 // node to wire it to, unless a socket is ringed there: the
                 // ring said the drop would land, so the menu would surprise.
@@ -335,6 +335,35 @@ impl NodeEditor {
             .and_then(|name| candidates.iter().find(|c| c.socket == name))
             .and_then(|to| fixed.noodle_to(to))
             .map_or(DropEnds::Refused, DropEnds::Connect)
+    }
+
+    /// Cancel a noodle drag (Escape, a lost pointer capture, a deactivated
+    /// window): a new noodle is dropped, and one picked up off an input is
+    /// put back. A deferred pick-up never left the model, so nothing
+    /// changes; one removed at the press is added again with
+    /// `try_add_noodle` (the model has no way to say where it sat among a
+    /// multi-input's noodles, so it may come back last). False with no
+    /// noodle drag in flight.
+    pub(super) fn cancel_connection(&mut self) -> bool {
+        if !matches!(self.interaction, CanvasState::DrawingConnection { .. }) {
+            return false;
+        }
+        let state = std::mem::replace(&mut self.interaction, CanvasState::Idle);
+        if let CanvasState::DrawingConnection {
+            lifted: Some(n), ..
+        } = state
+        {
+            if !self.deferred_pickup {
+                let _ = self.model.lock().unwrap().try_add_noodle(
+                    n.from_node,
+                    &n.from_socket,
+                    n.to_node,
+                    &n.to_socket,
+                );
+            }
+        }
+        self.connection_ended();
+        true
     }
 
     /// Whether the drop landed or not, the in-flight noodle has to go.

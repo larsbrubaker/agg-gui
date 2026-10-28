@@ -392,3 +392,73 @@ fn a_deferred_pick_up_is_not_drawn_in_place() {
         "the noodle follows the pointer"
     );
 }
+
+/// Pick card 2's `a` noodle up and drag it into open canvas, then end the
+/// drag with `cancel` instead of a release.
+fn lift_then(deferred: bool, cancel: &agg_gui::Event) -> (NodeEditor, Arc<Mutex<Memory>>) {
+    let (mut editor, memory) = fixture(deferred);
+    memory.lock().unwrap().noodles = vec![noodle(1, "out", 2, "a"), noodle(3, "out", 2, "b")];
+    editor.layout(Size::new(800.0, 600.0));
+    let from = at(&editor, 2, SocketSide::Input, "a");
+    press(&mut editor, from);
+    drag_to(&mut editor, Point::new(300.0, 100.0));
+    editor.on_event(cancel);
+    assert!(matches!(editor.interaction, CanvasState::Idle));
+    (editor, memory)
+}
+
+fn escape() -> agg_gui::Event {
+    agg_gui::Event::KeyDown {
+        key: agg_gui::Key::Escape,
+        modifiers: Modifiers::default(),
+    }
+}
+
+fn has(memory: &Arc<Mutex<Memory>>, n: (u64, String, u64, String)) -> bool {
+    noodles(memory).contains(&n)
+}
+
+#[test]
+fn losing_the_pointer_capture_puts_a_lifted_noodle_back() {
+    for deferred in [false, true] {
+        for cancel in [
+            agg_gui::Event::MouseCaptureLost,
+            agg_gui::Event::WindowDeactivated,
+        ] {
+            let (mut editor, memory) = lift_then(deferred, &cancel);
+            assert!(has(&memory, one(1, "out", 2, "a")), "{deferred} {cancel:?}");
+            assert!(has(&memory, one(3, "out", 2, "b")));
+            assert_eq!(noodles(&memory).len(), 2);
+            assert!(memory.lock().unwrap().moves.is_empty());
+            // A later release changes nothing more.
+            release(&mut editor, Point::new(300.0, 100.0));
+            assert_eq!(noodles(&memory).len(), 2);
+        }
+    }
+}
+
+#[test]
+fn escape_puts_a_lifted_noodle_back() {
+    for deferred in [false, true] {
+        let (_editor, memory) = lift_then(deferred, &escape());
+        assert!(has(&memory, one(1, "out", 2, "a")), "deferred {deferred}");
+        assert_eq!(noodles(&memory).len(), 2);
+        assert!(memory.lock().unwrap().moves.is_empty());
+        assert_eq!(memory.lock().unwrap().escapes, 0, "the drag used Escape");
+    }
+}
+
+#[test]
+fn escape_or_a_lost_capture_drops_a_new_noodle() {
+    for cancel in [escape(), agg_gui::Event::MouseCaptureLost] {
+        let (mut editor, memory) = fixture(false);
+        let from = at(&editor, 1, SocketSide::Output, "out");
+        press(&mut editor, from);
+        let target = at(&editor, 2, SocketSide::Input, "a");
+        drag_to(&mut editor, target);
+        editor.on_event(&cancel);
+        assert!(matches!(editor.interaction, CanvasState::Idle));
+        release(&mut editor, target);
+        assert!(noodles(&memory).is_empty(), "{cancel:?}: nothing connected");
+    }
+}

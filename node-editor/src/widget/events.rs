@@ -663,7 +663,7 @@ impl NodeEditor {
     }
 
     pub(super) fn on_key_down(&mut self, key: &Key, mods: Modifiers) -> EventResult {
-        if *key == Key::Escape && self.cancel_rubber_band() {
+        if *key == Key::Escape && (self.cancel_rubber_band() || self.cancel_connection()) {
             return EventResult::Consumed;
         }
         if let Some(result) = self.add_menu_key_down(key, mods) {
