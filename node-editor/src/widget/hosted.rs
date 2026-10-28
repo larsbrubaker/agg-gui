@@ -136,8 +136,7 @@ pub(crate) struct HostedState {
     /// Hosted cards bottom → top: the last-clicked card is painted last
     /// (model order when `raise_on_click` is off).
     pub order: Vec<NodeId>,
-    /// A press on a card raises it. Off keeps the cards in model order,
-    /// as MatterCAD's NodeDesigner does.
+    /// A press on a card raises it. Off keeps the cards in model order.
     pub raise_on_click: bool,
     pub resize: Option<ResizeDrag>,
     /// Card heights last reported through `on_node_measured`.
@@ -232,11 +231,10 @@ impl NodeEditor {
     /// Whether a press (left or right) on a hosted card raises it to the
     /// top of the paint order. On by default. Every hit test — presses,
     /// sockets, menus, noodle drops — goes to the card painted on top, so
-    /// a socket a raised card covers takes nothing. Off keeps the cards in the order the model
-    /// lists its nodes (MatterCAD's NodeDesigner keeps its node windows in
-    /// the order they were added): a press still selects the card, and
-    /// where two cards overlap the one later in model order is on top and
-    /// takes the press.
+    /// a socket a raised card covers takes nothing. A host can turn raising
+    /// off to keep the cards in the order the model lists its nodes: a press
+    /// still selects the card, and where two cards overlap the one later in
+    /// model order is on top and takes the press.
     pub fn with_raise_on_click(mut self, raise: bool) -> Self {
         self.hosted.raise_on_click = raise;
         self

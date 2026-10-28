@@ -132,6 +132,12 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Changed
 
+- Docs: `with_raise_on_click` says a host can turn raising off to keep the
+  cards in model order, and the press preview's doc says why raising a card
+  mid-press is safe: agg-gui's pointer capture follows the pressed widget,
+  not its child index, so after the hosted layer is re-sorted a button in
+  the raised card still clicks on the first press and a slider there still
+  follows the drag (now pinned by tests through agg-gui's real `App`).
 - A right press on a hosted card raises it (with raise-on-click on), as a
   left press does, so the card a context menu is for is the one on top.
 - A press on empty canvas clears the selection on release instead of on

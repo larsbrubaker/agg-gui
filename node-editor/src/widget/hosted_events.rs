@@ -56,9 +56,13 @@ impl NodeEditor {
     /// Sockets and the resize band are left to
     /// the editor's own handlers. A right press raises the card too (its
     /// selection and menu are the editor's, `events.rs`), so the card a
-    /// menu is for is the one on top. Never consumes. Selection order only
-    /// changes `hosted.order`; the layer is re-sorted at the next layout, so
-    /// the dispatch path in flight stays valid.
+    /// menu is for is the one on top. Never consumes. Raising only changes
+    /// `hosted.order` (and requests a frame); the layer adopts it at the next
+    /// layout, so the press in flight still reaches the widget it was
+    /// hit-tested to. That layout can run before the release: agg-gui's
+    /// pointer capture follows the pressed widget itself, not its child
+    /// index, so the moves and the release still reach it after the re-sort
+    /// and a button in a lower card works on the first click.
     pub(super) fn hosted_preview_event(&mut self, event: &Event) -> EventResult {
         let Event::MouseDown {
             pos,

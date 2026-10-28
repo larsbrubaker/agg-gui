@@ -1,8 +1,8 @@
 //! Tests for the hosted cards' paint order (`hosted.rs`,
 //! `hosted_events.rs`): by default a pressed card is raised; with
-//! `with_raise_on_click(false)` the cards keep model order, as MatterCAD's
-//! NodeDesigner keeps its node windows, so a press selects without raising
-//! and where two cards overlap the one later in model order takes it.
+//! `with_raise_on_click(false)` the cards keep model order, so a press
+//! selects without raising and where two cards overlap the one later in
+//! model order takes it.
 //! With raise-on-click on, a left or right press and a socket press in
 //! the overlap all go to the card painted on top.
 
