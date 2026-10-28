@@ -228,6 +228,8 @@ impl NodeEditor {
         self.paint_socket_hover(ctx);
         // Why the socket under a dragged noodle refuses it.
         self.paint_refusal_note(ctx);
+        // The rubber-band selection rectangle, over the cards.
+        self.paint_rubber_band(ctx);
 
         // Popup paints in widget-local space, on top of nodes & edges
         // but inside the canvas clip.

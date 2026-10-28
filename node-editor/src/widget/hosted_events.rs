@@ -54,13 +54,15 @@ impl NodeEditor {
     /// that reaches the editor: Shift adds, a press on a selected card keeps
     /// the selection) and raises it (unless `with_raise_on_click(false)`).
     /// Sockets and the resize band are left to
-    /// the editor's own handlers. Never consumes. Selection order only
+    /// the editor's own handlers. A right press raises the card too (its
+    /// selection and menu are the editor's, `events.rs`), so the card a
+    /// menu is for is the one on top. Never consumes. Selection order only
     /// changes `hosted.order`; the layer is re-sorted at the next layout, so
     /// the dispatch path in flight stays valid.
     pub(super) fn hosted_preview_event(&mut self, event: &Event) -> EventResult {
         let Event::MouseDown {
             pos,
-            button: MouseButton::Left,
+            button: button @ (MouseButton::Left | MouseButton::Right),
             modifiers,
         } = event
         else {
@@ -75,6 +77,10 @@ impl NodeEditor {
             return EventResult::Ignored;
         };
         if !self.hosted.cards.contains_key(&id) || self.hit_socket(&layouts, canvas).is_some() {
+            return EventResult::Ignored;
+        }
+        if *button == MouseButton::Right {
+            self.raise_card(id);
             return EventResult::Ignored;
         }
         let before = self.selected.clone();

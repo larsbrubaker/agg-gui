@@ -22,6 +22,8 @@ pub(super) struct Memory {
     /// `on_primary_selection_changed` and read back by
     /// `primary_selection`, exactly as a real host wires the two.
     pub last_selection: Option<NodeId>,
+    /// Every `on_primary_selection_changed` call, in order.
+    pub selection_reports: Vec<Option<NodeId>>,
     /// Records the most recent `set_property` write so tests can assert
     /// what a value editor committed / reverted.
     pub last_property: Option<(NodeId, String, PropertyValue)>,
@@ -134,6 +136,7 @@ impl NodeGraphModel for Memory {
     }
     fn on_primary_selection_changed(&mut self, id: Option<NodeId>) {
         self.last_selection = id;
+        self.selection_reports.push(id);
     }
     fn primary_selection(&self) -> Option<NodeId> {
         self.last_selection

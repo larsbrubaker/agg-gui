@@ -12,6 +12,9 @@
 //! [`fingerprint`], so this file stays under the 800-line guardrail.
 //! Hosted cards (node bodies built by the host as real widgets) live in
 //! [`hosted`], [`hosted_card`], [`hosted_resize`] and [`hosted_events`].
+//! Which card, socket or row a point lands on — the one painted on top —
+//! is [`hit_test`]; selecting cards with a dragged rectangle is
+//! [`rubber_band`].
 
 mod add_menu;
 mod axes;
@@ -22,6 +25,7 @@ mod connect;
 mod enum_row;
 mod events;
 mod fingerprint;
+mod hit_test;
 mod host_hooks;
 mod hosted;
 mod hosted_card;
@@ -36,6 +40,7 @@ mod paint;
 mod palette_source;
 mod popup;
 mod presentation;
+mod rubber_band;
 mod snap_guides;
 mod value_editor_widget;
 mod view_anchor;
@@ -101,6 +106,8 @@ mod tests_palette;
 #[cfg(test)]
 mod tests_presentation;
 #[cfg(test)]
+mod tests_rubber_band;
+#[cfg(test)]
 mod tests_select_nodes;
 #[cfg(test)]
 mod tests_selection_ring;
@@ -128,9 +135,7 @@ use agg_gui::{
     Widget, WidgetBase,
 };
 
-use crate::draw::{
-    layout_node_with_state, CanvasPalette, NodeLayoutInfo, PropLayout, SocketLayout, SocketSide,
-};
+use crate::draw::{layout_node_with_state, CanvasPalette, NodeLayoutInfo, SocketSide};
 #[cfg(test)]
 use crate::model::SocketTypeId;
 use crate::model::{NodeGraphModel, NodeId};
@@ -438,42 +443,6 @@ impl NodeEditor {
         layouts
     }
 
-    fn hit_node(&self, layouts: &[NodeLayoutInfo], canvas_pos: [f64; 2]) -> Option<NodeId> {
-        for l in layouts.iter().rev() {
-            if l.body_contains(canvas_pos) {
-                return Some(l.node_id);
-            }
-        }
-        None
-    }
-
-    fn hit_socket(
-        &self,
-        layouts: &[NodeLayoutInfo],
-        canvas_pos: [f64; 2],
-    ) -> Option<(NodeId, SocketLayout)> {
-        let half = self.socket_hit_half();
-        for l in layouts.iter().rev() {
-            if let Some(s) = l.socket_within(canvas_pos, half) {
-                return Some((l.node_id, s.clone()));
-            }
-        }
-        None
-    }
-
-    fn hit_property(
-        &self,
-        layouts: &[NodeLayoutInfo],
-        canvas_pos: [f64; 2],
-    ) -> Option<(NodeId, PropLayout)> {
-        for l in layouts.iter().rev() {
-            if let Some(p) = l.prop_at(canvas_pos) {
-                return Some((l.node_id, p.clone()));
-            }
-        }
-        None
-    }
-
     /// Tear down `self.children` and build a fresh `Vec<NodeWidget>`
     /// from `layouts`.  Bounds are in **screen-space** — the canvas
     /// pan/zoom is baked into each NodeWidget's position and size so
@@ -505,7 +474,7 @@ impl NodeEditor {
             .iter()
             .filter(|l| !self.hosted.cards.contains_key(&l.node_id))
         {
-            let selected = self.selected.contains(&l.node_id) || ext_sel == Some(l.node_id);
+            let selected = self.shows_ring(l.node_id, ext_sel);
             let nw = NodeWidget::from_layout_transformed(
                 l,
                 selected,

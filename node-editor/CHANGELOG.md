@@ -10,6 +10,20 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- Rubber-band selection: in the Select interaction mode a left drag from
+  empty canvas (past the 3 px click slop) draws a selection rectangle and
+  selects every card it touches, the cards showing their selection ring
+  while it drags. Shift adds to the selection held at the press; Shift with
+  Ctrl (Cmd on a Mac) toggles each touched card against it (Ctrl/Cmd alone
+  still pans the view); Escape cancels and restores it. On release the
+  primary selection stays if the band kept it, else becomes the top-most
+  selected card (or none), reported through `on_primary_selection_changed`
+  only when it changes. A press that does not pass the slop is a click on
+  empty canvas as before. The rectangle is drawn in the new
+  `CanvasPalette::selection_band_border` / `selection_band_fill` colours
+  (from the theme accent in `from_visuals`). Pan and Zoom modes, middle-
+  and right-drag pan are unchanged.
+
 - `NodeEditor::select_nodes(&[NodeId], bool) -> usize`: make exactly a
   set of cards the selection, as the user Shift-clicking each in order would
   (the last existing id becomes the primary selection reported through
@@ -85,6 +99,13 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Changed
 
+- A right press on a hosted card raises it (with raise-on-click on), as a
+  left press does, so the card a context menu is for is the one on top.
+- A press on empty canvas clears the selection on release instead of on
+  the press, so a drag can become a rubber band; the end state of a click
+  is the same.
+- A left drag on empty canvas with Shift and Ctrl/Cmd held toggles cards
+  with a rubber band instead of panning; Ctrl/Cmd without Shift still pans.
 - A hosted card's right-edge resize band is a 5-unit border outside the
   drawn card (agg-sharp `WindowWidget`'s grab handles) instead of 6 units
   inside it, so a press anywhere on the drawn card, up to its edge, reaches
@@ -239,6 +260,11 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Fixed
 
+- Hit tests agree with what is painted on top: a socket or property row of
+  a card lying under another card's body takes no press, no hover and no
+  noodle drop ring, so on overlapping cards a press, a right-press menu and
+  a noodle drop all go to the card the user sees on top (the raised card
+  with raise-on-click on, the later card in model order with it off).
 - A hosted card's body fills the whole card, title strip included, and the
   title colour lies over it, as agg-sharp's `WindowWidget.DrawBody` paints
   a window: a translucent title tint (MatterCAD's node windows) now reads

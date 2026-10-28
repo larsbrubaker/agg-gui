@@ -29,7 +29,7 @@
 //! widgets in `hosted_card.rs`, the resize bands in `hosted_resize.rs`
 //! and the resize/raise gestures in `hosted_events.rs`.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use agg_gui::{Rect, Size, Widget};
 
@@ -229,8 +229,10 @@ impl NodeEditor {
         self.hosted.snap_guides
     }
 
-    /// Whether a press on a hosted card raises it to the top of the paint
-    /// order. On by default. Off keeps the cards in the order the model
+    /// Whether a press (left or right) on a hosted card raises it to the
+    /// top of the paint order. On by default. Every hit test — presses,
+    /// sockets, menus, noodle drops — goes to the card painted on top, so
+    /// a socket a raised card covers takes nothing. Off keeps the cards in the order the model
     /// lists its nodes (MatterCAD's NodeDesigner keeps its node windows in
     /// the order they were added): a press still selects the card, and
     /// where two cards overlap the one later in model order is on top and
@@ -416,6 +418,11 @@ impl NodeEditor {
         let mut geoms = HashMap::new();
         let socket_hit = self.socket_hit_half();
         let (title_height, min_width) = (self.hosted.title_height, self.hosted.min_width);
+        let rings: HashSet<NodeId> = nodes
+            .iter()
+            .filter(|n| self.shows_ring(n.id, ext_sel))
+            .map(|n| n.id)
+            .collect();
         let layer = layer_in(&mut self.children).expect("hosted layer exists");
         for (n, look) in nodes.iter().zip(looks) {
             let Some(card) = layer.card_mut(n.id) else {
@@ -425,7 +432,7 @@ impl NodeEditor {
             let mut geom = card.layout_card(n, look.width.max(min_width), title_height);
             geom.vertical = look.vertical;
             card.resize_vertically = look.vertical.is_some();
-            let selected = self.selected.contains(&n.id) || ext_sel == Some(n.id);
+            let selected = rings.contains(&n.id);
             let sockets = geom
                 .sockets
                 .iter()

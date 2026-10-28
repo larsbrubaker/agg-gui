@@ -108,7 +108,7 @@ impl NodeEditor {
             for row in &l.rows {
                 hash_row(row, &mut h);
             }
-            let sel = self.selected.contains(&l.node_id) || ext_sel == Some(l.node_id);
+            let sel = self.shows_ring(l.node_id, ext_sel);
             sel.hash(&mut h);
             l.collapsed.hash(&mut h);
             // An error arriving from an *asynchronous* host evaluation

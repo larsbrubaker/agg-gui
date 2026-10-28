@@ -16,6 +16,7 @@ use crate::connection::{refusal_note_position, SocketRef};
 use crate::draw::{NodeLayoutInfo, SocketLayout, SocketSide};
 use crate::model::{NodeGraphModel, NodeId, NoodleView};
 
+use super::hit_test::covered_above;
 use super::{presentation, CanvasState, NodeEditor};
 
 /// Font size and padding of the refusal note, and its gap from the pointer.
@@ -68,9 +69,13 @@ pub(super) fn find_target_near<'a>(
 ) -> Option<&'a SocketLayout> {
     let snap_r = crate::draw::SOCKET_HIT_RADIUS * 1.6;
     let mut best: Option<(&SocketLayout, f64)> = None;
-    for l in layouts {
-        // A socket the host hides takes no drop.
-        for s in l.sockets().filter(|s| !s.hidden) {
+    for (i, l) in layouts.iter().enumerate() {
+        // A socket the host hides takes no drop, nor one under the body
+        // of a card painted above it: the user cannot see it there.
+        for s in l
+            .sockets()
+            .filter(|s| !s.hidden && !covered_above(layouts, i, s.center))
+        {
             let dx = s.center[0] - cursor[0];
             let dy = s.center[1] - cursor[1];
             let d2 = dx * dx + dy * dy;

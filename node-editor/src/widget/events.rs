@@ -92,7 +92,10 @@ impl NodeEditor {
                 // with Alt as well it zooms. Before the socket test: a socket
                 // hangs half outside its window, and the held modifier means
                 // the view, not a noodle. A press on a window keeps it.
+                // With Shift as well it is a toggling rubber band instead
+                // (`rubber_band.rs`).
                 if (modifiers.ctrl || agg_gui::platform::command_modifier_pressed(modifiers))
+                    && !modifiers.shift
                     && self.hit_node(&layouts, canvas_pos).is_none()
                 {
                     self.cancel_view_animation();
@@ -288,10 +291,9 @@ impl NodeEditor {
                     self.begin_drag_node(node_id, canvas_pos);
                     return EventResult::Consumed;
                 }
-                if !modifiers.shift {
-                    self.selected.clear();
-                    self.notify_primary_selection(None);
-                }
+                // Empty canvas: a click clears the selection (unless
+                // Shift), a drag is a rubber band — decided on release.
+                self.begin_rubber_band(pos, canvas_pos, modifiers);
                 EventResult::Consumed
             }
             MouseButton::Middle => {
@@ -319,6 +321,8 @@ impl NodeEditor {
                     }
                     self.selected.insert(node_id);
                     self.notify_primary_selection(Some(node_id));
+                    // A right press raises the card as a left press does.
+                    self.raise_card(node_id);
                     if !self.rebuild_popup_for_node_context(node_id) {
                         // The host's menu for this node is empty.
                         agg_gui::animation::request_draw();
@@ -500,6 +504,14 @@ impl NodeEditor {
                     EventResult::Consumed
                 }
             }
+            CanvasState::RubberBand { .. } => {
+                if self.drag_rubber_band(&layouts_snapshot, pos, canvas_pos) {
+                    EventResult::Consumed
+                } else {
+                    // Still a click: nothing moved on screen.
+                    return EventResult::Consumed;
+                }
+            }
             CanvasState::Idle => EventResult::Ignored,
         };
         if result.is_consumed() {
@@ -562,6 +574,10 @@ impl NodeEditor {
                 EventResult::Consumed
             }
             (_, CanvasState::PanningCanvas { .. }) | (_, CanvasState::ZoomingCanvas { .. }) => {
+                EventResult::Consumed
+            }
+            (_, state @ CanvasState::RubberBand { .. }) => {
+                self.finish_rubber_band(state, pos);
                 EventResult::Consumed
             }
             (
@@ -644,6 +660,9 @@ impl NodeEditor {
     }
 
     pub(super) fn on_key_down(&mut self, key: &Key, mods: Modifiers) -> EventResult {
+        if *key == Key::Escape && self.cancel_rubber_band() {
+            return EventResult::Consumed;
+        }
         if let Some(result) = self.add_menu_key_down(key, mods) {
             return result;
         }

@@ -3,8 +3,12 @@
 //! keep that file under the 800-line guardrail; the handlers that move
 //! between states live in `events` and `connect`.
 
+use std::collections::HashSet;
+
 use crate::draw::SocketSide;
 use crate::model::{NodeId, NoodleView, SocketTypeId};
+
+use super::rubber_band::BandMode;
 
 /// Interaction state machine. Only one drag at a time.
 #[derive(Clone, Debug)]
@@ -33,6 +37,21 @@ pub(super) enum CanvasState {
         /// Canvas-space position under the press, captured once so
         /// rounding in the running scale can't drift the anchor.
         anchor_canvas: [f64; 2],
+    },
+    /// A left press on empty canvas in Select mode (`rubber_band.rs`):
+    /// a click until the pointer passes the click slop, then a selection
+    /// rectangle from the press to the pointer, both corners in canvas
+    /// space so the rectangle stays on the same cards if the view moves.
+    RubberBand {
+        start_local: agg_gui::Point,
+        start_canvas: [f64; 2],
+        cursor_canvas: [f64; 2],
+        mode: BandMode,
+        /// The selection held at the press, which Shift adds to, Ctrl/Cmd
+        /// toggles against, and Escape restores.
+        base: HashSet<NodeId>,
+        /// True once the pointer has passed the click slop.
+        active: bool,
     },
     DrawingConnection {
         from_node: NodeId,

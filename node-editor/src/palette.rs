@@ -36,6 +36,12 @@ pub struct CanvasPalette {
     /// deliberately not theme-accent-derived for the same reason as
     /// [`node_error`](Self::node_error).
     pub node_warning: Color,
+    /// Outline of the rubber-band selection rectangle dragged on empty
+    /// canvas; the theme accent, the colour of a selected card's ring.
+    pub selection_band_border: Color,
+    /// Fill of the rubber-band rectangle: the accent, faint enough that
+    /// the cards under it stay readable.
+    pub selection_band_fill: Color,
 }
 
 impl CanvasPalette {
@@ -102,6 +108,8 @@ impl CanvasPalette {
             } else {
                 Color::rgb(0.79, 0.52, 0.03)
             },
+            selection_band_border: v.accent,
+            selection_band_fill: Color::rgba(v.accent.r, v.accent.g, v.accent.b, 0.15),
         }
     }
 

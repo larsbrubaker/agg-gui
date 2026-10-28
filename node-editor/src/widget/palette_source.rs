@@ -106,6 +106,8 @@ pub(super) fn hash_palette<H: std::hash::Hasher>(p: &CanvasPalette, h: &mut H) {
         p.label_text,
         p.node_error,
         p.node_warning,
+        p.selection_band_border,
+        p.selection_band_fill,
     ] {
         for v in [c.r, c.g, c.b, c.a] {
             v.to_bits().hash(h);
