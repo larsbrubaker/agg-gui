@@ -137,7 +137,19 @@ fn align_column(g: &Layered, tops: &mut [f64], i: usize, from_left: bool, row_ga
                 }
             })
             .collect();
-        let (wish, weight) = if ends.is_empty() {
+        let (wish, weight) = if g.pinned[v] {
+            // An unwired Input or Output lines up with the graph's top.
+            let graph_top = (0..g.w.len())
+                .filter(|&u| !g.dummy[u] && !g.pinned[u])
+                .map(|u| tops[u])
+                .fold(f64::INFINITY, f64::min);
+            let wish = if graph_top.is_finite() {
+                graph_top
+            } else {
+                tops[v]
+            };
+            (wish, IDLE_WEIGHT)
+        } else if ends.is_empty() {
             (tops[v], IDLE_WEIGHT)
         } else {
             ends.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1)));

@@ -7,7 +7,8 @@
 //! turned around. Columns come from longest-path layering; Outputs are
 //! then moved to the component's last column, and a card nothing feeds
 //! (a constant, a value) is pulled right to sit just left of its nearest
-//! consumer rather than piling up in column 0.
+//! consumer rather than piling up in column 0. Input and Output cards
+//! with no noodles take the first and last columns (`place_lone_roles`).
 
 use std::collections::BTreeSet;
 
@@ -146,5 +147,45 @@ pub(super) fn assign_layers(cards: &[Card], links: &[Link]) -> Vec<usize> {
     for l in &mut layer {
         *l -= first;
     }
+    place_lone_roles(cards, &preds, &succs, &mut layer);
     layer
+}
+
+/// Input and Output cards with no noodles (see `join_lone_roles`): the
+/// Inputs take the first column — one of their own unless a wired Input
+/// is there already — and the Outputs the last, likewise, so the graph
+/// always reads from its inputs on the left to its outputs on the right.
+fn place_lone_roles(
+    cards: &[Card],
+    preds: &[Vec<usize>],
+    succs: &[Vec<usize>],
+    layer: &mut [usize],
+) {
+    let n = cards.len();
+    let lone = |v: usize, role: ArrangeRole| {
+        cards[v].role == role && preds[v].is_empty() && succs[v].is_empty()
+    };
+    let lone_input = |v: usize| lone(v, ArrangeRole::Input);
+    let lone_output = |v: usize| lone(v, ArrangeRole::Output);
+    if (0..n).any(lone_input) {
+        let wired_input = (0..n).any(|v| cards[v].role == ArrangeRole::Input && !lone_input(v));
+        if !wired_input {
+            for v in (0..n).filter(|&v| !lone_input(v)) {
+                layer[v] += 1;
+            }
+        }
+        for v in (0..n).filter(|&v| lone_input(v)) {
+            layer[v] = 0;
+        }
+    }
+    let wired_output = (0..n).any(|v| cards[v].role == ArrangeRole::Output && !lone_output(v));
+    let rest_last = (0..n).filter(|&v| !lone_output(v)).map(|v| layer[v]).max();
+    let column = match rest_last {
+        Some(last) if wired_output => last,
+        Some(last) => last + 1,
+        None => 0,
+    };
+    for v in (0..n).filter(|&v| lone_output(v)) {
+        layer[v] = column;
+    }
 }

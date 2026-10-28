@@ -8,7 +8,8 @@
 //! The order of the cards in each column starts from their current
 //! heights (the user's arrangement is respected); a lane point always
 //! goes where its noodle's straight line crosses the column
-//! ([`canonical`]). Barycenter sweeps then alternate left → right and
+//! ([`canonical`]), and an Input or Output card with no noodles always
+//! goes at the top of its column. Barycenter sweeps then alternate left → right and
 //! right → left: each node moves to the mean height of the ports it
 //! connects to in the neighbouring column, so the feed into a card's
 //! socket 0 sits above the feed into its socket 1. After every sweep the
@@ -37,6 +38,9 @@ pub(super) struct Layered {
     pub w: Vec<f64>,
     pub h: Vec<f64>,
     pub dummy: Vec<bool>,
+    /// Input and Output cards with no noodles: always at the top of their
+    /// column, in index order.
+    pub pinned: Vec<bool>,
     /// Column of every node.
     pub layer: Vec<usize>,
     /// For a lane point, its whole noodle and how far along it the point
@@ -94,6 +98,7 @@ pub(super) fn order(
         w: cards.iter().map(|c| c.w).collect(),
         h: cards.iter().map(|c| c.h).collect(),
         dummy: vec![false; n],
+        pinned: vec![false; n],
         layer: layer_of.to_vec(),
         lane: vec![None; n],
         layers: vec![Vec::new(); columns],
@@ -114,6 +119,7 @@ pub(super) fn order(
                 g.w.push(0.0);
                 g.h.push(0.0);
                 g.dummy.push(true);
+                g.pinned.push(false);
                 g.layer.push(a + k);
                 g.lane.push(Some((*l, (k as f64) / (span as f64))));
                 g.in_segs.push(Vec::new());
@@ -133,6 +139,11 @@ pub(super) fn order(
             prev = next;
             prev_off = next_off;
         }
+    }
+    for (v, card) in cards.iter().enumerate() {
+        g.pinned[v] = card.role != super::ArrangeRole::Normal
+            && g.in_segs[v].is_empty()
+            && g.out_segs[v].is_empty();
     }
     // The user's arrangement: cards top to bottom by their current top.
     let mut cards_order: Vec<Vec<usize>> = vec![Vec::new(); columns];
@@ -206,8 +217,19 @@ pub(super) fn order(
 /// alone. It depends on the cards' order only, so an arranged graph's
 /// order can be rebuilt exactly from its cards' heights.
 fn canonical(g: &Layered, cards_order: &[Vec<usize>], row_gap: f64) -> Vec<Vec<usize>> {
+    // Pinned cards go first, in index order, before the lanes are placed
+    // against the stacked cards, so where a sweep left them never matters.
+    let cards_order: Vec<Vec<usize>> = cards_order
+        .iter()
+        .map(|col| {
+            let mut pinned: Vec<usize> = col.iter().copied().filter(|&v| g.pinned[v]).collect();
+            pinned.sort_unstable();
+            pinned.extend(col.iter().copied().filter(|&v| !g.pinned[v]));
+            pinned
+        })
+        .collect();
     let mut tops = vec![0.0; g.w.len()];
-    for col in cards_order {
+    for col in &cards_order {
         g.stack(col, &mut tops, row_gap);
     }
     let mut keyed: Vec<Vec<(f64, usize)>> = cards_order
@@ -224,9 +246,17 @@ fn canonical(g: &Layered, cards_order: &[Vec<usize>], row_gap: f64) -> Vec<Vec<u
     keyed
         .into_iter()
         .map(|mut col| {
-            // Cards come before lane points in index order, so a lane
-            // level with a card's middle goes below it.
-            col.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+            // Pinned cards first, in index order. Cards come before lane
+            // points in index order, so a lane level with a card's middle
+            // goes below it.
+            col.sort_by(|a, b| {
+                let (pa, pb) = (g.pinned[a.1], g.pinned[b.1]);
+                pb.cmp(&pa).then(if pa && pb {
+                    a.1.cmp(&b.1)
+                } else {
+                    a.0.total_cmp(&b.0).then(a.1.cmp(&b.1))
+                })
+            });
             col.into_iter().map(|(_, v)| v).collect()
         })
         .collect()

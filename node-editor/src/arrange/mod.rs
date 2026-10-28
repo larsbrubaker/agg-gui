@@ -15,7 +15,8 @@
 //! - `placement`: column x from the widest card, then y so the main
 //!   noodle into each card runs straight, with no two cards closer than a
 //!   gap.
-//! - this file: the public description types, components, stacking them
+//! - this file: the public description types, components (Input and
+//!   Output cards with no noodles join the main one), stacking them
 //!   top to bottom, and anchoring the result at the graph's current
 //!   top-left so the view does not jump.
 //!
@@ -32,6 +33,8 @@ mod placement;
 mod tests;
 #[cfg(test)]
 mod tests_layout;
+#[cfg(test)]
+mod tests_lone_roles;
 #[cfg(test)]
 mod tests_robust;
 
@@ -181,7 +184,7 @@ pub fn arrange(
         return Vec::new();
     }
     let links = resolve_links(&cards, &index, edges);
-    let components = components(&cards, &links);
+    let components = join_lone_roles(&cards, components(&cards, &links));
 
     // The anchor is rounded like every other output, so the result is in
     // whole canvas units.
@@ -322,6 +325,43 @@ fn resolve_links(cards: &[Card], index: &BTreeMap<u64, usize>, edges: &[ArrangeE
         .collect()
 }
 
+/// An Input or Output card with no noodles is a component of its own,
+/// but the user still expects it at the left or right of the graph: it
+/// joins the main component (the one with the most cards, then the
+/// smallest node id — never a position, so a second arrange picks the
+/// same one), where layering gives it the first or last column. With no
+/// other component, the lone role cards form one component together.
+/// The result is ordered again by the components' rule.
+fn join_lone_roles(cards: &[Card], components: Vec<Vec<usize>>) -> Vec<Vec<usize>> {
+    let lone = |m: &Vec<usize>| m.len() == 1 && cards[m[0]].role != ArrangeRole::Normal;
+    let (roles, mut rest): (Vec<Vec<usize>>, Vec<Vec<usize>>) =
+        components.into_iter().partition(lone);
+    if roles.is_empty() {
+        return rest;
+    }
+    let smallest_id = |m: &Vec<usize>| m.iter().map(|&v| cards[v].id).min().unwrap_or(0);
+    let main = (0..rest.len()).min_by(|&a, &b| {
+        rest[b]
+            .len()
+            .cmp(&rest[a].len())
+            .then(smallest_id(&rest[a]).cmp(&smallest_id(&rest[b])))
+    });
+    let joined: Vec<usize> = roles.into_iter().flatten().collect();
+    match main {
+        Some(i) => {
+            rest[i].extend(joined);
+            rest[i].sort_unstable();
+        }
+        None => {
+            let mut all = joined;
+            all.sort_unstable();
+            rest.push(all);
+        }
+    }
+    sort_components(cards, &mut rest);
+    rest
+}
+
 /// Weakly connected components (card indices ascending inside each),
 /// ordered top-most first by current position, then by smallest node id.
 fn components(cards: &[Card], links: &[Link]) -> Vec<Vec<usize>> {
@@ -346,6 +386,12 @@ fn components(cards: &[Card], links: &[Link]) -> Vec<Vec<usize>> {
         groups.entry(root).or_default().push(v);
     }
     let mut out: Vec<Vec<usize>> = groups.into_values().collect();
+    sort_components(cards, &mut out);
+    out
+}
+
+/// Top-most component first by current position, then by smallest node id.
+fn sort_components(cards: &[Card], out: &mut [Vec<usize>]) {
     let key = |m: &Vec<usize>| {
         let top = m
             .iter()
@@ -359,5 +405,4 @@ fn components(cards: &[Card], links: &[Link]) -> Vec<Vec<usize>> {
         let (tb, ib) = key(b);
         tb.total_cmp(&ta).then(ia.cmp(&ib))
     });
-    out
 }
