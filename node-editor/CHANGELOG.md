@@ -19,7 +19,12 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   primary selection stays if the band kept it, else becomes the top-most
   selected card (or none), reported through `on_primary_selection_changed`
   only when it changes. A press that does not pass the slop is a click on
-  empty canvas as before. The rectangle is drawn in the new
+  empty canvas as before. A band raises no hosted card. If the pointer
+  capture is lost or the window deactivates mid-band, or a mode change or
+  another button's press interrupts it, the band is cancelled as by Escape.
+  The editor remembers the primary selection it last reported, so a host
+  whose `primary_selection` keeps the `None` default still hears `None`
+  when a band clears everything. The rectangle is drawn in the new
   `CanvasPalette::selection_band_border` / `selection_band_fill` colours
   (from the theme accent in `from_visuals`). Pan and Zoom modes, middle-
   and right-drag pan are unchanged.
@@ -260,9 +265,15 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Fixed
 
+- Losing the pointer capture (`Event::MouseCaptureLost`) or the window's
+  activation (`Event::WindowDeactivated`) mid-press ends the gesture: a
+  pan, zoom, node drag, property scrub or card resize keeps what it
+  applied and stops following the pointer, a noodle drag is dropped
+  without connecting, and no menu or inline editor opens.
 - Hit tests agree with what is painted on top: a socket or property row of
   a card lying under another card's body takes no press, no hover and no
-  noodle drop ring, so on overlapping cards a press, a right-press menu and
+  noodle drop ring (the ring uses the press's rule at the pointer, so a
+  socket on an abutting card's edge rings where it can be pressed), so on overlapping cards a press, a right-press menu and
   a noodle drop all go to the card the user sees on top (the raised card
   with raise-on-click on, the later card in model order with it off).
 - A hosted card's body fills the whole card, title strip included, and the

@@ -13,7 +13,8 @@
 //!
 //! The rectangle lives in canvas space and is painted in `finish_paint`
 //! over the cards, in the palette's `selection_band_*` colours. Selecting
-//! with the band raises no card.
+//! with the band raises no hosted card; simplified cards keep their usual
+//! order, selected ones drawn on top.
 
 use std::collections::HashSet;
 
@@ -152,7 +153,10 @@ impl NodeEditor {
         let layouts = self.snapshot_layouts();
         self.drag_rubber_band(&layouts, pos, self.local_to_canvas(pos));
         self.interaction = CanvasState::Idle;
-        let current = self.model.lock().unwrap().primary_selection();
+        // The host's primary selection, or the one last reported to a host
+        // that keeps no copy (`primary_selection`'s default is `None`).
+        let host = self.model.lock().unwrap().primary_selection();
+        let current = host.or(self.reported_primary.get());
         let primary = if current.is_some_and(|id| self.selected.contains(&id)) {
             current
         } else {

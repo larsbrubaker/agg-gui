@@ -46,6 +46,9 @@ impl NodeEditor {
     ) -> EventResult {
         let canvas_pos = self.local_to_canvas(pos);
         let layouts = self.snapshot_layouts();
+        // Another press (middle, right) during a band ends the band first,
+        // so the selection is never left half-previewed.
+        self.cancel_rubber_band();
 
         match button {
             MouseButton::Left => {
@@ -697,6 +700,7 @@ impl NodeEditor {
     }
 
     pub(super) fn notify_primary_selection(&self, id: Option<NodeId>) {
+        self.reported_primary.set(id);
         self.model.lock().unwrap().on_primary_selection_changed(id);
     }
 }

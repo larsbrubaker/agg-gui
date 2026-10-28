@@ -68,6 +68,8 @@ mod tests_add_menu;
 #[cfg(test)]
 mod tests_axes;
 #[cfg(test)]
+mod tests_band_settle;
+#[cfg(test)]
 mod tests_canvas_grid;
 #[cfg(test)]
 mod tests_card_shadow;
@@ -287,6 +289,9 @@ pub struct NodeEditor {
     pub(crate) add_menu: add_menu::AddMenuState,
     /// View anchor, drop ring and pending centring (see [`view_anchor`]).
     pub(crate) view: view_anchor::ViewState,
+    /// The primary selection this editor last reported to the host, for a
+    /// host whose `primary_selection` keeps the trait's `None` default.
+    reported_primary: Cell<Option<NodeId>>,
 }
 
 impl NodeEditor {
@@ -331,6 +336,7 @@ impl NodeEditor {
             deferred_pickup: false,
             add_menu: add_menu::AddMenuState::default(),
             view: view_anchor::ViewState::default(),
+            reported_primary: Cell::new(None),
         }
     }
 
@@ -674,6 +680,11 @@ impl Widget for NodeEditor {
     }
 
     fn on_event(&mut self, event: &Event) -> EventResult {
+        // The press ended with no release to follow (`canvas_state.rs`).
+        if matches!(event, Event::MouseCaptureLost | Event::WindowDeactivated) {
+            self.abandon_interaction();
+            self.hosted.resize = None;
+        }
         self.add_menu_preview(event);
         // Overlay (color-picker dialog) consumes events first while it's
         // up — it draws on top and needs to capture clicks before they

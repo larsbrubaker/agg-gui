@@ -21,7 +21,7 @@ use crate::model::NodeView;
 
 /// Three simplified cards in the 400 x 300 pane (offset 0, scale 1, so
 /// local == canvas): 1 top-left, 2 top-right from x = 250, 3 below 1.
-fn editor() -> (NodeEditor, Arc<Mutex<Memory>>) {
+pub(super) fn editor() -> (NodeEditor, Arc<Mutex<Memory>>) {
     let (shared, typed) = fixture_with_typed_handle();
     let mut editor = NodeEditor::new(shared);
     seed_nodes(
@@ -36,7 +36,7 @@ fn editor() -> (NodeEditor, Arc<Mutex<Memory>>) {
     (editor, typed)
 }
 
-fn set(ids: &[u64]) -> HashSet<NodeId> {
+pub(super) fn set(ids: &[u64]) -> HashSet<NodeId> {
     ids.iter().map(|&id| NodeId(id)).collect()
 }
 
@@ -58,7 +58,7 @@ fn shift_command() -> Modifiers {
     }
 }
 
-fn down(editor: &mut NodeEditor, p: Point, modifiers: Modifiers) {
+pub(super) fn down(editor: &mut NodeEditor, p: Point, modifiers: Modifiers) {
     editor.on_event(&Event::MouseDown {
         pos: p,
         button: MouseButton::Left,
@@ -66,11 +66,11 @@ fn down(editor: &mut NodeEditor, p: Point, modifiers: Modifiers) {
     });
 }
 
-fn to(editor: &mut NodeEditor, p: Point) {
+pub(super) fn to(editor: &mut NodeEditor, p: Point) {
     editor.on_event(&Event::MouseMove { pos: p });
 }
 
-fn up(editor: &mut NodeEditor, p: Point, modifiers: Modifiers) {
+pub(super) fn up(editor: &mut NodeEditor, p: Point, modifiers: Modifiers) {
     editor.on_event(&Event::MouseUp {
         pos: p,
         button: MouseButton::Left,
@@ -79,7 +79,7 @@ fn up(editor: &mut NodeEditor, p: Point, modifiers: Modifiers) {
 }
 
 /// Press at `a`, drag through the midpoint to `b`, release at `b`.
-fn band(editor: &mut NodeEditor, a: Point, b: Point, modifiers: Modifiers) {
+pub(super) fn band(editor: &mut NodeEditor, a: Point, b: Point, modifiers: Modifiers) {
     down(editor, a, modifiers);
     to(editor, Point::new((a.x + b.x) * 0.5, (a.y + b.y) * 0.5));
     to(editor, b);
@@ -87,7 +87,7 @@ fn band(editor: &mut NodeEditor, a: Point, b: Point, modifiers: Modifiers) {
 }
 
 /// Above every card, left of card 1.
-fn empty() -> Point {
+pub(super) fn empty() -> Point {
     Point::new(5.0, 295.0)
 }
 

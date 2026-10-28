@@ -144,17 +144,15 @@ impl NodeEditor {
     /// drag may have written snap guides into the framework's registry,
     /// and neither those nor an in-flight noodle are part of the cached
     /// backbuffer's fingerprint — without the invalidate the next paint
-    /// blits an image still showing them.
+    /// blits an image still showing them. A rubber band is cancelled,
+    /// restoring the selection held at its press
+    /// (`NodeEditor::abandon_interaction`).
     pub fn set_interaction_mode(&mut self, mode: InteractionMode) {
         if self.mode == mode {
             return;
         }
         self.mode = mode;
-        if !matches!(self.interaction, super::CanvasState::Idle) {
-            self.interaction = super::CanvasState::Idle;
-            agg_gui::snap::clear_guides();
-            self.backbuffer.invalidate();
-        }
+        self.abandon_interaction();
         agg_gui::animation::request_draw();
     }
 

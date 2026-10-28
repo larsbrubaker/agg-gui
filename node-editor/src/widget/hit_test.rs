@@ -81,10 +81,9 @@ impl NodeEditor {
     }
 }
 
-/// Whether the canvas point `p` lies under the body of a card painted
-/// above `layouts[index]` (later in the paint-ordered list).
-pub(super) fn covered_above(layouts: &[NodeLayoutInfo], index: usize, p: [f64; 2]) -> bool {
-    layouts
-        .get(index + 1..)
-        .is_some_and(|above| above.iter().any(|l| l.body_contains(p)))
+/// Index in the paint-ordered `layouts` of the top-most card whose body
+/// contains `p`. As in [`NodeEditor::hit_socket`], a press at `p` can reach
+/// the sockets of that card and of the cards above it, never those below.
+pub(super) fn top_body_at(layouts: &[NodeLayoutInfo], p: [f64; 2]) -> Option<usize> {
+    layouts.iter().rposition(|l| l.body_contains(p))
 }

@@ -2,6 +2,10 @@
 //! what the pointer is doing until the release. Split out of `mod.rs` to
 //! keep that file under the 800-line guardrail; the handlers that move
 //! between states live in `events` and `connect`.
+//!
+//! [`NodeEditor::abandon_interaction`] ends whatever is in flight when no
+//! release will come: the pointer capture was lost, the window was
+//! deactivated, or the host switched the interaction mode.
 
 use std::collections::HashSet;
 
@@ -9,6 +13,27 @@ use crate::draw::SocketSide;
 use crate::model::{NodeId, NoodleView, SocketTypeId};
 
 use super::rubber_band::BandMode;
+
+impl super::NodeEditor {
+    /// End the gesture in flight without its release. A rubber band is
+    /// cancelled (the selection held at its press comes back); a pan, zoom,
+    /// node drag or property scrub keeps what it already applied live, as a
+    /// release would, but opens no menu or inline editor; a noodle drag is
+    /// dropped without connecting. Leaves the editor idle, no snap guides
+    /// or noodle left on screen.
+    pub(super) fn abandon_interaction(&mut self) {
+        if self.cancel_rubber_band() {
+            return;
+        }
+        if matches!(self.interaction, CanvasState::Idle) {
+            return;
+        }
+        self.interaction = CanvasState::Idle;
+        agg_gui::snap::clear_guides();
+        self.backbuffer.invalidate();
+        agg_gui::animation::request_draw();
+    }
+}
 
 /// Interaction state machine. Only one drag at a time.
 #[derive(Clone, Debug)]

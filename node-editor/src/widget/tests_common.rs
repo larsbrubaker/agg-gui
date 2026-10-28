@@ -24,6 +24,9 @@ pub(super) struct Memory {
     pub last_selection: Option<NodeId>,
     /// Every `on_primary_selection_changed` call, in order.
     pub selection_reports: Vec<Option<NodeId>>,
+    /// `primary_selection` keeps the trait's `None` default, as a host
+    /// that only listens to `on_primary_selection_changed` does.
+    pub no_primary_mirror: bool,
     /// Records the most recent `set_property` write so tests can assert
     /// what a value editor committed / reverted.
     pub last_property: Option<(NodeId, String, PropertyValue)>,
@@ -139,6 +142,9 @@ impl NodeGraphModel for Memory {
         self.selection_reports.push(id);
     }
     fn primary_selection(&self) -> Option<NodeId> {
+        if self.no_primary_mirror {
+            return None;
+        }
         self.last_selection
     }
     fn on_node_activated(&mut self, node: NodeId) -> bool {
