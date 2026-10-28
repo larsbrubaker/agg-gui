@@ -21,8 +21,6 @@ use super::{ArrangeOptions, Card, Link};
 
 /// Sweeps per series; a series starts from the best order so far.
 const SWEEPS: usize = 8;
-/// Most rounds of two series (left → right first, right → left first).
-const ROUNDS: usize = 6;
 
 /// One noodle segment between neighbouring columns: `left` in column `i`,
 /// `right` in column `i + 1`, with port offsets down from each top.
@@ -62,7 +60,9 @@ impl Layered {
         if self.dummy[a] && self.dummy[b] {
             row_gap * 0.5
         } else {
-            row_gap
+            // At least a whole unit, so cards in a column never share a
+            // height and their order can be read back from their heights.
+            row_gap.max(1.0)
         }
     }
 
@@ -156,7 +156,9 @@ pub(super) fn order(
     // so the order kept is one the sweeps cannot improve: arranging an
     // arranged graph then starts from it (its cards' order is read back
     // from their heights, the lanes put back by `canonical`) and keeps it.
-    for _ in 0..ROUNDS {
+    // Each round that goes on found strictly fewer crossings, a count
+    // that cannot go below zero, so this ends.
+    loop {
         if best_crossings == 0 {
             break;
         }

@@ -44,8 +44,9 @@ fn reversed(l: &Link) -> Link {
 
 /// Turn around every back edge of a deterministic depth-first search.
 /// Roots are tried Inputs first, then cards nothing feeds, then the rest,
-/// each by current position (left to right, top to bottom, then id), so
-/// the edges kept are the ones that already read left to right. Inputs
+/// each by node id. Nothing here reads positions: arranging moves cards,
+/// and a choice that followed them would turn different edges around the
+/// second time, so an arranged graph would not stay put. Inputs
 /// have no incoming edges and Outputs no outgoing ones, so neither can be
 /// reached by a back edge and the roles stay satisfied.
 fn break_cycles(cards: &[Card], links: &mut [Link]) {
@@ -63,11 +64,7 @@ fn break_cycles(cards: &[Card], links: &mut [Link]) {
             (_, 0) => 1,
             _ => 2,
         };
-        rank(a)
-            .cmp(&rank(b))
-            .then(cards[a].x.total_cmp(&cards[b].x))
-            .then(cards[b].top.total_cmp(&cards[a].top))
-            .then(cards[a].id.cmp(&cards[b].id))
+        rank(a).cmp(&rank(b)).then(cards[a].id.cmp(&cards[b].id))
     });
     // 0 unvisited, 1 on the DFS stack, 2 finished.
     let mut state = vec![0u8; n];

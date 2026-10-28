@@ -32,6 +32,8 @@ mod placement;
 mod tests;
 #[cfg(test)]
 mod tests_layout;
+#[cfg(test)]
+mod tests_robust;
 
 use std::collections::BTreeMap;
 
@@ -109,6 +111,12 @@ pub(crate) struct Card {
 }
 
 impl Card {
+    /// The `[width, height]` the card is laid out at.
+    #[cfg(test)]
+    pub fn size(&self) -> [f64; 2] {
+        [self.w, self.h]
+    }
+
     /// Offset of input `i` down from the top; the edge middle when out of range.
     pub fn input_off(&self, i: usize) -> f64 {
         self.inputs.get(i).copied().unwrap_or(self.h * 0.5)
@@ -129,20 +137,29 @@ pub(crate) struct Link {
     pub to_off: f64,
 }
 
-/// One component's arranged cards: `(x, down)` per member card, with
-/// `down` measured downward from the component's top-most card top, and
-/// the vertical extent of everything drawn (cards and noodle lanes).
+/// One component's arrangement: `(x, down)` per member card and per
+/// noodle lane point, `down` measured downward from the component's
+/// top-most card top, all in whole canvas units.
 pub(crate) struct ComponentLayout {
     pub places: Vec<[f64; 2]>,
-    pub extent_top: f64,
-    pub extent_bottom: f64,
+    pub lanes: Vec<[f64; 2]>,
 }
+
+/// Largest card size, port offset or gap taken as given, and largest
+/// position: far beyond any real canvas, small enough that sums over a
+/// few thousand cards stay finite.
+const MAX_SIZE: f64 = 1e9;
+const MAX_POSITION: f64 = 1e12;
 
 /// Arrange the graph: the new top-left of every node, in the order of
 /// `nodes` (a repeated id keeps its first entry only). Edges naming an
 /// unknown node, self-loops and duplicates are ignored; an empty graph
-/// gives an empty plan. The result is deterministic, and arranging an
-/// arranged graph gives the same positions again.
+/// gives an empty plan. Every position is in whole canvas units; the
+/// result is deterministic, and arranging an arranged graph gives the
+/// same positions again, also after a host's own arithmetic moved them by
+/// a rounding error. Sizes, offsets and gaps that are not finite count as
+/// 0 (an offset: the edge middle), negative ones as 0, and huge ones are
+/// capped at a billion units.
 pub fn arrange(
     nodes: &[ArrangeNode],
     edges: &[ArrangeEdge],
@@ -166,11 +183,18 @@ pub fn arrange(
     let links = resolve_links(&cards, &index, edges);
     let components = components(&cards, &links);
 
-    let anchor_x = cards.iter().map(|c| c.x).fold(f64::INFINITY, f64::min);
+    // The anchor is rounded like every other output, so the result is in
+    // whole canvas units.
+    let anchor_x = cards
+        .iter()
+        .map(|c| c.x)
+        .fold(f64::INFINITY, f64::min)
+        .round_ties_even();
     let anchor_top = cards
         .iter()
         .map(|c| c.top)
-        .fold(f64::NEG_INFINITY, f64::max);
+        .fold(f64::NEG_INFINITY, f64::max)
+        .round_ties_even();
     let mut result: Vec<[f64; 2]> = vec![[0.0, 0.0]; cards.len()];
     let mut offset = 0.0;
     let mut prev_bottom: Option<f64> = None;
@@ -187,14 +211,26 @@ pub fn arrange(
             })
             .collect();
         let layout = layout_component(&local_cards, &local_links, &opts);
+        // The vertical extent of everything drawn: cards and lanes.
+        let mut extent_top = 0.0f64;
+        let mut extent_bottom = 0.0f64;
+        for (c, p) in local_cards.iter().zip(&layout.places) {
+            extent_top = extent_top.min(p[1]);
+            extent_bottom = extent_bottom.max(p[1] + c.h);
+        }
+        for p in &layout.lanes {
+            extent_top = extent_top.min(p[1]);
+            extent_bottom = extent_bottom.max(p[1]);
+        }
         if let Some(bottom) = prev_bottom {
-            offset = bottom + opts.component_gap - layout.extent_top;
+            offset = (bottom + opts.component_gap - extent_top).ceil();
         }
         for (l, &g) in members.iter().enumerate() {
             let [x, down] = layout.places[l];
-            result[g] = [anchor_x + x, anchor_top - (offset + down)];
+            // `+ 0.0` turns a -0.0 into 0.0.
+            result[g] = [anchor_x + x + 0.0, anchor_top - (offset + down) + 0.0];
         }
-        prev_bottom = Some(offset + layout.extent_bottom);
+        prev_bottom = Some(offset + extent_bottom);
     }
     ids.into_iter().zip(result).collect()
 }
@@ -209,7 +245,13 @@ fn layout_component(cards: &[Card], links: &[Link], opts: &ArrangeOptions) -> Co
 
 /// Gaps must be finite and not negative for the separation constraints.
 fn sanitize_options(o: &ArrangeOptions) -> ArrangeOptions {
-    let fix = |v: f64| if v.is_finite() { v.max(0.0) } else { 0.0 };
+    let fix = |v: f64| {
+        if v.is_finite() {
+            v.clamp(0.0, MAX_SIZE)
+        } else {
+            0.0
+        }
+    };
     ArrangeOptions {
         column_gap: fix(o.column_gap),
         row_gap: fix(o.row_gap),
@@ -218,9 +260,23 @@ fn sanitize_options(o: &ArrangeOptions) -> ArrangeOptions {
 }
 
 fn sanitize_card(n: &ArrangeNode) -> Card {
-    let fix = |v: f64| if v.is_finite() { v } else { 0.0 };
-    let w = fix(n.size[0]).max(0.0);
-    let h = fix(n.size[1]).max(0.0);
+    let size = |v: f64| {
+        if v.is_finite() {
+            v.clamp(0.0, MAX_SIZE)
+        } else {
+            0.0
+        }
+    };
+    // `+ 0.0` turns a -0.0 into 0.0.
+    let at = |v: f64| {
+        if v.is_finite() {
+            v.clamp(-MAX_POSITION, MAX_POSITION) + 0.0
+        } else {
+            0.0
+        }
+    };
+    let w = size(n.size[0]);
+    let h = size(n.size[1]);
     // A port is clamped onto the card's edge so its height orders with
     // the card's neighbours in the column.
     let port = |v: &f64| {
@@ -236,8 +292,8 @@ fn sanitize_card(n: &ArrangeNode) -> Card {
         role: n.role,
         inputs: n.input_ports.iter().map(port).collect(),
         outputs: n.output_ports.iter().map(port).collect(),
-        x: fix(n.position[0]),
-        top: fix(n.position[1]),
+        x: at(n.position[0]),
+        top: at(n.position[1]),
         id: n.id.0,
     }
 }

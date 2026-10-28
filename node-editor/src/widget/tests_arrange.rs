@@ -21,6 +21,9 @@ use crate::model::{
 #[derive(Default)]
 struct RoleModel {
     inner: Memory,
+    /// Store every position a rounding error off, as a host keeping
+    /// cards as window rectangles does.
+    perturb: bool,
 }
 
 impl NodeGraphModel for RoleModel {
@@ -34,6 +37,11 @@ impl NodeGraphModel for RoleModel {
         vec![]
     }
     fn set_node_position(&mut self, id: NodeId, pos: [f64; 2]) {
+        let pos = if self.perturb {
+            [pos[0].next_up(), pos[1].next_down()]
+        } else {
+            pos
+        };
         self.inner.set_node_position(id, pos)
     }
     fn add_node(&mut self, _: &str, _: [f64; 2]) -> Option<NodeId> {
@@ -209,5 +217,19 @@ fn the_plan_uses_real_card_geometry_and_settles() {
         .map(|l| l.top_left[1])
         .fold(f64::NEG_INFINITY, f64::max);
     assert_eq!([left, top], [0.0, 300.0]);
+    assert!(editor.arrange_plan(&ArrangeOptions::default()).is_empty());
+}
+
+#[test]
+fn a_rounding_error_from_the_host_is_not_a_move() {
+    let (mut editor, model) = editor();
+    model.lock().unwrap().perturb = true;
+    let plan = editor.arrange_plan(&ArrangeOptions::default());
+    for (id, pos) in &plan {
+        model.lock().unwrap().set_node_position(*id, *pos);
+    }
+    editor.layout(Size::new(800.0, 600.0));
+    let stored = model.lock().unwrap().inner.nodes[0].position;
+    assert_ne!(stored, plan[0].1, "the host moved the position a little");
     assert!(editor.arrange_plan(&ArrangeOptions::default()).is_empty());
 }

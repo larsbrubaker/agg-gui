@@ -13,6 +13,10 @@ use crate::arrange::{arrange, ArrangeEdge, ArrangeNode, ArrangeOptions};
 use crate::draw::SocketSide;
 use crate::model::NodeId;
 
+/// Distance, in canvas units, below which a planned position counts as
+/// where the node already is.
+const MOVE_TOLERANCE: f64 = 1e-6;
+
 #[cfg(test)]
 #[path = "tests_arrange.rs"]
 mod tests;
@@ -25,7 +29,10 @@ impl NodeEditor {
     /// command). An empty plan means the graph is already arranged.
     ///
     /// Card sizes and socket heights are the ones the last `layout()`
-    /// measured, so call it on an editor that has been laid out.
+    /// measured — the size each card is laid out at, so a collapsed card
+    /// counts at its collapsed height — so call it on an editor that has
+    /// been laid out. A node less than a millionth of a unit from its
+    /// planned position counts as not moving.
     pub fn arrange_plan(&self, options: &ArrangeOptions) -> Vec<(NodeId, [f64; 2])> {
         let layouts = self.snapshot_layouts();
         let model = self.model.lock().unwrap();
@@ -87,9 +94,16 @@ impl NodeEditor {
             .collect();
 
         let current: BTreeMap<u64, [f64; 2]> = nodes.iter().map(|n| (n.id.0, n.position)).collect();
+        // A host's own arithmetic on a stored position can leave it a
+        // rounding error away from the plan; that is not a move.
+        let moves = |id: &NodeId, pos: &[f64; 2]| {
+            current.get(&id.0).is_none_or(|c| {
+                (c[0] - pos[0]).abs() > MOVE_TOLERANCE || (c[1] - pos[1]).abs() > MOVE_TOLERANCE
+            })
+        };
         arrange(&described, &edges, options)
             .into_iter()
-            .filter(|(id, pos)| current.get(&id.0) != Some(pos))
+            .filter(|(id, pos)| moves(id, pos))
             .collect()
     }
 }

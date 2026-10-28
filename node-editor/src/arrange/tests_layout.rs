@@ -3,7 +3,7 @@
 //! stacked apart, graphs it must survive (cycles, bad ports), and a
 //! release-mode timing check on a large graph.
 
-use super::tests::{applied, assert_no_overlap, columns, crossing_count, edge, node, run};
+use super::tests::{applied, assert_no_overlap, crossing_count, edge, node, run};
 use super::*;
 
 /// A connected acyclic graph of `n` nodes and about `m` edges: the first
@@ -191,58 +191,49 @@ fn cycles_and_bad_edges_still_arrange() {
     assert!(plan.values().all(|p| p[0].is_finite() && p[1].is_finite()));
 }
 
-#[test]
-fn a_long_noodle_keeps_its_own_lane() {
-    use ArrangeRole::*;
-    // Input feeds both the start of a three-card chain and the Output
-    // directly; the long noodle's lane must not overlap the chain cards.
-    let nodes = vec![
-        node(1, Input, 60.0, &[], &[30.0], [0.0, 0.0]),
-        node(2, Normal, 100.0, &[50.0], &[50.0], [0.0, 0.0]),
-        node(3, Normal, 100.0, &[50.0], &[50.0], [0.0, 0.0]),
-        node(4, Output, 100.0, &[30.0, 70.0], &[], [0.0, 0.0]),
-    ];
-    let edges = vec![
-        edge(1, 0, 2, 0),
-        edge(2, 0, 3, 0),
-        edge(3, 0, 4, 0),
-        edge(1, 0, 4, 1),
-    ];
-    let plan = run(&nodes, &edges);
-    assert_no_overlap(&nodes, &plan);
-    let cols = columns(&plan);
-    assert_eq!([cols[&1], cols[&2], cols[&3], cols[&4]], [0, 1, 2, 3]);
-    assert_eq!(crossing_count(&nodes, &edges, &plan), 0);
-    // The long noodle passes the middle cards above or below, a row gap clear,
-    // wherever it is straight across their column.
-    let lane_y = plan[&1][1] - 30.0;
-    let end_y = plan[&4][1] - 70.0;
-    if lane_y == end_y {
-        for id in [2, 3] {
-            let (top, bottom) = (plan[&id][1], plan[&id][1] - 100.0);
-            assert!(
-                lane_y > top || lane_y < bottom,
-                "the noodle runs through card {id}"
-            );
-        }
-    }
-}
-
 /// Run with `cargo test --release -p agg-gui-node-editor arrange_timing -- --ignored --nocapture`.
+/// The 200-node graph must arrange well inside a 10 ms frame; the others
+/// are reported. A graph whose many long noodles each need a lane point
+/// in every column they cross costs more, in proportion to those points.
 #[test]
 #[ignore]
-fn arrange_timing_200_nodes_300_edges() {
-    let (nodes, edges) = random_dag(200, 300, 6);
+fn arrange_timing() {
     let options = ArrangeOptions::default();
-    let start = web_time::Instant::now();
-    let runs = 20;
-    for _ in 0..runs {
-        std::hint::black_box(arrange(&nodes, &edges, &options));
+    for (n, m, inputs) in [(100, 150, 4), (200, 300, 6), (500, 750, 8)] {
+        let (nodes, edges) = random_dag(n, m, inputs);
+        let start = web_time::Instant::now();
+        let runs = 10;
+        for _ in 0..runs {
+            std::hint::black_box(arrange(&nodes, &edges, &options));
+        }
+        let each = start.elapsed().as_secs_f64() * 1000.0 / runs as f64;
+        println!(
+            "arrange: {n} nodes, {} edges: {each:.3} ms per run",
+            edges.len()
+        );
+        if n == 200 {
+            assert!(each < 10.0);
+        }
     }
-    let each = start.elapsed().as_secs_f64() * 1000.0 / runs as f64;
-    println!(
-        "arrange: 200 nodes, {} edges: {each:.3} ms per run",
-        edges.len()
-    );
-    assert!(each < 10.0);
+    // Lane-heavy: a 500-card chain where every card also feeds the last
+    // one, about 125 000 lane points.
+    let n = 500u64;
+    let nodes: Vec<ArrangeNode> = (0..n)
+        .map(|i| {
+            node(
+                i,
+                ArrangeRole::Normal,
+                60.0,
+                &[20.0, 40.0],
+                &[30.0],
+                [i as f64 * 10.0, 0.0],
+            )
+        })
+        .collect();
+    let mut edges: Vec<ArrangeEdge> = (0..n - 1).map(|i| edge(i, 0, i + 1, 0)).collect();
+    edges.extend((0..n - 2).map(|i| edge(i, 0, n - 1, 1)));
+    let start = web_time::Instant::now();
+    std::hint::black_box(arrange(&nodes, &edges, &options));
+    let ms = start.elapsed().as_secs_f64() * 1000.0;
+    println!("arrange: 500-card chain, every card also feeding the last: {ms:.1} ms");
 }

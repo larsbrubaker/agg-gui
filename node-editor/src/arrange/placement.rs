@@ -14,6 +14,7 @@
 //! shifting each node by the space the nodes above it need. Noodle lanes
 //! weigh more than cards so long noodles stay straight. The last sweep
 //! runs left → right, so a chain reads straight from the inputs on.
+//! Finally every x and height is rounded to whole canvas units.
 
 use super::ordering::Layered;
 use super::{ArrangeOptions, Card, ComponentLayout};
@@ -26,8 +27,9 @@ const LANE_WEIGHT: f64 = 4.0;
 /// its neighbours need the room.
 const IDLE_WEIGHT: f64 = 0.125;
 
-/// Place one ordered component: `(x, down)` for every card, `down`
-/// measured from the top-most card's top.
+/// Place one ordered component: `(x, down)` for every card and lane
+/// point, `down` measured from the top-most card's top. Every value is a
+/// whole canvas unit (see [`snap_column`]).
 pub(super) fn place(cards: &[Card], g: &Layered, opts: &ArrangeOptions) -> ComponentLayout {
     let total = g.w.len();
     let mut column_x = Vec::with_capacity(g.layers.len());
@@ -35,7 +37,8 @@ pub(super) fn place(cards: &[Card], g: &Layered, opts: &ArrangeOptions) -> Compo
     for col in &g.layers {
         column_x.push(x);
         let widest = col.iter().map(|&v| g.w[v]).fold(0.0, f64::max);
-        x = x + widest + opts.column_gap;
+        // Whole units, never closer than the gap.
+        x = (x + widest + opts.column_gap).ceil();
     }
 
     let mut tops = vec![0.0; total];
@@ -54,8 +57,11 @@ pub(super) fn place(cards: &[Card], g: &Layered, opts: &ArrangeOptions) -> Compo
     for i in 1..columns {
         align_column(g, &mut tops, i, true, opts.row_gap);
     }
+    for col in &g.layers {
+        snap_column(g, col, &mut tops, opts.row_gap);
+    }
 
-    let mut places = vec![[0.0, 0.0]; cards.len()];
+    // Both are whole numbers, so the shift is exact.
     let first_top = (0..cards.len())
         .map(|v| tops[v])
         .fold(f64::INFINITY, f64::min);
@@ -64,22 +70,40 @@ pub(super) fn place(cards: &[Card], g: &Layered, opts: &ArrangeOptions) -> Compo
     } else {
         0.0
     };
-    let mut extent_top = 0.0f64;
-    let mut extent_bottom = 0.0f64;
+    let mut places = vec![[0.0, 0.0]; cards.len()];
+    let mut lanes = Vec::with_capacity(total - cards.len());
     for (i, col) in g.layers.iter().enumerate() {
         for &v in col {
-            let down = tops[v] - first_top;
-            extent_top = extent_top.min(down);
-            extent_bottom = extent_bottom.max(down + g.h[v]);
+            let place = [column_x[i], tops[v] - first_top];
             if v < cards.len() {
-                places[v] = [column_x[i], down];
+                places[v] = place;
+            } else {
+                lanes.push(place);
             }
         }
     }
-    ComponentLayout {
-        places,
-        extent_top,
-        extent_bottom,
+    ComponentLayout { places, lanes }
+}
+
+/// Round a column's heights to whole canvas units, top to bottom, each
+/// pushed down to the next whole unit when rounding would bring it closer
+/// than its separation to the one above. A host that stores positions in
+/// its own arithmetic (a window rectangle, say) then reads back numbers
+/// that round to the same values, so arranging again changes nothing;
+/// straight noodles stay straight wherever the two socket offsets differ
+/// by a whole number of units.
+fn snap_column(g: &Layered, col: &[usize], tops: &mut [f64], row_gap: f64) {
+    let mut prev: Option<usize> = None;
+    for &v in col {
+        // Half up, not half to even: two heights a whole number of units
+        // apart (the two ends of a straight noodle) round to values the
+        // same distance apart, which ties-to-even would break.
+        let mut top = (tops[v] + 0.5).floor();
+        if let Some(p) = prev {
+            top = top.max((tops[p] + g.h[p] + g.separation(p, v, row_gap)).ceil());
+        }
+        tops[v] = top;
+        prev = Some(v);
     }
 }
 

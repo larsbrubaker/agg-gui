@@ -39,15 +39,21 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   the main noodle into each runs straight and no two cards come closer
   than `row_gap`, long noodles get a lane of their own, separate graphs
   stack top to bottom `component_gap` apart, and the whole keeps its
-  current top-left corner. Results are deterministic and arranging an
-  arranged graph changes nothing; cycles, self-loops, duplicate edges and
-  socket indices out of range are tolerated. 200 nodes with 300 edges
-  take about 3 ms in a release build.
+  current top-left corner. Positions are whole canvas units. Results are
+  deterministic, and arranging an arranged graph changes nothing (cyclic
+  graphs and positions a host's arithmetic left a rounding error off
+  included); cycles, self-loops, duplicate edges, socket indices out of
+  range and sizes that are not finite, negative or huge are tolerated. In
+  a release build 100 nodes take about 0.6 ms, 200 about 2 ms and 500
+  about 5 ms; a graph with very many long noodles costs more (a 500-card
+  chain whose every card also feeds the last: about 70 ms).
 - `NodeEditor::arrange_plan(&ArrangeOptions) -> Vec<(NodeId, [f64; 2])>`:
   that layout for the live graph, with the cards' laid-out sizes and
-  socket heights (hosted cards included), returning the nodes that move
-  without moving them, so a host applies them as one undo step; empty
-  when the graph is already arranged.
+  socket heights (hosted cards included, each at the size it is laid out
+  at), returning the nodes that move without moving them, so a host
+  applies them as one undo step; empty when the graph is already
+  arranged (a node within a millionth of a unit of its place counts as
+  not moving).
 - `NodeGraphModel::arrange_role(NodeId) -> ArrangeRole` (default
   `Normal`): which nodes are the graph's inputs and outputs for
   `arrange_plan`.

@@ -148,9 +148,12 @@ fn empty_graph_gives_an_empty_plan() {
 }
 
 #[test]
-fn a_single_node_stays_where_it_is() {
+fn a_single_node_stays_where_it_is_in_whole_units() {
+    // Positions come out in whole canvas units, half a unit to even.
     let n = [node(7, ArrangeRole::Normal, 50.0, &[], &[], [12.5, -40.0])];
-    assert_eq!(run(&n, &[])[&7], [12.5, -40.0]);
+    assert_eq!(run(&n, &[])[&7], [12.0, -40.0]);
+    let n = [node(7, ArrangeRole::Normal, 50.0, &[], &[], [-3.0, 8.0])];
+    assert_eq!(run(&n, &[])[&7], [-3.0, 8.0]);
 }
 
 #[test]
