@@ -17,6 +17,7 @@
 //! [`rubber_band`].
 
 mod add_menu;
+mod arrange_plan;
 mod axes;
 mod canvas_state;
 mod collapse_snap;

@@ -28,6 +28,8 @@
 //!   owned data the model returns from snapshot calls. The widget
 //!   never holds a long-lived borrow into the host graph.
 //! - [`NodeEditor`] — the widget itself. Implements `agg_gui::Widget`.
+//! - [`arrange()`] — automatic layout of a graph into tidy columns;
+//!   [`NodeEditor::arrange_plan`] runs it on the live graph.
 //! - [`CanvasPalette`] — theme-driven colour bundle (auto-rebuilt
 //!   from `ctx.visuals()` per paint, or set manually with
 //!   [`NodeEditor::set_palette`]).
@@ -35,6 +37,7 @@
 //! See [`crate::model`] for the trait + view types and [`crate::widget`]
 //! for the widget implementation.
 
+pub mod arrange;
 pub mod connection;
 #[cfg(test)]
 mod connection_tests;
@@ -52,6 +55,7 @@ mod socket_style_tests;
 mod test_recorder;
 pub mod widget;
 
+pub use arrange::{arrange, ArrangeEdge, ArrangeNode, ArrangeOptions, ArrangeRole};
 pub use connection::SocketRef;
 pub use draw::{CanvasPalette, SocketSide};
 pub use draw_immediate::draw_node;

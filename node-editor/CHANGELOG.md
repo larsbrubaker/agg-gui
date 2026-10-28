@@ -29,6 +29,28 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   (from the theme accent in `from_visuals`). Pan and Zoom modes, middle-
   and right-drag pan are unchanged.
 
+- Automatic graph layout. `arrange(&[ArrangeNode], &[ArrangeEdge],
+  &ArrangeOptions) -> Vec<(NodeId, [f64; 2])>` (module `arrange`, pure,
+  no widget) places a graph's cards in columns: `ArrangeRole::Input`
+  nodes first, `Output` nodes last, every edge running left to right,
+  and a node nothing feeds (a constant) just left of its nearest
+  consumer. Columns are ordered to cut noodle crossings (the feed into a
+  socket above the feed into the socket below it), cards are placed so
+  the main noodle into each runs straight and no two cards come closer
+  than `row_gap`, long noodles get a lane of their own, separate graphs
+  stack top to bottom `component_gap` apart, and the whole keeps its
+  current top-left corner. Results are deterministic and arranging an
+  arranged graph changes nothing; cycles, self-loops, duplicate edges and
+  socket indices out of range are tolerated. 200 nodes with 300 edges
+  take about 3 ms in a release build.
+- `NodeEditor::arrange_plan(&ArrangeOptions) -> Vec<(NodeId, [f64; 2])>`:
+  that layout for the live graph, with the cards' laid-out sizes and
+  socket heights (hosted cards included), returning the nodes that move
+  without moving them, so a host applies them as one undo step; empty
+  when the graph is already arranged.
+- `NodeGraphModel::arrange_role(NodeId) -> ArrangeRole` (default
+  `Normal`): which nodes are the graph's inputs and outputs for
+  `arrange_plan`.
 - `NodeEditor::select_nodes(&[NodeId], bool) -> usize`: make exactly a
   set of cards the selection, as the user Shift-clicking each in order would
   (the last existing id becomes the primary selection reported through

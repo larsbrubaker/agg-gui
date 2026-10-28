@@ -604,6 +604,14 @@ pub trait NodeGraphModel {
         false
     }
 
+    /// Where node `id` belongs when the graph is arranged
+    /// ([`crate::NodeEditor::arrange_plan`]): graph inputs in the first
+    /// column, outputs in the last. Default [`crate::ArrangeRole::Normal`],
+    /// placed by its connections alone.
+    fn arrange_role(&self, _id: NodeId) -> crate::arrange::ArrangeRole {
+        crate::arrange::ArrangeRole::Normal
+    }
+
     // ── Hosted cards (see `NodeEditor::with_body_factory`) ──────────────
     //
     // Read only when the editor has a body factory; hosts without one can
