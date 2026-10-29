@@ -30,6 +30,11 @@ const EXCLUDED_DIRS: &[&str] = &[
     "demo/dist",
     "demo/node_modules",
     "demo/public/pkg",
+    // Playwright's output for the demo's browser tests: results, traces and
+    // the error-context.md page snapshot it writes for a failed run, and its
+    // HTML report. Test output, not source.
+    "demo/test-results",
+    "demo/playwright-report",
     "tests/resvg-test-suite",
 ];
 
@@ -116,4 +121,27 @@ fn count_lines(path: &Path) -> usize {
         panic!("failed to read {} as UTF-8 text: {err}", path.display());
     });
     text.lines().count()
+}
+
+#[test]
+fn build_and_test_output_dirs_are_excluded() {
+    let root = Path::new("/repo");
+    for skipped in [
+        "demo/dist/app.js",
+        "demo/node_modules/pkg/index.js",
+        "demo/test-results/x/error-context.md",
+        "demo/playwright-report/index.html",
+        "target/debug/build.json",
+    ] {
+        assert!(
+            is_excluded(root, &root.join(skipped)),
+            "{skipped} should be excluded"
+        );
+    }
+    for checked in ["demo/src/main.ts", "demo/tests/screenshot.spec.ts"] {
+        assert!(
+            !is_excluded(root, &root.join(checked)),
+            "{checked} should be checked"
+        );
+    }
 }
