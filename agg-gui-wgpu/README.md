@@ -67,8 +67,10 @@ frame.render_app(Color::white(), &mut app);
 let rgba = frame.read_rgba()?;               // top row first, width * 4 bytes per row
 ```
 
-Turn-key platform shells (winit event loop, browser canvas + rAF loop) live in
-the agg-gui repo's `demo-wgpu` crate.
+Turn-key platform shells are their own crates:
+[agg-gui-shell](https://crates.io/crates/agg-gui-shell) (a native winit
+window and event loop) and `agg-gui-web-shell` (a browser canvas and its
+frame loop).
 
 ## License
 

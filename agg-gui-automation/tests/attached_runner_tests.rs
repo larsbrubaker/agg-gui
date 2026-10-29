@@ -3,7 +3,7 @@
 //! a pluggable paint target (`HeadlessPainter`), the background-busy hook and
 //! the idle waits it holds open (`wait_for_idle`, `wait_for_pending_ui_work`),
 //! and several drivers sharing one thread's clock and UI-thread mark
-//! (`docs/design/gui-automation.md`, sections 5 and 9, slice M2).
+//! (`src/driver/headless.rs`, `src/driver/thread_clock.rs`).
 
 use std::cell::Cell;
 use std::rc::Rc;

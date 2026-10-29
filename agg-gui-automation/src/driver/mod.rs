@@ -1,7 +1,7 @@
 //! Drivers: what owns the `App` under test and runs its frames. C#'s
 //! automation runs a real `SystemWindow` whose message loop owns a thread; here
 //! the test thread *is* the UI thread and every runner call pumps frames
-//! itself (design: `docs/design/gui-automation.md`, section 5).
+//! itself (the crate docs in `lib.rs` say why).
 //!
 //! - [`HeadlessDriver`] — no window: frames painted by a [`HeadlessPainter`]
 //!   ([`SoftwarePainter`], a software framebuffer, by default) and, by

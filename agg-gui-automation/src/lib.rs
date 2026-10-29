@@ -3,12 +3,89 @@
 //!
 //! Tests drive a real widget tree through the same input entry points the
 //! shells use, find widgets by name, and wait on conditions.  This crate is
-//! test-only: consumers take it as a dev-dependency so watchdogs and image
-//! matching stay out of product builds.  The design, including the slices
-//! still to land, is
-//! `docs/design/gui-automation.md`.
+//! test-only: consumers take it as a dev-dependency so watchdogs, stack dumps
+//! and image matching stay out of product builds, and so its live mode can
+//! depend on `agg-gui-shell` (winit and wgpu), which core agg-gui must not.
 //!
-//! Modules:
+//! # How a test runs
+//!
+//! - **Simulated input is real input.** The runner never calls a widget's
+//!   `on_event`. Every move, press, key and wheel turn becomes a
+//!   `ForwarderEvent` fed through `agg_gui::shell_input::InputForwarder`, the
+//!   bookkeeping the native and web shells feed OS events through
+//!   ([`input`]). Hover, capture, focus, modals, tooltips and the on-screen
+//!   keyboard therefore behave as they do for a user, and a test cannot pass
+//!   by going around them. Input is dispatched before the frame's idle drain,
+//!   the order the shells use.
+//! - **The test drives the pump.** `App`, widgets and agg-gui's thread-locals
+//!   cannot cross threads, so the test body runs on the UI thread and every
+//!   runner call is synchronous: it sends its input, then pumps frames until
+//!   its condition holds. When a call returns, the UI has taken the event.
+//!   What owns the `App` and runs its frames is a [`driver`]:
+//!   [`HeadlessDriver`] (no window or GPU, deterministic) or, with the `live`
+//!   feature, `LiveDriver` (a real window).
+//! - **One thread per test.** [`show_window_and_execute_tests`] runs each
+//!   test on a fresh thread. Fresh thread-locals (focus, modifiers, tooltip,
+//!   animation, idle queue, clock) isolate it, so tests run in parallel with
+//!   nothing to reset, and the calling thread stays free to time out a stuck
+//!   body ([`execute`]). An application's own harness, which owns its thread
+//!   and driver, wraps them with [`AutomationRunner::attach`].
+//! - **Two clocks.** Behaviour runs on UI time (`agg_gui::clock`): delays,
+//!   waits and their timeouts, and pointer pacing. Headless, that is a
+//!   virtual clock advanced one frame interval per pumped frame, so a test
+//!   never sleeps ([`ClockPolicy::Real`] is for an application whose worker
+//!   threads run in real time). The hang watchdogs (test budget, bring-up,
+//!   close) run on the wall clock, because they must fire when UI time stops.
+//!
+//! # Coordinates and options
+//!
+//! - The runner's pointer position is physical pixels, Y-down from the
+//!   window's top-left corner: what `App`'s entry points take.
+//! - A [`Point2D`] offset onto a widget is logical units, Y-up from the
+//!   widget's lower-left corner (or from its centre with
+//!   `ClickOrigin::Center`); a window point given to
+//!   `set_mouse_cursor_position` is Y-up logical.
+//! - Optional arguments are option structs with `Default` ([`ClickOpts`],
+//!   [`WaitOpts`], [`DragOpts`], [`TypeOpts`]).
+//! - Pacing and matching settings live in each runner's [`AutomationConfig`]
+//!   rather than in process-wide state, so parallel tests cannot disturb each
+//!   other.
+//!
+//! # What a test author must know
+//!
+//! - **A worker that serves a UI thread other than the main one** wakes it
+//!   through that thread's queue: capture `ui_thread::current_queue()` on the
+//!   UI thread, then call `UiQueue::run_on_idle` or
+//!   `UiQueue::signal_async_state_change` from the worker. An unbound
+//!   worker's `animation::signal_async_state_change` wakes only the main
+//!   queue's owner, so a headless test on its own thread would never see it.
+//! - **Process-wide agg-gui state is shared by parallel tests.** The
+//!   platform has a per-thread override
+//!   (`agg_gui::platform::override_platform_for_thread`); the input profile,
+//!   tilt and fullscreen requests have none, so a test that changes them
+//!   must not run beside one that reads them.
+//! - **Headless software paint can be slow on a large tree.** Frames paint
+//!   only when the app wants to draw, so idle `delay` and `wait_for` frames
+//!   stay cheap.
+//!
+//! # Features
+//!
+//! - `stack-dump` — `thread_stack_dump`: all-thread stack capture for hang
+//!   reports, over rust-minidump (pure Rust).
+//! - `live` — `LiveDriver` and the live tests, separate `harness = false`
+//!   binaries (`tests/live/`): winit wants its event loop on the main thread
+//!   on macOS and allows one per process. agg-gui's CI does not run them,
+//!   because its test machines have no display. Run them on a desktop with
+//!   `cargo test -p agg-gui-automation --features live --test
+//!   automation_runner_live_tests`, or on Linux under `xvfb-run` with a
+//!   Vulkan driver (lavapipe through `ShellConfig::with_force_fallback_adapter`).
+//!
+//! There is no browser driver: every runner call blocks while it pumps
+//! frames, and a wasm page cannot block. [`UiDriver`] is the seam an async
+//! driver would implement.
+//!
+//! # Modules
+//!
 //! - [`keys`] — C#'s `Keys` key codes (what typed strings parse into).
 //! - `key_mapping` — `Keys` strokes to agg-gui `Key`/`Modifiers`.
 //! - [`typed_key_parser`] — `TypedKeyParser`: the `^`, `^+`, `{Token}` spelling.

@@ -83,6 +83,10 @@ impl Container {
     /// the container's preferred size and inflate the window.  An empty
     /// fit-height container also fits its width (to its padding), so it can
     /// serve as a swatch inside a `FlexRow`.
+    ///
+    /// There is no fit-width mode: a container with children takes the whole
+    /// width it is offered, so a layout that hugs its content measures the
+    /// content first and offers the container only that width.
     pub fn with_fit_height(mut self, fit: bool) -> Self {
         self.props.fit_height = fit;
         self

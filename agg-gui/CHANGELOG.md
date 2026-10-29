@@ -759,5 +759,3 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 - The post-layout keyboard lift is gated on `accepts_text_input`.
 - LCD subpixel text inside opaque compositing layers renders correctly on the
   wgpu backend again.
-
-Older releases are in [CHANGELOG-ARCHIVE.md](CHANGELOG-ARCHIVE.md).

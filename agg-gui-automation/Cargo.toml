@@ -1,6 +1,6 @@
 # GUI automation for agg-gui: the port of agg-sharp's GuiAutomation
 # (AutomationRunner and friends). A test-only crate: consumers take it as a
-# dev-dependency. Design and remaining slices: docs/design/gui-automation.md.
+# dev-dependency. How it works: the crate docs in src/lib.rs.
 [package]
 name = "agg-gui-automation"
 version = "0.1.0"
@@ -34,7 +34,7 @@ agg-gui-shell = { path = "../agg-gui-shell", optional = true }
 
 # The minidump writer (MIT; pure Rust over mach2 on macOS and ptrace on
 # Linux) and the `libc` FFI bindings (no compiled C) for thread ids, fork and
-# Yama's PR_SET_PTRACER. Windows has no writer yet (docs/design/gui-automation.md).
+# Yama's PR_SET_PTRACER. Windows has no writer yet (src/thread_stack_dump/write_minidump.rs).
 [target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]
 minidump-writer = { version = "0.13", optional = true }
 libc = { version = "0.2", optional = true }

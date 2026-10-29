@@ -2,7 +2,7 @@
 //! `src/runner/waits.rs`): `delay`, `wait_for_pending_ui_work`,
 //! `wait_until` / `wait_for`, `assert` and `wait_for_draw`, and how C#'s
 //! sleeps and reset events map to pumped frames on the virtual clock
-//! (`docs/design/gui-automation.md`, section 5). The ported C# test that
+//! (the table in `src/runner/waits.rs`). The ported C# test that
 //! exercises them is `automation_runner_tests.rs`.
 
 use std::sync::atomic::{AtomicBool, Ordering};

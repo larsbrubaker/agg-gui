@@ -4,8 +4,7 @@
 //!
 //! C# runs the UI on another thread, so its waits sleep or block on a reset
 //! event while the UI moves on by itself. Here the test body runs on the UI
-//! thread, so every wait pumps the window's frames instead (design:
-//! `docs/design/gui-automation.md`, section 5):
+//! thread, so every wait pumps the window's frames instead:
 //!
 //! | C# | here |
 //! |---|---|

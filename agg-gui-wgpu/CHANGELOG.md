@@ -365,3 +365,33 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 - `DrawCommand::DrawBarGrid`, the hard-coded variant for the demo's 3-D cube.
   The cube now uses the public `custom_render` hook like any other GPU widget.
+
+### Migrating from `demo-wgpu`
+
+- Depend on `agg-gui-wgpu = "0.5"` in place of the path dependency on
+  `demo-wgpu`, and require `agg-gui = "0.5"`. A `[patch.crates-io]` entry for
+  `agg-gui` is ignored when the version requirement does not match the
+  patched crate, so an old `"0.2"` requirement quietly builds the crates.io
+  0.2 release instead of the local checkout.
+- `begin_frame(&mut ctx, view)` is `ctx.begin_frame(view)`.
+- An app's own copy of the GPU setup becomes
+  `Gpu::new(target, (w, h), GpuConfig::new("label"))`. `target` is any
+  `impl Into<wgpu::SurfaceTarget<'static>>`: the renderer has no winit
+  dependency.
+- The `Gpu` fields are accessors: `gpu.device()`, `gpu.surface_format()`,
+  `gpu.config().width`.
+- An app's own surface-acquire match becomes
+  `gpu.acquire_frame(|| window.request_redraw())`.
+- Usage flags that always included `COPY_SRC` become
+  `GpuConfig::with_copy_src(CopySrc::Never | IfSupported | Required)`; a
+  present mode is asked for with `GpuConfig::with_present_mode`, falling back
+  to `Fifo` where the surface lacks it; `gpu.device_lost()` reports a lost
+  device.
+- Matches over `SurfaceAcquire` and `GpuInitError` need a `_ =>` arm
+  (`#[non_exhaustive]`).
+- The inspector's typed editors need `features = ["reflect"]`.
+- The minimum Rust version is 1.88.
+- The renderer's inlined drawing code is compiled into the calling crate, so
+  a debug build at `opt-level = 0` draws frames about ten times slower. Set
+  `opt-level = 1` under `[profile.dev]` and `opt-level = 2` under
+  `[profile.dev.package."*"]` in the app's workspace.

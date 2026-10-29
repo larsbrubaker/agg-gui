@@ -193,3 +193,19 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   versions are too: a `winit` 0.31 or `wgpu` 30 will be a breaking release here.
 - The shell never calls `std::process::exit` and never prints; failures come
   back as `ShellError` and diagnostics go through the `log` facade.
+
+### Migrating from a copied event loop
+
+- Delete the app's own winit loop and call
+  `run(ShellConfig::new("My App").with_logical_size(..), |init| Ok((app, NoHost)))`;
+  the builder closure sees the real device scale and surface size
+  (`init.size()`).
+- What the shell does not own stays the app's, through `ShellHost` hooks
+  (`on_frame`, a `paint` override, `after_paint`, `on_idle`,
+  `on_geometry_changed`, `on_gpu_rebuilt`, `on_exit`): menus, file dialogs,
+  crash reporting, single-instance, splash screens, async runtimes. An app
+  that caches GPU resources drops them in `on_gpu_rebuilt`.
+- Take `wgpu` and `winit` through this crate's re-exports, so their major
+  versions always match the shell's.
+- `demo-native` in the agg-gui repo is a complete port: a short `main.rs`
+  and a `DemoHost`.

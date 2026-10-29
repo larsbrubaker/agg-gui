@@ -1,6 +1,6 @@
 //! `LiveDriver` (feature `live`): the runner's driver over a real
 //! `agg-gui-shell` window, pumped through [`ShellSession`] on the UI thread
-//! the test body runs on (design: `docs/design/gui-automation.md`, section 7).
+//! the test body runs on (the crate docs in `lib.rs` say how a test runs).
 //!
 //! - **Input.** Simulated input goes through [`ShellSession::send_simulated`],
 //!   into the same `InputForwarder` the shell's winit arms feed. Real input

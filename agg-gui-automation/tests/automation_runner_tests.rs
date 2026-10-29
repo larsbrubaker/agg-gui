@@ -1,7 +1,7 @@
 //! Port of agg-sharp `Tests/Agg.Tests/Agg Automation Tests/AutomationRunnerTests.cs`
 //! and the headless part of its WinForms half (`AutomationRunnerTests.Winforms.cs`);
-//! the WinForms tests that need a live window are listed in
-//! `docs/design/gui-automation.md`. C#'s `SystemWindow` is an
+//! the WinForms test that needs a live window is in
+//! `tests/live/automation_runner_live_tests.rs`. C#'s `SystemWindow` is an
 //! [`AutomationWindow`], built on the run's own UI thread; C#'s captured
 //! locals are shared atomics when the calling thread sets them, and state
 //! `build` returns beside the window (a click counter) when the widgets do,

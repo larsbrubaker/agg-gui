@@ -43,6 +43,22 @@ Never commit a bug fix that isn't covered by a test.
   relationships to other parts of the codebase. Skip them when the function name and
   signature already tell the full story.
 
+### Where documentation lives
+- Documentation lives in the code: the header comment of the file, module or crate it
+  describes, and the doc comments of its items, where whoever works on that code reads it.
+  Write it in the present tense, saying why; no history.
+- A rule that spans several files goes in the header of the crate that owns it (its `lib.rs`),
+  and the files it governs point there. There are no design docs.
+- Release notes for crate users go in that crate's `CHANGELOG.md`, in the entry of the version
+  that made the change, migration steps included.
+- Markdown is allowed only in: the root `README.md` and `CLAUDE.md`; a crate's own `README.md`,
+  `CHANGELOG.md` and `THIRD_PARTY_NOTICES.md`; `.claude/` (agent instructions and skills); a
+  file a `.rs` pulls into rustdoc with `include_str!` (the `DrawCtx` method docs in
+  `agg-gui/src/draw_ctx/docs/`), while some `.rs` names it; and a plan for open work listed in
+  the gate's `OPEN_WORK_PLANS`, deleted once that work is done and its reasons are in the code.
+- The `markdown_placement` test (`agg-gui/tests/markdown_placement.rs`) refuses any other
+  Markdown file.
+
 ### Icons
 - Use **Font Awesome** icons throughout the UI. Render icons via their Unicode
   code points in the appropriate Font Awesome font face, not as image assets.
