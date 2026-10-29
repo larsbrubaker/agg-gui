@@ -124,6 +124,13 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Fixed
 
+- A press whose widget is rebuilt away mid-drag (a list rebuilt with fewer children than the
+  pressed one's index) keeps its pointer capture on the deepest ancestor still in the tree, which
+  now receives the remaining moves, the release and a later `MouseCaptureLost`, wherever the
+  pointer is. The capture used to be dropped silently, so the release went to whatever was under
+  the pointer and nothing that saw the press start heard it end. A two-finger gesture capture
+  follows the same rule. The capture is still dropped when only the root would be left.
+
 - `input_profile_from_hint` and `platform_from_name` recognise a platform named `iOS` or `iPadOS`
   (Chrome's `userAgentData.platform` on an iPhone), which used to read as an unknown touch device;
   the demo passes the user agent along as a fallback.

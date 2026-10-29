@@ -5,7 +5,9 @@
 //! an ancestor of it) the path no longer names anything; using it indexed out
 //! of bounds and panicked (`tree_paths::widget_at_path_ref`). A stale path is
 //! now dropped: focus clears (the dropped widget gets no `FocusLost`, it is
-//! gone), and hover and capture fall back to whatever the pointer is over.
+//! gone), and hover falls back to whatever the pointer is over. Capture moves
+//! to the deepest surviving ancestor (`stale_capture_ancestor.rs`); here only
+//! the root survives, so it falls back to the pointer too.
 
 use crate::{
     App, DrawCtx, Event, EventResult, Font, Modifiers, MouseButton, Rect, Size, TextField,

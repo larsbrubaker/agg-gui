@@ -17,9 +17,13 @@
 //! widgets they point to. No widget opts in and no API changes — any reorder
 //! of an existing child (swap, remove + insert, rebuild of the `Vec` from the
 //! same boxes) is followed. A widget that was dropped has no new index: when
-//! its path now indexes past the tree, a hover or capture path is dropped
-//! (hover and capture fall back to what the pointer is over); when another
-//! widget now sits at its indices, the path names that widget. The current
+//! its path now indexes past the tree, a hover path is dropped (hover falls
+//! back to what the pointer is over), and a capture path is cut back to the
+//! deepest widget along it that is still the one anchored there (a list
+//! rebuilt with fewer tiles mid-drag keeps the capture on the list), so the
+//! rest of the press reaches a widget that saw it start; only when nothing
+//! below the root survives is the capture dropped. When another widget now
+//! sits at its indices, the path names that widget. The current
 //! index is checked first, so a path whose widgets did not move resolves in
 //! O(depth) without searching.
 //!
@@ -101,14 +105,34 @@ pub(super) fn resolve(root: &dyn Widget, path: &mut [usize], anchor: &[usize]) {
     }
 }
 
+/// The longest prefix of `path` whose widgets are still the ones `anchor`
+/// recorded, or `None` when not even the first level survives (only the root
+/// would be left).
+fn surviving_ancestor(
+    root: &dyn Widget,
+    path: Option<&[usize]>,
+    anchor: &[usize],
+) -> Option<Vec<usize>> {
+    let path = path?;
+    let now = anchor_of(root, Some(path));
+    let kept = now
+        .iter()
+        .zip(anchor)
+        .take_while(|(now, then)| now == then)
+        .count();
+    (kept > 0).then(|| path[..kept].to_vec())
+}
+
 impl App {
     /// Follow every stored path (focus, hover, pointer capture, gesture
     /// capture, the enter/leave hover chain) to where its widgets now sit, after any reordering of
     /// children since the path was recorded.
     ///
-    /// A hover or capture path that no longer names a widget at all (its
-    /// widget, or an ancestor, was removed from the tree) is dropped: using
-    /// it would address a widget that does not exist. Focus is kept on the
+    /// A hover path that no longer names a widget at all (its widget, or an
+    /// ancestor, was removed from the tree) is dropped: using it would
+    /// address a widget that does not exist. A capture path in that state
+    /// moves to its deepest surviving ancestor (see
+    /// [`drop_stale_paths`](Self::drop_stale_paths)). Focus is kept on the
     /// widget told it has focus, or handed to its replacement, or cleared
     /// (see [`follow_focused_widget`](Self::follow_focused_widget)). The
     /// hover chain is left alone: its enter/leave diff already skips widgets
@@ -131,8 +155,20 @@ impl App {
         self.follow_focused_widget();
     }
 
-    /// Clear each stored hover and capture path that indexes past the tree
-    /// (see [`resolve_tracked_paths`](Self::resolve_tracked_paths)).
+    /// Clear the stored hover path when it indexes past the tree, and move a
+    /// pointer or gesture capture path in that state to its deepest
+    /// surviving ancestor (see
+    /// [`resolve_tracked_paths`](Self::resolve_tracked_paths)).
+    ///
+    /// A capture is kept rather than dropped because dropping it silently
+    /// sends the remaining moves and the release to whatever is under the
+    /// pointer: nothing that saw the press start would hear it end. The
+    /// surviving ancestor (the list whose pressed tile was rebuilt away) is
+    /// the widget that owns the gesture now; it gets the moves, the release
+    /// and any later `MouseCaptureLost`, bubbling as usual. The root alone
+    /// does not hold a capture: it is the whole window, not a widget that
+    /// took part in the press, and capturing on it would only keep the
+    /// widgets under the pointer from seeing moves until the release.
     fn drop_stale_paths(&mut self) {
         let root = self.root.as_ref();
         let stale = |p: &Option<Vec<usize>>| {
@@ -140,16 +176,23 @@ impl App {
                 .is_some_and(|p| anchor_of(root, Some(p)).len() != p.len())
         };
         let hovered_stale = stale(&self.hovered);
-        let captured_stale = stale(&self.captured);
-        let gesture_stale = stale(&self.gesture_captured);
+        let captured = stale(&self.captured)
+            .then(|| surviving_ancestor(root, self.captured.as_deref(), &self.anchors.captured));
+        let gesture = stale(&self.gesture_captured).then(|| {
+            surviving_ancestor(
+                root,
+                self.gesture_captured.as_deref(),
+                &self.anchors.gesture_captured,
+            )
+        });
         if hovered_stale {
             self.store_hovered(None);
         }
-        if captured_stale {
-            self.store_captured(None);
+        if let Some(path) = captured {
+            self.store_captured(path);
         }
-        if gesture_stale {
-            self.store_gesture_captured(None);
+        if let Some(path) = gesture {
+            self.store_gesture_captured(path);
         }
     }
 

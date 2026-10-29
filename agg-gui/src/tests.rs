@@ -108,6 +108,7 @@ mod line_box_snapped;
 mod logical_root_transform;
 mod mouse_down_focus_grab_tests;
 mod nested_child_transform;
+mod stale_capture_ancestor;
 mod stale_path_removed_widget;
 mod try_set_hooks;
 // Loopback HTTP server: native only.
