@@ -574,17 +574,62 @@ pub trait Widget {
     /// invalidates the cache when the text actually changed.
     fn set_label_text(&mut self, _text: &str) {}
 
-    /// Opt-in reflection accessor for the inspector's typed property editors.
+    /// The widget's reflected values, for the inspector: `None` (the
+    /// default) for a widget that has none, `Some(&self.props)` for one that
+    /// opts in. The inspector lists each field of the returned struct after
+    /// the widget's [`properties`](Self::properties) rows, with no
+    /// per-widget code, and edits them live through
+    /// [`as_reflect_mut`](Self::as_reflect_mut) (`tree_inspector/edit.rs`).
+    /// Only with the `reflect` feature (the crate header's "Reflection").
     ///
-    /// Widgets that derive [`bevy_reflect::Reflect`] (via the `reflect`
-    /// cargo feature) override this to return `Some(self)` so the inspector
-    /// can walk their fields with type information — boolean toggles,
-    /// numeric sliders, color pickers, enum dropdowns — instead of falling
-    /// back to the read-only string [`properties`](Self::properties) list.
+    /// # The companion-props pattern
     ///
-    /// Default returns `None`; the inspector then uses the string list.
-    /// Available only with the `reflect` feature so consumers without it
-    /// don't pay the dependency cost.
+    /// A widget opts in by holding its inspectable values in a companion
+    /// `pub props: FooProps` struct that derives `Reflect`, and returning that
+    /// struct here, never the widget itself. Deriving `Reflect` on a widget
+    /// does not work: `bevy_reflect::Reflect` requires `Send + Sync`, and
+    /// widgets hold `Rc<Cell<…>>` state and `Box<dyn FnMut(…)>` callbacks that
+    /// are neither. Their sub-widgets (`Box<dyn Widget>`, which cannot be
+    /// reflected at all) and `Arc<Font>` would force `Reflect` onto every type
+    /// they reference, and skipping those fields with `#[reflect(ignore)]`
+    /// needs a `Default` that a widget such as `Label` (which needs a font)
+    /// has no sensible value for. The companion holds only plain values
+    /// (`f64`, `bool`, `Option<usize>`, [`Color`](crate::Color), …), and the
+    /// widget reads and writes them through `self.props`, so an edit the
+    /// inspector makes shows on the next paint. Where a shared cell is the
+    /// authoritative value (`Checkbox::with_state_cell`), the cell wins, and
+    /// an inspector edit of the companion shows only on an unbound widget.
+    /// `SliderProps`, `CheckboxProps`, `ProgressBarProps`,
+    /// `ToggleSwitchProps` and `ContainerProps` follow it.
+    ///
+    /// # Converting a widget `Foo`
+    ///
+    /// 1. Pick the values a user might tune at run time: numbers, bools,
+    ///    colours, enums, strings, small value structs. Leave out callbacks,
+    ///    sub-widgets, shared `Rc<RefCell<…>>` cells, fonts and internal
+    ///    state (drag tracking, animation, hover and focus flags).
+    /// 2. Define the companion:
+    ///    ```ignore
+    ///    #[cfg_attr(feature = "reflect", derive(bevy_reflect::Reflect))]
+    ///    #[derive(Clone, Debug, Default)]
+    ///    pub struct FooProps {
+    ///        pub field_a: f64,
+    ///        pub field_b: bool,
+    ///    }
+    ///    ```
+    /// 3. Replace those fields on `Foo` with `pub props: FooProps`, and route
+    ///    every read and write through it (`self.field_a` becomes
+    ///    `self.props.field_a`), the constructor and builders included.
+    /// 4. Keep every setter's cache invalidation: reflection writes the
+    ///    field directly and then calls [`mark_dirty`](Self::mark_dirty),
+    ///    but code that calls the setter still relies on it.
+    /// 5. Override this method and its `_mut` counterpart, each under
+    ///    `#[cfg(feature = "reflect")]`, to return `Some(&self.props)` and
+    ///    `Some(&mut self.props)`.
+    /// 6. Add a test beside the edit-pipeline tests in
+    ///    `src/tests/reflect_roundtrip.rs` that applies an
+    ///    `InspectorEdit` to one of the new fields and reads it back through
+    ///    the widget's own getter.
     #[cfg(feature = "reflect")]
     fn as_reflect(&self) -> Option<&dyn bevy_reflect::Reflect> {
         None

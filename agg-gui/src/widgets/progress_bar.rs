@@ -7,6 +7,10 @@
 //! `value < 1.0` and the bar is actually painted (i.e. visible), re-arming a
 //! ~60 fps wake via [`request_draw_after`](crate::animation::request_draw_after)
 //! each frame so the loop idles the moment the bar is culled or finishes.
+//!
+//! The values a user can tune live in [`ProgressBarProps`], which the
+//! inspector lists and edits through reflection (the companion-props pattern
+//! on `Widget::as_reflect`, with the `reflect` feature).
 
 use std::sync::Arc;
 use std::time::Duration;

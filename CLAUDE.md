@@ -54,8 +54,9 @@ Never commit a bug fix that isn't covered by a test.
 - Markdown is allowed only in: the root `README.md` and `CLAUDE.md`; a crate's own `README.md`,
   `CHANGELOG.md` and `THIRD_PARTY_NOTICES.md`; `.claude/` (agent instructions and skills); a
   file a `.rs` pulls into rustdoc with `include_str!` (the `DrawCtx` method docs in
-  `agg-gui/src/draw_ctx/docs/`), while some `.rs` names it; and a plan for open work listed in
-  the gate's `OPEN_WORK_PLANS`, deleted once that work is done and its reasons are in the code.
+  `agg-gui/src/draw_ctx/docs/`), while some `.rs` names it; and the root's `docs/later/`.
+- An idea for later, written down when Lars asks for it, lives in `docs/later/<idea>.md`: it is
+  not scheduled work and needs no plan entry; delete it when it is built or dropped.
 - The `markdown_placement` test (`agg-gui/tests/markdown_placement.rs`) refuses any other
   Markdown file.
 

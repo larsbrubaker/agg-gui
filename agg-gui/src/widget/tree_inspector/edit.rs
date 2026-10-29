@@ -5,6 +5,34 @@
 //!
 //! Part of `tree_inspector`; the inspector panel queues these and the host
 //! frame loop drains them.
+//!
+//! A reflected edit travels in four steps:
+//! 1. Each [`InspectorNode`] carries `path`, its child-index path from the
+//!    root, recorded while the snapshot is collected.
+//! 2. While painting the properties pane, the inspector panel
+//!    (`widgets/inspector_props.rs`) records a hit rectangle for each row:
+//!    a `true`/`false` row toggles, and a row that parses as a number steps
+//!    down on its left half and up on its right, by 5% of the value's
+//!    magnitude (at least 0.1). The step is sent as an `f64`, so it lands
+//!    only on `f64` fields. A click on a row pushes an [`InspectorEdit`]
+//!    (the node's path, the row's name as the field path, the new value)
+//!    onto the queue bound with `InspectorPanel::with_edit_queue`.
+//! 3. The host frame loop drains the queue before layout and paint (the
+//!    demo's `render_app_frame` in `demo-wgpu/src/frame.rs`), since applying
+//!    an edit during event dispatch or paint would change a tree that is
+//!    being walked. [`apply_inspector_edit`] resolves the path with
+//!    [`walk_path_mut`], the field with `reflect_path_mut` on the widget's
+//!    `as_reflect_mut` value, and writes it with `try_apply`. A stale path,
+//!    an unknown field or a value of the wrong type leaves the tree as it
+//!    was and returns `false`.
+//! 4. A landed edit calls [`Widget::mark_dirty`], which invalidates both the
+//!    widget's backbuffer and its cached bitmap (a `Label`'s rasterised
+//!    text), because reflection writes the field directly and skips the
+//!    setters that would invalidate them. The host then refreshes the
+//!    inspector snapshot so the new value shows at once.
+//!
+//! Which widgets have reflected values, and how a widget opts in, is on
+//! `Widget::as_reflect` (`widget/widget_trait.rs`).
 
 use super::super::*;
 

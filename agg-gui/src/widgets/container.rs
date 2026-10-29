@@ -9,6 +9,10 @@
 //! A border is either a uniform stroke (`with_border`) or, like C#
 //! `GuiWidget.Border`, a rectangular band per side (`with_border_sides`)
 //! that insets the children as padding does.
+//!
+//! The values a user can tune live in [`ContainerProps`], which the inspector
+//! lists and edits through reflection (the companion-props pattern on
+//! `Widget::as_reflect`, with the `reflect` feature).
 
 use crate::color::Color;
 use crate::draw_ctx::DrawCtx;

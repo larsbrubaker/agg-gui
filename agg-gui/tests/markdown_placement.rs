@@ -7,9 +7,9 @@
 //! - `README.md`, `CHANGELOG.md` and `THIRD_PARTY_NOTICES.md` in a crate's
 //!   own directory (beside a `Cargo.toml` with a `[package]`), or at the root;
 //! - anything under `.claude/` (agent instructions and skills);
-//! - a plan for open work listed in [`OPEN_WORK_PLANS`], while the work is
-//!   open: when it is done, its lasting reasons move into the code, and the
-//!   plan and its entry are deleted;
+//! - an idea for later, written down when Lars asks for it, directly in the
+//!   root's `docs/later/` folder (`docs/later/<idea>.md`, no subfolders): it
+//!   is not scheduled work, and it is deleted when it is built or dropped;
 //! - a Markdown file a `.rs` file pulls in with `include_str!("...")`, such as
 //!   the `DrawCtx` method docs in `src/draw_ctx/docs/`, which rustdoc shows as
 //!   the methods' own docs. It stays allowed only while some `.rs` names it.
@@ -50,13 +50,8 @@ const SKIPPED_TREES: &[&str] = &[
     "demo/playwright-report",
 ];
 
-/// Plans for work still open, relative to the root. Each must exist, so an
-/// entry cannot outlive its plan.
-const OPEN_WORK_PLANS: &[&str] = &[
-    // The widgets still to make reflectable, and the inspector's open editor
-    // questions.
-    "bevy_reflect_to_do.md",
-];
+/// The root folder holding ideas for later, one Markdown file per idea.
+const LATER_IDEAS_DIR: &str = "docs/later/";
 
 /// Directory names skipped wherever they appear: build output and git.
 const SKIPPED_NAMES: &[&str] = &[".git", "target", "node_modules"];
@@ -110,7 +105,9 @@ fn placement(path: &str, context: &Context) -> Placement {
         || path
             .strip_prefix(".claude/")
             .is_some_and(|rest| !rest.is_empty())
-        || OPEN_WORK_PLANS.contains(&path)
+        || path
+            .strip_prefix(LATER_IDEAS_DIR)
+            .is_some_and(|rest| !rest.is_empty() && !rest.contains('/'))
         || context.included.contains(path);
     if allowed {
         Placement::Allowed
@@ -246,8 +243,8 @@ fn failure_message(refused: &[String]) -> String {
          comments of the code it is about (CLAUDE.md, \"Documentation\"), then delete it. \
          Release notes go in the crate's CHANGELOG.md. Markdown may live only in the root \
          README.md and CLAUDE.md, a crate's README.md, CHANGELOG.md and \
-         THIRD_PARTY_NOTICES.md, .claude/, a file a .rs pulls in with include_str!, and a \
-         plan for open work listed in OPEN_WORK_PLANS.\n",
+         THIRD_PARTY_NOTICES.md, .claude/, a file a .rs pulls in with include_str!, and an \
+         idea for later in docs/later/<idea>.md.\n",
     );
     message
 }
@@ -318,19 +315,6 @@ fn markdown_gate_sees_the_allowed_files() {
 }
 
 #[test]
-fn every_listed_open_work_plan_exists() {
-    let Some(root) = repo_root() else {
-        return;
-    };
-    for plan in OPEN_WORK_PLANS {
-        assert!(
-            root.join(plan).is_file(),
-            "{plan} is listed in OPEN_WORK_PLANS but does not exist: delete its entry"
-        );
-    }
-}
-
-#[test]
 fn markdown_placement_allows_the_listed_places() {
     let context = Context {
         crate_dirs: ["agg-gui", "agg-mic"].map(String::from).into(),
@@ -346,7 +330,6 @@ fn markdown_placement_allows_the_listed_places() {
         ".claude/agents/implementer.md",
         ".claude/skills/acp/SKILL.md",
         "agg-gui/src/draw_ctx/docs/arc_to.md",
-        "bevy_reflect_to_do.md",
     ] {
         assert_eq!(placement(path, &context), Placement::Allowed, "{path}");
     }
@@ -376,6 +359,28 @@ fn markdown_placement_refuses_docs_anywhere_else() {
     // Not Markdown, so not this gate's concern.
     for path in ["agg-gui/src/lib.rs", "docs/hero_image.png", "README", ".md"] {
         assert_eq!(placement(path, &context), Placement::NotMarkdown, "{path}");
+    }
+}
+
+#[test]
+fn markdown_placement_allows_ideas_for_later_one_level_deep() {
+    let context = Context {
+        crate_dirs: ["agg-gui".to_string()].into(),
+        included: BTreeSet::new(),
+    };
+    assert_eq!(
+        placement("docs/later/idea.md", &context),
+        Placement::Allowed
+    );
+    for path in [
+        // Only files directly in the folder: an idea is one file.
+        "docs/later/sub/idea.md",
+        // The folder's name is not itself an idea.
+        "docs/later.md",
+        // Only the repository root's folder, not one inside a crate.
+        "agg-gui/docs/later/idea.md",
+    ] {
+        assert_eq!(placement(path, &context), Placement::Refused, "{path}");
     }
 }
 

@@ -10,6 +10,10 @@
 //! tested in isolation and to keep this file within the project's size limit.
 //! The configuration builders live in `builders.rs`, the per-instance style
 //! in `style.rs`, painting in `paint.rs` and the enabled state in `state.rs`.
+//!
+//! The values a user can tune live in [`SliderProps`], which the inspector
+//! lists and edits through reflection (the companion-props pattern on
+//! `Widget::as_reflect`, with the `reflect` feature).
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -88,20 +92,9 @@ const VALUE_W: f64 = 44.0;
 /// Gap between the track's right edge and the value label's left edge.
 const VALUE_GAP: f64 = 6.0;
 
-/// Inspector-visible properties of a [`Slider`].
-///
-/// **The "companion props" pattern:** widgets that opt into the reflection-
-/// driven inspector hold a small `*Props` struct exposing only their
-/// directly-editable values.  This sidesteps two structural problems with
-/// deriving `Reflect` on the whole widget:
-///   1. `bevy_reflect::Reflect` requires `Send + Sync`, which widgets violate
-///      because they carry `Rc<Cell<…>>` and non-`Sync` callbacks.
-///   2. Sub-widgets (`Label` here) and `Arc<Font>` would force a cascading
-///      `Reflect` derive across types that don't have it.
-///
-/// The companion struct contains plain values (`f64`, `bool`, `Option<usize>`)
-/// — `Send + Sync + Reflect`-friendly — and the widget routes all reads/writes
-/// through it.  The inspector edits the companion live and the widget reacts.
+/// Inspector-visible properties of a [`Slider`]: its companion props, the
+/// pattern described on `Widget::as_reflect`, and why a companion rather
+/// than `Reflect` on the widget itself.
 #[cfg_attr(feature = "reflect", derive(bevy_reflect::Reflect))]
 #[derive(Clone, Debug)]
 pub struct SliderProps {

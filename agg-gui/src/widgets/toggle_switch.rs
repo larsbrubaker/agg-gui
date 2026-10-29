@@ -7,6 +7,12 @@
 //! with a [`ToggleSwitchStyle`] (`toggle_switch/style.rs`).  A switch gated
 //! with `with_enabled_fn` paints dimmed and ignores input while disabled
 //! (`toggle_switch/enabled.rs`).
+//!
+//! The values a user can tune live in [`ToggleSwitchProps`], which the
+//! inspector lists and edits through reflection (the companion-props pattern
+//! on `Widget::as_reflect`, with the `reflect` feature). A switch bound with
+//! [`ToggleSwitch::with_state_cell`] reads the cell instead, so an inspector
+//! edit of `on` shows only on an unbound switch.
 
 use std::cell::Cell;
 use std::rc::Rc;

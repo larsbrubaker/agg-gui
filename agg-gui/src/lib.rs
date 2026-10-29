@@ -53,6 +53,46 @@
 //!   `web_adapter` (`install_keyboard_listeners` = typing + clipboard
 //!   for any browser shell) — platform glue. The `agg-gui-shell` (native)
 //!   and `agg-gui-web-shell` (browser) crates add turn-key runners on top.
+//!
+//! ## Reflection (the `reflect` feature)
+//!
+//! Reflection uses `bevy_reflect`, the most complete reflection system in
+//! the Rust ecosystem, adopted while the reflected surface is small rather
+//! than retrofitted later. One registry of typed values can serve four
+//! things: the inspector's typed property editors, one serialization path
+//! for saved state (window positions, theme, inspector state), project files
+//! that are trees of configurable values, and animation that tweens any
+//! field by its string path (`"props.value"`). Today it drives the inspector:
+//! the typed property dump (`widget/tree_inspector/mod.rs`) and live editing
+//! (`widget/tree_inspector/edit.rs`).
+//!
+//! The `reflect` cargo feature is on by default and is the only thing that
+//! pulls in `bevy_reflect`, pinned to one minor version because its API
+//! breaks between them. Every reflection item is behind
+//! `cfg(feature = "reflect")`, so a consumer that wants a smaller dependency
+//! tree turns default features off. The library crates that depend on
+//! agg-gui with its default features off (`agg-gui-wgpu`, `agg-gui-shell`,
+//! `agg-gui-web-shell`, `node-editor`) and the demo crates have a `reflect`
+//! feature that forwards to this one, so turning it back on reaches agg-gui.
+//!
+//! What derives `Reflect`, under `cfg_attr(feature = "reflect", ...)`:
+//! - value types: [`Color`], [`Point`], [`Size`], [`Rect`], [`Insets`],
+//!   [`WidgetBase`], [`ThemePreference`], [`AccentColor`], [`Visuals`] and
+//!   [`SpinnerSize`]. [`HAnchor`] and [`VAnchor`] are bit-flag newtypes over
+//!   `u8`, marked `#[reflect(opaque)]` so they are treated as one value: a
+//!   single bit means nothing on its own;
+//! - saved-state structs: [`OsWindowState`] and [`InspectorSavedState`];
+//! - widgets, through a companion `*Props` struct rather than the widget
+//!   itself: the pattern, why, and the steps to convert a widget are on
+//!   `Widget::as_reflect` (`widget/widget_trait.rs`).
+//!
+//! Reflection reaches the values inside widgets, never the widget tree:
+//! saving and restoring a whole tree would fail. Children are
+//! `Box<dyn Widget>`, which would need a registry of every concrete widget
+//! type and a way to build each by name; shared `Rc<RefCell<…>>` state has
+//! an identity a round trip cannot keep; and building a widget is imperative
+//! (fonts, callbacks, host state). Trees are built in code, and saved values
+//! are reflected into them.
 
 pub mod animation;
 pub mod app_state;

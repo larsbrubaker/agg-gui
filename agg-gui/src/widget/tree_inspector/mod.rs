@@ -8,6 +8,15 @@
 //! `draw_report` (the runaway-repaint diagnostic).  All are re-exported here
 //! so `tree_inspector::X` paths stay stable; `tree.rs` holds traversal and
 //! event dispatch.
+//!
+//! With the `reflect` feature, [`collect_inspector_nodes`] appends a typed
+//! dump of each widget's reflected values (`Widget::as_reflect`) to the
+//! rows from [`Widget::properties`], so a widget that opts in gets its
+//! fields listed without writing `properties()` rows for them.
+//! `reflect_fields` walks the reflected struct by field name and formats
+//! `bool`, `f64`, `f32`, `i32`, `u32`, `usize`, `String` and
+//! [`Color`](crate::Color) cleanly, and anything else with `Debug`. The rows
+//! it formats are the ones the inspector can then edit (`edit.rs`).
 
 use super::*;
 

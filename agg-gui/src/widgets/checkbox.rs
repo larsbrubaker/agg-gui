@@ -24,6 +24,12 @@
 //! A disabled box ([`Checkbox::with_enabled`]) ignores input and draws its
 //! box at 40% opacity (agg-gui's non-interactive dim, which
 //! `SelectionControlStyle` copies).
+//!
+//! The values a user can tune live in [`CheckboxProps`], which the inspector
+//! lists and edits through reflection (the companion-props pattern on
+//! `Widget::as_reflect`, with the `reflect` feature). A box bound with
+//! [`Checkbox::with_state_cell`] reads the cell instead, so an inspector edit
+//! of `checked` shows only on an unbound box.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -48,8 +54,8 @@ const BOX_STROKE_WIDTH: f64 = 1.5;
 /// agg-gui's opacity for a control that is not interactive.
 const DISABLED_OPACITY: f32 = 0.4;
 
-/// Inspector-visible properties of a [`Checkbox`].  See [`SliderProps`] for
-/// the rationale of the companion-props pattern.
+/// Inspector-visible properties of a [`Checkbox`]: its companion props (the
+/// pattern on `Widget::as_reflect`).
 #[cfg_attr(feature = "reflect", derive(bevy_reflect::Reflect))]
 #[derive(Clone, Debug, Default)]
 pub struct CheckboxProps {
