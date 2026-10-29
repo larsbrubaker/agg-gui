@@ -59,6 +59,13 @@ impl GpuState {
         });
         // Only the bindings the two entry points touch; the module's
         // peel / bed bindings stay out, as its header allows.
+        //
+        // Only `sceneVertexMain` and `sceneTextureMain` may get a
+        // pipeline here: the module's peel entry points read depth
+        // textures with `textureLoad` on a `texture_depth_2d`, which has
+        // no GLSL ES form, so a pipeline on them would fail to translate
+        // on WebGL2 and the cube would not draw there. The two entry
+        // points used read no depth texture and translate cleanly.
         let bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("tumble cube bgl"),
             entries: &[
