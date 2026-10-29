@@ -272,6 +272,7 @@ impl WgpuGfxCtx {
         };
 
         let t_execute = web_time::Instant::now();
+        let frame_info = self.pass_frame_info();
         execute_prepared(
             &self.device,
             &self.queue,
@@ -283,11 +284,13 @@ impl WgpuGfxCtx {
             &prepared,
             self.viewport,
             self.adapter_caps.as_ref(),
-            self.pass_frame_info(),
+            frame_info,
+            &mut self.textures,
         );
         if let Some((_, view)) = &proxy {
             crate::comp_op::blit_proxy(
                 &self.device,
+                &mut self.textures,
                 &mut encoder,
                 &self.comp_op,
                 view,
@@ -307,6 +310,7 @@ impl WgpuGfxCtx {
         // textures no frame asked for this time go with it.
         self.layer_pool.end_frame(&mut self.textures);
         self.textures.destroy_retired();
+        self.frame_arenas.destroy_retired();
 
         self.last_end_frame_stats = LastEndFrameStats {
             prepare_us,
@@ -333,6 +337,7 @@ fn execute_prepared<'a>(
     surface_viewport: (f32, f32),
     adapter_caps: Option<&crate::adapter_caps::AdapterCaps>,
     frame_info: crate::frame_timing::PassFrameInfo,
+    textures: &mut crate::texture_life::TextureLedger,
 ) {
     // Initial clear: only honoured if the very first command is Clear.  Mid-frame
     // clears (after a draw) are skipped — the layer system makes them rare.
@@ -514,6 +519,7 @@ fn execute_prepared<'a>(
                         device_generation: frame_info.device_generation,
                         frame: frame_info.frame,
                         last_frame_completion: frame_info.last_frame_completion,
+                        retire: &mut *textures,
                     };
                     renderer.borrow_mut().render(ctx);
                     i += 1;

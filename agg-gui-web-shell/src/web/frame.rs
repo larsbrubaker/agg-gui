@@ -546,7 +546,11 @@ fn paint(w: u32, h: u32) -> bool {
                     .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                         label: Some("agg-gui-web-shell scene blit"),
                     });
-            fb.blit_to(
+            // The blit's buffers are destroyed once its encoder is
+            // submitted: dropped, the browser frees them only when its
+            // garbage collector runs.
+            let mut blit_buffers = Vec::new();
+            fb.blit_downsample_retiring(
                 &p.gpu.device,
                 &mut encoder,
                 &surface_view,
@@ -554,8 +558,13 @@ fn paint(w: u32, h: u32) -> bool {
                 agg_gui::Rect::new(0.0, 0.0, w as f64, h as f64),
                 None,
                 p.ctx.pipelines(),
+                1,
+                &mut |buffer| blit_buffers.push(buffer),
             );
             p.gpu.queue.submit(std::iter::once(encoder.finish()));
+            for buffer in blit_buffers {
+                buffer.destroy();
+            }
         }
 
         // Releases the stashed texture (surface or SSAA resolve) before

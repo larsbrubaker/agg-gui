@@ -6,9 +6,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps.
 
-## [Unreleased]
+## [0.6.0] - 2026-10-29
 
 ### Added
+
+- `WgpuCustomRenderCtx::retire_buffer`: a custom render pass hands over a
+  buffer made for this frame only, and the context destroys it right after
+  the frame's submit (the earliest safe moment; dropping it frees nothing in
+  the browser until the garbage collector runs).
+- `SsaaFramebuffer::blit_downsample_in(&mut ctx, factor)`: the downsample
+  blit from inside a custom render pass, onto its target at its
+  `screen_rect` and clip, with the blit's buffers handed to the context.
+  Safe however many times one framebuffer is drawn in a frame.
+- `SsaaFramebuffer::blit_downsample_retiring(..., factor, retire)`: the
+  downsample blit for a caller that submits its own encoder; the blit's two
+  per-draw buffers go to `retire`, to be destroyed after that submit.
+- `BufferCounts` and `WgpuGfxCtx::buffer_counts`: how many single-frame
+  buffers the context has been given to destroy (its blend-mode proxy blit's
+  uniforms, buffers custom render passes retire) and has destroyed;
+  `waiting()` is 0 after every frame's submit.
 
 - Device generations: `next_device_generation()` hands out a process-wide,
   increasing `u64` that no two devices share. `Gpu::device_generation` and
@@ -68,6 +84,15 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Changed
 
+- `SsaaFramebuffer::blit_to`, `blit_downsample_3x_to`, `blit_downsample_4x_to`
+  and `blit_downsample_to` behave as before: their per-draw buffers are
+  dropped after recording, so in the browser they are freed only by the
+  garbage collector. A caller blitting every frame moves to
+  `blit_downsample_in` (inside a custom render pass) or
+  `blit_downsample_retiring` (with its own encoder) to have them destroyed.
+  `ensure_size` destroys only replaced attachments, so calling it more than
+  once a frame is safe.
+
 - Every texture the context replaces or lets go (evicted image and text
   textures, retained layers rebuilt at a new size, screenshot targets,
   per-frame gradient ramps and blend-mode copies, a resized `SsaaFramebuffer`'s
@@ -112,6 +137,26 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   of the time in `-[MTLCommandQueue commandBuffer]`).
 
 ### Fixed
+
+- The wgpu tumble cube (`WgpuTumbleCubeRenderer`) draws again after the shell
+  rebuilds a lost device: its GPU state and supersampled framebuffer are keyed
+  on `WgpuCustomRenderCtx::device_generation` (and the surface format) and
+  built again on a new device, instead of recording the lost device's buffers
+  and textures into the new device's frames, a validation error that threw
+  every later frame away. A new surface format now rebuilds the framebuffer
+  too, not only the pipeline.
+- Buffers agg-gui-wgpu makes and lets go are destroyed explicitly after the
+  submit that last used them, as its textures already were, instead of
+  waiting for the browser's garbage collector (in the browser dropping a
+  `wgpu::Buffer` frees nothing; Firefox ran out of GPU memory while the tumble
+  cube drew). Covered: the tumble cube's SSAA blit buffers (handed to the
+  context, destroyed after the frame's submit, so a cube drawn twice in one
+  frame stays valid), the blend-mode proxy blit's uniforms (after the
+  frame's submit), buffer-arena
+  chunks replaced by larger ones (after the frame's submit) and all chunks
+  when the context drops, screenshot and scaled-capture staging and uniform
+  buffers (once read or abandoned), and the tumble cube's buffers and face
+  textures when its state is replaced or dropped.
 
 - LCD and gray text masks (and LCD backbuffers) larger than the GPU's
   `max_texture_dimension_2d` are drawn in tiles instead of failing validation:

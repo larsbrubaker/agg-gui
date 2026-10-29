@@ -48,6 +48,16 @@
 //! holds an internal reference to that exact buffer.  Resizing in place
 //! would invalidate every prior allocation in the same frame.
 //!
+//! ## Releasing chunks
+//!
+//! A chunk too small for a frame's allocation is replaced. The old chunk is
+//! destroyed explicitly, not just dropped (in the browser a dropped buffer's
+//! memory comes back only when the garbage collector gets to it; see
+//! `texture_life`), but only once the frame recording over it has been
+//! submitted: [`FrameArenas::destroy_retired`] runs right after the frame's
+//! `queue.submit`. Dropping the arenas (with their context, between frames)
+//! destroys every chunk.
+//!
 //! ## Alignment
 //!
 //! `queue.write_buffer` requires offsets be multiples of
@@ -95,6 +105,9 @@ pub(crate) struct GpuArena {
     usage: wgpu::BufferUsages,
     /// Debug label applied to every chunk.
     label: &'static str,
+    /// Chunks replaced this frame, destroyed by [`Self::destroy_retired`]
+    /// after the frame's submit.
+    retired: Vec<Arc<Buffer>>,
 }
 
 impl GpuArena {
@@ -132,7 +145,23 @@ impl GpuArena {
             alignment,
             usage,
             label,
+            retired: Vec::new(),
         }
+    }
+
+    /// Destroy the chunks replaced so far. Call right after the submit of
+    /// the frame that replaced them.
+    pub fn destroy_retired(&mut self) {
+        for chunk in self.retired.drain(..) {
+            chunk.destroy();
+        }
+    }
+
+    /// How many chunks this arena holds and has replaced without destroying
+    /// yet, for tests.
+    #[cfg(test)]
+    pub(crate) fn live_chunks(&self) -> usize {
+        self.chunks.len() + self.retired.len()
     }
 
     /// Reset the write cursor.  Call once at the start of every flush — the
@@ -177,16 +206,17 @@ impl GpuArena {
                 self.staging.push(Vec::with_capacity(needed as usize));
             } else if self.chunk_caps[self.cur_chunk] < needed {
                 // Existing chunk left over from a previous frame, but too
-                // small for this allocation — replace it.  The prior Arc is
-                // dropped now; any bind groups still holding it from last
-                // frame keep their own internal reference alive.
+                // small for this allocation — replace it.  The old chunk is
+                // retired, destroyed after this frame's submit (see the
+                // module docs).
                 let buf = device.create_buffer(&wgpu::BufferDescriptor {
                     label: Some(self.label),
                     size: needed,
                     usage: self.usage | wgpu::BufferUsages::COPY_DST,
                     mapped_at_creation: false,
                 });
-                self.chunks[self.cur_chunk] = Arc::new(buf);
+                let old = std::mem::replace(&mut self.chunks[self.cur_chunk], Arc::new(buf));
+                self.retired.push(old);
                 self.chunk_caps[self.cur_chunk] = needed;
                 // The cursor only moves forward within a frame, so nothing
                 // has been staged in this chunk since `begin_frame`; grow
@@ -268,6 +298,14 @@ impl FrameArenas {
         }
     }
 
+    /// Destroy the chunks the three arenas replaced. Called right after the
+    /// frame's `queue.submit`.
+    pub fn destroy_retired(&mut self) {
+        self.vertex.destroy_retired();
+        self.index.destroy_retired();
+        self.uniform.destroy_retired();
+    }
+
     /// Reset all three arenas' write cursors.  Called from `flush_to_surface`.
     pub fn begin_frame(&mut self) {
         self.vertex.begin_frame();
@@ -281,6 +319,18 @@ impl FrameArenas {
         self.vertex.flush(queue);
         self.index.flush(queue);
         self.uniform.flush(queue);
+    }
+}
+
+impl Drop for GpuArena {
+    /// The arenas drop with their context, between frames (the last one
+    /// submitted), so every chunk can be destroyed now instead of whenever
+    /// the browser's garbage collector gets to it.
+    fn drop(&mut self) {
+        self.destroy_retired();
+        for chunk in &self.chunks {
+            chunk.destroy();
+        }
     }
 }
 
@@ -455,5 +505,43 @@ mod tests {
         assert_caps(&arena, "steady state");
         let after: Vec<*const u8> = arena.staging.iter().map(|s| s.as_ptr()).collect();
         assert_eq!(ptrs, after, "steady-state frame reallocated staging");
+    }
+
+    /// A chunk replaced by a larger one is let go for destruction after the
+    /// frame's submit, not left for the browser's garbage collector: frames
+    /// that each need a larger chunk keep the arena's buffer count flat.
+    /// Each frame records a copy out of its chunk, as a frame's draws read
+    /// it, and submits it before `destroy_retired`; the previous frame's
+    /// chunk, replaced in this frame, was read by the previous frame's
+    /// submitted copy. A chunk destroyed before the submit that reads it
+    /// would fail that submit (the shared device's handler panics) and lose
+    /// the bytes read back.
+    #[test]
+    fn replaced_chunks_are_destroyed_after_the_submit() {
+        let Some((device, queue)) = try_device() else {
+            return;
+        };
+        let mut arena = GpuArena::new(&device, 64, 16, wgpu::BufferUsages::COPY_SRC, "test");
+        for frame in 1..=5usize {
+            arena.begin_frame();
+            // Each frame's request outgrows the chunk the frame before made.
+            let data = vec![frame as u8; 64 * (frame + 1)];
+            let (chunk, offset, size) = arena.alloc(&device, &data);
+            arena.flush(&queue);
+            // The frame's work: record a read of the chunk and submit it.
+            let got = read_back(&device, &queue, &chunk, offset, size);
+            arena.destroy_retired();
+            assert_eq!(
+                got, data,
+                "frame {frame}: the chunk's bytes reached the GPU"
+            );
+            // Chunk 0 (too small for any request, so skipped) and the one
+            // in use.
+            assert_eq!(
+                arena.live_chunks(),
+                2,
+                "frame {frame}: only the chunks the arena holds are alive"
+            );
+        }
     }
 }

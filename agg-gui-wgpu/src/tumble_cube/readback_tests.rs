@@ -2,8 +2,10 @@
 //!
 //! They prove MatterCAD's scene module compiles and binds against our
 //! layout, and that the GPU cube agrees with agg-gui's software renderer
-//! (same camera, lighting and textures), and that its faces are uploaded
-//! once, not again on the paint after the first.  Like the other readback tests
+//! (same camera, lighting and textures), that its faces are uploaded
+//! once, not again on the paint after the first, and that frame after frame
+//! it destroys the buffers it makes instead of leaving them to the browser's
+//! garbage collector.  Like the other readback tests
 //! they pass trivially when no GPU adapter is available.
 
 use std::cell::RefCell;
@@ -126,4 +128,58 @@ fn the_faces_are_uploaded_once_across_frames() {
         ctx.flush_to_surface(&target.view);
     }
     assert_eq!(shared.borrow().face_uploads, 1);
+}
+
+/// Every frame the cube blits its supersampled picture with two buffers made
+/// for that draw. In the browser a dropped buffer is freed only when the
+/// garbage collector runs, which a browser feeling no GPU-memory pressure may
+/// put off until the device runs out of memory, so each frame's pair must be
+/// destroyed once that frame is submitted: the number alive stays flat
+/// however many frames are painted.
+#[test]
+fn painting_frames_leaves_no_buffers_or_textures_behind() {
+    let Some((device, queue)) = try_device() else {
+        return;
+    };
+    let target = Target::new(Arc::clone(&device), Arc::clone(&queue), SIZE, SIZE);
+    let mut ctx = WgpuGfxCtx::new(
+        device,
+        queue,
+        wgpu::TextureFormat::Rgba8Unorm,
+        SIZE as f32,
+        SIZE as f32,
+    );
+    let renderer = WgpuTumbleCubeRenderer::new();
+    let shared = Rc::clone(&renderer.shared);
+    let cam = Rc::new(RefCell::new(FixedCamera(math::look_at(
+        [0.4, 1.0, -0.6],
+        [0.0, 0.0, 1.0],
+    ))));
+    let mut cube = TumbleCube::new(cam).with_gpu_renderer(Box::new(renderer));
+    cube.layout(Size::new(SIZE as f64, SIZE as f64));
+    let mut first_textures = None;
+    for frame in 1..=20u64 {
+        ctx.reset(SIZE as f32, SIZE as f32);
+        ctx.clear(Color::rgba(0.0, 1.0, 0.0, 1.0));
+        cube.paint(&mut ctx);
+        ctx.flush_to_surface(&target.view);
+        let gpu = shared.borrow();
+        let fb = gpu.framebuffer.as_ref().expect("the cube drew");
+        let buffers = ctx.buffer_counts();
+        // Each frame's blit handed its two buffers to the context, which
+        // destroyed them after the frame's submit.
+        assert_eq!(buffers.let_go, 2 * frame, "frame {frame}: {buffers:?}");
+        assert_eq!(buffers.waiting(), 0, "frame {frame}: {buffers:?}");
+        let textures = (fb.texture_counts(), ctx.texture_counts().held());
+        assert_eq!(
+            textures.0.held(),
+            2,
+            "frame {frame}: colour and depth: {textures:?}"
+        );
+        let first = *first_textures.get_or_insert(textures.1);
+        assert_eq!(
+            textures.1, first,
+            "frame {frame}: the context holds the same textures: {textures:?}"
+        );
+    }
 }

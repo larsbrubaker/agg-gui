@@ -40,6 +40,14 @@
 //! `target_view`. Conventionally the implementor should leave its target
 //! state untouched after returning (no in-progress pass, no orphaned
 //! buffer mappings).
+//!
+//! # Buffers made for one frame
+//!
+//! A buffer the pass makes for this frame only (a blit's uniforms, a quad)
+//! goes to [`WgpuCustomRenderCtx::retire_buffer`]: the context destroys it
+//! right after the frame's submit. Dropping it instead frees nothing in the
+//! browser until the garbage collector runs, and destroying it in the pass
+//! fails the frame's submit, which still has to run the commands using it.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -147,6 +155,19 @@ pub struct WgpuCustomRenderCtx<'a> {
     /// `Features::TIMESTAMP_QUERY`, it is the frame cost there is. See
     /// [`crate::FrameCompletion`].
     pub last_frame_completion: Option<crate::FrameCompletion>,
+    /// Where [`Self::retire_buffer`] hands buffers: the context's ledger,
+    /// destroyed after the frame's submit.
+    pub(crate) retire: &'a mut crate::texture_life::TextureLedger,
+}
+
+impl WgpuCustomRenderCtx<'_> {
+    /// Hand over a buffer made for this frame's commands only; the context
+    /// destroys it right after the frame's submit, the earliest moment that
+    /// is safe however many passes in the frame used it. See the module
+    /// docs.
+    pub fn retire_buffer(&mut self, buffer: wgpu::Buffer) {
+        self.retire.retire_buffer(buffer);
+    }
 }
 
 /// Trait implemented by widgets that want to inject custom wgpu render

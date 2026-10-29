@@ -1,7 +1,9 @@
 //! Tests for explicit texture release (`texture_life.rs`): a context drawing
 //! frames whose size changes every frame (a page animating its canvas) keeps
-//! a bounded set of textures and destroys every one it lets go, and steady
-//! frames reuse their layer textures instead of making new ones.
+//! a bounded set of textures and destroys every one it lets go, steady
+//! frames reuse their layer textures instead of making new ones, and the
+//! buffers made for single draws (a blend-mode proxy blit, an SSAA blit) are
+//! destroyed once the frame that drew with them is submitted.
 //!
 //! Why this matters: in the browser a dropped texture's video memory is
 //! freed only when the JavaScript garbage collector collects it, so textures
@@ -15,6 +17,7 @@ use agg_gui::CompOp;
 use agg_rust::trans_affine::TransAffine;
 
 use crate::headless::{HeadlessFrame, HeadlessGpu};
+use crate::layer_text_readback_tests::Target;
 use crate::{SsaaFramebuffer, TextureCounts, WgpuGfxCtx};
 
 /// The shared device, or `None` (the test skips) when there is no adapter.
@@ -173,4 +176,73 @@ fn a_resized_ssaa_framebuffer_destroys_its_old_attachments() {
     let counts = fb.texture_counts();
     assert_eq!(counts.created, 2 * 20, "{counts:?}");
     assert_eq!(counts.destroyed, 2 * 20 - 2 - counts.retired, "{counts:?}");
+}
+
+/// A context with no readable surface texture renders a blend-mode frame
+/// into a proxy and blits it onto the target with a uniform buffer made for
+/// that draw; every frame's buffer is destroyed after its submit.
+#[test]
+fn a_blend_mode_proxy_blit_destroys_its_buffer_every_frame() {
+    let Some(gpu) = gpu() else { return };
+    let (w, h) = (96u32, 64u32);
+    let target = Target::new(gpu.device().clone(), gpu.queue().clone(), w, h);
+    let mut ctx = WgpuGfxCtx::new(
+        gpu.device().clone(),
+        gpu.queue().clone(),
+        wgpu::TextureFormat::Rgba8Unorm,
+        w as f32,
+        h as f32,
+    );
+    for frame in 1..=10u64 {
+        ctx.reset(w as f32, h as f32);
+        ctx.clear(Color::white());
+        paint(&mut ctx, w as f64, h as f64);
+        ctx.flush_to_surface(&target.view);
+        let buffers = ctx.buffer_counts();
+        assert_eq!(buffers.let_go, frame, "frame {frame}: {buffers:?}");
+        assert_eq!(buffers.waiting(), 0, "frame {frame}: {buffers:?}");
+        assert_eq!(buffers.destroyed, frame, "frame {frame}: {buffers:?}");
+    }
+}
+
+/// An SSAA blit into an encoder its caller submits hands its two per-draw
+/// buffers to the caller, also when it blits twice into one encoder (each
+/// blit has buffers of its own, so neither sees the other's quad); destroying
+/// them after the submit leaves the frame valid.
+#[test]
+fn an_ssaa_blit_hands_its_buffers_to_the_caller_that_submits() {
+    let Some(gpu) = gpu() else { return };
+    let (device, queue) = (gpu.device(), gpu.queue());
+    let format = wgpu::TextureFormat::Rgba8Unorm;
+    let target = Target::new(device.clone(), queue.clone(), 32, 32);
+    let ctx = WgpuGfxCtx::new(device.clone(), queue.clone(), format, 32.0, 32.0);
+    let mut fb = SsaaFramebuffer::new(device, 32, 32, format, false);
+    for frame in 1..=10u64 {
+        fb.ensure_size(device, 32, 32);
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+        let mut buffers = Vec::new();
+        for half in [0.0, 16.0] {
+            fb.blit_downsample_retiring(
+                device,
+                &mut encoder,
+                &target.view,
+                (32, 32),
+                agg_gui::Rect::new(half, 0.0, 16.0, 32.0),
+                None,
+                ctx.pipelines(),
+                1,
+                &mut |buffer| buffers.push(buffer),
+            );
+        }
+        assert_eq!(
+            buffers.len(),
+            4,
+            "frame {frame}: two blits, two buffers each"
+        );
+        queue.submit(std::iter::once(encoder.finish()));
+        for buffer in buffers {
+            buffer.destroy();
+        }
+    }
+    let _ = target.read();
 }

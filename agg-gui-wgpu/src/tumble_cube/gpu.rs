@@ -29,6 +29,28 @@ pub(crate) struct GpuState {
     bind_groups: Vec<wgpu::BindGroup>,
 }
 
+impl Drop for GpuState {
+    /// The state is replaced (a new device or surface format) before the
+    /// frame records anything with it, or dropped with its widget between
+    /// frames, so every encoder that used these buffers and textures has
+    /// been submitted: destroy them now. In the browser a dropped buffer or
+    /// texture is freed only when the garbage collector gets to it.
+    fn drop(&mut self) {
+        for buffer in [
+            &self.vbuf,
+            &self.ibuf,
+            &self.transform,
+            &self.lights,
+            &self.effect,
+        ] {
+            buffer.destroy();
+        }
+        for texture in &self.textures {
+            texture.destroy();
+        }
+    }
+}
+
 fn uniform_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {
     wgpu::BindGroupLayoutEntry {
         binding,

@@ -161,12 +161,14 @@ impl WgpuGfxCtx {
         let padded_bpr = unpadded_bpr.div_ceil(ALIGN) * ALIGN;
         let buffer_size = (padded_bpr as u64) * (h as u64);
 
-        let staging = self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("capture_readback"),
-            size: buffer_size,
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        });
+        let staging = crate::texture_life::DestroyOnDrop(self.device.create_buffer(
+            &wgpu::BufferDescriptor {
+                label: Some("capture_readback"),
+                size: buffer_size,
+                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                mapped_at_creation: false,
+            },
+        ));
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -267,12 +269,14 @@ impl WgpuGfxCtx {
 
         const ALIGN: u32 = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
         let padded_bpr = (w * 4).div_ceil(ALIGN) * ALIGN;
-        let staging = self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("capture_readback_async"),
-            size: (padded_bpr as u64) * (h as u64),
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        });
+        let staging = crate::texture_life::DestroyOnDrop(self.device.create_buffer(
+            &wgpu::BufferDescriptor {
+                label: Some("capture_readback_async"),
+                size: (padded_bpr as u64) * (h as u64),
+                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                mapped_at_creation: false,
+            },
+        ));
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {

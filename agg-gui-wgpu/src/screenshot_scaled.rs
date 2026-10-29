@@ -335,12 +335,13 @@ impl WgpuGfxCtx {
         let dst_view = blit
             .ensure_dst(&mut self.textures, &device, dst_w, dst_h)
             .clone();
-        let ub = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("scaled_blit_uniforms"),
-            size: std::mem::size_of::<ScaledBlitUniforms>() as u64,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let ub =
+            crate::texture_life::DestroyOnDrop(device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("scaled_blit_uniforms"),
+                size: std::mem::size_of::<ScaledBlitUniforms>() as u64,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }));
         self.queue
             .write_buffer(&ub, 0, bytemuck::bytes_of(&uniforms));
         let bg0 = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -367,12 +368,13 @@ impl WgpuGfxCtx {
         });
 
         let padded_bpr = padded_bytes_per_row(dst_w);
-        let staging = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("scaled_capture_readback"),
-            size: (padded_bpr as u64) * (dst_h as u64),
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        });
+        let staging =
+            crate::texture_life::DestroyOnDrop(device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("scaled_capture_readback"),
+                size: (padded_bpr as u64) * (dst_h as u64),
+                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                mapped_at_creation: false,
+            }));
 
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("scaled_capture_blit"),

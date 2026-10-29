@@ -1,6 +1,6 @@
 [package]
 name = "agg-gui-web-shell"
-version = "0.5.0"
+version = "0.6.0"
 edition = "2021"
 # agg-rust (a path dependency) requires 1.88; wgpu 29 needs 1.87 and arboard 3.6 needs 1.71.
 rust-version = "1.88"
@@ -35,7 +35,7 @@ reflect = ["agg-gui/reflect", "agg-gui-wgpu/reflect"]
 [dependencies]
 # `version` is required for a `path` dependency to be publishable.
 agg-gui = { path = "../agg-gui", version = "0.5", default-features = false }
-agg-gui-wgpu = { path = "../agg-gui-wgpu", version = "0.5.3", default-features = false }
+agg-gui-wgpu = { path = "../agg-gui-wgpu", version = "0.6.0", default-features = false }
 wgpu = { version = "29", default-features = false, features = ["wgsl"] }
 web-time = "1"
 # Facade only — a library must not print.

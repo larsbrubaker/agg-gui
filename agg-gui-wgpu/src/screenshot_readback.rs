@@ -189,12 +189,13 @@ pub(crate) fn read_texture_rgba_bounded(
     let padded_bpr = unpadded_bpr.div_ceil(ALIGN) * ALIGN;
     let buffer_size = (padded_bpr as u64) * (h as u64);
 
-    let staging = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("screenshot_staging"),
-        size: buffer_size,
-        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-        mapped_at_creation: false,
-    });
+    let staging =
+        crate::texture_life::DestroyOnDrop(device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("screenshot_staging"),
+            size: buffer_size,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        }));
 
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("screenshot_copy"),

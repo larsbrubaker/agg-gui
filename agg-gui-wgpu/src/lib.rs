@@ -182,7 +182,7 @@ pub use screenshot_scaled::RectInPixels;
 mod shaders;
 mod text_render;
 mod texture_life;
-pub use texture_life::TextureCounts;
+pub use texture_life::{BufferCounts, TextureCounts};
 
 /// Every in-crate test module (see `test_modules.rs`).
 #[cfg(test)]
@@ -353,7 +353,9 @@ pub(crate) struct RetainedWgpuLayer {
 /// readback one frame and harvests it a later frame via
 /// [`WgpuGfxCtx::poll_capture_readback`].
 pub(crate) struct PendingReadback {
-    staging: wgpu::Buffer,
+    /// Destroyed when the read-back is harvested or abandoned; its copy was
+    /// submitted when the read-back started.
+    staging: texture_life::DestroyOnDrop,
     w: u32,
     h: u32,
     padded_bpr: u32,
@@ -673,6 +675,13 @@ impl WgpuGfxCtx {
     /// longer uses.
     pub fn texture_counts(&self) -> TextureCounts {
         self.textures.counts()
+    }
+
+    /// How many single-frame buffers this context has been given to destroy
+    /// (the blend-mode proxy blit's uniforms, buffers custom render passes
+    /// hand over) and has destroyed; none wait once a frame is submitted.
+    pub fn buffer_counts(&self) -> BufferCounts {
+        self.textures.buffer_counts()
     }
 
     /// Hand over a texture the caller no longer needs but that commands

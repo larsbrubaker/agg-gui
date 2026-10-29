@@ -17,6 +17,11 @@
 //! whole post-process bind layout for the one entry point.
 //! The pipeline / GPU resource code is adapted from AtomArtist's
 //! `tumble_cube/renderer.rs`; its own shader text is not used.
+//!
+//! The GPU state and the framebuffer belong to one device: they are built
+//! again whenever the pass sees a new device generation (a shell rebuilt its
+//! device after losing it) or a new surface format, and the replaced ones
+//! are destroyed, not left for the browser's garbage collector.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -66,8 +71,9 @@ impl TumbleCubeGpuRenderer for WgpuTumbleCubeRenderer {
             if s.faces_version != Some(frame.faces_version) {
                 // Hand the renderer this frame's pixels; the upload happens
                 // in `render`, where the queue is available.
-                s.pending_faces = Some(frame.faces.iter().map(|f| f.active.clone()).collect());
+                s.faces = frame.faces.iter().map(|f| f.active.clone()).collect();
                 s.faces_version = Some(frame.faces_version);
+                s.faces_uploaded = false;
             }
         }
         let (w, h) = (frame.view.width, frame.view.height);
@@ -85,34 +91,47 @@ impl TumbleCubeGpuRenderer for WgpuTumbleCubeRenderer {
 #[derive(Default)]
 struct CubeGpu {
     view: Option<CubeView>,
-    pending_faces: Option<Vec<Arc<Vec<u8>>>>,
+    /// The latest face pixels handed over, kept so a state built again (on a
+    /// rebuilt device) is filled in the same frame, with no repaint needed.
+    faces: Vec<Arc<Vec<u8>>>,
     faces_version: Option<u64>,
+    /// Whether `faces` are in the current state's textures.
+    faces_uploaded: bool,
     state: Option<gpu::GpuState>,
     framebuffer: Option<SsaaFramebuffer>,
+    /// The device generation `state` and `framebuffer` were built on.
+    device_generation: u64,
     /// How many times the faces have been uploaded, for tests: each upload builds six mip chains
     /// on the CPU and writes them, so one more than needed costs a frame.
     face_uploads: u64,
 }
 
 impl WgpuCustomRender for CubeGpu {
-    fn render(&mut self, ctx: WgpuCustomRenderCtx<'_>) {
+    fn render(&mut self, mut ctx: WgpuCustomRenderCtx<'_>) {
         let Some(view) = self.view else { return };
         let pw = ctx.screen_rect.width.round().max(1.0) as u32 * SSAA;
         let ph = ctx.screen_rect.height.round().max(1.0) as u32 * SSAA;
-        if !matches!(&self.state, Some(s) if s.format == ctx.surface_format) {
+        let current = self.device_generation == ctx.device_generation
+            && matches!(&self.state, Some(s) if s.format == ctx.surface_format);
+        if !current {
+            // Everything built for another device or format goes: recording
+            // the lost device's buffers into this device's encoder is a
+            // validation error that throws the whole frame away, and the
+            // framebuffer's colour target must match the pipeline's format.
+            // Dropping destroys them (`GpuState` and `SsaaFramebuffer` drop
+            // impls); this frame has not recorded anything with them yet.
+            self.framebuffer = None;
             self.state = Some(gpu::GpuState::new(ctx.device, ctx.surface_format));
-            // A rebuilt state has blank textures: re-upload. Faces handed over for this render
-            // fill them below, so their version stays; forgetting it would upload the same faces
-            // again on the next paint.
-            if self.pending_faces.is_none() {
-                self.faces_version = None;
-            }
+            self.device_generation = ctx.device_generation;
+            // A rebuilt state has blank textures: fill them below, this frame.
+            self.faces_uploaded = false;
         }
         let Some(state) = self.state.as_mut() else {
             return;
         };
-        if let Some(faces) = self.pending_faces.take() {
-            state.upload_faces(ctx.queue, &faces);
+        if !self.faces_uploaded && !self.faces.is_empty() {
+            state.upload_faces(ctx.queue, &self.faces);
+            self.faces_uploaded = true;
             self.face_uploads += 1;
         }
         match &mut self.framebuffer {
@@ -133,15 +152,9 @@ impl WgpuCustomRender for CubeGpu {
         let Some(depth) = fb.depth_view() else { return };
         state.write_uniforms(ctx.queue, &view, pw, ph);
         state.draw(ctx.encoder, fb.render_view(), depth, pw, ph);
-        fb.blit_downsample_3x_to(
-            ctx.device,
-            ctx.encoder,
-            ctx.target_view,
-            ctx.target_size,
-            ctx.screen_rect,
-            ctx.parent_clip,
-            ctx.pipelines,
-        );
+        // The blit's buffers go to the context, destroyed after the frame's
+        // submit: safe however many times the cube is drawn in one frame.
+        fb.blit_downsample_in(&mut ctx, SSAA);
     }
 }
 

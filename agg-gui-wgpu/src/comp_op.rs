@@ -36,7 +36,6 @@ use std::sync::Arc;
 use agg_gui::color::Color;
 use agg_gui::CompOp;
 use agg_rust::color::Rgba8;
-use wgpu::util::DeviceExt;
 
 use crate::end_frame::{Prepared, PreparedSlice};
 use crate::texture_life::TextureLedger;
@@ -409,6 +408,7 @@ pub(crate) fn alloc_proxy(
 /// copy mode, no blending).
 pub(crate) fn blit_proxy(
     device: &wgpu::Device,
+    textures: &mut TextureLedger,
     encoder: &mut wgpu::CommandEncoder,
     comp: &CompOpGpu,
     proxy: &wgpu::TextureView,
@@ -421,11 +421,16 @@ pub(crate) fn blit_proxy(
         srgb: 0,
         pad: 0,
     };
-    let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("comp_op_blit"),
-        contents: bytemuck::bytes_of(&uniforms),
-        usage: wgpu::BufferUsages::UNIFORM,
-    });
+    // Made for this one draw, so destroyed after the frame's submit rather
+    // than left to the browser's garbage collector (see `texture_life`).
+    let buffer = textures.create_buffer_for_frame(
+        device,
+        &wgpu::util::BufferInitDescriptor {
+            label: Some("comp_op_blit"),
+            contents: bytemuck::bytes_of(&uniforms),
+            usage: wgpu::BufferUsages::UNIFORM,
+        },
+    );
     let bg = comp.bind_group(device, proxy, proxy, buffer.as_entire_binding());
     let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
         label: Some("comp_op_blit"),

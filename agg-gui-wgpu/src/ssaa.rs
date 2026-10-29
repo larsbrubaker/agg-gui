@@ -53,10 +53,30 @@
 //! // ... begin_render_pass with fb.render_view() + fb.depth_view(), draw your 3-D scene ...
 //! fb.blit_to(device, encoder, target_view, target_size, dst_rect, parent_clip, pipelines);
 //! ```
+//!
+//! # Releasing GPU memory
+//!
+//! In the browser a dropped texture or buffer is freed only when the garbage
+//! collector gets to it (see `texture_life`), so what the framebuffer makes
+//! is destroyed explicitly. Replaced attachments are destroyed by the next
+//! [`SsaaFramebuffer::ensure_size`], and dropping the framebuffer (between
+//! frames) destroys the rest.
+//!
+//! A blit's uniform and vertex buffers are made for that one draw: they
+//! cannot be persistent buffers rewritten each frame, because a blit has no
+//! queue to write them with and two blits recorded into one encoder would
+//! both see the last write. Only whoever submits the encoder knows when they
+//! may be destroyed (destroying one before that submit fails it), so the
+//! framebuffer does not keep them: [`SsaaFramebuffer::blit_downsample_in`]
+//! hands them to a custom render pass's context, which destroys them after
+//! the frame's submit, and [`SsaaFramebuffer::blit_downsample_retiring`]
+//! hands them to a caller that submits its own encoder. The other blit
+//! methods drop them, leaving them to the garbage collector in the browser.
 
 use agg_gui::geometry::Rect;
 use wgpu::util::DeviceExt;
 
+use crate::custom_render::WgpuCustomRenderCtx;
 use crate::pipelines::{TexUniforms, WgpuPipelines};
 use crate::texture_life::{TextureCounts, TextureLedger};
 
@@ -271,6 +291,7 @@ impl SsaaFramebuffer {
             parent_clip,
             &pipelines.tex_pipeline,
             pipelines,
+            &mut drop,
         );
     }
 
@@ -303,6 +324,7 @@ impl SsaaFramebuffer {
             parent_clip,
             &pipelines.tex_downsample_3x_pipeline,
             pipelines,
+            &mut drop,
         );
     }
 
@@ -332,6 +354,7 @@ impl SsaaFramebuffer {
             parent_clip,
             &pipelines.tex_downsample_4x_pipeline,
             pipelines,
+            &mut drop,
         );
     }
 
@@ -371,11 +394,7 @@ impl SsaaFramebuffer {
         pipelines: &WgpuPipelines,
         factor: u32,
     ) {
-        let pipeline = match factor {
-            0..=2 => &pipelines.tex_pipeline,
-            3 => &pipelines.tex_downsample_3x_pipeline,
-            _ => &pipelines.tex_downsample_4x_pipeline,
-        };
+        let pipeline = downsample_pipeline(pipelines, factor);
         self.blit_to_inner(
             device,
             encoder,
@@ -385,6 +404,60 @@ impl SsaaFramebuffer {
             parent_clip,
             pipeline,
             pipelines,
+            &mut drop,
+        );
+    }
+
+    /// [`Self::blit_downsample_to`] onto a custom render pass's target, at
+    /// its `screen_rect` inside its `parent_clip`, handing the blit's
+    /// per-draw buffers to the context
+    /// ([`WgpuCustomRenderCtx::retire_buffer`]), which destroys them right
+    /// after the frame's submit. The blit to use from
+    /// [`crate::WgpuCustomRender::render`]: it is safe however many times the
+    /// framebuffer is drawn in one frame.
+    pub fn blit_downsample_in(&self, ctx: &mut WgpuCustomRenderCtx<'_>, factor: u32) {
+        let pipeline = downsample_pipeline(ctx.pipelines, factor);
+        let retire = &mut *ctx.retire;
+        self.blit_to_inner(
+            ctx.device,
+            ctx.encoder,
+            ctx.target_view,
+            ctx.target_size,
+            ctx.screen_rect,
+            ctx.parent_clip,
+            pipeline,
+            ctx.pipelines,
+            &mut |buffer| retire.retire_buffer(buffer),
+        );
+    }
+
+    /// [`Self::blit_downsample_to`] for a caller that records into an
+    /// encoder it submits itself: the blit's per-draw buffers go to
+    /// `retire`, for the caller to destroy (`wgpu::Buffer::destroy`) once
+    /// that encoder has been submitted, not before (that fails the submit).
+    #[allow(clippy::too_many_arguments)]
+    pub fn blit_downsample_retiring(
+        &self,
+        device: &wgpu::Device,
+        encoder: &mut wgpu::CommandEncoder,
+        target_view: &wgpu::TextureView,
+        target_size: (u32, u32),
+        dst_rect: Rect,
+        parent_clip: Option<[i32; 4]>,
+        pipelines: &WgpuPipelines,
+        factor: u32,
+        retire: &mut dyn FnMut(wgpu::Buffer),
+    ) {
+        self.blit_to_inner(
+            device,
+            encoder,
+            target_view,
+            target_size,
+            dst_rect,
+            parent_clip,
+            downsample_pipeline(pipelines, factor),
+            pipelines,
+            retire,
         );
     }
 
@@ -399,6 +472,7 @@ impl SsaaFramebuffer {
         parent_clip: Option<[i32; 4]>,
         pipeline: &wgpu::RenderPipeline,
         pipelines: &WgpuPipelines,
+        retire: &mut dyn FnMut(wgpu::Buffer),
     ) {
         let [gl_x, gl_y, gl_w, gl_h] = pixel_rect(dst_rect);
         if gl_w <= 0 || gl_h <= 0 {
@@ -471,6 +545,8 @@ impl SsaaFramebuffer {
                 (gl_x.max(0) as u32, y_down as u32, gl_w as u32, gl_h as u32)
             });
         if scissor.2 == 0 || scissor.3 == 0 {
+            retire(tex_ub);
+            retire(vb);
             return;
         }
 
@@ -504,9 +580,19 @@ impl SsaaFramebuffer {
         pass.set_bind_group(1, &tex_bg1, &[]);
         pass.set_vertex_buffer(0, vb.slice(..));
         pass.draw(0..6, 0..1);
-        // pass dropped here; vb / bind groups kept alive by `_` below.
         drop(pass);
-        let _ = (tex_ub, tex_bg0, tex_bg1, vb);
+        retire(tex_ub);
+        retire(vb);
+    }
+}
+
+/// The downsample pipeline for a linear supersample `factor` (see
+/// [`SsaaFramebuffer::blit_downsample_to`]).
+fn downsample_pipeline(pipelines: &WgpuPipelines, factor: u32) -> &wgpu::RenderPipeline {
+    match factor {
+        0..=2 => &pipelines.tex_pipeline,
+        3 => &pipelines.tex_downsample_3x_pipeline,
+        _ => &pipelines.tex_downsample_4x_pipeline,
     }
 }
 

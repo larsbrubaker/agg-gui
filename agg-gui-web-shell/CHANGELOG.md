@@ -6,7 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps.
 
-## [0.5.0] - Unreleased
+## [0.6.0] - Unreleased
+
+### Changed
+
+- **Breaking:** built on agg-gui-wgpu 0.6.0, whose types this crate
+  re-exports (the whole crate as `agg_gui_wgpu`, and `WgpuGfxCtx`),
+  so their 0.6.0 changes reach this crate's API. A consumer that names
+  agg-gui-wgpu itself moves it to 0.6 too; one that sets
+  `default-features = false` on agg-gui-wgpu and renders through WebGL2
+  enables its `webgl` feature.
+- The tumble cube and every other custom render pass on agg-gui-wgpu rebuild
+  their GPU state after this shell rebuilds a lost device (agg-gui-wgpu
+  0.6.0), and the buffers agg-gui-wgpu lets go are destroyed rather than
+  left to the browser's garbage collector.
+- With `offscreen_scene`, the scene blit's per-draw buffers are destroyed
+  right after its submit instead of waiting for the garbage collector.
 
 ### Added
 
