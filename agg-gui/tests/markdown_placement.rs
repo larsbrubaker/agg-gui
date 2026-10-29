@@ -17,7 +17,8 @@
 //! Every other `.md` or `.markdown` file (any case) fails the gate, named with
 //! what to do about it. The walk is of the working tree, so a new doc fails
 //! before it is committed. It skips build output (`target`, `node_modules`,
-//! any directory holding a `CACHEDIR.TAG`, the web demo's `dist` and `pkg`),
+//! any directory holding a `CACHEDIR.TAG`, the web demo's `dist` and `pkg`,
+//! and Playwright's `test-results` and `playwright-report` beside them),
 //! `.git`, and the third-party trees (`tests/resvg-test-suite` and the egui
 //! and C++ reference mirrors), whose Markdown is not ours.
 //!
@@ -43,6 +44,10 @@ const SKIPPED_TREES: &[&str] = &[
     "demo/node_modules",
     "demo/public/pkg",
     "demo/public/dist",
+    // Playwright's output for the demo's browser tests: results, traces and
+    // the error-context.md it writes for a failed run, and its HTML report.
+    "demo/test-results",
+    "demo/playwright-report",
 ];
 
 /// Plans for work still open, relative to the root. Each must exist, so an
@@ -430,6 +435,8 @@ fn markdown_gate_reads_untracked_files_and_skips_build_and_third_party_trees() {
         "target/doc/README.md",
         "demo/node_modules/pkg/README.md",
         "demo/dist/README.md",
+        "demo/test-results/x/error-context.md",
+        "demo/playwright-report/data/notes.md",
         "lib-a/target/notes.md",
         ".git/info/notes.md",
         ".claude/worktrees/slot1/notes.md",
