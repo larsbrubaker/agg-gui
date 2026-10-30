@@ -8,6 +8,21 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ## [Unreleased]
 
+## [0.0.3] - 2026-10-30
+
+### Added
+
+- `NodeEditor::show_nodes_readable(min_scale)` and
+  `NodeEditor::request_readable_on_draw(min_scale)`: show a graph so its
+  cards can be read. The whole graph is fitted as `center_nodes_in_view`
+  fits it while that zoom stays at or above the host's `min_scale`;
+  otherwise the view zooms to `min_scale` (snapped to 100 % within 5 %)
+  and starts at the graph's top-left: its left edge at the margin, its top
+  at the top margin when it is taller than the view, and centred along an
+  axis it fits. The request form runs on the next layout that can, retried
+  and cancelled as `request_center_on_draw` is. `center_nodes_in_view` and
+  `request_center_on_draw` are unchanged.
+
 ## [0.0.2] - 2026-10-28
 
 ### Added

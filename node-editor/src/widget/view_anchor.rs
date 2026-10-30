@@ -15,6 +15,14 @@
 //! `CenterNodesInView` (the home button, and the first draw of a graph);
 //! [`NodeEditor::request_center_on_draw`] is its `centerPending`.
 //!
+//! A big graph fitted whole can shrink its cards' text past reading, so a
+//! host can open a graph with [`NodeEditor::show_nodes_readable`] instead
+//! ([`NodeEditor::request_readable_on_draw`] for the first layout): it fits
+//! as the home button does while that zoom stays at or above the host's
+//! minimum readable zoom, and otherwise opens at that minimum from the
+//! graph's top-left, where reading starts. The host chooses the minimum,
+//! because only it knows the fonts its cards draw.
+//!
 //! Split out of `mod.rs` for the 800-line guardrail; the fit tween lives
 //! in `view_nav`.
 
@@ -45,6 +53,10 @@ pub(crate) struct ViewState {
     /// Centre the graph on the next layout that can (NodeDesigner's
     /// `centerPending`).
     pub center_pending: bool,
+    /// The minimum readable zoom of a pending centring that opens the
+    /// graph readable ([`NodeEditor::request_readable_on_draw`]); `None`
+    /// fits the whole graph.
+    pub pending_min_scale: Option<f64>,
     /// The size of the last layout, to shift a centre-anchored view by
     /// half of a resize.
     pub last_size: Size,
@@ -56,6 +68,36 @@ pub(crate) struct ViewState {
 /// for the editor's logical units, so a 2x display fits as NodeDesigner does.
 const MARGIN: f64 = 30.0;
 const BOTTOM_PIXELS: f64 = 20.0;
+
+/// What fitting the graph measured: its canvas bounds `(min_x, min_y,
+/// max_x, max_y)`, the margins in logical units, and the zoom that fits it.
+struct FitFrame {
+    bounds: (f64, f64, f64, f64),
+    margin: f64,
+    bottom_pixels: f64,
+    fit: f64,
+}
+
+/// NodeDesigner's `LayerScale` setter snaps a near-100 % zoom to 100 %.
+fn snap_near_one(scale: f64) -> f64 {
+    if scale > 0.95 && scale < 1.05 {
+        1.0
+    } else {
+        scale
+    }
+}
+
+/// The raw offset that centres the graph at `scale` in a `w` x `h` editor.
+/// NodeDesigner: `UnscaledRenderOffset = -center + (0, 20) * scale`, then
+/// `local = (canvas + U) * scale + size / 2`.
+fn centred_offset(frame: &FitFrame, scale: f64, w: f64, h: f64) -> [f64; 2] {
+    let (min_x, min_y, max_x, max_y) = frame.bounds;
+    let u = [
+        -(min_x + max_x) * 0.5,
+        -(min_y + max_y) * 0.5 + frame.bottom_pixels * scale,
+    ];
+    [u[0] * scale + w * 0.5, u[1] * scale + h * 0.5]
+}
 
 impl NodeEditor {
     /// Measure the pan from `anchor` (see [`ViewAnchor`]). The view on
@@ -120,11 +162,63 @@ impl NodeEditor {
     /// the view alone, when there is nothing to fit or no room to fit it in
     /// (an empty graph, or a panel squeezed below the margins).
     pub fn center_nodes_in_view(&mut self) -> bool {
-        let w = self.bounds.width;
-        let h = self.bounds.height;
-        let Some((min_x, min_y, max_x, max_y)) = content_bounds(&self.snapshot_layouts()) else {
+        let Some(frame) = self.fit_frame() else {
             return false;
         };
+        let scale = snap_near_one(frame.fit.min(1.0).clamp(ZOOM_MIN, ZOOM_MAX));
+        self.apply_centred(&frame, scale);
+        true
+    }
+
+    /// Show the graph so its cards can be read: fit it whole, as
+    /// [`Self::center_nodes_in_view`] does, when that zoom is at least
+    /// `min_scale`; otherwise zoom to `min_scale` (snapped to 100 % when
+    /// within 5 % of it, as the fit is) and start at the graph's top-left.
+    /// There the graph's left edge sits at the margin and, when the graph
+    /// is taller than the view, its top at the top margin; an axis the
+    /// graph fits along at that zoom is centred instead. Instant. Returns
+    /// `false`, leaving the view alone, in the same cases as
+    /// [`Self::center_nodes_in_view`].
+    pub fn show_nodes_readable(&mut self, min_scale: f64) -> bool {
+        let Some(frame) = self.fit_frame() else {
+            return false;
+        };
+        let fitted = snap_near_one(frame.fit.min(1.0).clamp(ZOOM_MIN, ZOOM_MAX));
+        // A NaN minimum fits as the home button does.
+        if fitted >= min_scale || min_scale.is_nan() {
+            self.apply_centred(&frame, fitted);
+            return true;
+        }
+        let scale = snap_near_one(min_scale.clamp(ZOOM_MIN, ZOOM_MAX));
+        let (w, h) = (self.bounds.width, self.bounds.height);
+        let (min_x, min_y, max_x, max_y) = frame.bounds;
+        let centred = centred_offset(&frame, scale, w, h);
+        // The margins split evenly across each axis: half of `margin` on
+        // either side, and `bottom_pixels` more above and below.
+        let fits_x = (max_x - min_x) * scale <= w - frame.margin;
+        let fits_y = (max_y - min_y) * scale <= h - frame.margin - frame.bottom_pixels * 2.0;
+        let x = if fits_x {
+            centred[0]
+        } else {
+            frame.margin * 0.5 - min_x * scale
+        };
+        let y = if fits_y {
+            centred[1]
+        } else {
+            h - frame.margin * 0.5 - frame.bottom_pixels - max_y * scale
+        };
+        self.view_anim = None;
+        self.apply_view(scale, [x, y]);
+        true
+    }
+
+    /// The graph's bounds, the margins in logical units and the zoom that
+    /// fits the graph in the editor, or `None` when nothing fits (an empty
+    /// graph, or a panel squeezed below the margins).
+    fn fit_frame(&self) -> Option<FitFrame> {
+        let w = self.bounds.width;
+        let h = self.bounds.height;
+        let (min_x, min_y, max_x, max_y) = content_bounds(&self.snapshot_layouts())?;
         let device = agg_gui::device_scale();
         let (margin, bottom_pixels) = (MARGIN / device, BOTTOM_PIXELS / device);
         let by_height = (h - margin - bottom_pixels * 2.0) / (max_y - min_y);
@@ -136,22 +230,21 @@ impl NodeEditor {
             by_height.min(by_width)
         };
         if fit.is_nan() || fit <= 0.0 || fit.is_infinite() {
-            return false;
+            return None;
         }
-        let mut scale = fit.min(1.0).clamp(ZOOM_MIN, ZOOM_MAX);
-        // NodeDesigner's `LayerScale` setter snaps a near-100 % zoom to 100 %.
-        if scale > 0.95 && scale < 1.05 {
-            scale = 1.0;
-        }
-        // NodeDesigner: `UnscaledRenderOffset = -center + (0, 20) * scale`,
-        // then `local = (canvas + U) * scale + size / 2`.
-        let u = [
-            -(min_x + max_x) * 0.5,
-            -(min_y + max_y) * 0.5 + bottom_pixels * scale,
-        ];
+        Some(FitFrame {
+            bounds: (min_x, min_y, max_x, max_y),
+            margin,
+            bottom_pixels,
+            fit,
+        })
+    }
+
+    /// Centre the graph at `scale`, NodeDesigner's way.
+    fn apply_centred(&mut self, frame: &FitFrame, scale: f64) {
+        let offset = centred_offset(frame, scale, self.bounds.width, self.bounds.height);
         self.view_anim = None;
-        self.apply_view(scale, [u[0] * scale + w * 0.5, u[1] * scale + h * 0.5]);
-        true
+        self.apply_view(scale, offset);
     }
 
     /// Centre the graph ([`Self::center_nodes_in_view`]) on the next layout
@@ -161,6 +254,17 @@ impl NodeEditor {
     /// that has no saved view.
     pub fn request_center_on_draw(&mut self) {
         self.view.center_pending = true;
+        self.view.pending_min_scale = None;
+        agg_gui::animation::request_draw();
+    }
+
+    /// Show the graph readable ([`Self::show_nodes_readable`] with
+    /// `min_scale`) on the next layout that can, retried and cancelled as
+    /// [`Self::request_center_on_draw`] is. For a graph shown for the
+    /// first time, whose whole might be too small to read.
+    pub fn request_readable_on_draw(&mut self, min_scale: f64) {
+        self.view.center_pending = true;
+        self.view.pending_min_scale = Some(min_scale);
         agg_gui::animation::request_draw();
     }
 
@@ -169,7 +273,8 @@ impl NodeEditor {
         self.view.center_pending = false;
     }
 
-    /// Whether a [`Self::request_center_on_draw`] is still waiting.
+    /// Whether a [`Self::request_center_on_draw`] or
+    /// [`Self::request_readable_on_draw`] is still waiting.
     pub fn is_center_pending(&self) -> bool {
         self.view.center_pending
     }
@@ -214,7 +319,14 @@ impl NodeEditor {
     /// Called from `layout()` once the cards are measured: run a pending
     /// centring, cleared only once it worked.
     pub(super) fn run_pending_center(&mut self) {
-        if self.view.center_pending && self.center_nodes_in_view() {
+        if !self.view.center_pending {
+            return;
+        }
+        let done = match self.view.pending_min_scale {
+            Some(min_scale) => self.show_nodes_readable(min_scale),
+            None => self.center_nodes_in_view(),
+        };
+        if done {
             self.view.center_pending = false;
         }
     }
