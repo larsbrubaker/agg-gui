@@ -213,9 +213,9 @@ pub use framebuffer::Framebuffer;
 pub use geometry::{Point, Rect, Size};
 pub use gfx_ctx::GfxCtx;
 pub use icon_image::{IconImage, IconPixelFilter};
+pub use image_density::{encode_png_rgba_at_density, image_pixel_density};
 pub use layout_props::{resolve_fit_or_stretch, HAnchor, Insets, VAnchor, WidgetBase};
 pub use platform::{current_platform, platform_from_name, set_platform, Platform};
-pub use image_density::{encode_png_rgba_at_density, image_pixel_density};
 pub use screenshot::ScreenshotHandle;
 pub use selection_control_size::{
     selection_control_size, set_selection_control_size, SelectionControlSize,

@@ -105,6 +105,9 @@ pub fn encode_png_rgba_at_density(
         let mut encoder = png::Encoder::new(&mut out, width, height);
         encoder.set_color(png::ColorType::Rgba);
         encoder.set_depth(png::BitDepth::Eight);
+        // Each row picks its own filter: screenshots mix flat chrome and detailed renders, and
+        // one filter for the whole image makes them about a quarter larger.
+        encoder.set_adaptive_filter(png::AdaptiveFilterType::Adaptive);
         encoder.set_pixel_dims(Some(png::PixelDimensions {
             xppu: per_metre,
             yppu: per_metre,

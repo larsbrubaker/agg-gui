@@ -108,10 +108,10 @@ mod headings_tests;
 mod html_form;
 #[cfg(test)]
 mod html_form_tests;
-#[cfg(test)]
-mod image_density_tests;
 mod html_rewriter;
 mod image_context;
+#[cfg(test)]
+mod image_density_tests;
 pub(crate) mod image_loader;
 mod introspect;
 mod layout;
