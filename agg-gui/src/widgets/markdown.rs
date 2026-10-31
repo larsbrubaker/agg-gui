@@ -108,6 +108,8 @@ mod headings_tests;
 mod html_form;
 #[cfg(test)]
 mod html_form_tests;
+#[cfg(test)]
+mod image_density_tests;
 mod html_rewriter;
 mod image_context;
 pub(crate) mod image_loader;
@@ -357,6 +359,9 @@ pub(crate) struct ImagePixels {
     pub(crate) height: u32,
     /// The frames of an animated image; `data` is its first frame.
     pub(crate) sequence: Option<Arc<crate::image_sequence::ImageSequence>>,
+    /// Image pixels per logical point (`crate::image_density`): the picture
+    /// lays out at `width / density` by `height / density` points.
+    pub(crate) density: u32,
 }
 
 /// An image's load state, shared with the rich editor's image cache

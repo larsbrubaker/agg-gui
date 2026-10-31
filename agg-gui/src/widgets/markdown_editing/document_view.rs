@@ -22,7 +22,9 @@
 //! - Raw blocks' rendered hosts and the image cache live in the widget; the
 //!   view tells it where a Raw host goes ([`RichDocumentView::raw_host_origin`])
 //!   and which blocks show an image ([`RichDocumentView::blocks_showing`]),
-//!   and [`image_display_size`] is C#'s `ImageSize` sizing rule.
+//!   and [`image_display_size`] is C#'s `ImageSize` sizing rule
+//!   ([`image_display_size_at_density`] for a picture that says its pixel
+//!   density, `crate::image_density`).
 //! - A relayout does not run from inside painting (C#'s `OnDraw` re-laid out
 //!   on a stale style); the widget checks [`RichDocumentView::style_is_current`]
 //!   and relays out before it paints.
@@ -652,12 +654,26 @@ pub fn image_display_size(
     layout_width: f64,
     placeholder_line: f64,
 ) -> Size {
+    image_display_size_at_density(image, 1, layout_width, placeholder_line)
+}
+
+/// [`image_display_size`] for an image that spends `density` pixels on a
+/// logical point (`crate::image_density`): its natural size is its pixel size
+/// divided by `density` (0 counts as 1), then shrunk to fit as before.
+pub fn image_display_size_at_density(
+    image: Option<(u32, u32)>,
+    density: u32,
+    layout_width: f64,
+    placeholder_line: f64,
+) -> Size {
     match image {
         // A zero-width image divides to an infinite scale, clamped to 1, as
         // in C#.
         Some((width, height)) => {
-            let scale = f64::min(1.0, f64::max(layout_width, 1.0) / f64::from(width));
-            Size::new(f64::from(width) * scale, f64::from(height) * scale)
+            let density = f64::from(density.max(1));
+            let (width, height) = (f64::from(width) / density, f64::from(height) / density);
+            let scale = f64::min(1.0, f64::max(layout_width, 1.0) / width);
+            Size::new(width * scale, height * scale)
         }
         None => Size::new(placeholder_line, placeholder_line),
     }

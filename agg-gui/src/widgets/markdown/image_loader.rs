@@ -25,7 +25,9 @@
 //!
 //! A loader gets the url and a [`RemoteImageDone`], which it completes from
 //! any thread with the image's bytes (decoded here: PNG/JPEG/…, SVG, and an
-//! animated GIF as an image sequence), decoded pixels, or a sequence. The
+//! animated GIF as an image sequence; a PNG's pixel density, read by
+//! `crate::image_density`, comes along), decoded pixels (with the density
+//! the host read, `deliver_rgba_at_density`), or a sequence. The
 //! completion stores the image and wakes the queue of the UI thread that
 //! started the load ([`crate::ui_thread::current_queue`], captured up front),
 //! not whatever queue a worker would post to, so that thread redraws.
@@ -162,8 +164,18 @@ impl RemoteImageDone {
         self.finish(next);
     }
 
-    /// Complete with decoded RGBA8 pixels, top row first, `width × height`.
+    /// Complete with decoded RGBA8 pixels, top row first, `width × height`,
+    /// laid out one pixel per logical point.
     pub fn deliver_rgba(self, data: Vec<u8>, width: u32, height: u32) {
+        self.deliver_rgba_at_density(data, width, height, 1);
+    }
+
+    /// Complete with decoded RGBA8 pixels, top row first, `width × height`,
+    /// that spend `density` pixels on a logical point (clamped to
+    /// 1..=[`crate::image_density::MAX_IMAGE_DENSITY`]): a host that decodes
+    /// a picture itself passes on what [`crate::image_pixel_density`] read
+    /// from its bytes, so the view lays it out at its intended size.
+    pub fn deliver_rgba_at_density(self, data: Vec<u8>, width: u32, height: u32, density: u32) {
         let next = if width > 0 && height > 0 && data.len() == width as usize * height as usize * 4
         {
             ImageState::Ready {
@@ -172,6 +184,7 @@ impl RemoteImageDone {
                     width,
                     height,
                     sequence: None,
+                    density: density.clamp(1, crate::image_density::MAX_IMAGE_DENSITY),
                 },
                 seen: false,
             }
@@ -292,6 +305,7 @@ impl super::MarkdownView {
                         width,
                         height,
                         sequence: None,
+                        density: 1,
                     },
                     seen: false,
                 }
@@ -415,6 +429,7 @@ fn decode_image(bytes: &[u8]) -> Option<ImagePixels> {
         width,
         height,
         sequence: None,
+        density: crate::image_density::image_pixel_density(bytes),
     })
 }
 
@@ -436,6 +451,7 @@ fn decode_svg(bytes: &[u8]) -> Option<ImagePixels> {
         width,
         height,
         sequence: None,
+        density: 1,
     })
 }
 
@@ -443,6 +459,17 @@ fn decode_svg(bytes: &[u8]) -> Option<ImagePixels> {
 mod tests {
     use super::decode_image;
     use crate::image_sequence::tests::gif_bytes;
+
+    #[test]
+    fn a_fetched_png_keeps_the_density_its_file_says() {
+        let rgba = [10u8, 20, 30, 255].repeat(8 * 4);
+        let marked =
+            crate::image_density::encode_png_rgba_at_density(&rgba, 8, 4, 2).expect("encodes");
+        let image = decode_image(&marked).expect("decodes");
+        assert_eq!((image.width, image.height, image.density), (8, 4, 2));
+        let plain = crate::screenshot::encode_png_rgba(&rgba, 8, 4).expect("encodes");
+        assert_eq!(decode_image(&plain).expect("decodes").density, 1);
+    }
 
     #[test]
     fn rust_only_fetched_animated_gif_keeps_its_frames() {

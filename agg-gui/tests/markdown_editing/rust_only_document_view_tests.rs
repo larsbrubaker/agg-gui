@@ -13,7 +13,7 @@ use agg_gui::text::Font;
 use agg_gui::widgets::markdown_editing::caret_blink::RichCaretBlink;
 use agg_gui::widgets::markdown_editing::caret_navigator as nav;
 use agg_gui::widgets::markdown_editing::document_view::{
-    ends_list, image_display_size, list_numbers,
+    ends_list, image_display_size, image_display_size_at_density, list_numbers,
 };
 use agg_gui::widgets::markdown_editing::markdown_parser::parse;
 use agg_gui::widgets::markdown_editing::{
@@ -104,6 +104,17 @@ fn rust_only_image_display_size_fits_the_column() {
     assert_eq!((size.width, size.height), (200.0, 100.0));
     let size = image_display_size(None, 200.0, 12.0);
     assert_eq!((size.width, size.height), (12.0, 12.0));
+}
+
+#[test]
+fn a_picture_that_says_two_pixels_per_point_shows_at_half_its_pixel_size() {
+    let size = image_display_size_at_density(Some((300, 120)), 2, 500.0, 12.0);
+    assert_eq!((size.width, size.height), (150.0, 60.0));
+    // Still shrunk to fit a narrower column, from its logical size.
+    let size = image_display_size_at_density(Some((800, 400)), 2, 200.0, 12.0);
+    assert_eq!((size.width, size.height), (200.0, 100.0));
+    let size = image_display_size_at_density(Some((300, 120)), 1, 500.0, 12.0);
+    assert_eq!((size.width, size.height), (300.0, 120.0));
 }
 
 #[test]

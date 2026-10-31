@@ -113,6 +113,13 @@ impl RichImageCache {
     /// The atom's image once it has loaded, or `None` while it is loading (or
     /// has no loader or url).  The first call for a url starts its load.
     pub fn loaded(&self, atom: &InlineAtom) -> Option<RichImage> {
+        self.loaded_with_density(atom).map(|(image, _)| image)
+    }
+
+    /// [`Self::loaded`] with the image's pixel density (`crate::image_density`:
+    /// image pixels per logical point, 1 for a picture that says none), which
+    /// the layout divides its size by.
+    pub fn loaded_with_density(&self, atom: &InlineAtom) -> Option<(RichImage, u32)> {
         let url = self.url_of(atom);
         if url.trim().is_empty() {
             return None;
@@ -122,13 +129,14 @@ impl RichImageCache {
         let load = loads.entry(url.clone()).or_insert_with(|| self.start(&url));
         let state = load.state.lock().ok()?;
         match &*state {
-            ImageState::Ready { image, .. } if image.width > 0 && image.height > 0 => {
-                Some(RichImage {
+            ImageState::Ready { image, .. } if image.width > 0 && image.height > 0 => Some((
+                RichImage {
                     data: Arc::clone(&image.data),
                     width: image.width,
                     height: image.height,
-                })
-            }
+                },
+                image.density,
+            )),
             _ => None,
         }
     }
@@ -148,6 +156,7 @@ impl RichImageCache {
                         width,
                         height,
                         sequence: None,
+                        density: 1,
                     },
                     seen: true,
                 },

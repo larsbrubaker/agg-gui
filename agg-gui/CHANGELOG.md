@@ -10,6 +10,16 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- A picture says its own pixel density and `MarkdownView` and the rich editor lay it out by it:
+  a PNG whose `pHYs` chunk says 144 ppi (5669 px/m) is a 2x picture and shows at half its pixel
+  size in logical points, so a high-density screenshot appears at the size it was taken at, pixel
+  for pixel on a 2x screen (`image_density`: 2x, 3x or 4x only when both axes are within 1 ppi
+  of 144, 216 or 288 ppi; everything else is 1, including no chunk, an unknown unit, 72 or 96 ppi,
+  print resolutions such as 300 dpi and every other format, so existing pictures show as before). `image_pixel_density` reads it from a file's bytes,
+  `encode_png_rgba_at_density` writes a PNG that says it, a host that decodes pictures itself
+  passes it on with `RemoteImageDone::deliver_rgba_at_density`, and the rich editor offers
+  `RichImageCache::loaded_with_density` and `document_view::image_display_size_at_density`.
+
 - In a browser the right-click menu's Paste in `TextField`, `TextArea` and `RichTextEdit` reads
   the system clipboard too, as the touch toolbar's does (`navigator.clipboard.readText()` inside
   the click, pasted when the read resolves), so text copied in another app pastes. The app's own

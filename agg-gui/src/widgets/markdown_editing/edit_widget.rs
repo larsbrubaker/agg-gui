@@ -39,7 +39,7 @@ use super::block::{RichBlockId, RichBlockKind};
 use super::block_painter::{RichEditColors, RichLayout};
 use super::caret_blink::RichCaretBlink;
 use super::document::RichDocument;
-use super::document_view::{image_display_size, placeholder_line};
+use super::document_view::{image_display_size_at_density, placeholder_line};
 use super::edit_error::RichEditError;
 use super::editor_state::{RichEditorState, SCROLL_BAR_ROOM};
 use super::image_cache::{RichImageCache, RichImageProvider, RichResolveUrl};
@@ -508,9 +508,12 @@ fn style_builder(shared: Rc<Shared>) -> Box<dyn FnMut() -> RichLayoutStyle> {
         let body_px = style.block_face(&Default::default()).em_px();
         let images = Rc::clone(&shared);
         style.image_size = Some(Box::new(move |atom| {
-            let loaded = images.images.borrow().loaded(atom);
-            image_display_size(
-                loaded.map(|image| (image.width, image.height)),
+            let loaded = images.images.borrow().loaded_with_density(atom);
+            image_display_size_at_density(
+                loaded
+                    .as_ref()
+                    .map(|(image, _)| (image.width, image.height)),
+                loaded.as_ref().map_or(1, |(_, density)| *density),
                 images.layout_width.get(),
                 placeholder,
             )

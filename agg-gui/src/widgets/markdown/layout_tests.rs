@@ -117,6 +117,7 @@ fn newly_ready_image_layout_uses_image_dimensions() {
             width: 200,
             height: 40,
             sequence: None,
+            density: 1,
         },
         seen: false,
     };
@@ -164,6 +165,7 @@ fn ready_remote_image_stays_dirty_until_painted() {
             width: 1,
             height: 1,
             sequence: None,
+            density: 1,
         },
         seen: false,
     };

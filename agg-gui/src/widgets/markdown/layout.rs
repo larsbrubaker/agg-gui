@@ -389,12 +389,21 @@ impl MarkdownView {
     pub(super) fn inline_image_size(&self, cache_idx: usize, alt: &str, max_w: f64) -> (f64, f64) {
         if let Some((iw, ih)) = self.image_cache.get(cache_idx).and_then(|entry| {
             entry.state.lock().ok().and_then(|state| match &*state {
-                ImageState::Ready { image, .. } => Some((image.width, image.height)),
+                // A picture says how many pixels it spends on a point
+                // (`crate::image_density`): a 2x screenshot lays out at half
+                // its pixel size, the size it was taken at.
+                ImageState::Ready { image, .. } => {
+                    let density = f64::from(image.density.max(1));
+                    Some((
+                        f64::from(image.width) / density,
+                        f64::from(image.height) / density,
+                    ))
+                }
                 _ => None,
             })
         }) {
-            let scale = (max_w / iw as f64).min(1.0);
-            (iw as f64 * scale, ih as f64 * scale)
+            let scale = (max_w / iw).min(1.0);
+            (iw * scale, ih * scale)
         } else {
             let label = if alt.is_empty() { "image" } else { alt };
             let w = self.text_width(label, LineStyle::Body) + 16.0 + self.placeholder_icon_room();

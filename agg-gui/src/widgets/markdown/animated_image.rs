@@ -222,5 +222,6 @@ pub(crate) fn pixels_of_sequence(sequence: ImageSequence) -> Option<super::Image
         width: first.width,
         height: first.height,
         sequence: animated.then(|| std::sync::Arc::new(sequence)),
+        density: 1,
     })
 }
