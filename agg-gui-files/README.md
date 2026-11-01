@@ -16,6 +16,9 @@ can depend on it. It builds for `wasm32-unknown-unknown`.
 | `Picture` | Straight-alpha RGBA pixels, top row first |
 | `Spawner`, `PlaceId`, `LoadError` | Where work nobody awaits runs, the storage a folder is in, why content could not be given |
 | `tr`, `set_translator`, `ENGLISH_TEXTS` | The translation hook for the text the crate shows |
+| `MessageItem`, `DynamicFolder`, `DynamicFolderLink`, `FolderData` | Ready-made rows and folders: a message, a folder filled when it loads, a row whose folder is made when opened |
+| `SearchResultsFolder`, `WakeTimer` | A search across folders, in sections, and the deadline that bounds its wait for a late listing |
+| `MemoryFolder` | A writable folder held in memory, for tests and demos |
 
 Everything is single-threaded (`Rc`, local futures, no async runtime): a folder's `load` lists at
 once or starts the work and raises its content-changed callbacks when the listing lands.
@@ -45,7 +48,7 @@ impl Folder for Home {
 }
 ```
 
-It depends on std alone.
+It depends on std and `web-time` alone.
 
 The model comes from MatterCAD's library (mattercad-rust's `mattercad-model`, same author). MIT
 licensed, as the rest of agg-gui.

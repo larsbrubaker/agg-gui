@@ -10,7 +10,7 @@
 # author), published here under agg-gui's MIT licence.
 [package]
 name = "agg-gui-files"
-version = "0.0.1"
+version = "0.0.2"
 edition = "2021"
 # Matches the rest of the agg-gui workspace.
 rust-version = "1.88"
@@ -26,4 +26,7 @@ categories = ["gui", "filesystem"]
 name = "agg_gui_files"
 path = "src/lib.rs"
 
-# No dependencies: std only.
+[dependencies]
+# The search walk's deadline reads the clock, and std's Instant panics in the browser
+# (wasm32-unknown-unknown); web-time is std's own Instant natively.
+web-time = "1"

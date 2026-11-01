@@ -3,7 +3,8 @@
 //! `WritableFolder::copy_in`) is handed a [`Spawner`] and gives the work to it. An app implements
 //! it over its own executor, which it pumps every frame; a test spawns onto its own and drives
 //! it. Work that fails after its starter returned reports the failure through `report_fault`, so
-//! the failure is never lost with nobody awaiting it.
+//! the failure is never lost with nobody awaiting it; a failure the work already handled (a
+//! search section that says it failed) is only noted for the app's log through `log_error`.
 
 use std::future::Future;
 use std::pin::Pin;
@@ -20,4 +21,11 @@ pub trait Spawner {
 
     /// Reports that `error` ended work nobody awaits.
     fn report_fault(&self, error: Arc<dyn std::error::Error + Send + Sync>);
+
+    /// Notes, for the app's log, a failure that work on this spawner has already handled and
+    /// shown where it happened (a search section that failed: `category` is `"LibrarySearch"`).
+    /// Nothing reaches the user from here. The default logs nothing, for an app with no log.
+    fn log_error(&self, category: &str, message: &str) {
+        let _ = (category, message);
+    }
 }

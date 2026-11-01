@@ -14,7 +14,17 @@ type Translator = fn(&str) -> String;
 static TRANSLATOR: RwLock<Option<Translator>> = RwLock::new(None);
 
 /// Every English literal this crate hands to [`tr`].
-pub const ENGLISH_TEXTS: &[&str] = &[];
+pub const ENGLISH_TEXTS: &[&str] = &[
+    "A folder cannot be copied into itself",
+    "A name cannot be empty",
+    "Could not be opened",
+    "Loading",
+    "Missing",
+    "Search Results",
+    "{0} has no content to copy",
+    "{0} is already in this folder",
+    "{0} is not in this folder",
+];
 
 /// `english` in the user's language: the translator's answer once one is set, `english` itself
 /// before.

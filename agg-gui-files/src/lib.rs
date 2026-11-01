@@ -1,6 +1,6 @@
 //! `agg-gui-files`: the folder and item model behind agg-gui's file browser, with no drawing code.
-//! It depends on std alone (no agg-gui, agg-rust or wgpu), so a crate with no UI can use it, and
-//! it builds for `wasm32-unknown-unknown`.
+//! It depends on std and `web-time` alone (no agg-gui, agg-rust or wgpu), so a crate with no UI
+//! can use it, and it builds for `wasm32-unknown-unknown`.
 //!
 //! A [`Folder`] lists [`FolderLink`]s (rows that open another folder) and [`Item`]s. An item says
 //! what kind it is by answering `as_container_link`, `as_asset` or `as_asset_stream`, and an app
@@ -29,6 +29,11 @@
 //! - **Text the user reads** goes through [`tr`], which an app points at its own translations
 //!   with [`set_translator`]; every English literal handed to `tr` in this crate is listed in
 //!   [`ENGLISH_TEXTS`] so the app can check its translations cover them.
+//! - **Providers** are the folders and items any app can list: [`MessageItem`] (a row that only
+//!   shows a message), [`DynamicFolder`] and [`DynamicFolderLink`] (a folder filled by a callback,
+//!   a row whose folder is made when opened), [`FolderData`] (the state a plain folder keeps),
+//!   [`SearchResultsFolder`] (a search across folders, in sections, its deadline a
+//!   [`WakeTimer`]) and [`MemoryFolder`] (a writable folder in memory, for tests and demos).
 //! - **Stored values keep their shape.** The sort key numbers ([`SortKey`]) are the flags that
 //!   stored view states hold.
 //!
@@ -36,38 +41,58 @@
 //! content-changed event, listing failures), `writable` (writable folders and the default
 //! move), `create_folder_item` (the item that asks a writable folder for a new folder),
 //! `history` (recorded changes), `error` (why content could not be given), `search`,
-//! `search_terms`, `sort`, `picture`, `spawner`, `place` and `translate`.
+//! `search_terms`, `sort`, `picture`, `spawner`, `place` and `translate`; the providers
+//! `message_item`, `folder_data`, `dynamic_folder`, `dynamic_folder_link`, `search_results`
+//! (with `search_walk` and `wake_timer`) and `memory_folder`.
 //!
 //! The model comes from mattercad-rust's `mattercad-model` (`src/library/`), the same author's,
 //! published here under agg-gui's MIT licence. MatterCAD keeps its own names for these types by
-//! re-exporting them (`LibraryItem` is [`Item`], `LibraryContainer` is [`Folder`]).
+//! re-exporting them (`LibraryItem` is [`Item`], `LibraryContainer` is [`Folder`]), the providers
+//! included (`DynamicContainerLink` is [`DynamicFolderLink`], `LibrarySearchResultsContainer` is
+//! [`SearchResultsFolder`]).
 
 mod create_folder_item;
+mod dynamic_folder;
+mod dynamic_folder_link;
 mod error;
 mod folder;
+mod folder_data;
 mod history;
 mod item;
+mod memory_folder;
+mod message_item;
 mod picture;
 mod place;
 mod search;
+mod search_results;
 mod search_terms;
+mod search_walk;
 mod sort;
 mod spawner;
 mod translate;
+mod wake_timer;
 mod writable;
 
 pub use create_folder_item::CreateFolderItem;
+pub use dynamic_folder::{DynamicFolder, FolderInitializer};
+pub use dynamic_folder_link::{DynamicFolderLink, FolderCreator, OptionalFolderCreator, NO_FOLDER};
 pub use error::LoadError;
 pub use folder::{ContentChangedEvent, ContentChangedListener, Folder, ListingFailure};
+pub use folder_data::FolderData;
 pub use history::{HistoryStep, Recorded, StepDone, StepOutcome};
 pub use item::{Asset, AssetStream, FolderLink, Item, PictureFuture, StreamFuture, Thumbnail};
+pub use memory_folder::{MemoryFile, MemoryFolder, MemoryFolderLink};
+pub use message_item::MessageItem;
 pub use picture::Picture;
 pub use place::PlaceId;
 pub use search::{yield_now, SearchCancel, SearchFuture, SearchProvider, SearchReport};
+pub use search_results::{ContentFileTest, SearchOrigin, SearchResultsFolder, SearchSection};
 pub use search_terms::name_matches;
+pub use search_walk::{live_load_wait_timer_threads, ASYNC_LOAD_TIMEOUT, MAX_FALLBACK_DEPTH};
 pub use sort::{culture_compare, sort_items, system_time_ticks, SortBehavior, SortKey};
 pub use spawner::{LocalTask, Spawner};
 pub use translate::{set_translator, tr, ENGLISH_TEXTS};
+pub use wake_timer::WakeTimer;
 pub use writable::{
     add_then_remove, names_of_items_gone_from_source, ContainerActions, CopyDone, CopyOutcome,
     WritableFolder,
