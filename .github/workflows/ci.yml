@@ -133,6 +133,10 @@ jobs:
       - name: Run tests
         run: cargo test -p agg-gui
 
+      # The file browser's model.
+      - name: Run file model tests
+        run: cargo test -p agg-gui-files
+
       # The `clipboard` feature's arboard backend (the X11 / Wayland path
       # here) is otherwise never compiled: the tests above build agg-gui
       # without it.
@@ -291,3 +295,7 @@ jobs:
       # The UI module and the dictation worker module (simd128).
       - name: Build WASM
         run: demo/build-wasm.sh
+
+      # The file browser's model builds for the browser.
+      - name: Build file model (wasm)
+        run: cargo build -p agg-gui-files --target wasm32-unknown-unknown

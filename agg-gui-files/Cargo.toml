@@ -1,0 +1,29 @@
+# agg-gui-files: the folder and item model of agg-gui's file browser, with no
+# drawing code. Folders list folders and items, items say what they are
+# (content, a stream of bytes, a link to another folder), a folder the user
+# can change adds, removes, renames and moves, searches and sorts behave the
+# same everywhere, and changes can be recorded for undo. No agg-gui, agg-rust
+# or wgpu dependency, so a model crate with no UI (a server, a website build)
+# can depend on it; it builds for wasm32-unknown-unknown.
+#
+# The model comes from mattercad-rust's mattercad-model (`src/library/`, same
+# author), published here under agg-gui's MIT licence.
+[package]
+name = "agg-gui-files"
+version = "0.0.1"
+edition = "2021"
+# Matches the rest of the agg-gui workspace.
+rust-version = "1.88"
+license = "MIT"
+description = "The folder and item model of agg-gui's file browser: folders, items, writable folders, search, sort and recorded changes, with no drawing code."
+authors = ["Lars Brubaker <larsbrubaker@matterhackers.com>"]
+repository = "https://github.com/larsbrubaker/agg-gui"
+readme = "README.md"
+keywords = ["agg-gui", "file-browser", "folders", "library"]
+categories = ["gui", "filesystem"]
+
+[lib]
+name = "agg_gui_files"
+path = "src/lib.rs"
+
+# No dependencies: std only.

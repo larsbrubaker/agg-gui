@@ -208,6 +208,7 @@ and feature set using agg-gui's own widgets:
 | `agg-gui-wgpu` | Hardware-accelerated wgpu `DrawCtx` backend — pipelines, SSAA, screenshot capture, custom render-pass hook |
 | `agg-gui-shell` | Turn-key native shell — winit window + event loop + wgpu present, input forwarding, window-bounds persistence, device-loss recovery |
 | `agg-gui-web-shell` | Turn-key browser shell — canvas + WebGPU/WebGL2 surface, rAF loop (reactive/continuous), DOM input, page lifecycle, localStorage settings |
+| `agg-gui-files` | The file browser's folder and item model (folders, items, writable folders, search, sort, recorded changes); no drawing code, builds for wasm32 |
 | `agg-gui-whistle` | Dictation for the on-screen keyboard on whistle-rust speech-to-text (opt-in; Web Worker in the browser, agg-mic + threads natively) |
 | `agg-gui-whistle-worker` | The dictation Web Worker's wasm module (built with simd128 by `demo/build-whistle.sh`) |
 | `agg-mic` | The system microphone in pure Rust (AVAudioEngine, WASAPI, the PulseAudio protocol; no `-sys` crates): mono `f32` chunks from the default input device, for `agg-gui-whistle` and other apps; no UI |
