@@ -1,0 +1,42 @@
+# agg-gui-file-browser: the widgets of agg-gui's file browser, over the folder
+# and item model in agg-gui-files. An app gives the browser its look (colours,
+# sizes, icons and widget names, `BrowserLook`); without one the browser draws
+# in agg-gui's theme with Font Awesome glyphs.
+#
+# A crate of its own rather than part of agg-gui, so the browser's code adds
+# no compile time for agg-gui consumers that don't show one (as
+# agg-gui-node-editor does for the node editor).
+#
+# The widgets come from mattercad-rust's mattercad-app (`src/library/`, same
+# author), published here under agg-gui's MIT licence.
+[package]
+name = "agg-gui-file-browser"
+version = "0.0.1"
+edition = "2021"
+# Matches the rest of the agg-gui workspace.
+rust-version = "1.88"
+license = "MIT"
+description = "The widgets of agg-gui's file browser: its look, fitted names and the folder breadcrumb trail, over agg-gui-files' folder model."
+authors = ["Lars Brubaker <larsbrubaker@matterhackers.com>"]
+repository = "https://github.com/larsbrubaker/agg-gui"
+readme = "README.md"
+keywords = ["agg-gui", "file-browser", "breadcrumb", "widget"]
+categories = ["gui"]
+
+[lib]
+name = "agg_gui_file_browser"
+path = "src/lib.rs"
+
+[features]
+default = ["reflect"]
+# Forwards to agg-gui's `reflect` feature. The browser has no reflection code
+# of its own; agg-gui is depended on with its default features off so a
+# consumer that turns this crate's defaults off can leave `bevy_reflect` out,
+# and one that keeps them gets a single, consistently-featured agg-gui.
+reflect = ["agg-gui/reflect"]
+
+[dependencies]
+# Default features off so they stay the consumer's choice (see `reflect`).
+agg-gui = { path = "../agg-gui", version = "0.5.3", default-features = false }
+# A 0.0.x requirement is written as a range: plain "0.0.2" would pin that one version.
+agg-gui-files = { path = "../agg-gui-files", version = ">=0.0.2, <0.1.0" }

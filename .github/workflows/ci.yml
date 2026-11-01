@@ -137,6 +137,10 @@ jobs:
       - name: Run file model tests
         run: cargo test -p agg-gui-files
 
+      # The file browser's widgets.
+      - name: Run file browser tests
+        run: cargo test -p agg-gui-file-browser
+
       # The `clipboard` feature's arboard backend (the X11 / Wayland path
       # here) is otherwise never compiled: the tests above build agg-gui
       # without it.
@@ -299,3 +303,7 @@ jobs:
       # The file browser's model builds for the browser.
       - name: Build file model (wasm)
         run: cargo build -p agg-gui-files --target wasm32-unknown-unknown
+
+      # The file browser's widgets build for the browser.
+      - name: Build file browser (wasm)
+        run: cargo build -p agg-gui-file-browser --target wasm32-unknown-unknown

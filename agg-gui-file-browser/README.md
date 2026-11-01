@@ -1,0 +1,32 @@
+# agg-gui-file-browser
+
+The widgets of agg-gui's file browser, over the folder and item model in
+[`agg-gui-files`](../agg-gui-files). A crate of its own, so agg-gui apps that show no file browser
+don't compile it. It builds for `wasm32-unknown-unknown`.
+
+| Item | What it is |
+|---|---|
+| `BrowserLook`, `DefaultLook` | A browser's look: its style, icons and widget names; the default is agg-gui's theme with Font Awesome glyphs |
+| `BrowserStyle` | The colours and sizes a browser draws with (`from_visuals` for agg-gui's theme) |
+| `BrowserIcon` | The icons a browser draws, each with a Font Awesome fallback glyph |
+| `BrowserNames` | The names a browser's widgets carry, which automation scripts and help articles find them by |
+| `fit_name`, `fit_text`, `fill_text_within`, `centered_text_baseline` | Names fitted to their room (a file keeps its extension: "Bad+Batch+Hun….zip") and drawn inside it |
+| `FolderBreadCrumbWidget`, `folder_bread_crumb_for` | The breadcrumb trail: up button, a link per folder, eliding the crumbs after the root when it is too wide |
+| `BrowserIconButton`, `LinkLabel` | The trail's square icon button and its text links |
+
+```rust
+use std::rc::Rc;
+use agg_gui_file_browser::{folder_bread_crumb_for, BrowserLook, DefaultLook};
+
+fn trail(font: &std::sync::Arc<agg_gui::text::Font>) -> impl agg_gui::Widget {
+    let look: Rc<dyn BrowserLook> = Rc::new(DefaultLook::default());
+    let names = vec!["Home".to_string(), "Downloads".to_string()];
+    folder_bread_crumb_for(&names, Rc::new(|depth| println!("open level {depth}")), &look, font)
+}
+```
+
+Text the user reads goes through `agg_gui_files::tr`; `ENGLISH_TEXTS` lists every English literal
+this crate shows, so an app can check its translations cover them.
+
+The widgets come from MatterCAD's library (mattercad-rust's `mattercad-app`, same author). MIT
+licensed, as the rest of agg-gui.

@@ -2,6 +2,7 @@
 members = [
     "agg-gui",
     "agg-gui-files",
+    "agg-gui-file-browser",
     "agg-mic",
     "agg-gui-automation",
     "agg-gui-shell",
@@ -18,6 +19,7 @@ members = [
 default-members = [
     "agg-gui",
     "agg-gui-files",
+    "agg-gui-file-browser",
     "agg-mic",
     "agg-gui-automation",
     "agg-gui-shell",
