@@ -20,7 +20,9 @@
 //! ancestors' clips, and a context menu's host may have no size at all. The
 //! polling waits look once per pumped frame (C#'s
 //! `WaitForPendingUiWork(50)`), and their answer is the last look, not the
-//! clock, so a zero-second wait reports what is there now. The frame-level
+//! clock, so a zero-second wait reports what is there now. While the name
+//! is not there yet and background work runs, their frames take real time
+//! (`waits.rs`, "Real time in condition waits"). The frame-level
 //! waits they build on are in the sibling `waits.rs`.
 //!
 //! C# searches every open `SystemWindow`; a runner drives one window, so its
@@ -28,6 +30,7 @@
 
 use agg_gui::{clock, Point, Rect, Widget};
 
+use super::waits::Pace;
 use super::AutomationRunner;
 use crate::driver::UiDriver;
 use crate::name_pick::{self, HitPlacement};
@@ -353,7 +356,7 @@ impl<D: UiDriver> AutomationRunner<D> {
             }
             // The widget tree only changes when the UI runs, so asking again
             // before it has run again can only give the same answer.
-            self.wait_for_pending_ui_work(WIDGET_POLL_WAIT_MILLISECONDS);
+            self.wait_for_pending_ui_work_paced(WIDGET_POLL_WAIT_MILLISECONDS, Pace::RealWhileBusy);
         }
     }
 
@@ -370,7 +373,7 @@ impl<D: UiDriver> AutomationRunner<D> {
                 return !still_there;
             }
             // The widget can only go away as a result of UI work.
-            self.wait_for_pending_ui_work(WIDGET_POLL_WAIT_MILLISECONDS);
+            self.wait_for_pending_ui_work_paced(WIDGET_POLL_WAIT_MILLISECONDS, Pace::RealWhileBusy);
         }
     }
 
@@ -466,7 +469,7 @@ impl<D: UiDriver> AutomationRunner<D> {
         while !self.named_widget_exists(widget_name, None, true, None)
             && clock::since(time_waited).as_secs_f64() < secs_to_wait
         {
-            self.wait_for_pending_ui_work(WIDGET_POLL_WAIT_MILLISECONDS);
+            self.wait_for_pending_ui_work_paced(WIDGET_POLL_WAIT_MILLISECONDS, Pace::RealWhileBusy);
         }
 
         let Some(found) = self.get_widget_hit_by_name(widget_name, &WaitOpts::default()) else {

@@ -33,7 +33,10 @@
 //! thread (compute workers) tells the driver about it with
 //! [`HeadlessDriver::set_background_busy`]; while the hook reports true the
 //! driver is not idle ([`HeadlessDriver::is_idle`]), so the runner's idle
-//! waits keep pumping until the results have landed.
+//! waits keep pumping until the results have landed, and the runner's
+//! condition waits pace their frames to real time while their condition is
+//! false (`src/runner/waits.rs`, "Real time in condition waits"). The
+//! driver's own [`pump`](UiDriver::pump) never sleeps for it.
 
 use std::cell::OnceCell;
 
@@ -128,7 +131,9 @@ impl HeadlessDriver {
     /// ([`is_idle`](Self::is_idle)), so the runner's idle waits
     /// ([`AutomationRunner::wait_for_idle`](crate::AutomationRunner::wait_for_idle),
     /// [`wait_for_pending_ui_work`](crate::AutomationRunner::wait_for_pending_ui_work))
-    /// keep pumping frames until it is done. Replaces an earlier hook.
+    /// keep pumping frames until it is done, and a condition wait whose
+    /// condition is false takes real time per frame while it is true
+    /// (`src/runner/waits.rs`). Replaces an earlier hook.
     pub fn set_background_busy(&mut self, busy: BackgroundBusy) {
         self.background_busy = Some(busy);
     }

@@ -33,8 +33,12 @@
 //! - **Two clocks.** Behaviour runs on UI time (`agg_gui::clock`): delays,
 //!   waits and their timeouts, and pointer pacing. Headless, that is a
 //!   virtual clock advanced one frame interval per pumped frame, so a test
-//!   never sleeps ([`ClockPolicy::Real`] is for an application whose worker
-//!   threads run in real time). The hang watchdogs (test budget, bring-up,
+//!   does not sleep — except that a condition wait whose condition is false
+//!   takes a frame interval of real time per frame while the driver's
+//!   background-busy hook reports work, so it can't give up before a worker
+//!   delivers (`src/runner/waits.rs`, "Real time in condition waits").
+//!   [`ClockPolicy::Real`] is for an application whose worker threads set
+//!   the pace of everything. The hang watchdogs (test budget, bring-up,
 //!   close) run on the wall clock, because they must fire when UI time stops.
 //!
 //! # Coordinates and options

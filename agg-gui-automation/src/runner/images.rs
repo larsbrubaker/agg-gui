@@ -9,7 +9,8 @@
 //! the current screen cropped to the region); with no region every look
 //! takes a fresh capture of the whole window, so a wait sees the UI change.
 //! Like the name waits in `named.rs`, the answer is the last look, not the
-//! clock: a zero-second wait is a single look.
+//! clock: a zero-second wait is a single look, and while the needle is
+//! missing and background work runs its polls take real time (`waits.rs`).
 //!
 //! C#'s region captures the *whole* screen on first use, so a region did not
 //! limit an image search, and the image gestures, which place the match
@@ -19,6 +20,7 @@
 use agg_gui::clock;
 use agg_gui::Framebuffer;
 
+use super::waits::Pace;
 use super::AutomationRunner;
 use crate::driver::UiDriver;
 use crate::image_match::find_least_squares_match;
@@ -118,7 +120,7 @@ impl<D: UiDriver> AutomationRunner<D> {
             if found || clock::since(time_waited).as_secs_f64() >= secs_to_wait {
                 return found;
             }
-            self.delay(IMAGE_POLL_SECONDS);
+            self.delay_paced(IMAGE_POLL_SECONDS, Pace::RealWhileBusy);
         }
     }
 

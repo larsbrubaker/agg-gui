@@ -38,7 +38,9 @@ pub const FRAME_INTERVAL: Duration = Duration::from_millis(10);
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ClockPolicy {
     /// The thread's [`agg_gui::clock`] is virtual and each pumped frame
-    /// advances it by the frame interval: deterministic, no sleeping.
+    /// advances it by the frame interval: deterministic, and no sleeping
+    /// except in a condition wait whose condition is false while background
+    /// work runs (`src/runner/waits.rs`, "Real time in condition waits").
     #[default]
     Virtual,
     /// The real clock, for tests whose background workers run in real time.

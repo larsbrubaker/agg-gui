@@ -27,6 +27,7 @@
 
 use agg_gui::{clock, Framebuffer, MouseButton};
 
+use super::waits::Pace;
 use super::{AutomationRunner, ClickOrigin, DEFAULT_WIDGET_WAIT_SECONDS};
 use crate::driver::UiDriver;
 use crate::image_match::find_least_squares_match;
@@ -196,7 +197,7 @@ impl<D: UiDriver> AutomationRunner<D> {
             if clock::since(waited_from).as_secs_f64() >= opts.secs_to_wait {
                 return None;
             }
-            self.delay(IMAGE_POLL_SECONDS);
+            self.delay_paced(IMAGE_POLL_SECONDS, Pace::RealWhileBusy);
         }
     }
 
