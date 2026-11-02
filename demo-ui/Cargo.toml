@@ -13,6 +13,9 @@ reflect = ["agg-gui/reflect"]
 
 [dependencies]
 agg-gui    = { path = "../agg-gui" }
+# The File Browser demo: the browser's widgets over an in-memory sample folder.
+agg-gui-file-browser = { path = "../agg-gui-file-browser" }
+agg-gui-files = { path = "../agg-gui-files" }
 agg-rust   = { version = "1.1.0", path = "../../agg-rust" }
 png        = "0.17"
 dark-light = "1"

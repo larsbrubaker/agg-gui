@@ -99,3 +99,14 @@ fn a_light_and_a_dark_theme_give_their_own_text_colour() {
     assert_eq!(dark.text_color, Visuals::dark().text_color);
     assert_ne!(light.text_color, dark.text_color);
 }
+
+#[test]
+fn the_default_look_draws_the_folder_key_as_a_folder_and_nothing_else() {
+    let look = agg_gui_file_browser::DefaultLook::default();
+    let side = Size::new(20.0, 20.0);
+    let tint = agg_gui::Color::rgba(0.2, 0.4, 0.8, 1.0);
+    let folder = agg_gui_file_browser::BrowserLook::icon_for_key(&look, "folder", side, tint);
+    assert!(folder.is_some(), "a folder tree's rows look like folders");
+    let other = agg_gui_file_browser::BrowserLook::icon_for_key(&look, "cube.svg", side, tint);
+    assert!(other.is_none());
+}

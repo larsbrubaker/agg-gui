@@ -381,9 +381,33 @@ impl BrowserLook for DefaultLook {
         BrowserStyle::default()
     }
 
+    /// The "folder" key (a link's `micro_icon`, `BrowserIcon::Folder`'s key) draws a folder in
+    /// `tint`, so a folder tree's rows look like folders; every other key has no art.
+    fn icon_for_key(&self, key: &str, logical: Size, tint: Color) -> Option<IconImage> {
+        if key != BrowserIcon::Folder.key() {
+            return None;
+        }
+        IconImage::from_svg_data(folder_svg(tint).as_bytes(), logical).ok()
+    }
+
     fn names(&self) -> &BrowserNames {
         &self.names
     }
+}
+
+/// A folder silhouette (a tab over a body) filled with `tint`, 20 units square.
+fn folder_svg(tint: Color) -> String {
+    // Colour channels are 0..=1; the cast cannot overflow after the clamp.
+    let channel = |v: f32| (f64::from(v).clamp(0.0, 1.0) * 255.0).round() as u8;
+    format!(
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"20\" height=\"20\" viewBox=\"0 0 20 20\">\
+         <path fill=\"#{:02x}{:02x}{:02x}\" fill-opacity=\"{}\" \
+         d=\"M2 4h6l2 2h8v10H2z\"/></svg>",
+        channel(tint.r),
+        channel(tint.g),
+        channel(tint.b),
+        f64::from(tint.a).clamp(0.0, 1.0)
+    )
 }
 
 /// The face the default glyphs draw in: agg-gui's bundled Font Awesome 4.7.

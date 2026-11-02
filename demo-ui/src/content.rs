@@ -56,6 +56,7 @@ pub(crate) fn build_demo_content(
         "\u{F0DB} Panels" => windows::panels_demo(font),
         "\u{F075} Popups" => windows::popups_demo(font),
         "\u{F0C9} Menus" => windows::menu_demo(font),
+        t if t == windows::FILE_BROWSER_TITLE => windows::file_browser_demo(font),
         "\u{F0C3} Rendering Test" => rendering_test::rendering_test_view(font),
         "\u{F013} System" => windows::system_view(font),
         "\u{F002} Scene" => windows::scene_demo(font),

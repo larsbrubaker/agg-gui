@@ -118,6 +118,14 @@ pub(crate) const DEMOS: &[DemoSpec] = &[
         win_h: WIN_H,
     },
     DemoSpec {
+        title: "\u{F07C} File Browser",
+        label: "\u{F07C} File Browser",
+        group: "Widgets",
+        open: false,
+        win_w: 720.0,
+        win_h: 440.0,
+    },
+    DemoSpec {
         title: "\u{F0C9} Menus",
         label: "\u{F0C9} Menus",
         group: "Widgets",
