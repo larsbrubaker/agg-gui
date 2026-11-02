@@ -13,6 +13,12 @@ don't compile it. It builds for `wasm32-unknown-unknown`.
 | `fit_name`, `fit_text`, `fill_text_within`, `centered_text_baseline` | Names fitted to their room (a file keeps its extension: "Bad+Batch+Hun….zip") and drawn inside it |
 | `FolderBreadCrumbWidget`, `folder_bread_crumb_for` | The breadcrumb trail: up button, a link per folder, eliding the crumbs after the root when it is too wide |
 | `BrowserIconButton`, `LinkLabel` | The trail's square icon button and its text links |
+| `BrowserConfig`, `BrowserOptions` | Everything one browser view takes from its app, every hook defaulted (`BrowserConfig::default()` works with none) |
+| `ItemPictures`, `BrowserActions`, `OutsideDrops`, `PlaceRules`, `BrowserMemory`, `BrowserDialogs` | The hooks an app extends the browser through: pictures and tile overlays, the ordered menu and activation, drags onto its own views, move or copy, what is remembered, its dialogs |
+| `NoPictures`, `NoActions`, `DefaultPlaces`, `NoMemory`, `NoDialogs` | The defaults: the look's icons, the built-in menu, the place rule, nothing remembered, no dialogs (the actions needing one unavailable) |
+| `Entry`, `BrowserRef` | The snapshots hooks are handed, so no hook runs while the browser's state is borrowed |
+| `default_drop_copies`, `copy_modifier_held` | Move or copy: items move within a place, and are copied between places, out of folders that keep them, or with Option (Mac) or Ctrl held |
+| `LocalSpawner` | Background work for apps without an executor, run a step at a time from agg-gui's UI-queue drain |
 
 ```rust
 use std::rc::Rc;
@@ -22,6 +28,18 @@ fn trail(font: &std::sync::Arc<agg_gui::text::Font>) -> impl agg_gui::Widget {
     let look: Rc<dyn BrowserLook> = Rc::new(DefaultLook::default());
     let names = vec!["Home".to_string(), "Downloads".to_string()];
     folder_bread_crumb_for(&names, Rc::new(|depth| println!("open level {depth}")), &look, font)
+}
+```
+
+```rust
+use std::rc::Rc;
+use agg_gui_file_browser::{BrowserConfig, BrowserLayout, BrowserOptions};
+
+fn popup_config() -> BrowserConfig {
+    BrowserConfig::builder()
+        .report(Rc::new(|message| eprintln!("{message}")))
+        .options(BrowserOptions { layout: BrowserLayout::ListOnly, ..BrowserOptions::default() })
+        .build()
 }
 ```
 

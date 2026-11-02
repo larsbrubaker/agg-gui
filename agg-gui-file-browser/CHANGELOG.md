@@ -8,6 +8,27 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ## [Unreleased]
 
+## [0.0.2] - 2026-11-02
+
+### Added
+
+- `BrowserConfig`, one per browser view, and `BrowserConfigBuilder`: the spawner, look, hooks,
+  error report and `BrowserOptions` (tree or list only, who hears a double click, tap
+  activation, Show Folders, a folder filter, the opening picture size). `BrowserConfig::default()`
+  works for an app with no hooks.
+- The hooks, each with a default: `ItemPictures` (`NoPictures`; `PictureCx`, `PictureState`),
+  `BrowserActions` (`NoActions`; `Builtins`, `BuiltinAction`, `BrowserAction`,
+  `BrowserCommand`, `Activation`), `OutsideDrops` (`OutsideOver`), `PlaceRules`
+  (`DefaultPlaces`; `CopyCx`, `CopyTakeover`), `BrowserMemory` (`NoMemory`; `ViewState`,
+  `ViewMode`, `LocationFuture`) and `BrowserDialogs` (`NoDialogs`, which offers none;
+  `Confirmation`, `NameRequest`, `DialogKind`).
+- `Entry` and `BrowserRef`, the snapshots hooks are handed, so no hook runs while the browser's
+  state is borrowed.
+- The move-or-copy rule: `default_drop_copies`, `default_crosses_places`, `places_differ` and
+  `copy_modifier_held` (Option on the Mac, Ctrl elsewhere).
+- `LocalSpawner`, an `agg_gui_files::Spawner` for apps without an executor, run from agg-gui's
+  UI-queue drain (`run_ready_local_tasks`, `unfinished_local_tasks`).
+
 ## [0.0.1] - 2026-11-01
 
 ### Added
