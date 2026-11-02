@@ -9,8 +9,9 @@
 //! - Remove asks first ("Move to Trash?" for a folder on the computer, whose items go to the
 //!   system's trash; "Remove Items?" elsewhere), then removes. The tree's folder, removed while
 //!   it shows, gives way to the folder above it first.
-//! - Move asks the app's Move dialog for a folder, then moves (or copies, between places) as a
-//!   drop onto it does (`drag/execute.rs`).
+//! - Move asks the app's Move dialog for a folder, handing it the folder the items leave (its
+//!   name, identity and copy rule), then moves (or copies, as the dialog said) into the folder
+//!   it picked, as a drop into it does (`drag/execute.rs`).
 //! - Add picks files through the app and adds them (unrecorded: a folder's add has no undo).
 //! - Open File Location asks the app where the item lives (`BrowserActions::locate`) and shows
 //!   it (`BrowserState::show_location`).
@@ -20,12 +21,13 @@
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
 
-use agg_gui_files::{tr, FolderLink, Item, PlaceId, Recorded};
+use agg_gui_files::{tr, ContainerActions, FolderLink, Item, PlaceId, Recorded};
 
 use super::{can_move, Target};
 use crate::actions::BuiltinAction;
-use crate::dialogs::{Confirmation, MoveRequest, NameRequest};
-use crate::drag::execute::drop_onto;
+use crate::dialogs::{Confirmation, CopiesTo, MoveRequest, NameRequest};
+use crate::drag::execute::drop_into;
+use crate::move_dialog::plan::FolderKey;
 use crate::state::BrowserState;
 
 /// Runs `action` in `state` (whether it can is the caller's check).
@@ -176,26 +178,40 @@ fn remove(state: &Rc<RefCell<BrowserState>>) {
 }
 
 fn move_items(state: &Rc<RefCell<BrowserState>>) {
-    let (target, place) = {
+    let (target, source, places) = {
         let s = state.borrow();
         let target = Target::of(&s);
-        let place = s
-            .path_containers()
-            .nth(target.depth)
-            .and_then(|f| f.place());
-        (target, place)
+        let source = s.open_path().get(target.depth).cloned();
+        (target, source, Rc::clone(&s.config().places))
+    };
+    let Some(source) = source else {
+        return;
     };
     let items: Vec<Rc<dyn Item>> = target.items.into_iter().filter(can_move).collect();
     if items.is_empty() {
         return;
     }
+    let (place, name, key, keeps) = {
+        let folder = source.borrow();
+        let keeps = !folder
+            .as_writable()
+            .is_some_and(|w| w.allow_action(ContainerActions::RemoveItems));
+        let key = FolderKey::of_folder(&**folder);
+        (folder.place(), folder.name().to_string(), key, keeps)
+    };
+    // A folder that keeps its items copies them wherever they go.
+    let copies_to: CopiesTo = Rc::new(move |target| {
+        keeps || places.drop_copies(Some(&**source.borrow()), target.cloned(), false)
+    });
     let depth = target.depth;
     let (dialogs, weak) = dialogs_of(state);
+    let request = MoveRequest::new(items.clone(), place).with_source(name, key, copies_to);
     dialogs.pick_move_target(
-        MoveRequest::new(items.clone(), place),
+        request,
         Box::new(move |picked| {
-            if let (Some(state), Some(link)) = (weak.upgrade(), picked) {
-                drop_onto(&state, &link, &items, depth, false);
+            if let (Some(state), Some(pick)) = (weak.upgrade(), picked) {
+                let name = pick.target.name().to_string();
+                drop_into(&state, pick.target, &name, &items, depth, pick.copy);
             }
         }),
     );

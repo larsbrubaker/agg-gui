@@ -1,7 +1,8 @@
 //! [`DialogSheet`]: the widget [`SheetDialogs`](super::SheetDialogs) show their questions on (the
 //! rules are in `mod.rs`). It holds nothing while no question shows; at the layout after a
 //! question is asked it builds an agg-gui `ModalSheet` for it (title, text, a name field for a
-//! name, Cancel and the confirming button), and drops it once the question is answered.
+//! name, Cancel and the confirming button; for a Move, the Move page over a browser of its own
+//! opened over the dialogs' move root), and drops it once the question is answered.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -15,7 +16,11 @@ use agg_gui::{
 };
 use agg_gui_files::tr;
 
-use super::{Question, Shared};
+use super::{answer_move, Question, Shared};
+use crate::config::BrowserConfig;
+use crate::look::{BrowserNames, DefaultLook};
+use crate::move_dialog::{dialog_options, MoveAnswers, MovePage};
+use crate::state::BrowserState;
 
 /// The name of a name question's text field.
 pub const NAME_FIELD: &str = "Browser Dialog Name Field";
@@ -26,6 +31,8 @@ pub const CANCEL_BUTTON: &str = "Browser Dialog Cancel Button";
 
 /// The panel's size.
 const PANEL: Size = Size::new(420.0, 190.0);
+/// The Move dialog's panel: room to browse.
+const MOVE_PANEL: Size = Size::new(480.0, 500.0);
 
 /// The question showing: what hears its answer (taken when answered) and the sheet's visibility.
 #[derive(Clone)]
@@ -123,7 +130,12 @@ impl DialogSheet {
             question: Rc::new(RefCell::new(None)),
             visible: Rc::new(Cell::new(true)),
         };
+        let mut panel = PANEL;
         let content = match &question {
+            Question::PickMove(request, _) => {
+                panel = MOVE_PANEL;
+                self.move_page(request.clone(), &showing)
+            }
             Question::Confirm(confirmation, _) => {
                 let text = Label::new(confirmation.message.clone(), Arc::clone(&self.font))
                     .with_wrap(true);
@@ -164,11 +176,45 @@ impl DialogSheet {
         *showing.question.borrow_mut() = Some(question);
         let (cancel, closed) = (showing.clone(), showing.clone());
         let sheet = ModalSheet::new(Rc::clone(&showing.visible), content)
-            .with_panel_size(PANEL)
+            .with_panel_size(panel)
             .with_cancel_action(move || cancel.cancel())
             .with_on_close(move || closed.cancel());
         self.children = vec![Box::new(sheet)];
         self.showing = Some(showing);
+    }
+
+    /// The Move page over a new browser of the move root, answering through `showing`.
+    fn move_page(
+        &self,
+        request: crate::dialogs::MoveRequest,
+        showing: &Showing,
+    ) -> Box<dyn Widget> {
+        let root = self.shared.move_root.borrow().clone();
+        let Some(root) = root else {
+            return Box::new(SizedBox::new());
+        };
+        // The page's view and sorting buttons are named apart from a browser's behind it.
+        let names = BrowserNames {
+            view_options_button: "Library Browser View Options Button".into(),
+            sort_button: "Library Browser Sorting Button".into(),
+            ..BrowserNames::default()
+        };
+        let config = BrowserConfig::builder()
+            .look(Rc::new(DefaultLook::with_names(names)))
+            .options(dialog_options())
+            .build();
+        let state = BrowserState::new(root(), config);
+        let (accepting, cancelling) = (showing.clone(), showing.clone());
+        let answers = MoveAnswers {
+            accept: Rc::new(move |pick| answer_move(accepting.take(), pick)),
+            cancel: Rc::new(move || cancelling.cancel()),
+        };
+        Box::new(MovePage::new(
+            &state,
+            request,
+            answers,
+            Arc::clone(&self.font),
+        ))
     }
 
     /// The panel: `title`, `body`, then Cancel and the confirming button `confirm_label` (which

@@ -2,9 +2,13 @@
 //! confirming a change ([`Confirmation`]: removing items), asking for a name ([`NameRequest`]:
 //! a new folder, a rename), picking files to add, and picking the folder a Move goes to
 //! ([`MoveRequest`]). [`SheetDialogs`](crate::SheetDialogs) (`sheet_dialogs/`) is a ready set
-//! on agg-gui's `ModalSheet` for an app without its own: it confirms and asks for names, and
-//! offers neither file picking (agg-gui has no file picker) nor the Move dialog (the composed
-//! browser's page).
+//! on agg-gui's `ModalSheet` for an app without its own: it confirms, asks for names and, given a
+//! root to browse from (`SheetDialogs::with_move_root`), shows the Move dialog
+//! (`move_dialog/`); it offers no file picking (agg-gui has no file picker).
+//!
+//! The Move dialog only picks: it answers with the folder it opened for the items and whether
+//! they copy ([`MovePick`]), and the browser's Move moves or copies them there itself, as a drop
+//! into that folder does (`drop_into`), recorded for Undo.
 //!
 //! The browser asks only what [`BrowserDialogs::offers`] says the app can show, and leaves the
 //! action that needs a dialog it lacks unavailable (greyed in its menu), so nothing is ever done
@@ -17,7 +21,9 @@
 
 use std::rc::Rc;
 
-use agg_gui_files::{FolderLink, Item};
+use agg_gui_files::{Folder, Item, PlaceId};
+
+use crate::move_dialog::plan::FolderKey;
 
 /// A dialog a browser can ask for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -33,22 +39,52 @@ pub enum DialogKind {
     PickMoveTarget,
 }
 
+/// Whether items copy rather than move into a folder in the given place.
+pub type CopiesTo = Rc<dyn Fn(Option<&PlaceId>) -> bool>;
+
 /// The Move dialog's question: the items moving, already gathered (the selection is cleared by
-/// the move), and the place of the folder they leave, so the dialog can say whether a folder it
-/// offers moves or copies them (`PlaceRules`).
+/// the move), and the folder they leave: its place, name and identity (`FolderKey`), and the
+/// copy rule, so the dialog can say whether a folder it offers moves or copies them and refuse
+/// one that can't take them (`move_dialog/plan.rs`).
 #[derive(Clone)]
 #[non_exhaustive]
 pub struct MoveRequest {
     pub items: Vec<Rc<dyn Item>>,
-    pub source_place: Option<agg_gui_files::PlaceId>,
+    pub source_place: Option<PlaceId>,
+    /// The name of the folder the items leave ("These items are already in Downloads.").
+    pub source_name: String,
+    /// The folder the items leave, as the dialog tells folders apart.
+    pub source_key: Option<FolderKey>,
+    /// Whether the items copy rather than move into a folder in the given place: the browser's
+    /// `PlaceRules` over the folder they leave, and always when that folder keeps its items.
+    pub copies_to: CopiesTo,
 }
 
 impl MoveRequest {
-    pub fn new(items: Vec<Rc<dyn Item>>, source_place: Option<agg_gui_files::PlaceId>) -> Self {
+    /// `items` leaving a folder in `source_place`, of no known name or identity, copying into
+    /// another place and moving within one.
+    pub fn new(items: Vec<Rc<dyn Item>>, source_place: Option<PlaceId>) -> Self {
+        let place = source_place.clone();
         Self {
             items,
             source_place,
+            source_name: String::new(),
+            source_key: None,
+            copies_to: Rc::new(move |target| target != place.as_ref()),
         }
+    }
+
+    /// The request with the folder the items leave: its name, identity and copy rule.
+    pub fn with_source(
+        mut self,
+        name: impl Into<String>,
+        key: Option<FolderKey>,
+        copies_to: CopiesTo,
+    ) -> Self {
+        self.source_name = name.into();
+        self.source_key = key;
+        self.copies_to = copies_to;
+        self
     }
 }
 
@@ -64,12 +100,30 @@ impl std::fmt::Debug for MoveRequest {
                     .collect::<Vec<_>>(),
             )
             .field("source_place", &self.source_place)
+            .field("source_name", &self.source_name)
+            .field("source_key", &self.source_key)
             .finish()
     }
 }
 
-/// Hears the folder a Move goes to, or `None` when the user cancelled.
-pub type PickedMoveTarget = Box<dyn FnOnce(Option<Rc<dyn FolderLink>>)>;
+/// What the user picked in the Move dialog: the folder the items go into, opened, and whether
+/// they copy (the originals staying where they are).
+pub struct MovePick {
+    pub target: Box<dyn Folder>,
+    pub copy: bool,
+}
+
+impl std::fmt::Debug for MovePick {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MovePick")
+            .field("target", &self.target.name())
+            .field("copy", &self.copy)
+            .finish()
+    }
+}
+
+/// Hears what the user picked for a Move, or `None` when they cancelled.
+pub type PickedMoveTarget = Box<dyn FnOnce(Option<MovePick>)>;
 
 /// A change the user confirms: the dialog's title, what it says, and the confirming button's
 /// label, all already translated.

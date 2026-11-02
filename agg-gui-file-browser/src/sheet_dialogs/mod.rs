@@ -10,8 +10,11 @@
 //!   button accepts; an empty name accepts nothing and the sheet stays open, so the user can
 //!   type one. Whether the name is free is the folder's to say: a name it refuses shows on the
 //!   browser's status line, the dialog closed.
-//! - No file picker (agg-gui has none) and no Move dialog (the composed browser's page): both
-//!   are left unoffered, so Add and Move stay greyed rather than doing nothing.
+//! - The Move dialog (`move_dialog/`), once given a root to browse from
+//!   ([`SheetDialogs::with_move_root`]): a browser of its own over a new root, saying what
+//!   accepting will do, answering with the folder picked and whether the items copy. Without a
+//!   root Move is left unoffered.
+//! - No file picker (agg-gui has none): Add stays greyed rather than doing nothing.
 //!
 //! Each question answers exactly once: a button, Escape, or the sheet closing any other way
 //! (cancelled). A question asked while one shows replaces it, the first answered as cancelled.
@@ -22,7 +25,14 @@ use std::rc::Rc;
 
 use agg_gui::animation::request_layout;
 
-use crate::dialogs::{BrowserDialogs, Confirmation, DialogKind, NameRequest};
+use agg_gui_files::Folder;
+
+use crate::dialogs::{
+    BrowserDialogs, Confirmation, DialogKind, MovePick, MoveRequest, NameRequest, PickedMoveTarget,
+};
+
+/// Makes the root the Move dialog's browser opens over (a new one per dialog).
+pub type MoveRoot = Rc<dyn Fn() -> Box<dyn Folder>>;
 
 mod sheet;
 
@@ -32,6 +42,7 @@ pub use sheet::{DialogSheet, CANCEL_BUTTON, CONFIRM_BUTTON, NAME_FIELD};
 pub(crate) enum Question {
     Confirm(Confirmation, Box<dyn FnOnce(bool)>),
     AskName(NameRequest, Box<dyn FnOnce(Option<String>)>),
+    PickMove(MoveRequest, PickedMoveTarget),
 }
 
 impl Question {
@@ -40,6 +51,7 @@ impl Question {
         match self {
             Question::Confirm(_, answer) => answer(false),
             Question::AskName(_, answer) => answer(None),
+            Question::PickMove(_, answer) => answer(None),
         }
     }
 }
@@ -50,6 +62,7 @@ impl Question {
 pub(crate) struct Shared {
     pub pending: RefCell<Option<Question>>,
     pub showing: Cell<bool>,
+    pub move_root: RefCell<Option<MoveRoot>>,
 }
 
 /// Dialogs shown on a [`DialogSheet`] (see the module header).
@@ -62,6 +75,12 @@ impl SheetDialogs {
     /// Dialogs with no sheet yet: make it with [`SheetDialogs::sheet`].
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// The dialogs, with the Move dialog browsing from the root `root` makes.
+    pub fn with_move_root(self, root: impl Fn() -> Box<dyn Folder> + 'static) -> Self {
+        *self.shared.move_root.borrow_mut() = Some(Rc::new(root));
+        self
     }
 
     /// The sheet these dialogs show on, drawing its text in `font`; place it as a late child of
@@ -86,7 +105,11 @@ impl SheetDialogs {
 
 impl BrowserDialogs for SheetDialogs {
     fn offers(&self, kind: DialogKind) -> bool {
-        matches!(kind, DialogKind::Confirm | DialogKind::AskName)
+        match kind {
+            DialogKind::Confirm | DialogKind::AskName => true,
+            DialogKind::PickMoveTarget => self.shared.move_root.borrow().is_some(),
+            DialogKind::PickFiles => false,
+        }
     }
 
     fn confirm(&self, question: Confirmation, answer: Box<dyn FnOnce(bool)>) {
@@ -95,5 +118,19 @@ impl BrowserDialogs for SheetDialogs {
 
     fn ask_name(&self, request: NameRequest, answer: Box<dyn FnOnce(Option<String>)>) {
         self.ask(Question::AskName(request, answer));
+    }
+
+    fn pick_move_target(&self, request: MoveRequest, answer: PickedMoveTarget) {
+        match self.shared.move_root.borrow().is_some() {
+            true => self.ask(Question::PickMove(request, answer)),
+            false => answer(None),
+        }
+    }
+}
+
+/// Answers a Move question with `pick`.
+pub(crate) fn answer_move(question: Option<Question>, pick: MovePick) {
+    if let Some(Question::PickMove(_, answer)) = question {
+        answer(Some(pick));
     }
 }

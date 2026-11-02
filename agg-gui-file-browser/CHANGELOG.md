@@ -197,8 +197,8 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 - `OverflowButton`, the navigation bar's "File" button (`BrowserIcon::Overflow`, named
   `BrowserNames::overflow_menu`), opening the open folder's whole ordered menu.
 - `SheetDialogs` and `DialogSheet`: dialogs on agg-gui's `ModalSheet` for an app without its own,
-  confirming a change and asking for a name (an empty name accepts nothing); they offer no file
-  picker and no Move dialog.
+  confirming a change and asking for a name (an empty name accepts nothing), and with
+  `with_move_root` the Move dialog; they offer no file picker.
 - Delete and Backspace run Remove, with its question, in the list and in the tree (the tree's
   selected folder).
 - `FileBrowser`, the whole browser composed over one `BrowserState`: with
@@ -216,6 +216,15 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   named `BrowserNames::header_markdown`, left out when the folder has none); both forms of
   `FileBrowser` show it.
 - `BrowserList::without_drag_picture`, for a host that draws the drag's picture itself.
+- The Move dialog (`move_dialog`): `MovePage` ("Select a new Destination:", a line saying what
+  accepting does, a `BrowserPage` of its own, Cancel and Move or Copy) over `move_verdict`, which
+  moves within a place and copies between places or out of a folder that keeps its items, and
+  refuses a read-only folder or the top, the items' own folder ("... is already in ..."), and a
+  moved folder or one inside it ("... can't go inside itself."), folders told apart by
+  `FolderKey` (place and location key). `SheetDialogs::with_move_root` shows it; the browser's
+  Move then moves or copies into the folder picked with `drop_into`, recorded for Undo.
+  `BrowserPage` and `dialog_options` are a dialog's browser (nav bar named
+  `BrowserNames::page_nav_bar`, 75-unit pictures, read-only folders hidden).
 - `FileBrowser::with_compact`: the list-only form as a phone's narrow panel while the app's flag
   is set: `COMPACT_VIEW` tiles (70) with their names, whatever view the folder remembers, no view
   button, and one tap activates. `BrowserList::with_view` fixes a list's view.
@@ -246,6 +255,10 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   take the shared state and run the hooks once its borrow has ended, so no activation waits.
 - `BrowserConfig::default()` shows each item's own picture (`OwnPictures`) where it showed the
   look's icon (`NoPictures`, still there for an app that wants icons only).
+- `PickedMoveTarget` answers with a `MovePick` (the folder picked, opened, and whether the items
+  copy) and the browser runs the move into it; `MoveRequest` carries the source folder's name,
+  `FolderKey` and copy rule (`with_source`). Migration: an app's Move dialog answers
+  `Some(MovePick { target: link.get_container()?, copy })` where it answered the link.
 - `BrowserStyle` and `BrowserNames` have new fields. Migration: a look building either with a
   struct literal adds them or ends with `..Default::default()`.
 

@@ -233,6 +233,8 @@ pub struct BrowserNames {
     pub provider_message: String,
     /// The list-only browser's second bar (its search box, view and sorting buttons).
     pub folders_toolbar: String,
+    /// A dialog page's nav bar (its breadcrumbs, view and sorting buttons).
+    pub page_nav_bar: String,
     /// The history's notice ("Moved 3 items to Brackets").
     pub notice: String,
     /// The notice's Undo or Redo button.
@@ -270,6 +272,7 @@ impl Default for BrowserNames {
             splitter: "Library Splitter".into(),
             provider_message: "Provider Message".into(),
             folders_toolbar: "Folders Toolbar".into(),
+            page_nav_bar: "Library Browser Nav Bar".into(),
             notice: "Library Notice".into(),
             notice_button: "Library Notice Button".into(),
         }

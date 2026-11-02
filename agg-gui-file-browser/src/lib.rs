@@ -50,7 +50,9 @@
 //! `places`, `memory` and `dialogs` (the hooks and their defaults), `builtins` (the browser's own
 //! menu actions, which run: Add, Create Folder..., Open File Location, Rename, Move, Remove, each
 //! recorded for Undo and asking through the dialogs), `sheet_dialogs` ([`SheetDialogs`] and the
-//! [`DialogSheet`] they show on), `local_spawner` (the
+//! [`DialogSheet`] they show on), `move_dialog` ([`MovePage`] over a [`BrowserPage`] of its own,
+//! and [`move_verdict`]: where a Move can go and whether it moves or copies), `disk_monitor`
+//! (feature `disk`: the directory monitor that wakes the UI), `local_spawner` (the
 //! spawner for apps without an executor), `trace` (the opt-in trace through the app's tracer);
 //! `drag` ([`DropManager`], the drag of the browser's items onto its folders: targets recorded
 //! as they paint, the highlight and label, the move or copy the drop runs with its history step,
@@ -91,6 +93,7 @@ pub mod list;
 pub mod local_spawner;
 pub mod look;
 pub mod memory;
+pub mod move_dialog;
 pub mod nav;
 pub mod own_pictures;
 pub mod pictures;
@@ -116,8 +119,8 @@ pub use config::{
     ErrorReport, FolderFilter,
 };
 pub use dialogs::{
-    BrowserDialogs, Confirmation, DialogKind, MoveRequest, NameRequest, NoDialogs, PickedFiles,
-    PickedMoveTarget,
+    BrowserDialogs, Confirmation, CopiesTo, DialogKind, MovePick, MoveRequest, NameRequest,
+    NoDialogs, PickedFiles, PickedMoveTarget,
 };
 #[cfg(feature = "disk")]
 pub use disk_monitor::{register_directory_monitor, WakingDirectoryMonitor};
@@ -155,6 +158,10 @@ pub use look::{glyph_face, BrowserIcon, BrowserLook, BrowserNames, BrowserStyle,
 pub use memory::{
     remember_open_location, BrowserMemory, LocationFuture, NoMemory, ViewMode, ViewState,
 };
+pub use move_dialog::{
+    dialog_options, move_verdict, BrowserPage, FolderKey, MoveAnswers, MovePage, MoveVerdict,
+    MOVE_ITEM_SUMMARY, MOVE_ITEM_WINDOW,
+};
 pub use nav::buttons::{
     history_key_text, sorting_button, view_options_button, HistoryButtons, NAV_BUTTON_SIDE,
 };
@@ -187,9 +194,13 @@ pub const ENGLISH_TEXTS: &[&str] = &[
     "Are you sure you want to remove the currently selected items?",
     "Ascending",
     "Cancel",
+    "Choose a folder you can add to.",
     "Clear",
     "Click to go back",
+    "Copy",
     "Copy to {0}",
+    "Copy {0} items to {1}. The originals stay in {2}.",
+    "Copy {0} to {1}. The original stays in {2}.",
     "Couldn't copy to",
     "Couldn't find the location of",
     "Couldn't move to",
@@ -206,6 +217,8 @@ pub const ENGLISH_TEXTS: &[&str] = &[
     "Move to Trash",
     "Move to Trash?",
     "Move to {0}",
+    "Move {0} items to {1}.",
+    "Move {0} to {1}.",
     "Moved",
     "Name",
     "No results",
@@ -218,10 +231,13 @@ pub const ENGLISH_TEXTS: &[&str] = &[
     "Rename Item",
     "Search",
     "Searching for '{0}'",
+    "Select a new Destination",
     "Show Folders",
     "Sorting",
+    "The folder was busy, so nothing moved. Try again.",
     "The selected items will go to the Recycle Bin, where you can restore them.",
     "The selected items will go to the Trash, where you can restore them.",
+    "These items are already in {0}.",
     "This folder can't be changed",
     "This folder is busy. Open it again to see the change.",
     "Undo",
@@ -230,4 +246,6 @@ pub const ENGLISH_TEXTS: &[&str] = &[
     "View Large Icons",
     "View List",
     "View Settings",
+    "{0} can't go inside itself. Choose another folder.",
+    "{0} is already in {1}.",
 ];
