@@ -8,6 +8,17 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ## [Unreleased]
 
+## [0.0.5] - 2026-11-02
+
+### Added
+
+- `PlaceRules::take_over_move`, handed a `MoveCx` (the items, the target and source folders, the
+  target's name): an app runs a drop's or the Move dialog's move its own way (a move between two
+  folders of a remote place, whose undo step can only be recorded once the server answers) and
+  answers `MoveTakeover::Taken` with how it went, which the browser reports as it reports its own
+  moves; `MoveTakeover::Declined` hands the move back to the folders' recorded move. The default
+  hands every move back, so nothing changes for an app that doesn't override it.
+
 ## [0.0.4] - 2026-11-02
 
 ### Added

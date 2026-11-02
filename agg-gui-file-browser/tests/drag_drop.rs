@@ -2,7 +2,8 @@
 //! events over a folder tree beside the list: a row dropped on a folder row, a folder tile or a
 //! tree row moves on disk and the move can be undone; with the copy modifier the drop copies; a
 //! drop between two places copies; a read-only folder is never highlighted and takes nothing; and
-//! a copy is offered to the app first (`take_over_copy`), which may run it or hand it back. A
+//! a copy is offered to the app first (`take_over_copy`), which may run it or hand it back, as is
+//! a move (`take_over_move`). A
 //! drag held over a folder opens it after the spring delay (on agg-gui's virtual clock): a tree
 //! row in place, a folder in the list in the list, where a drop on the empty space lands in it.
 //! The drag's picture follows the pointer (everywhere without a hook), hides outside the browser
@@ -22,8 +23,8 @@ use agg_gui::{
 };
 use agg_gui_file_browser::{
     run_ready_local_tasks, BrowserConfig, BrowserList, BrowserState, BrowserTree, CopyCx,
-    CopyTakeover, DropKey, DropTargetKind, Entry, ItemPictures, OutsideDrops, OutsideOver,
-    OverlayFrame, PictureCx, PictureState, PlaceRules, ViewMode, SPRING_DELAY,
+    CopyTakeover, DropKey, DropTargetKind, Entry, ItemPictures, MoveCx, MoveTakeover, OutsideDrops,
+    OutsideOver, OverlayFrame, PictureCx, PictureState, PlaceRules, ViewMode, SPRING_DELAY,
 };
 use agg_gui_files::disk::{AllFiles, DiskFolder};
 use agg_gui_files::Item;
@@ -368,6 +369,71 @@ fn a_copy_taken_over_is_the_apps_and_one_handed_back_runs_here() {
             }
             false => assert_eq!(names(&shelf), ["gear.stl"]),
         }
+    }
+}
+
+/// Rules that take every move (`take`, failing it with `answer`'s error when it has one) or hand
+/// it back, noting what they were handed.
+struct MovesOffered {
+    take: bool,
+    seen: RefCell<Vec<String>>,
+}
+
+impl PlaceRules for MovesOffered {
+    fn take_over_move<'a>(&self, cx: MoveCx<'a>) -> MoveTakeover<'a> {
+        self.seen.borrow_mut().push(format!(
+            "{} item(s) to {}: {}",
+            cx.items.len(),
+            cx.target_name,
+            cx.items[0].name()
+        ));
+        match self.take {
+            true => MoveTakeover::Taken(Err("the app's own move failed".to_string())),
+            false => MoveTakeover::Declined(cx),
+        }
+    }
+}
+
+#[test]
+fn a_move_taken_over_is_the_apps_and_one_handed_back_runs_here() {
+    for take in [true, false] {
+        let dir = workshop(&format!("move-takeover-{take}"));
+        let rules = Rc::new(MovesOffered {
+            take,
+            seen: RefCell::new(Vec::new()),
+        });
+        let reported = Rc::new(RefCell::new(Vec::<String>::new()));
+        let report = Rc::clone(&reported);
+        let config = BrowserConfig::builder()
+            .places(rules.clone())
+            .report(Rc::new(move |m: &str| {
+                report.borrow_mut().push(m.to_string())
+            }))
+            .build();
+        let (mut app, state) = browser_app(disk(&dir), config, ViewMode::Rows);
+        let at = drag_over(&mut app, "Row Item gear.stl", "Parts Tree Node");
+        release(&mut app, at, Modifiers::default());
+        assert_eq!(*rules.seen.borrow(), ["1 item(s) to Parts: gear.stl"]);
+        let undo = state.borrow().history().undo_description();
+        match take {
+            true => {
+                assert!(
+                    dir.join("gear.stl").exists(),
+                    "the app runs it, not the folder"
+                );
+                assert_eq!(undo, None, "the app records its own step");
+                assert_eq!(
+                    *reported.borrow(),
+                    ["Couldn't move to \"Parts\": the app's own move failed"]
+                );
+            }
+            false => {
+                assert!(dir.join("Parts/gear.stl").exists());
+                assert_eq!(undo.as_deref(), Some("Moved gear.stl to Parts"));
+                assert!(reported.borrow().is_empty());
+            }
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
 

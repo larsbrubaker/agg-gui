@@ -187,7 +187,7 @@ pub use pictures::{
 };
 pub use places::{
     copy_modifier_held, default_crosses_places, default_drop_copies, places_differ, CopyCx,
-    CopyTakeover, DefaultPlaces, PlaceRules,
+    CopyTakeover, DefaultPlaces, MoveCx, MoveTakeover, PlaceRules,
 };
 pub use save_dialog::{
     QuestionHost, SaveAnswers, SaveController, SaveFolderRule, SaveMode, SavePage, SAVE_AS_WINDOW,

@@ -12,8 +12,10 @@
 //! holding one copies where the copy rule already copies, and otherwise moves nothing and says
 //! why ("Protected items can't be moved").
 //!
-//! A move runs at once through the folders' recorded form (`WritableFolder::move_in_recorded`):
-//! its step goes on the history, the source and any open ancestor that is the target list again,
+//! A move is first offered to the app (`PlaceRules::take_over_move`, handed a `MoveCx` with the
+//! items and the two folders), which runs it its own way (recording its step itself) or hands it
+//! back; handed back, it runs at once through the folders' recorded form
+//! (`WritableFolder::move_in_recorded`): its step goes on the history. Either way, the source and any open ancestor that is the target list again,
 //! the browser lists again, and a failure is reported naming what did move.
 //!
 //! A copy is first offered to the app (`PlaceRules::take_over_copy`, handed a `CopyCx` with the
@@ -29,7 +31,7 @@ use std::rc::Rc;
 use agg_gui_files::{names_of_items_gone_from_source, tr, Folder, FolderLink, Item, Recorded};
 
 use crate::move_dialog::plan::{fill, FolderKey};
-use crate::places::{CopyCx, CopyTakeover};
+use crate::places::{CopyCx, CopyTakeover, MoveCx, MoveTakeover};
 use crate::state::{BrowserState, OpenFolder};
 
 /// "Couldn't move to "Brackets": why", one translated line.
@@ -117,15 +119,32 @@ pub fn drop_into(
         ));
         return false;
     }
-    let recorded = {
+    let history = state.borrow().history();
+    let result = {
         let mut source = source.borrow_mut();
         match (target.as_writable_mut(), source.as_writable_mut()) {
-            (Some(target), Some(source)) => target.move_in_recorded(items, source),
-            _ => Recorded::unrecorded(Err(tr("This folder can't be changed"))),
+            (Some(target), Some(source)) => {
+                let cx = MoveCx {
+                    items,
+                    target,
+                    target_name,
+                    source,
+                };
+                match places.take_over_move(cx) {
+                    MoveTakeover::Taken(result) => {
+                        crate::trace(|| format!("move to {target_name} taken over by the app"));
+                        result
+                    }
+                    MoveTakeover::Declined(cx) => {
+                        history.keep(cx.target.move_in_recorded(cx.items, cx.source))
+                    }
+                }
+            }
+            _ => history.keep(Recorded::unrecorded(Err(tr(
+                "This folder can't be changed",
+            )))),
         }
     };
-    let history = state.borrow().history();
-    let result = history.keep(recorded);
     source.borrow_mut().load();
     if let Err(e) = &result {
         let gone = names_of_items_gone_from_source(items, &**source.borrow());

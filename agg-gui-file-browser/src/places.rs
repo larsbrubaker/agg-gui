@@ -1,6 +1,8 @@
 //! Move or copy: the rule a browser's drags and Move dialog follow when items leave one folder
-//! for another ([`PlaceRules`], [`DefaultPlaces`]), and the hook through which an app runs a copy
-//! itself ([`PlaceRules::take_over_copy`], handed a [`CopyCx`]).
+//! for another ([`PlaceRules`], [`DefaultPlaces`]), and the hooks through which an app runs a copy
+//! itself ([`PlaceRules::take_over_copy`], handed a [`CopyCx`]) or a move itself
+//! ([`PlaceRules::take_over_move`], handed a [`MoveCx`]: a move between two folders of a remote
+//! place whose step can only be recorded once the server answers).
 //!
 //! The rule rests on places (`agg_gui_files::PlaceId`, what a folder's or row's `place()`
 //! answers). Items move within one place and are copied, keeping the originals, when:
@@ -19,7 +21,7 @@
 use std::rc::Rc;
 
 use agg_gui::Modifiers;
-use agg_gui_files::{ContainerActions, Folder, Item, PlaceId};
+use agg_gui_files::{ContainerActions, Folder, Item, PlaceId, WritableFolder};
 
 use crate::config::ErrorReport;
 use crate::history::HistoryRecorder;
@@ -98,6 +100,31 @@ pub enum CopyTakeover {
     Declined(CopyCx),
 }
 
+/// A move the browser is about to run: the items, the writable folders they go into and come
+/// from, and the target's name (for the notice and any failure). Handed to
+/// [`PlaceRules::take_over_move`], which runs the move or hands it back. The folders are lent
+/// for the call only: no browser state is borrowed while the hook runs, but the two folders are.
+pub struct MoveCx<'a> {
+    /// What moves, in the order the user picked it.
+    pub items: &'a [Rc<dyn Item>],
+    /// The opened folder the items go into.
+    pub target: &'a mut dyn WritableFolder,
+    /// The target folder's name, as the user reads it.
+    pub target_name: &'a str,
+    /// The open folder the items come from.
+    pub source: &'a mut dyn WritableFolder,
+}
+
+/// What [`PlaceRules::take_over_move`] did with a move.
+pub enum MoveTakeover<'a> {
+    /// The app ran the move: how it went (an error is reported with the items that did move, as
+    /// the browser's own move is). The app records any undo step itself (through the history's
+    /// recorder, once its move lands).
+    Taken(Result<(), String>),
+    /// The app leaves the move, handed back whole, to the browser (the folders' recorded move).
+    Declined(MoveCx<'a>),
+}
+
 /// How a browser decides between moving and copying, and who runs a copy. Every method has the
 /// default the module header describes; an app overrides only what its places need.
 pub trait PlaceRules {
@@ -123,6 +150,13 @@ pub trait PlaceRules {
     /// back.
     fn take_over_copy(&self, cx: CopyCx) -> CopyTakeover {
         CopyTakeover::Declined(cx)
+    }
+
+    /// Runs `cx`'s move the app's own way, answering [`MoveTakeover::Taken`] with how it went,
+    /// or hands it back. The default hands every move back, to the folders' recorded move
+    /// (`WritableFolder::move_in_recorded`).
+    fn take_over_move<'a>(&self, cx: MoveCx<'a>) -> MoveTakeover<'a> {
+        MoveTakeover::Declined(cx)
     }
 }
 
