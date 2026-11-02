@@ -18,7 +18,9 @@
 //! corner, opens the list's menu. Rows hold no state of their own beyond a build: hover, the menu
 //! button's press and a press that may become a drag live in the state (`press.rs`), so they
 //! survive the rows being rebuilt under the pointer. `item_event.rs` is a row's pointer handling,
-//! `build.rs` what each row is built from, `tile_art.rs` what a row shows where its picture goes.
+//! `build.rs` what each row is built from, `tile_art.rs` what a row shows where its picture goes,
+//! `overlay.rs` how the app's overlay on a picture is reached, and `section_header.rs` a search's
+//! lines between its results.
 
 pub mod build;
 pub mod gestures;
@@ -27,9 +29,11 @@ pub mod item_event;
 pub mod list_menu;
 pub mod menu_button;
 pub mod message;
+pub mod overlay;
 pub mod press;
 pub mod reveal;
 pub mod row;
+pub mod section_header;
 pub mod tile_art;
 
 use std::cell::{Cell, RefCell};
@@ -262,7 +266,13 @@ impl Widget for BrowserList {
         }
         available
     }
-    fn paint(&mut self, _ctx: &mut dyn DrawCtx) {}
+    /// Records where the list is in the window, for a drag that ends outside it.
+    fn paint(&mut self, ctx: &mut dyn DrawCtx) {
+        let (mut x, mut y) = (0.0, 0.0);
+        agg_gui::logical_root_transform(ctx).transform(&mut x, &mut y);
+        let rect = Rect::new(x, y, self.bounds.width, self.bounds.height);
+        self.state.borrow_mut().item_press_mut().set_list_rect(rect);
+    }
     /// The rubber band over the rows.
     fn paint_overlay(&mut self, ctx: &mut dyn DrawCtx) {
         let style = self.look.style();

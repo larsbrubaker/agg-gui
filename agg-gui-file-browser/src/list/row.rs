@@ -5,8 +5,8 @@
 //! `fit_name`) and shows whole as the row's tooltip; an item with a detail line
 //! (`Item::detail_line`) shows it smaller and fainter under the name. A hovered row draws the
 //! menu button's glyph at its right end (`list/menu_button.rs`), and whatever the app lays over
-//! the picture (`ItemPictures::tile_overlay`) is the row's child, over the picture. Pointer
-//! handling is `list/item_event.rs`.
+//! the picture (`ItemPictures::tile_overlay`) is the row's child, over the picture, reached
+//! through the row (`list/overlay.rs`). Pointer handling is `list/item_event.rs`.
 
 use agg_gui::{DrawCtx, Event, EventResult, Point, Rect, Size, Widget};
 
@@ -15,6 +15,8 @@ use crate::fitted_text::{centered_text_baseline, fill_text_within, fit_name, fit
 use super::build::{ListCx, RowParts};
 use super::item_event::item_event;
 use super::menu_button::{menu_glyph_rect, shows_menu_button, MENU_GLYPH_SIZE};
+use super::overlay::OverlayRoute;
+use super::section_header::SectionHeaderRow;
 use super::tile_art::{paint_art, TileArt};
 
 /// The picture's side in logical units.
@@ -47,6 +49,8 @@ pub struct BrowserRow {
     detail: Option<String>,
     shown_detail: String,
     hovered: bool,
+    /// The routing of the pointer to the app's overlay (the row's one child, if any).
+    route: OverlayRoute,
     bounds: Rect,
     children: Vec<Box<dyn Widget>>,
 }
@@ -57,10 +61,14 @@ impl BrowserRow {
         let mut parts = cx.parts(index, ROW_THUMB_SIZE)?;
         let name = parts.entry.name().to_string();
         let detail = parts.entry.detail_line();
-        let children = parts.overlay.take().into_iter().collect();
+        let mut children: Vec<Box<dyn Widget>> = parts.overlay.take().into_iter().collect();
+        if parts.hovered {
+            OverlayRoute::hovered(children.first_mut());
+        }
         Some(Self {
             cx: cx.clone(),
             hovered: parts.hovered,
+            route: OverlayRoute::default(),
             index,
             shown_name: name.clone(),
             name,
@@ -80,6 +88,21 @@ impl BrowserRow {
     /// What the row shows where its picture goes.
     pub fn art(&self) -> &TileArt {
         &self.parts.art
+    }
+
+    /// The picture's side in device pixels: the row lays it out at [`ROW_THUMB_SIZE`] logical
+    /// units and draws it through the display's scale, so a picture made this size lands 1:1.
+    pub fn thumbnail_pixel_size(&self) -> Size {
+        let side = f64::from(ROW_THUMB_SIZE) * agg_gui::device_scale();
+        Size::new(side, side)
+    }
+
+    /// The painted name's right end, in the row's own coordinates.
+    pub fn name_right(&self) -> f64 {
+        let width =
+            agg_gui::measure_text_metrics(&self.cx.font, &self.shown_name, self.cx.style.font_size)
+                .width;
+        ROW_MARGIN + f64::from(ROW_THUMB_SIZE) + NAME_MARGIN + width
     }
 
     /// The row's own box (its margins left out).
@@ -174,11 +197,19 @@ impl Widget for BrowserRow {
             paint_art(ctx, &self.cx.overflow, glyph);
         }
     }
+    /// The row takes every press over it, and hands the overlay its own (`list/overlay.rs`).
+    fn claims_pointer_exclusively(&self, _local_pos: Point) -> bool {
+        true
+    }
     fn on_event(&mut self, event: &Event) -> EventResult {
         match event {
             Event::MouseEnter => self.hovered = true,
             Event::MouseLeave => self.hovered = false,
             _ => {}
+        }
+        let state = &self.cx.state;
+        if let Some(result) = self.route.route(self.children.first_mut(), event, state) {
+            return result;
         }
         let size = self.item_size();
         item_event(
@@ -189,24 +220,31 @@ impl Widget for BrowserRow {
             size,
         )
     }
-    /// The whole name while it is cut short, so the user can still read it.
+    /// The overlay's over its own shape; elsewhere the whole name while it is cut short, so the
+    /// user can still read it.
     fn tooltip_text(&self) -> Option<&str> {
-        (self.shown_name != self.name).then_some(self.name.as_str())
+        self.route
+            .tooltip(self.children.first().map(|c| c.as_ref()))
+            .or_else(|| (self.shown_name != self.name).then_some(self.name.as_str()))
     }
     fn properties(&self) -> Vec<(&'static str, String)> {
         vec![
             ("name", self.name.clone()),
             ("shown_name", self.shown_name.clone()),
             ("detail", self.detail.clone().unwrap_or_default()),
+            ("name_right", self.name_right().to_string()),
             ("selected", self.parts.selected.to_string()),
             ("is_container", self.parts.entry.is_container().to_string()),
             ("picture", self.parts.art.kind.to_string()),
+            ("thumbnail", self.parts.art.name.clone()),
+            ("thumbnail_center", self.parts.art.center_pixel_text()),
             ("menu_glyph", self.hovered.to_string()),
         ]
     }
 }
 
-/// The rows top down, as tall as they are so a `ScrollView` knows how far to scroll.
+/// The rows top down, a search's headers between them (`list/section_header.rs`), as tall as
+/// they are so a `ScrollView` knows how far to scroll.
 pub struct RowStack {
     bounds: Rect,
     children: Vec<Box<dyn Widget>>,
@@ -220,10 +258,12 @@ impl RowStack {
         let children = slots
             .iter()
             .filter_map(|slot| match slot {
-                crate::state::ListSlot::Entry(index) => BrowserRow::new(cx, *index),
-                _ => None,
+                crate::state::ListSlot::Entry(index) => {
+                    BrowserRow::new(cx, *index).map(|row| Box::new(row) as Box<dyn Widget>)
+                }
+                _ => SectionHeaderRow::for_slot(slot, cx)
+                    .map(|header| Box::new(header) as Box<dyn Widget>),
             })
-            .map(|row| Box::new(row) as Box<dyn Widget>)
             .collect();
         Self {
             bounds: Rect::default(),

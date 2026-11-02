@@ -126,6 +126,8 @@ pub struct BrowserStyle {
     pub thumbnail_background: Color,
     /// The splitter between the folder tree and the list.
     pub splitter_background: Color,
+    /// The rule under a search section's header.
+    pub section_rule: Color,
     /// The side of a square toolbar button (the up button, the menu buttons).
     pub button_height: f64,
     /// The corners of a tile and of its selection and hover highlights.
@@ -147,6 +149,7 @@ impl BrowserStyle {
             hover_fill: visuals.widget_bg_hovered,
             thumbnail_background: visuals.widget_bg,
             splitter_background: visuals.separator,
+            section_rule: visuals.separator,
             button_height: 32.0,
             corner_radius: 3.0,
         }
@@ -199,6 +202,11 @@ pub struct BrowserNames {
     pub folder_message_text: String,
     /// The Sign In button under a folder refused for the sign-in.
     pub sign_in_button: String,
+    /// The "Searching for ..." line over a search's results.
+    pub search_status: String,
+    /// A search section's header (template; its expand toggle is the header's name and
+    /// " Toggle").
+    pub search_section: String,
 }
 
 impl Default for BrowserNames {
@@ -222,6 +230,8 @@ impl Default for BrowserNames {
             folder_message: "Library Folder Message".into(),
             folder_message_text: "Library Folder Message Text".into(),
             sign_in_button: "Library Folder Sign In Button".into(),
+            search_status: "Search Status".into(),
+            search_section: "Search Section {name}".into(),
         }
     }
 }
@@ -235,6 +245,11 @@ impl BrowserNames {
     /// The row or tile of the item named `name`.
     pub fn item_row_for(&self, name: &str) -> String {
         self.item_row.replace("{name}", name)
+    }
+
+    /// The header of the search section named `name`.
+    pub fn search_section_for(&self, name: &str) -> String {
+        self.search_section.replace("{name}", name)
     }
 
     /// The row or tile of the folder named `name`.

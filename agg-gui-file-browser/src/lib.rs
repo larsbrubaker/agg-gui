@@ -97,8 +97,10 @@ pub use list::icon_view::{BrowserTile, TileStack};
 pub use list::list_menu::MenuScope;
 pub use list::menu_button::MenuButtonState;
 pub use list::message::FolderMessage;
+pub use list::overlay::OverlayRoute;
 pub use list::press::{ItemPress, DRAG_THRESHOLD};
 pub use list::row::{BrowserRow, RowStack, ROW_HEIGHT, ROW_THUMB_SIZE};
+pub use list::section_header::SectionHeaderRow;
 pub use list::tile_art::TileArt;
 pub use list::BrowserList;
 pub use local_spawner::{run_ready_local_tasks, unfinished_local_tasks, ErrorLog, LocalSpawner};
@@ -106,7 +108,7 @@ pub use look::{glyph_face, BrowserIcon, BrowserLook, BrowserNames, BrowserStyle,
 pub use memory::{
     remember_open_location, BrowserMemory, LocationFuture, NoMemory, ViewMode, ViewState,
 };
-pub use own_pictures::OwnPictures;
+pub use own_pictures::{OwnPictures, KEPT_PICTURES};
 pub use pictures::{FolderPicture, ItemPictures, NoPictures, PictureCx, PictureState};
 pub use places::{
     copy_modifier_held, default_crosses_places, default_drop_copies, places_differ, CopyCx,
@@ -130,4 +132,5 @@ pub const ENGLISH_TEXTS: &[&str] = &[
     "Open File Location",
     "Remove",
     "Rename",
+    "Searching for '{0}'",
 ];

@@ -9,7 +9,8 @@
 //! to the list, which opens the menu where it was pressed; a click on the menu button a hovered
 //! row draws asks for the same menu hanging from the button (`list/menu_button.rs`). A press
 //! that loses the pointer without a release (a finger lifting, the window deactivating) ends
-//! without a click: no selection settled, no menu, no tap.
+//! without a click: no selection settled, no menu, no tap. A drag that ends outside the list
+//! gives the keys back (`drag_ended`), so the view it ended over has them.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -115,6 +116,9 @@ fn release(
         s.release_press(dragged);
         dragged
     };
+    if dragged {
+        drag_ended(state, pointer(pos));
+    }
     let on_button = in_menu_button(here, size.width, size.height);
     let menu = state
         .borrow_mut()
@@ -157,10 +161,15 @@ pub fn press_lost(state: &Rc<RefCell<BrowserState>>, index: Option<usize>) -> bo
     if !state.borrow().item_press().is_pressed() {
         return false;
     }
-    {
+    let (dragged, at) = {
         let mut s = state.borrow_mut();
-        s.item_press_mut().end();
+        let at = s.item_press().last_pointer();
+        let dragged = s.item_press_mut().end();
         s.release_press(true);
+        (dragged, at)
+    };
+    if let (true, Some(at)) = (dragged, at) {
+        drag_ended(state, at);
     }
     match index {
         Some(index) => {
@@ -171,4 +180,13 @@ pub fn press_lost(state: &Rc<RefCell<BrowserState>>, index: Option<usize>) -> bo
         None => state.borrow_mut().begin_tap(None),
     }
     true
+}
+
+/// A drag ended at `at` (window coordinates): outside the list, the list gives up the keys.
+fn drag_ended(state: &Rc<RefCell<BrowserState>>, at: Point) {
+    let s = state.borrow();
+    if s.item_press().list_contains(at) == Some(false) {
+        crate::trace(|| "drag ended outside the list: keys given back".to_string());
+        agg_gui::focus::release_focus(s.list_focus_id());
+    }
 }

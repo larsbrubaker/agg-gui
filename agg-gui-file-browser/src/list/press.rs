@@ -9,8 +9,12 @@
 //! button is held (`agg_gui::mouse_button_held`): one released where the list never heard it (a
 //! page that left the screen mid-press) ends as a cancel at the next move
 //! ([`ItemPress::released_unheard`]).
+//!
+//! The press also keeps where the list is in the window (`set_list_rect`, recorded as the list
+//! paints): a drag that ends outside it gives the keys back (`list/item_event.rs`), so Delete
+//! where the items were dropped is that view's, not the list's.
 
-use agg_gui::{MouseButton, Point};
+use agg_gui::{MouseButton, Point, Rect};
 
 /// How far a press must move to become a drag (more than 40 units), so a click with a slight
 /// wobble stays a click.
@@ -30,6 +34,8 @@ pub struct ItemPress {
     last_at: Option<Point>,
     /// The press moved far enough to be a drag.
     dragging: bool,
+    /// The list's window rectangle (logical units, Y up), from its last paint.
+    list_rect: Option<Rect>,
 }
 
 impl ItemPress {
@@ -79,6 +85,17 @@ impl ItemPress {
             crate::trace(|| "item press became a drag".to_string());
         }
         self.dragging
+    }
+
+    /// Records the list's window rectangle (logical units, Y up).
+    pub fn set_list_rect(&mut self, rect: Rect) {
+        self.list_rect = Some(rect);
+    }
+
+    /// Whether `at` (window coordinates) is over the list; `None` before the list has painted.
+    pub fn list_contains(&self, at: Point) -> Option<bool> {
+        let r = self.list_rect?;
+        Some(at.x >= r.x && at.y >= r.y && at.x <= r.x + r.width && at.y <= r.y + r.height)
     }
 
     /// The press ended (released, cancelled or its capture lost): whether it was a drag.

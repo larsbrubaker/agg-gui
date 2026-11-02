@@ -8,8 +8,12 @@
 //! A picture is asked for once per item and side: the first ask starts it on the context's
 //! spawner and answers `Default`; once it lands it is kept, the browser is told
 //! (`PictureCx::picture_arrived`) and every later ask answers it at once. Pictures are made at
-//! the device scale the first ask was made at, so a tile draws them pixel for pixel. The kept
-//! pictures live as long as the hook does (one per browser config).
+//! the device scale the first ask was made at, so a tile draws them pixel for pixel.
+//!
+//! At most [`KEPT_PICTURES`] pictures are kept (the least recently asked for leave first), so a
+//! browser walked through many folders holds a bounded amount of pixels: 1024 covers a folder of
+//! a few hundred items shown at two sides (rows and an icon size) with the one walked back to.
+//! A picture that left is made again at its next ask, the item icon showing meanwhile.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -24,22 +28,85 @@ use crate::entry::Entry;
 use crate::pictures::{ItemPictures, PictureCx, PictureState};
 use crate::state::item_identity_key;
 
+/// How many pictures an [`OwnPictures`] keeps (see the module header).
+pub const KEPT_PICTURES: usize = 1024;
+
 /// One item's picture at one side: being made, or made (`None`: the item has none).
 enum Slot {
     Making,
     Made(Option<IconImage>),
 }
 
+/// An item and side's picture (an item's identity key and the side).
+type Key = (String, i32);
+
+/// The kept pictures, each with when it was last asked for.
+struct Kept {
+    slots: HashMap<Key, (Slot, u64)>,
+    clock: u64,
+    capacity: usize,
+}
+
+impl Kept {
+    /// The slot of `key`, marked as asked for now.
+    fn ask(&mut self, key: &Key) -> Option<&Slot> {
+        self.clock += 1;
+        let now = self.clock;
+        let (slot, asked) = self.slots.get_mut(key)?;
+        *asked = now;
+        Some(slot)
+    }
+
+    /// Keeps `slot` for `key`, the least recently asked for leaving while over the capacity.
+    fn keep(&mut self, key: Key, slot: Slot) {
+        self.clock += 1;
+        self.slots.insert(key, (slot, self.clock));
+        while self.slots.len() > self.capacity {
+            // Ties cannot happen: every ask and keep takes its own tick.
+            let oldest = self
+                .slots
+                .iter()
+                .min_by_key(|(_, (_, asked))| *asked)
+                .map(|(key, _)| key.clone());
+            match oldest {
+                Some(key) => self.slots.remove(&key),
+                None => break,
+            };
+        }
+    }
+}
+
 /// The pictures items and their folders make of them (see the module header).
-#[derive(Default)]
 pub struct OwnPictures {
-    kept: Rc<RefCell<HashMap<(String, i32), Slot>>>,
+    kept: Rc<RefCell<Kept>>,
+}
+
+impl Default for OwnPictures {
+    fn default() -> Self {
+        Self::with_capacity(KEPT_PICTURES)
+    }
 }
 
 impl OwnPictures {
-    /// Pictures with none kept yet.
+    /// Pictures with none kept yet, keeping up to [`KEPT_PICTURES`].
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Pictures keeping up to `capacity` (at least one).
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            kept: Rc::new(RefCell::new(Kept {
+                slots: HashMap::new(),
+                clock: 0,
+                capacity: capacity.max(1),
+            })),
+        }
+    }
+
+    /// How many pictures are kept now (made, being made, or known to be none).
+    pub fn kept(&self) -> usize {
+        self.kept.borrow().slots.len()
     }
 }
 
@@ -62,7 +129,7 @@ impl ItemPictures for OwnPictures {
             return PictureState::Default;
         }
         let key = (item_identity_key(entry.item().as_ref()), side);
-        if let Some(slot) = self.kept.borrow().get(&key) {
+        if let Some(slot) = self.kept.borrow_mut().ask(&key) {
             return match slot {
                 Slot::Made(Some(image)) => PictureState::Ready(image.clone()),
                 _ => PictureState::Default,
@@ -76,10 +143,10 @@ impl ItemPictures for OwnPictures {
             .folder_picture(item, pixels, pixels)
             .or_else(|| item.as_thumbnail().map(|t| t.get_thumbnail(pixels, pixels)));
         let Some(future) = future else {
-            self.kept.borrow_mut().insert(key, Slot::Made(None));
+            self.kept.borrow_mut().keep(key, Slot::Made(None));
             return PictureState::Default;
         };
-        self.kept.borrow_mut().insert(key.clone(), Slot::Making);
+        self.kept.borrow_mut().keep(key.clone(), Slot::Making);
         let kept = Rc::clone(&self.kept);
         let spawner = Rc::clone(cx.spawner());
         let arrived = cx.arrived_callback();
@@ -92,7 +159,7 @@ impl ItemPictures for OwnPictures {
                     None
                 }
             };
-            kept.borrow_mut().insert(key, Slot::Made(image));
+            kept.borrow_mut().keep(key, Slot::Made(image));
             arrived();
         }));
         PictureState::Default

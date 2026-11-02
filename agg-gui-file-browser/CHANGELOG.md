@@ -57,6 +57,21 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 - `BrowserState::menu_button`, `menu_button_mut`, `item_press` and `item_press_mut`: the rows'
   menu button and press state, kept with the browser so they survive the rows being rebuilt under
   the pointer.
+- A search's results list under their places' headers in both views (`SectionHeaderRow`: a
+  "Searching for '{0}'" line while the search runs, then per place an expand toggle with the
+  place's name and "(n)", "No results" or its error; a click on the header rolls the section up
+  or opens it).
+- The app's overlay on a picture (`ItemPictures::tile_overlay`) is reached through its row or
+  tile (`OverlayRoute`): it hears the row's hover and every move over it, takes only the presses
+  its `hit_test` says are its own (a press it takes is never the row's), and its tooltip is the
+  row's over its own shape.
+- A drag that ends outside the list gives the keys back (`ItemPress::set_list_rect`,
+  `list_contains`).
+- Rows and tiles report `name_right`, `thumbnail` (the art's name) and `thumbnail_center` (its
+  centre pixel); `BrowserRow::thumbnail_pixel_size` and `name_right`; `BrowserTile::label_band`,
+  `label_text_origin`, `label_printed_height` and `name_max_width`.
+- `OwnPictures` keeps at most `KEPT_PICTURES` (1024) pictures, the least recently asked for
+  leaving first and made again when asked for (`with_capacity`, `kept`).
 - `BuiltinAction::title` and `acts_on_selection`.
 - `OwnPictures`: each item shows the picture its folder or the item itself makes of it, made on
   the spawner and kept, the look's item icon until then; the default pictures hook.
@@ -64,9 +79,10 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   `icon_for_key` (the art an item names by key: a folder link's `micro_icon` and `tile_icon`) and
   `icon_generation` (changes when the look's art does: the list builds again and
   `BrowserIconButton` asks for its image again).
-- `BrowserStyle::tile_font_size` (the name under a tile, 9 pt) and the names
-  `BrowserNames::list_area` ("LibraryView"), `folder_message`, `folder_message_text` and
-  `sign_in_button`.
+- `BrowserStyle::tile_font_size` (the name under a tile, 9 pt) and `section_rule`, and the names
+  `BrowserNames::list_area` ("LibraryView"), `folder_message`, `folder_message_text`,
+  `sign_in_button`, `search_status` ("Search Status") and `search_section` ("Search Section
+  {name}").
 
 ### Changed
 

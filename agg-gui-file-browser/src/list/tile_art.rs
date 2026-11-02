@@ -46,6 +46,9 @@ pub struct TileArt {
     /// What it is, reported as the row's `picture` property: `folder`, `picture`,
     /// `generating` or `item`.
     pub kind: &'static str,
+    /// Which art it is, reported as the row's `thumbnail` property: the look's name for its icon
+    /// (`BrowserLook::icon_name`), the key a folder link named, or `picture` for an entry's own.
+    pub name: String,
 }
 
 /// `which` from the look in `tint`, `side` units, else its glyph.
@@ -76,41 +79,61 @@ pub fn tile_art(
         let own = link
             .tile_icon()
             .and_then(|key| look.icon_for_key(key, size, style.accent));
-        let art = match own.or_else(|| look.folder_tile(link, square)) {
-            Some(image) => return TileArt::folder(Art::Image(image), None),
-            None => icon_art(look, BrowserIcon::Folder, square, style.accent),
-        };
+        if let (Some(image), Some(key)) = (own, link.tile_icon()) {
+            return TileArt::folder(Art::Image(image), None, key.to_string());
+        }
+        let folder = look.icon_name(BrowserIcon::Folder);
+        if let Some(image) = look.folder_tile(link, square) {
+            return TileArt::folder(Art::Image(image), None, folder);
+        }
+        let art = icon_art(look, BrowserIcon::Folder, square, style.accent);
         let micro = square * MICRO_ICON_SHARE;
         let badge = link
             .micro_icon()
             .and_then(|key| look.icon_for_key(key, Size::new(micro, micro), style.background));
-        return TileArt::folder(art, badge);
+        return TileArt::folder(art, badge, folder);
     }
     let icon_side = ITEM_ICON_SIZE.min(square);
-    let (art, kind) = match pictures.picture(cx, entry, side) {
-        PictureState::Ready(image) => (Art::Image(image), "picture"),
-        PictureState::Generating => (
-            icon_art(look, BrowserIcon::Generating, icon_side, style.text_color),
-            "generating",
-        ),
-        PictureState::Default => (
-            icon_art(look, BrowserIcon::Item, icon_side, style.text_color),
-            "item",
-        ),
+    let icon = |which: BrowserIcon, kind| {
+        let art = icon_art(look, which, icon_side, style.text_color);
+        (art, kind, look.icon_name(which))
+    };
+    let (art, kind, name) = match pictures.picture(cx, entry, side) {
+        PictureState::Ready(image) => (Art::Image(image), "picture", "picture".to_string()),
+        PictureState::Generating => icon(BrowserIcon::Generating, "generating"),
+        PictureState::Default => icon(BrowserIcon::Item, "item"),
     };
     TileArt {
         art,
         badge: None,
         kind,
+        name,
     }
 }
 
 impl TileArt {
-    fn folder(art: Art, badge: Option<IconImage>) -> Self {
+    fn folder(art: Art, badge: Option<IconImage>, name: String) -> Self {
         Self {
             art,
             badge,
             kind: "folder",
+            name,
+        }
+    }
+
+    /// The image's centre pixel as "r,g,b,a" at the device scale, for tests that check a tile's
+    /// colour; empty for a glyph, which has no pixels of its own.
+    pub fn center_pixel_text(&self) -> String {
+        let Art::Image(image) = &self.art else {
+            return String::new();
+        };
+        let Some((rgba, w, h)) = image.raster_at_scale(agg_gui::device_scale()) else {
+            return String::new();
+        };
+        let at = ((h / 2) as usize * w as usize + (w / 2) as usize) * 4;
+        match rgba.get(at..at + 4) {
+            Some([r, g, b, a]) => format!("{r},{g},{b},{a}"),
+            _ => String::new(),
         }
     }
 
