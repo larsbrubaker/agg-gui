@@ -11,10 +11,13 @@
 //! selected it opens that folder instead, as a double click on it does. A double click on a file
 //! opens the selection it belongs to. Reading the files is the app's.
 //!
-//! The page takes the list's double clicks before laying its browser page out; its line and
-//! buttons are built again whenever the browser's view changes (a selection, a folder).
+//! What Open does is [`OpenController`]'s, so an app can wrap it in its own page; the page is its
+//! default chrome, its buttons named by the look's `BrowserNames::dialog_cancel` and
+//! `dialog_confirm`. The page has the controller take the list's double clicks before laying its
+//! browser page out; its line and buttons are built again whenever the browser's view changes (a
+//! selection, a folder).
 
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -23,8 +26,9 @@ use agg_gui::{Button, DrawCtx, Event, EventResult, FlexRow, Label, Rect, Size, S
 use agg_gui_files::{tr, FolderLink, Item};
 
 use crate::dialogs::{OpenPick, OpenRequest};
+use crate::memory::LocationFuture;
+use crate::move_dialog::place::DialogPlace;
 use crate::move_dialog::BrowserPage;
-use crate::sheet_dialogs::{CANCEL_BUTTON, CONFIRM_BUTTON};
 use crate::state::{BrowserEntry, BrowserState, ItemEvent};
 
 /// The Open page's widget name.
@@ -48,16 +52,66 @@ enum Choice {
     Nothing,
 }
 
-/// What the page's buttons share.
+/// What an Open dialog's controller shares.
 struct Core {
     state: Rc<RefCell<BrowserState>>,
     request: OpenRequest,
     answers: OpenAnswers,
-    /// The browser page's: set once the page has answered.
-    accepted: Rc<Cell<bool>>,
+    place: DialogPlace,
 }
 
-impl Core {
+/// The Open dialog's logic without its widgets, so an app can wrap it in its own page; clones
+/// share one dialog. It says what Open does with the selection ([`OpenController::summary`],
+/// [`OpenController::accept_enabled`]), opens (answering with the selected files, or opening
+/// the one folder selected), takes the list's double clicks in [`OpenController::update`] (which
+/// the page calls at each layout before its browser lays out) and keeps the dialog's place
+/// (`move_dialog`'s `place.rs`).
+#[derive(Clone)]
+pub struct OpenController {
+    core: Rc<Core>,
+}
+
+impl OpenController {
+    /// The dialog opening per `request`, browsing `state` (made with the request's filter and
+    /// selection), answering through `answers`.
+    pub fn new(
+        state: &Rc<RefCell<BrowserState>>,
+        request: OpenRequest,
+        answers: OpenAnswers,
+    ) -> Self {
+        Self {
+            core: Rc::new(Core {
+                state: Rc::clone(state),
+                request,
+                answers,
+                place: DialogPlace::default(),
+            }),
+        }
+    }
+
+    /// The dialog opening where it was last left under `key` (unless given a starting folder)
+    /// and remembering where the user goes.
+    pub fn remembering(self, key: impl Into<String>) -> Self {
+        self.core.place.remember_under(key);
+        self
+    }
+
+    /// The dialog opening in the folders `start` finds below the root.
+    pub fn starting_in(self, start: LocationFuture) -> Self {
+        self.core.place.start_in(start);
+        self
+    }
+
+    /// The dialog's browser.
+    pub fn state(&self) -> &Rc<RefCell<BrowserState>> {
+        &self.core.state
+    }
+
+    /// The request the dialog answers.
+    pub fn request(&self) -> &OpenRequest {
+        &self.core.request
+    }
+
     /// What Open does with `selected` (see the module header).
     fn choice(selected: &[BrowserEntry]) -> Choice {
         let files: Vec<Rc<dyn Item>> = selected
@@ -75,41 +129,68 @@ impl Core {
     }
 
     fn current(&self) -> Choice {
-        Self::choice(&self.state.borrow().selected_entries())
+        Self::choice(&self.core.state.borrow().selected_entries())
     }
 
-    /// The Open button.
-    fn open(&self) {
+    /// The line saying what Open will open: the selected files' names, or what to choose.
+    pub fn summary(&self) -> String {
+        match self.current() {
+            Choice::Files(files) => {
+                let names: Vec<&str> = files.iter().map(|f| f.name()).collect();
+                names.join(", ")
+            }
+            Choice::Folder(_) | Choice::Nothing => match self.core.request.multiple {
+                true => tr("Choose files to open."),
+                false => tr("Choose a file to open."),
+            },
+        }
+    }
+
+    /// Whether Open does anything with the selection now.
+    pub fn accept_enabled(&self) -> bool {
+        !matches!(self.current(), Choice::Nothing)
+    }
+
+    /// The Open button: answers with the selected files, or opens the one folder selected.
+    pub fn accept(&self) {
         match self.current() {
             Choice::Files(files) => self.answer(files),
-            Choice::Folder(link) => self.state.borrow_mut().open(link.as_ref()),
+            Choice::Folder(link) => self.core.state.borrow_mut().open(link.as_ref()),
             Choice::Nothing => {}
         }
     }
 
+    /// Answers as cancelled.
+    pub fn cancel(&self) {
+        (self.core.answers.cancel)();
+    }
+
     /// Answers with `files` and the folder listing them, once.
     fn answer(&self, files: Vec<Rc<dyn Item>>) {
-        if self.accepted.get() {
+        let accepted = &self.core.place.accepted;
+        if accepted.get() {
             return;
         }
-        let Some(folder) = self.state.borrow().open_path().last().cloned() else {
+        let Some(folder) = self.core.state.borrow().open_path().last().cloned() else {
             return;
         };
-        self.accepted.set(true);
-        (self.answers.accept)(OpenPick {
+        accepted.set(true);
+        (self.core.answers.accept)(OpenPick {
             folder,
             items: files,
         });
     }
 
-    /// The list's double clicks since the last layout: a file's opens the selection it is in.
-    fn apply_item_events(&self) {
-        let events = self.state.borrow_mut().take_item_events();
+    /// Opens the dialog's place on the first call and remembers a move by the user after; takes
+    /// the list's double clicks since the last call: a file's opens the selection it is in.
+    pub fn update(&self) {
+        self.core.place.update(&self.core.state);
+        let events = self.core.state.borrow_mut().take_item_events();
         for event in events {
             let ItemEvent::Activated(entry) = event else {
                 continue;
             };
-            let selected = self.state.borrow().selected_entries();
+            let selected = self.core.state.borrow().selected_entries();
             let files = match Self::choice(&selected) {
                 Choice::Files(files) if selected.iter().any(|s| s.same_row(&entry)) => files,
                 _ => vec![entry.item()],
@@ -117,11 +198,24 @@ impl Core {
             self.answer(files);
         }
     }
+
+    /// What a page over the controller reports: `bread_crumb_trail`, `summary` and
+    /// `accept_enabled`.
+    pub fn properties(&self) -> Vec<(&'static str, String)> {
+        vec![
+            (
+                "bread_crumb_trail",
+                self.core.state.borrow().path_names().join("/"),
+            ),
+            ("summary", self.summary()),
+            ("accept_enabled", self.accept_enabled().to_string()),
+        ]
+    }
 }
 
 /// The Open dialog's page (see the module header).
 pub struct OpenPage {
-    core: Rc<Core>,
+    controller: OpenController,
     font: Arc<Font>,
     built: Option<u64>,
     summary: String,
@@ -142,21 +236,21 @@ impl OpenPage {
         font: Arc<Font>,
         location_key: Option<&str>,
     ) -> Self {
-        let mut page = BrowserPage::new(state, Arc::clone(&font));
+        let mut controller = OpenController::new(state, request, answers);
         if let Some(key) = location_key {
-            page = page.remembering(key);
+            controller = controller.remembering(key);
         }
-        let heading = Label::new(request.title.clone(), Arc::clone(&font))
+        Self::over(controller, font)
+    }
+
+    /// The page over `controller` (an app's starting folder set on it).
+    pub fn over(controller: OpenController, font: Arc<Font>) -> Self {
+        let page = BrowserPage::new(controller.state(), Arc::clone(&font));
+        let heading = Label::new(controller.request().title.clone(), Arc::clone(&font))
             .with_font_size(16.0)
             .with_strong(true);
-        let core = Rc::new(Core {
-            state: Rc::clone(state),
-            accepted: page.accepted_flag(),
-            request,
-            answers,
-        });
         Self {
-            core,
+            controller,
             font,
             built: None,
             summary: String::new(),
@@ -171,27 +265,33 @@ impl OpenPage {
         }
     }
 
+    /// The controller the page shows.
+    pub fn controller(&self) -> &OpenController {
+        &self.controller
+    }
+
     /// The summary and the buttons, for the selection now.
     fn rebuild(&mut self) {
-        let (summary, can_open) = match self.core.current() {
-            Choice::Files(files) => {
-                let names: Vec<&str> = files.iter().map(|f| f.name()).collect();
-                (names.join(", "), true)
-            }
-            Choice::Folder(_) => (self.ask_text(), true),
-            Choice::Nothing => (self.ask_text(), false),
-        };
-        let cancelling = Rc::clone(&self.core);
+        let (summary, can_open) = (self.controller.summary(), self.controller.accept_enabled());
+        let names = self
+            .controller
+            .state()
+            .borrow()
+            .config()
+            .look
+            .names()
+            .clone();
+        let cancelling = self.controller.clone();
         let cancel = Button::new(tr("Cancel"), Arc::clone(&self.font))
-            .on_click(move || (cancelling.answers.cancel)())
+            .on_click(move || cancelling.cancel())
             .with_cancel_action()
-            .with_name(CANCEL_BUTTON);
-        let opening = Rc::clone(&self.core);
+            .with_name(names.dialog_cancel.clone());
+        let opening = self.controller.clone();
         let open = Button::new(tr("Open"), Arc::clone(&self.font))
-            .on_click(move || opening.open())
+            .on_click(move || opening.accept())
             .with_enabled_fn(move || can_open)
             .with_default_action()
-            .with_name(CONFIRM_BUTTON);
+            .with_name(names.dialog_confirm.clone());
         let buttons = FlexRow::new()
             .with_gap(8.0)
             .add_flex(Box::new(SizedBox::new().with_height(1.0)), 1.0)
@@ -205,14 +305,6 @@ impl OpenPage {
         self.children[3] = Box::new(buttons);
         self.summary = summary;
         self.can_open = can_open;
-    }
-
-    /// What the line says while no file is selected.
-    fn ask_text(&self) -> String {
-        match self.core.request.multiple {
-            true => tr("Choose files to open."),
-            false => tr("Choose a file to open."),
-        }
     }
 }
 
@@ -238,8 +330,8 @@ impl Widget for OpenPage {
     /// 16 of padding; the heading at the top; the summary and buttons at the bottom; the browser
     /// between, 8 apart.
     fn layout(&mut self, available: Size) -> Size {
-        self.core.apply_item_events();
-        let generation = self.core.state.borrow().generation();
+        self.controller.update();
+        let generation = self.controller.state().borrow().generation();
         if self.built != Some(generation) {
             self.rebuild();
             self.built = Some(generation);
@@ -269,7 +361,7 @@ impl Widget for OpenPage {
         vec![
             (
                 "bread_crumb_trail",
-                self.core.state.borrow().path_names().join("/"),
+                self.controller.state().borrow().path_names().join("/"),
             ),
             ("summary", self.summary.clone()),
             ("accept_enabled", self.can_open.to_string()),

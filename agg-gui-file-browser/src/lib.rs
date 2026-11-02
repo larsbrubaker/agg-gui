@@ -180,7 +180,7 @@ pub use nav::menu_button::{NavMenuButton, NavMenuRow, NavMenuRows};
 pub use nav::overflow::OverflowButton;
 pub use nav::provider_message::{ProviderMessageBar, PROVIDER_MESSAGE_SIZE};
 pub use nav::splitter::{BrowserSplitter, DEFAULT_TREE_WIDTH, MIN_TREE_WIDTH, SPLITTER_WIDTH};
-pub use open_dialog::{OpenAnswers, OpenPage, OPEN_SUMMARY, OPEN_WINDOW};
+pub use open_dialog::{OpenAnswers, OpenController, OpenPage, OPEN_SUMMARY, OPEN_WINDOW};
 pub use own_pictures::{OwnPictures, KEPT_PICTURES};
 pub use pictures::{
     FolderPicture, ItemPictures, NoPictures, OverlayFrame, PictureCx, PictureKind, PictureState,

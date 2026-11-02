@@ -12,6 +12,26 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- `SaveController`, `MoveController` and `OpenController`: the Save, Move and Open dialogs'
+  logic without their widgets, so an app can wrap them in its own dialog page (its heading,
+  field, buttons, footer and names); `SavePage`, `MovePage` and `OpenPage` are the default pages
+  over them (`SavePage::over`, `MovePage::over`, `OpenPage::over` take a controller; `new` is
+  unchanged). A page calls the controller's `update` at each layout, before its browser lays out
+  (it opens the dialog's place, remembers the user's moves and takes the list's clicks), and
+  reports what the controller exposes (`name`, `placeholder`, `can_save`, `refusal`,
+  `accept_enabled`, `summary`, `accept_text`, `properties`). Each opens in a starting folder
+  (`starting_in`, a `LocationFuture`) or where it was last left (`remembering(key)`).
+- `SaveController::with_folder_rule` (`SaveFolderRule`): the app's own rule for which folders
+  take a save (a cloud folder only while signed in), so Save is disabled up front, with the
+  rule's reason as `refusal`; `with_question_host` (`QuestionHost`): the replace question and the
+  app's own question asked in the app's modal message box (confirming saves, cancelling stays),
+  the in-page question being the default (`SaveMode`); `asking_names_through`: Create Folder's
+  name asked through `BrowserDialogs::ask_name` (the app's input box) rather than in the page.
+- `SaveRequest::with_placeholder` and `with_focus_id`: the name field's grey hint while empty,
+  and the focus id it is given focus through as the dialog opens.
+- `BrowserNames::dialog_confirm`, `dialog_cancel`, `save_name_field`, `save_note`,
+  `create_folder_button` and `folder_name_field`: the dialog pages' widget names, defaulting to
+  the names they always had.
 - `tree_menu_rows`, the rows a tree row's right-click menu shows, each running with the row's
   folder as the temporary selection, as `menu_actions` gives the list's.
 - `BrowserMenus` (`BrowserConfig::menus`, builder `menus`): the list and the folder tree offer
