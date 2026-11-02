@@ -210,6 +210,27 @@ fn the_app_slot_holds_one_value_of_the_apps_own_type() {
 }
 
 #[test]
+fn the_app_slot_gives_its_value_or_takes_a_new_one_of_the_type_asked_for() {
+    let state = BrowserState::new(Box::new(home()), BrowserConfig::default());
+    let mut s = state.borrow_mut();
+    assert_eq!(
+        s.app_slot::<TapCount>(),
+        None,
+        "a browser made without app data"
+    );
+    s.app_slot_or_insert_with(TapCount::default).0 += 1;
+    assert_eq!(s.app_slot::<TapCount>(), Some(&TapCount(1)));
+    s.app_slot_or_insert_with(|| TapCount(9)).0 += 1;
+    assert_eq!(
+        s.app_slot::<TapCount>(),
+        Some(&TapCount(2)),
+        "the value already there is kept, not made again"
+    );
+    assert_eq!(s.app_slot_or_insert_with(|| String::from("other")), "other");
+    assert_eq!(s.app_slot::<TapCount>(), None, "another type replaces it");
+}
+
+#[test]
 fn a_snapshot_of_a_closed_browser_has_no_live_handle() {
     let state = BrowserState::new(Box::new(home()), BrowserConfig::default());
     let snapshot = state.borrow().snapshot();

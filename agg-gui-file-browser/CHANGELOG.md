@@ -24,7 +24,8 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   gestures (`click`, `press`/`release_press`, Shift ranges, Ctrl/Cmd toggles, the rubber band,
   select all, arrow moves, `select_when_listed`); tap activation; double clicks to the app's
   `BrowserActions::activate` or, with `DoubleClickTarget::Host`, as `ItemEvent`s for the host.
-- The app slot: `app_slot`, `app_slot_mut`, `set_app_slot`, the app's own data per browser.
+- The app slot: `app_slot`, `app_slot_mut`, `set_app_slot`, `app_slot_or_insert_with` (the
+  value there, or a new one of the type asked for), the app's own data per browser.
 - `BrowserRef::live` and `BrowserRef::with_app_slot`: a hook reaches the browser it was handed a
   snapshot of, borrowing it only for the call.
 - Search results on the path: `push_search_results` shows a started `SearchResultsFolder` below

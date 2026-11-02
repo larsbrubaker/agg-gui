@@ -57,6 +57,20 @@ impl BrowserState {
         self.app.downcast_mut::<T>()
     }
 
+    /// The app's own data for this browser, to change it: what is there when it is a `T`, else
+    /// what `make` gives, put in the slot in place of what was there. An app whose views all set
+    /// their data still gets a value from a browser made without it.
+    pub fn app_slot_or_insert_with<T: 'static>(&mut self, make: impl FnOnce() -> T) -> &mut T {
+        if !self.app.is::<T>() {
+            self.app = Box::new(make());
+        }
+        match self.app.downcast_mut::<T>() {
+            Some(data) => data,
+            // The slot holds a `T`: it was one, or was given one just above.
+            None => unreachable!("the app slot holds the type it was just given"),
+        }
+    }
+
     /// Puts `data` in the app slot in place of what was there.
     pub fn set_app_slot<T: 'static>(&mut self, data: T) {
         self.app = Box::new(data) as Box<dyn Any>;
