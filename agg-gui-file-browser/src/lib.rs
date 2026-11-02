@@ -96,10 +96,15 @@ pub use places::{
     CopyTakeover, DefaultPlaces, PlaceRules,
 };
 pub use state::{
-    is_only_a_message, item_identity_key, BrowserEntry, BrowserState, ContainerChangedListener,
-    ItemEvent, OpenFolder,
+    is_only_a_message, item_identity_key, search_listing, BrowserEntry, BrowserState,
+    ContainerChangedListener, ItemEvent, ListSlot, OpenFolder, SearchSectionCollapseState,
+    SectionHeader,
 };
 pub use trace::{set_tracer, trace, tracing};
 
 /// Every English literal this crate hands to `agg_gui_files::tr`.
-pub const ENGLISH_TEXTS: &[&str] = &["Click to go back", "Couldn't find the location of"];
+pub const ENGLISH_TEXTS: &[&str] = &[
+    "Click to go back",
+    "Couldn't find the location of",
+    "No results",
+];

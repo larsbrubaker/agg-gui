@@ -27,6 +27,12 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 - The app slot: `app_slot`, `app_slot_mut`, `set_app_slot`, the app's own data per browser.
 - `BrowserRef::live` and `BrowserRef::with_app_slot`: a hook reaches the browser it was handed a
   snapshot of, borrowing it only for the call.
+- Search results on the path: `push_search_results` shows a started `SearchResultsFolder` below
+  the folder searched; `list_slots` gives the list's lines (`ListSlot`: the searching line,
+  `SectionHeader`s, rows) from `search_listing`; the same results shown again keep their
+  selection and place, and a rolled-up section (`toggle_search_section`,
+  `SearchSectionCollapseState`, shared for the session) carries its selected results until it
+  opens; a result's picture is read from the folder it was found in.
 - `item_identity_key`, the identity a selection is matched back by, and `is_only_a_message`.
 
 ### Changed

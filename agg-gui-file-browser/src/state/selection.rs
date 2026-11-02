@@ -34,11 +34,8 @@ impl BrowserState {
     /// ([`is_only_a_message`]) lists no rows, so Select All and the arrow keys find nothing.
     pub fn mark_listed(&mut self) {
         let entries = self.entries();
-        self.listed = Some(if is_only_a_message(&entries) {
-            Vec::new()
-        } else {
-            entries
-        });
+        let only_a_message = self.showing_search_results().is_none() && is_only_a_message(&entries);
+        self.listed = Some(if only_a_message { Vec::new() } else { entries });
     }
 
     /// The row at `index` of the list the user sees: the listing the list was last built from
@@ -104,8 +101,10 @@ impl BrowserState {
     }
 
     /// The showing folder's rows are shown again (its content changed, it was sorted, the view
-    /// changed): new content, so the selection is emptied and the list goes back to the top,
-    /// rows waiting to be selected once listed being selected. The trace names the line that
+    /// changed). For the same search's results the list keeps its place and the selection is
+    /// matched back onto the rows (`state/search.rs`); anything else is new content, so the
+    /// selection is emptied and the list goes back to the top, rows waiting to be selected once
+    /// listed being selected. The trace names the line that
     /// asked (`#[track_caller]`): the redisplay's trigger.
     #[track_caller]
     pub(super) fn redisplay(&mut self) {
@@ -116,10 +115,15 @@ impl BrowserState {
                 self.selected.len()
             )
         });
-        self.selected.clear();
-        self.list_resets += 1;
-        if self.select_pending_rows() {
-            self.select_when_listed.clear();
+        if self.showing_search_results().is_some() {
+            self.restore_search_selection();
+        } else {
+            self.selected.clear();
+            self.parked_selection.clear();
+            self.list_resets += 1;
+            if self.select_pending_rows() {
+                self.select_when_listed.clear();
+            }
         }
         self.changed();
     }

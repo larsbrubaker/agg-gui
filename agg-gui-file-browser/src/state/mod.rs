@@ -12,12 +12,14 @@
 //! Every change of the showing folder bumps a navigation counter and tells the container-changed
 //! listeners (how a search learns the user walked away from its results). Only the showing folder
 //! is activated and listened to for content changes (`state/active_watch.rs`); `sync_content`
-//! turns a change into a redisplay and `pump_live_refresh` gives the showing folder its turn.
+//! turns a change into a redisplay and `pump_live_refresh` gives the showing folder its turn. A
+//! search's results are pushed as one more folder (`state/search.rs`), so the breadcrumbs show
+//! them under the folder searched.
 //! Writes change the folders on the path through `container_at_mut`, then `after_write`.
 //!
 //! Children: `browser_entry` (a row and its identity), `selection` (the selection and the row
 //! clicks), `gesture` (Shift ranges, the rubber band, keeping a multi-selection on a press, the
-//! keyboard's moves), `activate` (double clicks and taps, the activation queue `run_hooks`
+//! keyboard's moves), `search` (search results in sections), `activate` (double clicks and taps, the activation queue `run_hooks`
 //! drains, the config, the report and the app slot) and `active_watch`.
 //!
 //! No hook runs while the state is borrowed (the crate header's rule): activations wait for
@@ -28,7 +30,9 @@ use std::any::Any;
 use std::cell::{Ref, RefCell, RefMut};
 use std::rc::{Rc, Weak};
 
-use agg_gui_files::{tr, Folder, FolderLink, Item, PictureFuture, SortBehavior, SortKey};
+use agg_gui_files::{
+    tr, Folder, FolderLink, Item, PictureFuture, SearchResultsFolder, SortBehavior, SortKey,
+};
 
 use crate::actions::Activation;
 use crate::config::{BrowserConfig, DoubleClickTarget, FolderFilter};
@@ -39,10 +43,12 @@ mod activate;
 mod active_watch;
 mod browser_entry;
 mod gesture;
+mod search;
 mod selection;
 
 use active_watch::ActiveWatch;
 pub use browser_entry::{item_identity_key, BrowserEntry};
+pub use search::{search_listing, ListSlot, SearchSectionCollapseState, SectionHeader};
 pub use selection::is_only_a_message;
 
 /// A folder on a browser's open path: shared, so a hook can be handed the path without the
@@ -89,6 +95,10 @@ pub struct BrowserState {
     show_containers: bool,
     navigation: u64,
     container_changed: Vec<ContainerChangedListener>,
+    /// A search's results and where on `path` they stand, while they are on it (`state/search.rs`).
+    results: Option<(Rc<SearchResultsFolder>, usize)>,
+    /// The identity keys of selected results whose section is rolled up.
+    parked_selection: Vec<String>,
     /// Identity keys of rows to select once listed, and whether to scroll them into view.
     select_when_listed: Vec<String>,
     reveal_selection: bool,
@@ -147,6 +157,8 @@ impl BrowserState {
             show_containers: options.show_folders,
             navigation: 0,
             container_changed: Vec::new(),
+            results: None,
+            parked_selection: Vec::new(),
             select_when_listed: Vec::new(),
             reveal_selection: false,
             item_menu_requested: false,
@@ -321,6 +333,9 @@ impl BrowserState {
     /// The showing folder's rows: its folders (unless "Show Folders" is off, and those the
     /// options' folder filter keeps), then its items, the visible ones only, each group sorted.
     pub fn entries(&self) -> Vec<BrowserEntry> {
+        if let Some(results) = self.showing_search_results() {
+            return search_listing(results, self.sort).1;
+        }
         let Some(folder) = self.active_container() else {
             return Vec::new();
         };
@@ -471,7 +486,15 @@ impl BrowserState {
     fn navigated(&mut self) {
         self.navigation += 1;
         self.list_resets += 1;
+        self.parked_selection.clear();
         self.select_when_listed.clear();
+        if self
+            .results
+            .as_ref()
+            .is_some_and(|(_, depth)| *depth >= self.path.len())
+        {
+            self.results = None;
+        }
         let id = self.active_container_id().unwrap_or_default();
         let listeners = self.container_changed.clone();
         let gone: Vec<bool> = listeners.iter().map(|l| !l(&id)).collect();
@@ -507,14 +530,23 @@ impl BrowserState {
             .map(|c| Ref::map(c.borrow(), |b| b.as_ref()))
     }
 
-    /// The showing folder's reading of `item`'s picture.
+    /// The showing folder's reading of `item`'s picture. A search's results route an item to
+    /// the folder it was found in; an item of the searched folder's own listing has no such
+    /// origin, so the folder under the results is asked, and the result shows the same picture
+    /// as in the folder.
     pub fn container_thumbnail(
         &self,
         item: &Rc<dyn Item>,
         width: i32,
         height: i32,
     ) -> Option<PictureFuture> {
-        self.active_container()?.get_thumbnail(item, width, height)
+        match self.showing_search_results() {
+            Some(results) if results.try_get_origin(item).is_none() && self.path.len() >= 2 => self
+                .path[self.path.len() - 2]
+                .borrow()
+                .get_thumbnail(item, width, height),
+            _ => self.active_container()?.get_thumbnail(item, width, height),
+        }
     }
 
     /// The root's folders, what a folder tree lists.
