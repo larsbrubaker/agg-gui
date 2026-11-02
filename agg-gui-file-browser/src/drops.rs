@@ -9,6 +9,13 @@
 //! picture its drag carries there (a view that shows the items itself, or an app whose drags show
 //! their picture only over the browser). Without a hook, or where the hook leaves it shown, the
 //! picture follows the pointer everywhere.
+//!
+//! When a drag comes back into the browser from the app's view, the hook is told to `cancel` (its
+//! view puts itself back), unless it keeps its view while the browser is over it
+//! ([`OutsideDrops::cancel_on_return`]: a browser panel lying over the app's view, whose preview
+//! should stay put while the pointer crosses the panel). A drag that then ends inside the browser
+//! drops on the folder there and tells the hook to `cancel`, or, over no folder, is the hook's
+//! `release`.
 
 use std::rc::Rc;
 
@@ -47,4 +54,11 @@ pub trait OutsideDrops {
     /// The drag ended without a release the app hears (cancelled, or back inside the browser):
     /// a view showing the items while the drag was over it puts itself back.
     fn cancel(&self);
+
+    /// Whether a drag coming back into the browser from the app's view cancels it there (the
+    /// default). `false` keeps the app's view as the drag left it while the pointer is over the
+    /// browser (see the module header for how the drag then ends).
+    fn cancel_on_return(&self) -> bool {
+        true
+    }
 }

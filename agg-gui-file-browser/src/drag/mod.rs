@@ -104,6 +104,9 @@ pub struct DropManager {
     pub(crate) spring: spring::SpringOpen,
     /// What the app said is under the drag outside the browser, while it is there.
     pub(crate) outside: Option<OutsideOver>,
+    /// The drag came back into the browser from the app's view, which kept itself as the drag
+    /// left it (`OutsideDrops::cancel_on_return`): the drag's end still owes it a word.
+    pub(crate) app_view_kept: bool,
     /// The picture the drag carries (`picture.rs`).
     pub(crate) picture: picture::DragPicture,
 }
@@ -223,6 +226,7 @@ impl DropManager {
         self.source_key = None;
         self.spring.clear();
         self.outside = None;
+        self.app_view_kept = false;
         self.picture = picture::DragPicture::default();
         self.set_highlight(None, None);
         items

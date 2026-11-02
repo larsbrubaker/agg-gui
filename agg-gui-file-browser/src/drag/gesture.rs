@@ -12,7 +12,9 @@
 //! `OutsideDrops` hook what is under it, with the state let go: a view of the app's may take the
 //! items, and may show them itself, which hides the drag's picture. A release there hands the
 //! items to the hook's `release`; coming back into the browser, or the drag ending any other way
-//! after it was out there, calls `cancel`, so the app's view puts itself back.
+//! after it was out there, calls `cancel`, so the app's view puts itself back. A hook that keeps
+//! its view on the way back (`OutsideDrops::cancel_on_return`) hears at the drag's end instead:
+//! `cancel` after a drop on a folder, `release` over no folder.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -39,19 +41,23 @@ fn outside_over(state: &Rc<RefCell<BrowserState>>, at: Point) {
     let Some(drops) = drops else {
         return;
     };
-    let over = match inside {
-        true => {
-            if was_out {
+    let (over, kept) = match inside {
+        true => match (was_out, drops.cancel_on_return()) {
+            (true, true) => {
                 drops.cancel();
+                (None, false)
             }
-            None
-        }
-        false => Some(drops.over(&items, at)),
+            (true, false) => (None, true),
+            (false, _) => (None, state.borrow().drop.app_view_kept),
+        },
+        false => (Some(drops.over(&items, at)), false),
     };
     if over != state.borrow().drop.outside {
         agg_gui::animation::request_draw();
     }
-    state.borrow_mut().drop.outside = over;
+    let mut s = state.borrow_mut();
+    s.drop.outside = over;
+    s.drop.app_view_kept = kept;
 }
 use crate::move_dialog::plan::FolderKey;
 use crate::places::copy_modifier_held;
@@ -159,23 +165,29 @@ pub fn drag_end(state: &Rc<RefCell<BrowserState>>, at: Point, modifiers: Modifie
             .target_link_at(at)
             .or_else(|| into_showing.map(|link| (LIST_DROP_KEY, link)));
         let outside = s.drop.outside.is_some() && !s.drop.browser_contains(at);
+        let kept = s.drop.app_view_kept && !outside;
         let source_depth = s.drop.source_depth();
         let items = s.drop.take_items().unwrap_or_default();
         let source = s.open_path().get(source_depth).cloned();
+        let drops = s.config().drops.clone();
         (
             target,
             items,
             source_depth,
             Rc::clone(&s.config().places),
             source,
-            outside.then(|| s.config().drops.clone()).flatten(),
+            (outside || kept).then_some(drops).flatten(),
         )
     };
     agg_gui::animation::request_layout();
-    if let Some(drops) = outside {
-        crate::trace(|| "drag released outside the browser: handed to the app".to_string());
-        return drops.release(&items, at);
-    }
+    let kept_view = match outside {
+        // Over no folder, a drag whose app view stayed as it left it ends there too.
+        Some(drops) if target.is_none() || !state.borrow().drop.browser_contains(at) => {
+            crate::trace(|| "drag released outside the browser: handed to the app".to_string());
+            return drops.release(&items, at);
+        }
+        other => other,
+    };
     let Some((_, link)) = target else {
         return false;
     };
@@ -189,7 +201,11 @@ pub fn drag_end(state: &Rc<RefCell<BrowserState>>, at: Point, modifiers: Modifie
         ),
         None => true,
     };
-    super::execute::drop_onto(state, &link, &items, source_depth, copy_wanted)
+    let dropped = super::execute::drop_onto(state, &link, &items, source_depth, copy_wanted);
+    if let Some(drops) = kept_view {
+        drops.cancel();
+    }
+    dropped
 }
 
 /// A press that ended without its release being heard, after it became a drag: with the window
@@ -202,7 +218,7 @@ pub fn drag_lost(state: &Rc<RefCell<BrowserState>>, at: Option<Point>) {
         None => {
             let (drops, was_out) = {
                 let mut s = state.borrow_mut();
-                let was_out = s.drop.outside.is_some();
+                let was_out = s.drop.outside.is_some() || s.drop.app_view_kept;
                 s.drop.cancel();
                 (s.config().drops.clone(), was_out)
             };

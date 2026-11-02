@@ -8,7 +8,8 @@
 //! row in place, a folder in the list in the list, where a drop on the empty space lands in it.
 //! The drag's picture follows the pointer (everywhere without a hook), hides outside the browser
 //! when the app says so whatever it answers, and a release over the app's view goes to its
-//! `OutsideDrops` hook (`cancel` when the drag comes back). An app's overlay on a carried row
+//! `OutsideDrops` hook (`cancel` when the drag comes back, or at the drag's end for a hook that
+//! keeps its view on the way back). An app's overlay on a carried row
 //! paints faded with it, and learns how its square sits in a row or a tile.
 
 use std::cell::RefCell;
@@ -565,6 +566,62 @@ fn the_picture_follows_hides_over_the_apps_view_and_a_release_there_is_the_apps(
     assert!(dir.join("gear.stl").exists(), "the browser moved nothing");
     assert_eq!(list_property(&app, "drag_picture"), "");
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The app's view under a browser panel: it keeps its preview while the drag crosses the panel.
+#[derive(Default)]
+struct ViewUnderPanel(View);
+
+impl OutsideDrops for ViewUnderPanel {
+    fn over(&self, items: &[Rc<dyn Item>], window_at: Point) -> OutsideOver {
+        self.0.over(items, window_at)
+    }
+    fn release(&self, items: &[Rc<dyn Item>], window_at: Point) -> bool {
+        self.0.release(items, window_at)
+    }
+    fn cancel(&self) {
+        self.0.cancel()
+    }
+    fn cancel_on_return(&self) -> bool {
+        false
+    }
+}
+
+#[test]
+fn a_view_kept_on_return_hears_at_the_drags_end_a_cancel_after_a_folder_drop_else_the_release() {
+    for onto_folder in [true, false] {
+        let dir = workshop(&format!("kept-view-{onto_folder}"));
+        let view = Rc::new(ViewUnderPanel::default());
+        let config = BrowserConfig::builder().drops(view.clone()).build();
+        let (mut app, _state) = browser_app(disk(&dir), config, ViewMode::Rows);
+        drag_over(&mut app, "Row Item gear.stl", "Parts Row Item Collection");
+        let outside = Point::new(WIDTH - VIEW / 2.0, HEIGHT / 2.0);
+        move_to(&mut app, outside);
+        // Back over the browser: the view keeps its preview.
+        let folder = centre(&app, "Parts Row Item Collection");
+        let at = match onto_folder {
+            true => folder,
+            false => Point::new(folder.x, 10.0),
+        };
+        move_to(&mut app, at);
+        assert_eq!(
+            *view.0.calls.borrow(),
+            ["over 1"],
+            "no cancel on the way back"
+        );
+        release(&mut app, at, Modifiers::default());
+        match onto_folder {
+            true => {
+                assert_eq!(*view.0.calls.borrow(), ["over 1", "cancel"]);
+                assert!(dir.join("Parts/gear.stl").exists(), "the folder took it");
+            }
+            false => {
+                assert_eq!(*view.0.calls.borrow(), ["over 1", "release gear.stl"]);
+                assert!(dir.join("gear.stl").exists(), "the browser moved nothing");
+            }
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
 
 /// An app whose drag pictures show only over the browser: nothing outside takes the items.
