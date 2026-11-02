@@ -128,12 +128,20 @@ pub trait BrowserMemory {
         None
     }
 
-    /// Remembers `path` (the open folders from just below the root down) under `key`. The one
-    /// hook the browser lends part of its state to: it is handed no way to reach the browser, so
-    /// it cannot call back into it.
+    /// Remembers `path` under `key`: the whole open path, the browser's root first and the open
+    /// folder last ([`remember_open_location`]), so an app can store where the path starts (its
+    /// root's name) as well as where it ends. The one hook the browser lends part of its state
+    /// to: it is handed no way to reach the browser, so it cannot call back into it.
     fn remember_location(&self, key: &str, path: &[&dyn Folder]) {
         let _ = (key, path);
     }
+}
+
+/// Lends `memory` the browser's open path (`open`: its root first, the open folder last) to
+/// remember under `key`, the way every browser view remembers where it is.
+pub fn remember_open_location(memory: &dyn BrowserMemory, key: &str, open: &[Box<dyn Folder>]) {
+    let path: Vec<&dyn Folder> = open.iter().map(|folder| folder.as_ref()).collect();
+    memory.remember_location(key, &path);
 }
 
 /// The memory of an app that remembers nothing.

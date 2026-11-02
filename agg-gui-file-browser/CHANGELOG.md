@@ -20,12 +20,15 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   `BrowserActions` (`NoActions`; `Builtins`, `BuiltinAction`, `BrowserAction`,
   `BrowserCommand`, `Activation`), `OutsideDrops` (`OutsideOver`), `PlaceRules`
   (`DefaultPlaces`; `CopyCx`, `CopyTakeover`), `BrowserMemory` (`NoMemory`; `ViewState`,
-  `ViewMode`, `LocationFuture`) and `BrowserDialogs` (`NoDialogs`, which offers none;
+  `ViewMode`, `LocationFuture`; `remember_location` is lent the whole open path, the root
+  first, through `remember_open_location`) and `BrowserDialogs` (`NoDialogs`, which offers none;
   `Confirmation`, `NameRequest`, `DialogKind`).
 - `Entry` and `BrowserRef`, the snapshots hooks are handed, so no hook runs while the browser's
   state is borrowed.
 - The move-or-copy rule: `default_drop_copies`, `default_crosses_places`, `places_differ` and
   `copy_modifier_held` (Option on the Mac, Ctrl elsewhere).
+- The opt-in trace: `trace` sends a line, built only while on, to the tracer the app installs
+  with `set_tracer` (`tracing` says whether one is on).
 - `LocalSpawner`, an `agg_gui_files::Spawner` for apps without an executor, run from agg-gui's
   UI-queue drain (`run_ready_local_tasks`, `unfinished_local_tasks`).
 

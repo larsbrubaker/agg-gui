@@ -31,15 +31,17 @@
 //! - **No hook is called while the browser's state is borrowed.** Hooks are handed owned
 //!   snapshots ([`Entry`], [`BrowserRef`]) or plain values, or are run from the UI queue, so a
 //!   hook that calls back into the browser never meets a held borrow. The one hook lent part of
-//!   the state, [`BrowserMemory::remember_location`] (the open folders), is handed no way to
-//!   reach the browser.
+//!   the state, [`BrowserMemory::remember_location`] (the open path from the root), is handed no
+//!   way to reach the browser.
+//! - **Tracing is the app's.** The browser's trace lines go through [`trace`] to the tracer the
+//!   app installed ([`set_tracer`]), built only while it is on.
 //!
 //! Modules (each item is also re-exported at the root): `look` (the look and its defaults),
 //! `fitted_text` (fitting names to their room), `link_label` (a text link), `icon_button` (a
 //! square icon button), `bread_crumb` (the breadcrumb trail and its builder); `config` (the
 //! config and its options), `entry` (what hooks are handed), `pictures`, `actions`, `drops`,
 //! `places`, `memory` and `dialogs` (the hooks and their defaults), `local_spawner` (the
-//! spawner for apps without an executor).
+//! spawner for apps without an executor), `trace` (the opt-in trace through the app's tracer).
 //!
 //! The widgets come from MatterCAD's library (mattercad-rust's `mattercad-app`, same author),
 //! published here under agg-gui's MIT licence.
@@ -58,6 +60,7 @@ pub mod look;
 pub mod memory;
 pub mod pictures;
 pub mod places;
+pub mod trace;
 
 pub use actions::{
     Activation, BrowserAction, BrowserActions, BrowserCommand, BuiltinAction, Builtins, NoActions,
@@ -78,12 +81,15 @@ pub use icon_button::BrowserIconButton;
 pub use link_label::LinkLabel;
 pub use local_spawner::{run_ready_local_tasks, unfinished_local_tasks, ErrorLog, LocalSpawner};
 pub use look::{glyph_face, BrowserIcon, BrowserLook, BrowserNames, BrowserStyle, DefaultLook};
-pub use memory::{BrowserMemory, LocationFuture, NoMemory, ViewMode, ViewState};
+pub use memory::{
+    remember_open_location, BrowserMemory, LocationFuture, NoMemory, ViewMode, ViewState,
+};
 pub use pictures::{FolderPicture, ItemPictures, NoPictures, PictureCx, PictureState};
 pub use places::{
     copy_modifier_held, default_crosses_places, default_drop_copies, places_differ, CopyCx,
     CopyTakeover, DefaultPlaces, PlaceRules,
 };
+pub use trace::{set_tracer, trace, tracing};
 
 /// Every English literal this crate hands to `agg_gui_files::tr`.
 pub const ENGLISH_TEXTS: &[&str] = &["Click to go back"];
