@@ -17,7 +17,11 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   lands in; a taken name numbered, given back on undo), and `rename_recorded`,
   `create_folder_recorded` (nothing recorded for a folder already there) and `remove_recorded`
   (the removed entries kept to put back) each hand back a step whose undo and redo finish at
-  once. A move from a folder not in memory stays the unrecorded add-then-remove.
+  once. A move from a folder not in memory stays the unrecorded add-then-remove. Every step
+  handed back on undo and redo keeps describing the write as first recorded ("Moved gear.stl to
+  Brackets"), as the disk's steps do; undoing a new folder takes it away only while it is
+  empty, otherwise failing with "the folder isn't empty", as on disk.
+- `HistoryStep` documents that `undo` and `redo` call their `done` exactly once.
 - `ENGLISH_TEXTS` gains "Removed {0}" and "Removed {0} items" (a memory removal's step).
 
 ## [0.0.3] - 2026-11-02

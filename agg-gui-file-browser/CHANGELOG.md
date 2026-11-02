@@ -8,7 +8,7 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ## [Unreleased]
 
-## [0.0.3] - 2026-11-02
+## [0.0.4] - 2026-11-02
 
 ### Added
 
@@ -45,60 +45,7 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   is what the Delete and Backspace keys run, in the list for the selection and in the tree for
   the folder drawn selected (the built-in Remove is one); a Remove row that can't run runs
   nothing.
-
-- `BrowserState`, what a browser is looking at and does, made with `BrowserState::new(root,
-  config)` or `with_config(root, config, app_data)`: the open path (`OpenFolder`s, shared, so a
-  hook can be handed them with the state not borrowed); the showing folder's rows
-  (`BrowserEntry`: folders first, then items, each sorted, Show Folders and the options' folder
-  filter applied); the view mode and sort, restored from `BrowserMemory::view` whenever a folder
-  shows and remembered through `set_view` when picked; navigation (`open`, `go_to`,
-  `push_container`, `show_location`, `take_active_container`, `replace_active_container`) with
-  container-changed listeners; only the showing folder activated and listened to, its content
-  changes listing it again (`sync_content`, `pump_live_refresh`); the selection and its
-  gestures (`click`, `press`/`release_press`, Shift ranges, Ctrl/Cmd toggles, the rubber band,
-  select all, arrow moves, `select_when_listed`); tap activation; double clicks to the app's
-  `BrowserActions::activate` or, with `DoubleClickTarget::Host`, as `ItemEvent`s for the host.
-- The app slot: `app_slot`, `app_slot_mut`, `set_app_slot`, `app_slot_or_insert_with` (the
-  value there, or a new one of the type asked for), the app's own data per browser.
-- `BrowserRef::live` and `BrowserRef::with_app_slot`: a hook reaches the browser it was handed a
-  snapshot of, borrowing it only for the call.
-- Search results on the path: `push_search_results` shows a started `SearchResultsFolder` below
-  the folder searched; `list_slots` gives the list's lines (`ListSlot`: the searching line,
-  `SectionHeader`s, rows) from `search_listing`; the same results shown again keep their
-  selection and place, and a rolled-up section (`toggle_search_section`,
-  `SearchSectionCollapseState`, shared for the session) carries its selected results until it
-  opens; a result's picture is read from the folder it was found in.
-- `item_identity_key`, the identity a selection is matched back by.
-- A folder listing only a message: `ListingMessage`, `entries_message`, `is_only_a_message` and
-  `BrowserState::listing_message` (its text, whether it is "Loading...", whether signing in
-  lists it); such a folder lists no rows to select.
-- Until a list view marks its listings (`mark_listed`), the state keeps its own listing current
-  (at its making, each navigation and each redisplay), so `listed_entry`, `is_selected` and the
-  clicks work for an app or a test with no view yet.
-- `BrowserList`, the list views over a `BrowserState`: the showing folder's rows (`BrowserRow`,
-  `RowStack`: a 50-unit picture, the name fitted beside it and an item's detail line under it) or
-  tiles (`BrowserTile`, `TileStack`: 18, 70, 100 or 256 units, folders on rows of their own, names
-  under tiles of 75 and up or under all with `with_tile_names`), built again whenever the state
-  changes, a picture arrives or the look's art changes; clicks, Shift ranges, Ctrl/Cmd toggles,
-  the rubber band and Control+A, Escape and the arrow keys; double clicks and taps through the
-  app's `BrowserActions::activate`; a press that moves 40 units is a drag and never clicks
-  (`ItemPress`, `DRAG_THRESHOLD`; what a drag carries comes with the browser's drag and drop); the
-  selection's menu from a right press or a hovered row's menu button (`MenuButtonState`), the
-  folder's from a right press on empty space or the list's top-right corner, each the app's
-  `BrowserActions::menu` with the built-ins offered there (`MenuScope`); a row the app selects scrolled into view; and a folder whose
-  listing is only a message shows it in place of the rows (`FolderMessage`), under the look's
-  warning for a refusal, with the app's Sign In (`BrowserActions::sign_in`, `SignInOffer`).
-- `BrowserState::menu_button`, `menu_button_mut`, `item_press` and `item_press_mut`: the rows'
-  menu button and press state, kept with the browser so they survive the rows being rebuilt under
-  the pointer.
-- A search's results list under their places' headers in both views (`SectionHeaderRow`: a
-  "Searching for '{0}'" line while the search runs, then per place an expand toggle with the
-  place's name and "(n)", "No results" or its error; a click on the header rolls the section up
-  or opens it).
-- The app's overlay on a picture (`ItemPictures::tile_overlay`) is reached through its row or
-  tile (`OverlayRoute`): it hears the row's hover and every move over it, takes only the presses
-  its `hit_test` says are its own (a press it takes is never the row's), and its tooltip is the
-  row's over its own shape; the row reports the overlay's properties after its own
+- A row or tile reports its overlay's properties after its own
   (`OverlayRoute::properties`).
 - `BrowserLook::folder_tile` is asked before a link's own tile image (`FolderLink::tile_icon`),
   so a look draws that image its own way; the tile reports `BrowserLook::folder_tile_name` as
@@ -111,12 +58,6 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   picture, its generating marker or its item icon (`PictureKind`), reported by the row as
   `picture` and `thumbnail`, for an app whose icons depend on the item or whose pictures carry a
   name of their own.
-- A drag that ends outside the list gives the keys back (`ItemPress::set_list_rect`,
-  `list_contains`).
-- Rows and tiles report `name_right`, `thumbnail` (the art's name) and `thumbnail_center` (its
-  centre pixel); `BrowserRow::thumbnail_pixel_size` and `name_right`; `BrowserTile::label_band`,
-  `label_text_origin`, `label_printed_height` and `name_max_width`.
-- `BuiltinAction::title` and `acts_on_selection`.
 - `BrowserTree`, the folder tree over a `BrowserState`: the root's folders by name, an expand
   arrow on each folder that may have folders of its own (asked through
   `FolderLink::has_child_containers` where that is cheap, kept until first opened elsewhere, and
@@ -205,21 +146,6 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   history step) and `report`.
 - `BrowserNames::notice` ("Library Notice") and `notice_button` ("Library Notice Button");
   `BrowserStyle::notice_font_size` (10 pt).
-- `OwnPictures`: each item shows the picture its folder or the item itself makes of it, made on
-  the spawner and kept, the look's item icon until then; the default pictures hook. It keeps at
-  most `KEPT_PICTURES` (1024) pictures, the least recently asked for leaving first and made again
-  when asked for (`with_capacity`, `kept`), but never one the list's current build asked for: a
-  folder with more items than that grows the kept pictures rather than making them again on
-  every build. A picture that lands while the list builds shows at the next layout.
-- `BrowserLook::tinted_icon` (an icon in a colour: a folder's accent, an item's text colour),
-  `icon_for_key` (the art an item names by key: a folder link's `micro_icon` and `tile_icon`) and
-  `icon_generation` (changes when the look's art does: the list builds again and
-  `BrowserIconButton` asks for its image again).
-- `BrowserStyle::tile_font_size` (the name under a tile, 9 pt) and `section_rule`, and the names
-  `BrowserNames::list_area` ("LibraryView"), `folder_message`, `folder_message_text`,
-  `sign_in_button`, `search_status` ("Search Status") and `search_section` ("Search Section
-  {name}").
-
 - The browser's own menu actions run (`builtins`): Create Folder... asks "Folder Name" and makes
   the folder, Rename asks "Name" over the current name (from the tree, the folder renamed while
   it shows is shown again by its new name), Remove confirms ("Move to Trash?" or "Move to Recycle
@@ -314,6 +240,13 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   `BrowserState::can_hand_over_active_container`, whether `take_active_container` would hand the
   folder over alone: the Save and Move dialogs ask it first, so a folder something still holds
   stays showing and the dialog says it was busy.
+- `BrowserState::put_back_active_container`: an open folder `take_active_container` took goes
+  back on the path; the Save and Move dialogs put the folder back when a hand-over can't
+  complete, so they stay in it.
+- The folder tree scrolls when its rows are taller than it: the wheel moves them, and the row of
+  each folder the browser goes to is scrolled into sight (`TreeScroll`, kept in the model,
+  `TreeModel::scroll_offset`).
+- `DropManager::set_source_key`: the folder a drag came from (`FolderKey`), which takes no drop.
 
 ### Changed
 
@@ -321,6 +254,112 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   right-click menu should; the built-ins in it run rather than showing greyed. `MenuScope` has
   `Overflow`. Migration: a test that read a greyed built-in in the selection's menu gives the
   browser dialogs (`SheetDialogs`) or reads the overflow menu.
+- `PickedMoveTarget` answers with a `MovePick` (the folder picked, opened, and whether the items
+  copy) and the browser runs the move into it; `MoveRequest` carries the source folder's name,
+  `FolderKey` and copy rule (`with_source`). Migration: an app's Move dialog answers
+  `Some(MovePick { target: link.get_container()?, copy })` where it answered the link.
+- Requires `agg-gui-files` 0.0.4 (memory folders that record undo).
+- A drag never drops on the folder its items are already in (the same place and location key):
+  no highlight or label, and `drop_into` refuses such a target, so nothing is renamed.
+- A drop holding a protected item copies it where the copy rule copies, and otherwise moves
+  nothing and says "Protected items can't be moved"; such a folder isn't highlighted.
+- A tree row takes a drop only inside the tree's rectangle.
+- Save's "already there" ignores case (`SaveTarget::exists` agrees), so the replace question is
+  asked for `Report.mcx` over `report.mcx`. A question asked in the page goes when the showing
+  folder changes, and an answer arriving after a change saves nothing.
+- Move from the tree's menu, like Remove, shows the folder above before the showing folder
+  leaves. `tree_menu_rows` shows the row's folder first when it isn't the one showing, so it
+  is right for any row.
+- The history: a step recorded while an undo is finishing leaves the redo list empty when the
+  undo lands (a redo landing goes below the new step); a step that drops its callback uncalled
+  frees the history, the notice saying "Undo didn't finish: {0}" (or Redo).
+- Translated lines are whole, with placeholders: "Create Folder...", "Undone: {0}",
+  "Redone: {0}", "Couldn't put back: {0}", "Couldn't move to \"{0}\": {1}", "Couldn't copy to
+  \"{0}\": {1}", "(Moved: {0})", "Couldn't find the location of \"{0}\"" and "Select a new
+  Destination:" replace the pieces they were joined from (`ENGLISH_TEXTS` lists them).
+  Migration: an app's translations add the new lines.
+
+## [0.0.3] - 2026-11-02
+
+### Added
+
+- `BrowserState`, what a browser is looking at and does, made with `BrowserState::new(root,
+  config)` or `with_config(root, config, app_data)`: the open path (`OpenFolder`s, shared, so a
+  hook can be handed them with the state not borrowed); the showing folder's rows
+  (`BrowserEntry`: folders first, then items, each sorted, Show Folders and the options' folder
+  filter applied); the view mode and sort, restored from `BrowserMemory::view` whenever a folder
+  shows and remembered through `set_view` when picked; navigation (`open`, `go_to`,
+  `push_container`, `show_location`, `take_active_container`, `replace_active_container`) with
+  container-changed listeners; only the showing folder activated and listened to, its content
+  changes listing it again (`sync_content`, `pump_live_refresh`); the selection and its
+  gestures (`click`, `press`/`release_press`, Shift ranges, Ctrl/Cmd toggles, the rubber band,
+  select all, arrow moves, `select_when_listed`); tap activation; double clicks to the app's
+  `BrowserActions::activate` or, with `DoubleClickTarget::Host`, as `ItemEvent`s for the host.
+- The app slot: `app_slot`, `app_slot_mut`, `set_app_slot`, `app_slot_or_insert_with` (the
+  value there, or a new one of the type asked for), the app's own data per browser.
+- `BrowserRef::live` and `BrowserRef::with_app_slot`: a hook reaches the browser it was handed a
+  snapshot of, borrowing it only for the call.
+- Search results on the path: `push_search_results` shows a started `SearchResultsFolder` below
+  the folder searched; `list_slots` gives the list's lines (`ListSlot`: the searching line,
+  `SectionHeader`s, rows) from `search_listing`; the same results shown again keep their
+  selection and place, and a rolled-up section (`toggle_search_section`,
+  `SearchSectionCollapseState`, shared for the session) carries its selected results until it
+  opens; a result's picture is read from the folder it was found in.
+- `item_identity_key`, the identity a selection is matched back by.
+- A folder listing only a message: `ListingMessage`, `entries_message`, `is_only_a_message` and
+  `BrowserState::listing_message` (its text, whether it is "Loading...", whether signing in
+  lists it); such a folder lists no rows to select.
+- Until a list view marks its listings (`mark_listed`), the state keeps its own listing current
+  (at its making, each navigation and each redisplay), so `listed_entry`, `is_selected` and the
+  clicks work for an app or a test with no view yet.
+- `BrowserList`, the list views over a `BrowserState`: the showing folder's rows (`BrowserRow`,
+  `RowStack`: a 50-unit picture, the name fitted beside it and an item's detail line under it) or
+  tiles (`BrowserTile`, `TileStack`: 18, 70, 100 or 256 units, folders on rows of their own, names
+  under tiles of 75 and up or under all with `with_tile_names`), built again whenever the state
+  changes, a picture arrives or the look's art changes; clicks, Shift ranges, Ctrl/Cmd toggles,
+  the rubber band and Control+A, Escape and the arrow keys; double clicks and taps through the
+  app's `BrowserActions::activate`; a press that moves 40 units is a drag and never clicks
+  (`ItemPress`, `DRAG_THRESHOLD`; what a drag carries comes with the browser's drag and drop); the
+  selection's menu from a right press or a hovered row's menu button (`MenuButtonState`), the
+  folder's from a right press on empty space or the list's top-right corner, each the app's
+  `BrowserActions::menu` with the built-ins offered there (`MenuScope`; the built-ins show greyed
+  until the browser runs them); a row the app selects scrolled into view; and a folder whose
+  listing is only a message shows it in place of the rows (`FolderMessage`), under the look's
+  warning for a refusal, with the app's Sign In (`BrowserActions::sign_in`, `SignInOffer`).
+- `BrowserState::menu_button`, `menu_button_mut`, `item_press` and `item_press_mut`: the rows'
+  menu button and press state, kept with the browser so they survive the rows being rebuilt under
+  the pointer.
+- A search's results list under their places' headers in both views (`SectionHeaderRow`: a
+  "Searching for '{0}'" line while the search runs, then per place an expand toggle with the
+  place's name and "(n)", "No results" or its error; a click on the header rolls the section up
+  or opens it).
+- The app's overlay on a picture (`ItemPictures::tile_overlay`) is reached through its row or
+  tile (`OverlayRoute`): it hears the row's hover and every move over it, takes only the presses
+  its `hit_test` says are its own (a press it takes is never the row's), and its tooltip is the
+  row's over its own shape.
+- A drag that ends outside the list gives the keys back (`ItemPress::set_list_rect`,
+  `list_contains`).
+- Rows and tiles report `name_right`, `thumbnail` (the art's name) and `thumbnail_center` (its
+  centre pixel); `BrowserRow::thumbnail_pixel_size` and `name_right`; `BrowserTile::label_band`,
+  `label_text_origin`, `label_printed_height` and `name_max_width`.
+- `BuiltinAction::title` and `acts_on_selection`.
+- `OwnPictures`: each item shows the picture its folder or the item itself makes of it, made on
+  the spawner and kept, the look's item icon until then; the default pictures hook. It keeps at
+  most `KEPT_PICTURES` (1024) pictures, the least recently asked for leaving first and made again
+  when asked for (`with_capacity`, `kept`), but never one the list's current build asked for: a
+  folder with more items than that grows the kept pictures rather than making them again on
+  every build. A picture that lands while the list builds shows at the next layout.
+- `BrowserLook::tinted_icon` (an icon in a colour: a folder's accent, an item's text colour),
+  `icon_for_key` (the art an item names by key: a folder link's `micro_icon` and `tile_icon`) and
+  `icon_generation` (changes when the look's art does: the list builds again and
+  `BrowserIconButton` asks for its image again).
+- `BrowserStyle::tile_font_size` (the name under a tile, 9 pt) and `section_rule`, and the names
+  `BrowserNames::list_area` ("LibraryView"), `folder_message`, `folder_message_text`,
+  `sign_in_button`, `search_status` ("Search Status") and `search_section` ("Search Section
+  {name}").
+
+### Changed
+
 - `BrowserConfig::report` is an `Option`: `None` (the default) shows errors on the browser's own
   status line (`BrowserState::status`), where the user sees them, rather than on standard error.
   The default spawner still reports its faults to standard error when no report is given.
@@ -333,11 +372,6 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   take the shared state and run the hooks once its borrow has ended, so no activation waits.
 - `BrowserConfig::default()` shows each item's own picture (`OwnPictures`) where it showed the
   look's icon (`NoPictures`, still there for an app that wants icons only).
-- `PickedMoveTarget` answers with a `MovePick` (the folder picked, opened, and whether the items
-  copy) and the browser runs the move into it; `MoveRequest` carries the source folder's name,
-  `FolderKey` and copy rule (`with_source`). Migration: an app's Move dialog answers
-  `Some(MovePick { target: link.get_container()?, copy })` where it answered the link.
-- Requires `agg-gui-files` 0.0.4 (memory folders that record undo).
 - `BrowserStyle` and `BrowserNames` have new fields. Migration: a look building either with a
   struct literal adds them or ends with `..Default::default()`.
 
