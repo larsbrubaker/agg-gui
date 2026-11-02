@@ -10,7 +10,7 @@
 # author), published here under agg-gui's MIT licence.
 [package]
 name = "agg-gui-files"
-version = "0.0.2"
+version = "0.0.3"
 edition = "2021"
 # Matches the rest of the agg-gui workspace.
 rust-version = "1.88"
@@ -30,3 +30,17 @@ path = "src/lib.rs"
 # The search walk's deadline reads the clock, and std's Instant panics in the browser
 # (wasm32-unknown-unknown); web-time is std's own Instant natively.
 web-time = "1"
+
+[features]
+# Folders on the computer's disk (`disk`): listing, writes and the system trash. The trash needs
+# the operating system's own calls: NSFileManager through objc2 on macOS (MIT), the Shell's
+# recycle bin through windows-sys on Windows (MIT OR Apache-2.0); the freedesktop trash is plain
+# file work. Neither compiles C. On wasm32 the disk code compiles and every read fails.
+disk = ["dep:objc2-foundation", "dep:windows-sys"]
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-foundation = { version = "0.3", optional = true, default-features = false, features = ["std", "NSString", "NSURL", "NSError", "NSFileManager"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", optional = true, features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_UI_Shell"] }
+

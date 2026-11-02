@@ -1,0 +1,145 @@
+//! Copying items into a [`DiskFolder`] while the originals stay where they are: what a move from
+//! a folder that is not on disk does (`folder_writes`' `move_items`), so an item is never missing
+//! from both places. A move between two folders on disk is `DiskFolder::move_from_disk`; this
+//! file never removes anything from the source.
+//!
+//! Each copy lands under a free name (`paths::non_colliding_path`, the numbering a move uses), and
+//! the copy answers every path it made, the record an undo sends to the trash.
+//! [`DiskFolder::copy_items_in`] reads only the content each item has at hand and names the items
+//! whose content isn't, rather than leaving them out silently.
+
+use std::path::{Path, PathBuf};
+use std::rc::Rc;
+
+use super::folder::DiskFolder;
+use super::folder_link::DiskFolderLink;
+use super::paths::{non_colliding_path, path_file_name};
+use crate::item::Item;
+use crate::translate::tr;
+
+/// What a copy made and what it couldn't.
+#[derive(Default)]
+struct CopyProgress {
+    made: Vec<PathBuf>,
+    errors: Vec<String>,
+    skipped: Vec<String>,
+}
+
+impl CopyProgress {
+    fn finish(self, folder: &mut DiskFolder) -> (Vec<PathBuf>, Result<(), String>) {
+        if !self.made.is_empty() {
+            folder.reload_content();
+        }
+        let mut errors = self.errors;
+        if !self.skipped.is_empty() {
+            errors.push(format!(
+                "{}: {}",
+                tr("These items could not be copied"),
+                self.skipped.join(", ")
+            ));
+        }
+        let result = if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors.join("\n"))
+        };
+        (self.made, result)
+    }
+}
+
+/// Copies the folder at `from` (with everything in it) to `to`.
+fn copy_dir(from: &Path, to: &Path) -> std::io::Result<()> {
+    std::fs::create_dir(to)?;
+    for entry in std::fs::read_dir(from)? {
+        let entry = entry?;
+        let path = entry.path();
+        let target = to.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            copy_dir(&path, &target)?;
+        } else {
+            std::fs::copy(&path, &target)?;
+        }
+    }
+    Ok(())
+}
+
+impl DiskFolder {
+    /// A folder on disk copied in whole; false when `item` is not a folder on disk.
+    fn copy_folder_in(&self, item: &dyn Item, progress: &mut CopyProgress) -> bool {
+        let Some(dir) = item
+            .as_any()
+            .and_then(|a| a.downcast_ref::<DiskFolderLink>())
+        else {
+            return false;
+        };
+        let from = dir.file_path().to_path_buf();
+        // A folder copied into itself would copy forever.
+        if self.full_path().starts_with(&from) {
+            progress.skipped.push(item.name().to_string());
+            return true;
+        }
+        let to = non_colliding_path(&self.full_path().join(path_file_name(&from)));
+        match copy_dir(&from, &to) {
+            Ok(()) => progress.made.push(to),
+            Err(e) => {
+                // A part-made copy is not left behind as if it were the item.
+                let _ = std::fs::remove_dir_all(&to);
+                progress.errors.push(format!("{}: {e}", item.name()));
+            }
+        }
+        true
+    }
+
+    /// Writes one file's content under a free name.
+    fn write_copy(
+        &self,
+        item: &dyn Item,
+        file_name: &str,
+        content: Option<Vec<u8>>,
+        progress: &mut CopyProgress,
+    ) {
+        let Some(bytes) = content else {
+            progress.errors.push(format!(
+                "{}: {}",
+                item.name(),
+                tr("its content couldn't be downloaded")
+            ));
+            return;
+        };
+        let to = non_colliding_path(&self.full_path().join(file_name));
+        match std::fs::write(&to, bytes) {
+            Ok(()) => progress.made.push(to),
+            Err(e) => progress.errors.push(format!("{}: {e}", item.name())),
+        }
+    }
+
+    /// Copies `items` in, keeping the originals, with the content each item has at hand. Answers
+    /// every path made and the failures; items that are neither files nor folders on disk and
+    /// have no content stream are named in the error. A read-only folder copies nothing.
+    pub fn copy_items_in(&mut self, items: &[Rc<dyn Item>]) -> (Vec<PathBuf>, Result<(), String>) {
+        if let Err(e) = self.refuse_if_read_only() {
+            return (Vec::new(), Err(e));
+        }
+        let mut progress = CopyProgress::default();
+        if let Err(e) = std::fs::create_dir_all(self.full_path()) {
+            return (Vec::new(), Err(e.to_string()));
+        }
+        for item in items {
+            if self.copy_folder_in(item.as_ref(), &mut progress) {
+                continue;
+            }
+            match item.as_asset_stream() {
+                Some(stream) => match stream.get_stream() {
+                    Ok(content) => {
+                        self.write_copy(item.as_ref(), &stream.file_name(), content, &mut progress)
+                    }
+                    Err(e) => progress
+                        .errors
+                        .push(format!("{}: {}", item.name(), String::from(e))),
+                },
+                None => progress.skipped.push(item.name().to_string()),
+            }
+        }
+        progress.finish(self)
+    }
+}

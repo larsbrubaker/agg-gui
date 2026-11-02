@@ -8,6 +8,34 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ## [Unreleased]
 
+## [0.0.3] - 2026-11-02
+
+### Added
+
+- The `disk` feature: folders on the computer's disk, from MatterCAD's library. `disk::DiskFolder`
+  lists a folder's sub-folders by name and the files its `DiskRules` accept by path, reads its
+  `index.md` as the header, lists a message row for a folder it cannot read, and answers
+  `place()` (the computer) and `location_key()` (`disk_location_key`, its path). It is a
+  `WritableFolder`: `add` (content copied in under a free name, `CreateFolderItem` folders made),
+  `remove` (to the system trash), `rename`, and `move_items` (renamed across between two folders
+  on disk, copied in with the originals kept from anywhere else), with `move_from_disk`,
+  `rename_on_disk` and `remove_to_trash` answering what they did (`MovedPath`, `TrashedItem`)
+  and `copy_items_in`. `disk::DiskFolderLink` is a sub-folder's row, carrying the rules to the
+  folder it opens; `disk::DiskFile` a file, with `set_name` and `subscribe_file_renamed`.
+- `disk::DiskRules` (`lists_file`, `read_only`, default false) and `disk::AllFiles`. A read-only
+  folder's `allow_action` refuses everything and each write fails before touching the disk.
+- Disk item IDs (`disk_item_id`, `disk_item_id_at`, `round_trip_utc`) are MatterCAD's, text for
+  text, so a thumbnail cache keyed by them keeps working.
+- The system trash: `move_to_trash`, `restore_from_trash`, `set_trash_directory` (tests),
+  `move_to_system_trash`, the freedesktop trash (`move_to_freedesktop_trash`) and the Recycle Bin
+  record reader (`parse_recycle_bin_record`, `newest_recycle_bin_match`).
+- `ENGLISH_TEXTS` lists the disk provider's texts.
+
+### Changed
+
+- With `disk` on, depends on `objc2-foundation` on macOS and `windows-sys` on Windows (the system
+  trash); neither compiles C.
+
 ## [0.0.2] - 2026-11-01
 
 ### Added

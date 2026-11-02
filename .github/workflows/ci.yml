@@ -75,6 +75,11 @@ jobs:
       - name: Clippy (agg-gui-whistle, native features)
         run: cargo clippy -p agg-gui-whistle --all-targets --features native-mic,native-download -- -D warnings
 
+      # The file model's `disk` feature (folders on disk and the system trash),
+      # which no workspace member turns on.
+      - name: Clippy (agg-gui-files, disk)
+        run: cargo clippy -p agg-gui-files --all-targets --features disk -- -D warnings
+
       # Its browser halves: the provider in the UI module, and the worker
       # module, built with simd128 as demo/build-whistle.sh builds it.
       - name: Clippy (agg-gui-whistle, wasm)
@@ -135,7 +140,9 @@ jobs:
 
       # The file browser's model.
       - name: Run file model tests
-        run: cargo test -p agg-gui-files
+        run: |
+          cargo test -p agg-gui-files
+          cargo test -p agg-gui-files --features disk
 
       # The file browser's widgets.
       - name: Run file browser tests
@@ -253,6 +260,10 @@ jobs:
       - name: Check native dictation
         run: cargo check -p agg-gui-whistle --features native-mic,native-download
 
+      # Folders on disk and the system trash, whose calls differ per platform.
+      - name: Check file model disk feature
+        run: cargo clippy -p agg-gui-files --all-targets --features disk -- -D warnings
+
       - name: Run microphone tests
         run: cargo test -p agg-mic
 
@@ -302,7 +313,9 @@ jobs:
 
       # The file browser's model builds for the browser.
       - name: Build file model (wasm)
-        run: cargo build -p agg-gui-files --target wasm32-unknown-unknown
+        run: |
+          cargo build -p agg-gui-files --target wasm32-unknown-unknown
+          cargo build -p agg-gui-files --features disk --target wasm32-unknown-unknown
 
       # The file browser's widgets build for the browser.
       - name: Build file browser (wasm)

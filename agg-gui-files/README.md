@@ -2,7 +2,7 @@
 
 The folder and item model behind agg-gui's file browser, with no drawing code: no agg-gui,
 agg-rust or wgpu dependency, so a crate with no UI (a server, a website build, an app's model)
-can depend on it. It builds for `wasm32-unknown-unknown`.
+can depend on it. It builds for `wasm32-unknown-unknown`, with or without its `disk` feature.
 
 | Type | What it is |
 |---|---|
@@ -19,6 +19,7 @@ can depend on it. It builds for `wasm32-unknown-unknown`.
 | `MessageItem`, `DynamicFolder`, `DynamicFolderLink`, `FolderData` | Ready-made rows and folders: a message, a folder filled when it loads, a row whose folder is made when opened |
 | `SearchResultsFolder`, `WakeTimer` | A search across folders, in sections, and the deadline that bounds its wait for a late listing |
 | `MemoryFolder` | A writable folder held in memory, for tests and demos |
+| `disk::DiskFolder`, `disk::DiskFolderLink`, `disk::DiskFile`, `disk::DiskRules` | With the `disk` feature: folders on the computer's disk, listing the files the app's rules accept, taking changes, and removing to the system trash |
 
 Everything is single-threaded (`Rc`, local futures, no async runtime): a folder's `load` lists at
 once or starts the work and raises its content-changed callbacks when the listing lands.
