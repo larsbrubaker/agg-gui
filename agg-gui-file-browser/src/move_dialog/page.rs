@@ -18,7 +18,8 @@
 //! stay in Downloads." / why the folder can't take them: `plan.rs`), the browser page, then
 //! Cancel and Move or Copy as the line says (disabled while the folder can't take the items).
 //! Accepting opens the destination (the selected folder row, or hands over the folder showing)
-//! and answers with it; the browser's Move does the move.
+//! and answers with it; the browser's Move does the move. A showing folder something else still
+//! holds is not handed over: the dialog stays in it and says the folder was busy.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -317,7 +318,12 @@ fn accept(
         Destination::Showing => {
             // The folder showing is handed over: the dialog closes on accept, and the page stops
             // remembering its place first. Should something still hold the folder, nothing
-            // moves and the user is told so.
+            // moves, the dialog stays in it and the user is told so.
+            if !state.borrow().can_hand_over_active_container() {
+                let text = tr("The folder was busy, so nothing moved. Try again.");
+                state.borrow_mut().after_write(text);
+                return;
+            }
             accepted.set(true);
             let Some(taken) = state.borrow_mut().take_active_container() else {
                 accepted.set(false);

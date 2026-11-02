@@ -2,7 +2,8 @@
 //! `App` with real pointer events: the browser's Move opens it, the user opens a folder in the
 //! dialog's own browser and presses Move, the item moves there and Undo puts it back; a folder
 //! can't go inside itself, nor items into the folder they are in (the dialog says why and its
-//! button is off); and where the app's rule copies, the dialog says Copy and the original stays.
+//! button is off); where the app's rule copies, the dialog says Copy and the original stays; and
+//! a folder something still holds moves nothing and the dialog stays in it.
 
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
@@ -350,6 +351,70 @@ fn the_dialog_browses_with_the_apps_config_and_opens_where_it_was_left() {
     assert_eq!(
         memory.saved.borrow().get("MoveItemLastBrowsedPath"),
         Some(&vec!["Projects".to_string()])
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Remembers nothing, but holds on to every folder it is handed: something else holding the
+/// folder the dialog would hand over.
+#[derive(Default)]
+struct Holding {
+    held: RefCell<Vec<agg_gui_file_browser::OpenFolder>>,
+}
+
+impl agg_gui_file_browser::BrowserMemory for Holding {
+    fn remember_location(&self, _key: &str, path: &[agg_gui_file_browser::OpenFolder]) {
+        self.held.borrow_mut().extend(path.iter().cloned());
+    }
+}
+
+#[test]
+fn a_folder_something_still_holds_moves_nothing_and_the_dialog_stays_in_it() {
+    let dir = workshop("held");
+    agg_gui::set_device_scale(1.0);
+    let holding = Rc::new(Holding::default());
+    let (root, memory) = (dir.clone(), Rc::clone(&holding));
+    let dialogs = SheetDialogs::new()
+        .with_browse_root(move || disk(&root))
+        .with_browse_config(move || {
+            BrowserConfig::builder()
+                .memory(memory.clone())
+                .options(agg_gui_file_browser::dialog_options())
+                .build()
+        })
+        .with_move_location_key("MoveItemLastBrowsedPath");
+    let state = BrowserState::new(
+        disk(&dir),
+        BrowserConfig::builder()
+            .dialogs(Rc::new(dialogs.clone()))
+            .build(),
+    );
+    state.borrow_mut().set_view_mode(ViewMode::Rows);
+    let root = Stack::new()
+        .add(Box::new(FileBrowser::new(&state, font())))
+        .add(Box::new(dialogs.sheet(font())));
+    let mut f = Fixture {
+        app: App::new(Box::new(root)),
+        state,
+    };
+    layout(&mut f.app);
+    select_in_browser(&mut f, "Row Item gear.stl");
+    open_move(&mut f);
+    click_in_dialog(&mut f, "Parts Row Item Collection", 2);
+    click_in_dialog(&mut f, "Browser Dialog Confirm Button", 1);
+    settle(&mut f);
+    assert!(dir.join("gear.stl").exists(), "nothing moved");
+    let trail = dialog_property(&f.app, "bread_crumb_trail");
+    assert!(
+        trail.ends_with("/Parts"),
+        "the dialog stays in the folder: {trail}"
+    );
+    holding.held.borrow_mut().clear();
+    click_in_dialog(&mut f, "Browser Dialog Confirm Button", 1);
+    settle(&mut f);
+    assert!(
+        dir.join("Parts").join("gear.stl").exists(),
+        "moved once let go"
     );
     let _ = std::fs::remove_dir_all(&dir);
 }

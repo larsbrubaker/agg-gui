@@ -292,7 +292,8 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   with any keys selects only its row, the band never draws and select all does nothing).
 - `BrowserState::relist`, loading the showing folder again and showing it anew, and
   `BrowserState::can_hand_over_active_container`, whether `take_active_container` would hand the
-  folder over alone.
+  folder over alone: the Save and Move dialogs ask it first, so a folder something still holds
+  stays showing and the dialog says it was busy.
 
 ### Changed
 
