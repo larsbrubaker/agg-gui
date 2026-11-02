@@ -11,7 +11,7 @@
 //! that loses the pointer without a release (a finger lifting, the window deactivating) ends
 //! without a click: no selection settled, no menu, no tap. A row consumes every move of a press
 //! under way, so the list never hears it a second time, and ignores agg-gui's hover-clear move
-//! (sent to the row the pointer left, at the root's `(-1, -1)`), which is no pointer move. A drag that ends outside the list
+//! (sent to the row the pointer left, at the root's `(-1, -1)`), which is no pointer move. A drag that ends outside the browser
 //! gives the keys back (`drag_ended`), so the view it ended over has them. A press that is a drag
 //! carries the selection onto the browser's folders or the app's views (`drag/gesture.rs`): each
 //! move updates it, the release drops, and a release the list hears after the row was rebuilt away
@@ -241,11 +241,14 @@ pub fn release_rowless(
     true
 }
 
-/// A drag ended at `at` (window coordinates): outside the list, the list gives up the keys.
+/// A drag ended at `at` (window coordinates): outside the browser (its list and its folder
+/// tree), the list gives up the keys, so the app's own keys work where the items were dropped; a
+/// drop on one of the browser's folders keeps them with the list, whose undo takes it back.
 fn drag_ended(state: &Rc<RefCell<BrowserState>>, at: Point) {
     let s = state.borrow();
-    if s.item_press().list_contains(at) == Some(false) {
-        crate::trace(|| "drag ended outside the list: keys given back".to_string());
+    let in_list = s.item_press().list_contains(at) != Some(false);
+    if !in_list && !s.drop_manager().browser_contains(at) {
+        crate::trace(|| "drag ended outside the browser: keys given back".to_string());
         agg_gui::focus::release_focus(s.list_focus_id());
     }
 }

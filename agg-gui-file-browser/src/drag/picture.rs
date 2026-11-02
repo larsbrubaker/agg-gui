@@ -25,7 +25,7 @@ use agg_gui_files::Item;
 
 use super::badge::{paint_plus_badge, painted_rect};
 use crate::drops::OutsideOver;
-use crate::list::tile_art::{paint_art, Art};
+use crate::list::tile_art::{paint_art, Art, TileArt};
 use crate::look::BrowserStyle;
 use crate::state::BrowserState;
 
@@ -52,8 +52,9 @@ struct Shown {
 /// What the drag's picture shows and where it was last drawn.
 #[derive(Clone, Default)]
 pub struct DragPicture {
-    /// The carried row's art, and whether it is the first carried item's.
-    art: Option<(Art, bool)>,
+    /// The carried row's art, the name its row reports it by (`thumbnail`), and whether it is
+    /// the first carried item's.
+    art: Option<(Art, String, bool)>,
     /// The last frame's picture, `None` while hidden.
     shown: Option<Shown>,
 }
@@ -62,11 +63,11 @@ impl DragPicture {
     /// A carried row at `rank` among the carried items painted `art`. The first item's art always
     /// wins (kept current as its picture arrives); another's stands in only until the first one
     /// paints (it may be scrolled away).
-    fn offer(&mut self, rank: usize, art: &Art) {
+    fn offer(&mut self, rank: usize, art: &TileArt) {
         if rank != 0 && self.art.is_some() {
             return;
         }
-        self.art = Some((art.clone(), rank == 0));
+        self.art = Some((art.art.clone(), art.name.clone(), rank == 0));
     }
 }
 
@@ -89,7 +90,7 @@ pub fn finish_lift(
     ctx: &mut dyn DrawCtx,
     state: &Rc<RefCell<BrowserState>>,
     rank: Option<usize>,
-    art: &Art,
+    art: &TileArt,
 ) {
     let Some(rank) = rank else {
         return;
@@ -146,7 +147,7 @@ pub fn paint_drag_picture(
     ctx.begin_path();
     ctx.rounded_rect(rect.x, rect.y, rect.width, rect.height, style.corner_radius);
     ctx.fill();
-    if let Some((art, _)) = art {
+    if let Some((art, _, _)) = art {
         paint_art(ctx, &art, rect);
     }
     ctx.restore();
@@ -192,8 +193,10 @@ fn paint_count_badge(
 
 /// What the drag's picture showed in the last frame: its window rectangle ("x,y,width,height",
 /// logical units, Y up; empty while hidden), the count it carries and whether the copy badge
-/// shows. The list's `drag_picture`, `drag_picture_count` and `drag_picture_copies` properties.
-pub fn picture_properties(state: &BrowserState) -> [(&'static str, String); 3] {
+/// shows, and the name of the art it shows (the carried row's `thumbnail`; empty while hidden).
+/// The list's `drag_picture`, `drag_picture_count`, `drag_picture_copies` and
+/// `drag_picture_image` properties.
+pub fn picture_properties(state: &BrowserState) -> [(&'static str, String); 4] {
     let shown = state.drop.picture.shown;
     let rect = shown.map_or_else(String::new, |s| {
         format!(
@@ -210,6 +213,13 @@ pub fn picture_properties(state: &BrowserState) -> [(&'static str, String); 3] {
         (
             "drag_picture_copies",
             shown.is_some_and(|s| s.copies).to_string(),
+        ),
+        (
+            "drag_picture_image",
+            match (shown, &state.drop.picture.art) {
+                (Some(_), Some((_, name, _))) => name.clone(),
+                _ => String::new(),
+            },
         ),
     ]
 }

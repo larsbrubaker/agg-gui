@@ -242,6 +242,27 @@ fn a_row_dropped_on_a_tree_row_moves_and_can_be_undone() {
 }
 
 #[test]
+fn a_drop_on_a_tree_row_leaves_the_list_its_keys_and_one_outside_the_browser_gives_them_up() {
+    let dir = workshop("keys");
+    let (mut app, _state) = browser_app(disk(&dir), BrowserConfig::default(), ViewMode::Rows);
+    let at = drag_over(&mut app, "Row Item gear.stl", "Parts Tree Node");
+    release(&mut app, at, Modifiers::default());
+    assert_eq!(
+        app.focused_widget_type_name(),
+        Some("BrowserList"),
+        "a drop on the browser's own folder keeps the undo keys with the list"
+    );
+    std::fs::write(dir.join("bolt.stl"), b"solid bolt").expect("written");
+    let (mut app, _state) = browser_app(disk(&dir), BrowserConfig::default(), ViewMode::Rows);
+    drag_over(&mut app, "Row Item bolt.stl", "Parts Tree Node");
+    let outside = Point::new(WIDTH - VIEW / 2.0, HEIGHT / 2.0);
+    move_to(&mut app, outside);
+    release(&mut app, outside, Modifiers::default());
+    assert_ne!(app.focused_widget_type_name(), Some("BrowserList"));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn the_copy_modifier_copies() {
     let dir = workshop("copy");
     let (mut app, state) = browser_app(disk(&dir), BrowserConfig::default(), ViewMode::Rows);
@@ -547,6 +568,11 @@ fn the_picture_follows_hides_over_the_apps_view_and_a_release_there_is_the_apps(
     let expected = format!("{},{},64,64", at.x + 16.0, at.y - 16.0 - 64.0);
     assert_eq!(list_property(&app, "drag_picture"), expected);
     assert_eq!(list_property(&app, "drag_picture_count"), "1");
+    assert_eq!(
+        list_property(&app, "drag_picture_image"),
+        property(&app, "Row Item gear.stl", "thumbnail"),
+        "the picture is the art the carried row draws"
+    );
     assert!(view.calls.borrow().is_empty(), "inside the browser");
 
     // Over the app's view, which shows the items itself.

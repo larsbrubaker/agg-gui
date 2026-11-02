@@ -24,6 +24,17 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   folder.
 - The folder message's Sign In button carries `BrowserNames::sign_in_button` itself, so what
   finds it by name reads whether it takes a press (it was a wrapper that always read enabled).
+- The drag picture reports the art it shows as the list's `drag_picture_image` property (the
+  carried row's `thumbnail`).
+
+### Fixed
+
+- A drag dropped on a folder tree row kept no keys: the list gave them up for any drop outside
+  itself. Only a drag ending outside the browser (list and tree) gives them up now, so the undo
+  keys take back a drop on the tree.
+
+### Added
+
 - `BrowserList::with_offset_cell`: the list scrolled by an offset its host keeps across the lists
   it builds again (a dialog page rebuilding its list on each change), which the host puts back to
   the top itself.

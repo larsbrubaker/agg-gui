@@ -11,7 +11,7 @@
 //! ([`ItemPress::released_unheard`]).
 //!
 //! The press also keeps where the list is in the window (`set_list_rect`, recorded as the list
-//! paints): a drag that ends outside it gives the keys back (`list/item_event.rs`), so Delete
+//! paints): a drag that ends outside the browser gives the keys back (`list/item_event.rs`), so Delete
 //! where the items were dropped is that view's, not the list's.
 
 use agg_gui::{MouseButton, Point, Rect};

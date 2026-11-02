@@ -268,7 +268,7 @@ impl Widget for BrowserTile {
     }
     fn finish_paint(&mut self, ctx: &mut dyn DrawCtx) {
         let lifted = self.lifted.take();
-        crate::drag::picture::finish_lift(ctx, &self.cx.state, lifted, &self.parts.art.art);
+        crate::drag::picture::finish_lift(ctx, &self.cx.state, lifted, &self.parts.art);
     }
     /// The tile takes every press over it, and hands the overlay its own (`list/overlay.rs`).
     fn claims_pointer_exclusively(&self, _local_pos: Point) -> bool {
