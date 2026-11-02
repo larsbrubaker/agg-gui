@@ -216,6 +216,12 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   named `BrowserNames::header_markdown`, left out when the folder has none); both forms of
   `FileBrowser` show it.
 - `BrowserList::without_drag_picture`, for a host that draws the drag's picture itself.
+- `FileBrowser::with_compact`: the list-only form as a phone's narrow panel while the app's flag
+  is set: `COMPACT_VIEW` tiles (70) with their names, whatever view the folder remembers, no view
+  button, and one tap activates. `BrowserList::with_view` fixes a list's view.
+- Feature `disk` (off by default): agg-gui-files' disk folders and `register_directory_monitor`,
+  a polling directory monitor that wakes the UI on each report (`WakingDirectoryMonitor`), so a
+  browser on a disk folder relists when the folder changes outside the app.
 - `BrowserCommand::builtin(action)`: one of the browser's own actions placed in an app's list
   with the app's tooltip, icon key or shortcut (`with_tooltip`, ...); the browser still runs it
   and decides when it can run.

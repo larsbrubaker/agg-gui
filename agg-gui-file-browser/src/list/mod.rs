@@ -91,6 +91,8 @@ pub struct BrowserList {
     tile_names: bool,
     /// Whether the list draws the drag's picture (`without_drag_picture`).
     drag_picture: bool,
+    /// The view the list always shows, whatever the folder remembers (`with_view`).
+    fixed_view: Option<ViewMode>,
     built: Option<BuildKey>,
     /// Bumped by each picture that arrives.
     arrivals: Rc<Cell<u64>>,
@@ -116,6 +118,7 @@ impl BrowserList {
             font,
             tile_names: false,
             drag_picture: true,
+            fixed_view: None,
             built: None,
             arrivals: Rc::new(Cell::new(0)),
             offset: Rc::new(Cell::new(0.0)),
@@ -132,6 +135,13 @@ impl BrowserList {
     /// folder is which (a phone's popup browser).
     pub fn with_tile_names(mut self) -> Self {
         self.tile_names = true;
+        self
+    }
+
+    /// The list always in `mode`, whatever view the folder remembers, and never changing what it
+    /// remembers: a phone's narrow panel, whose room fits one view only.
+    pub fn with_view(mut self, mode: ViewMode) -> Self {
+        self.fixed_view = Some(mode);
         self
     }
 
@@ -187,7 +197,10 @@ impl BrowserList {
         );
         let (message, mode, thumb) = {
             let s = self.state.borrow();
-            (s.listing_message(), s.view_mode(), s.thumb_size())
+            match self.fixed_view {
+                Some(mode) => (s.listing_message(), mode, mode.thumb_size()),
+                None => (s.listing_message(), s.view_mode(), s.thumb_size()),
+            }
         };
         let child: Box<dyn Widget> = match message {
             Some(message) => {

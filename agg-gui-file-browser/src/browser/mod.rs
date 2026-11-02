@@ -11,6 +11,12 @@
 //!   and sorting buttons; then the list under the folder's header markdown; then that header
 //!   text again, small, in a bar along the bottom (`ProviderMessageBar`).
 //!
+//! The list-only form has a narrow variant for a phone's panel ([`FileBrowser::with_compact`],
+//! while the app's flag is set): the list always shows [`COMPACT_VIEW`]'s tiles with their names
+//! under them, whatever view the folder remembers (and without changing it), the toolbar has no
+//! view button, and one tap activates a row (a folder opens; an item is the app's), since a
+//! finger has no double click.
+//!
 //! In both the undo notice sits centred [`NOTICE_BOTTOM_GAP`] above the bottom, over the rest.
 //! Gaps, paddings and names are the ones MatterCAD's Library uses, so its tests and help
 //! articles find the same widgets.
@@ -27,7 +33,7 @@
 
 pub mod parts;
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -39,6 +45,7 @@ use crate::config::BrowserLayout;
 use crate::history::notice::BrowserNotice;
 use crate::list::BrowserList;
 use crate::look::BrowserLook;
+use crate::memory::ViewMode;
 use crate::nav::buttons::{sorting_button, view_options_button, HistoryButtons};
 use crate::nav::overflow::OverflowButton;
 use crate::nav::provider_message::ProviderMessageBar;
@@ -53,6 +60,8 @@ use parts::{take_search_box, BottomBorder, ListColumn, SearchSlot};
 pub const SEARCH_BOX_WIDTH: f64 = 200.0;
 /// How far above the browser's bottom the undo notice sits.
 pub const NOTICE_BOTTOM_GAP: f64 = 16.0;
+/// The view the compact form's list shows: tiles of 70, two across a phone's panel.
+pub const COMPACT_VIEW: ViewMode = ViewMode::Icons70;
 /// The mouse's back button, as agg-gui numbers it (`Other(3)`, the DOM's `MouseEvent.button`).
 pub const BACK_MOUSE_BUTTON: u8 = 3;
 
@@ -75,6 +84,7 @@ struct HeaderKey {
     navigation: u64,
     path: Vec<String>,
     header: String,
+    compact: bool,
 }
 
 /// The composed browser (see the module header).
@@ -84,6 +94,10 @@ pub struct FileBrowser {
     look: Rc<dyn BrowserLook>,
     font: Arc<Font>,
     list_only: bool,
+    /// Set by the app while the list-only form is a phone's narrow panel.
+    compact: Rc<Cell<bool>>,
+    /// The compact flag the body was built for.
+    body_compact: Option<bool>,
     /// The folder tree's rows (the tree form's), kept for the app to read.
     tree: Option<Rc<RefCell<TreeModel>>>,
     /// The search box while no header holds it (before the first build).
@@ -125,12 +139,26 @@ impl FileBrowser {
             look,
             font,
             list_only,
+            compact: Rc::new(Cell::new(false)),
+            body_compact: None,
             search_box: Some(Box::new(search_box)),
             built: None,
             bounds: Rect::default(),
             children: Vec::new(),
             roles: Vec::new(),
         }
+    }
+
+    /// The list-only form laid out as a phone's narrow panel while `compact` is set (the app's
+    /// panel sets it as it lays out; see the module header). No effect on the tree form.
+    pub fn with_compact(mut self, compact: Rc<Cell<bool>>) -> Self {
+        self.compact = compact;
+        self
+    }
+
+    /// Whether the browser is laid out as the narrow panel now.
+    pub fn is_compact(&self) -> bool {
+        self.list_only && self.compact.get()
     }
 
     /// The browser's state.
@@ -159,6 +187,7 @@ impl FileBrowser {
             navigation: s.navigation(),
             path: s.path_names(),
             header: s.header_markdown(),
+            compact: self.is_compact(),
         }
     }
 
@@ -178,13 +207,17 @@ impl FileBrowser {
             .search_box
             .take()
             .or_else(|| take_search_box(&mut bars));
-        let body = body.unwrap_or_else(|| self.body());
+        // The narrow panel's list differs from the wide one's: built again when that changes.
+        let body = body
+            .filter(|_| self.body_compact == Some(key.compact))
+            .unwrap_or_else(|| self.body(key.compact));
+        self.body_compact = Some(key.compact);
         let notice = notice
             .unwrap_or_else(|| Box::new(BrowserNotice::new(&self.state, Arc::clone(&self.font))));
         if self.list_only {
             self.place(self.nav_bar(None), Role::Bar);
             if let Some(search_box) = search_box {
-                self.place(self.toolbar(search_box), Role::Bar);
+                self.place(self.toolbar(search_box, key.compact), Role::Bar);
             }
             self.place(body, Role::Body);
             let style = self.look.style();
@@ -208,8 +241,11 @@ impl FileBrowser {
     }
 
     /// The tree, splitter and list; or the list.
-    fn body(&self) -> Box<dyn Widget> {
-        let list = BrowserList::new(&self.state, Arc::clone(&self.font)).without_drag_picture();
+    fn body(&self, compact: bool) -> Box<dyn Widget> {
+        let mut list = BrowserList::new(&self.state, Arc::clone(&self.font)).without_drag_picture();
+        if compact {
+            list = list.with_view(COMPACT_VIEW).with_tile_names();
+        }
         let name = self.look.names().header_markdown.clone();
         let font = Arc::clone(&self.font);
         let list = ListColumn::new(&self.state, Box::new(list), font, name);
@@ -262,15 +298,17 @@ impl FileBrowser {
         ))
     }
 
-    /// The list-only form's toolbar: the search box taking the room, the view and sorting
-    /// buttons, over the bar's rule.
-    fn toolbar(&self, search_box: Box<dyn Widget>) -> Box<dyn Widget> {
-        let row = FlexRow::new()
+    /// The list-only form's toolbar: the search box taking the room, the view (not on the narrow
+    /// panel, whose view is its own) and sorting buttons, over the bar's rule.
+    fn toolbar(&self, search_box: Box<dyn Widget>, compact: bool) -> Box<dyn Widget> {
+        let mut row = FlexRow::new()
             .with_gap(4.0)
             .with_padding(2.0)
-            .add_flex(Box::new(SearchSlot::new(search_box)), 1.0)
-            .add(Box::new(view_options_button(&self.state, &self.font, true)))
-            .add(Box::new(sorting_button(&self.state, &self.font)));
+            .add_flex(Box::new(SearchSlot::new(search_box)), 1.0);
+        if !compact {
+            row = row.add(Box::new(view_options_button(&self.state, &self.font, true)));
+        }
+        let row = row.add(Box::new(sorting_button(&self.state, &self.font)));
         let name = self.look.names().folders_toolbar.clone();
         let bar = BottomBorder::new(Box::new(row), self.look.style().border_color);
         Box::new(bar.with_name(name))
@@ -300,6 +338,12 @@ impl Widget for FileBrowser {
     /// notice centred near the bottom.
     fn layout(&mut self, available: Size) -> Size {
         let key = self.header_key();
+        if self.built.as_ref().map(|b| b.compact) != Some(key.compact) {
+            // One tap activates on the narrow panel; elsewhere the config says.
+            let mut s = self.state.borrow_mut();
+            let tap = key.compact || s.config().options.tap_activates;
+            s.set_tap_activates(tap);
+        }
         if self.built.as_ref() != Some(&key) {
             self.rebuild(&key);
             self.built = Some(key);

@@ -398,3 +398,40 @@ fn a_folders_header_markdown_shows_above_the_list_and_goes_with_the_folder() {
         assert!(!has(&app, "Provider Message"));
     }
 }
+
+fn kind_of(app: &App, id: &str) -> &'static str {
+    find(app.root(), id, Point::new(0.0, 0.0))
+        .unwrap_or_else(|| panic!("no widget named {id}"))
+        .0
+        .type_name()
+}
+
+#[test]
+fn the_compact_form_shows_named_tiles_without_a_view_button_and_a_tap_opens() {
+    agg_gui::set_device_scale(1.0);
+    let state = BrowserState::new(Box::new(home()), list_only());
+    state.borrow_mut().set_view_mode(ViewMode::Rows);
+    let compact = Rc::new(std::cell::Cell::new(true));
+    let browser = FileBrowser::new(&state, font()).with_compact(Rc::clone(&compact));
+    let mut app = App::new(Box::new(browser));
+    frame(&mut app);
+    assert!(!has(&app, "Library View Options Button"));
+    assert!(has(&app, "Print Library View Options"));
+    assert_eq!(kind_of(&app, "Row Item gear.stl"), "BrowserTile");
+    assert_eq!(
+        state.borrow().view_mode(),
+        ViewMode::Rows,
+        "the folder's own view is left as it was"
+    );
+    // One tap on a folder opens it.
+    click(&mut app, "Projects Row Item Collection");
+    assert_eq!(browser_property(&app, "path"), "Home > Projects");
+    // Wide again: the folder's view, the view button, and a click only selects.
+    compact.set(false);
+    click(&mut app, "Bread Crumb Button Home");
+    assert!(has(&app, "Library View Options Button"));
+    assert_eq!(kind_of(&app, "Row Item gear.stl"), "BrowserRow");
+    click(&mut app, "Projects Row Item Collection");
+    assert_eq!(browser_property(&app, "path"), "Home");
+    assert_eq!(browser_property(&app, "selected"), "Projects");
+}

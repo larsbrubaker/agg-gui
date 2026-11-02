@@ -149,9 +149,11 @@ jobs:
           cargo test -p agg-gui-files --features zip
           cargo test -p agg-gui-files --features disk,zip
 
-      # The file browser's widgets.
+      # The file browser's widgets, and with `disk` its waking directory monitor.
       - name: Run file browser tests
-        run: cargo test -p agg-gui-file-browser
+        run: |
+          cargo test -p agg-gui-file-browser
+          cargo test -p agg-gui-file-browser --features disk
 
       # The `clipboard` feature's arboard backend (the X11 / Wayland path
       # here) is otherwise never compiled: the tests above build agg-gui
@@ -326,4 +328,6 @@ jobs:
 
       # The file browser's widgets build for the browser.
       - name: Build file browser (wasm)
-        run: cargo build -p agg-gui-file-browser --target wasm32-unknown-unknown
+        run: |
+          cargo build -p agg-gui-file-browser --target wasm32-unknown-unknown
+          cargo build -p agg-gui-file-browser --features disk --target wasm32-unknown-unknown

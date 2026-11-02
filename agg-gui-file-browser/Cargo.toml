@@ -34,6 +34,10 @@ default = ["reflect"]
 # consumer that turns this crate's defaults off can leave `bevy_reflect` out,
 # and one that keeps them gets a single, consistently-featured agg-gui.
 reflect = ["agg-gui/reflect"]
+# Folders on disk (agg-gui-files' `disk`) and a directory monitor that wakes the UI
+# (`register_directory_monitor`), so a browser on a disk folder relists when the folder changes
+# outside the app. Off by default: an app without disk folders compiles none of it.
+disk = ["agg-gui-files/disk"]
 
 [dependencies]
 # Default features off so they stay the consumer's choice (see `reflect`).
@@ -48,3 +52,7 @@ web-time = "1"
 # The history's tests undo and redo real changes on a folder on disk (a scratch folder under the
 # system's temp directory), so the tests also build agg-gui-files' disk folders.
 agg-gui-files = { path = "../agg-gui-files", version = ">=0.0.2, <0.1.0", features = ["disk"] }
+
+[[test]]
+name = "live_relist"
+required-features = ["disk"]

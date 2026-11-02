@@ -78,6 +78,8 @@ pub mod browser;
 pub mod builtins;
 pub mod config;
 pub mod dialogs;
+#[cfg(feature = "disk")]
+pub mod disk_monitor;
 pub mod drag;
 pub mod drops;
 pub mod entry;
@@ -105,7 +107,9 @@ pub use actions::{
 };
 pub use bread_crumb::{folder_bread_crumb_for, FolderBreadCrumbWidget, UP_ICON_SIZE};
 pub use browser::parts::{take_search_box, BottomBorder, ListColumn, SearchSlot};
-pub use browser::{FileBrowser, BACK_MOUSE_BUTTON, NOTICE_BOTTOM_GAP, SEARCH_BOX_WIDTH};
+pub use browser::{
+    FileBrowser, BACK_MOUSE_BUTTON, COMPACT_VIEW, NOTICE_BOTTOM_GAP, SEARCH_BOX_WIDTH,
+};
 pub use builtins::run_builtin;
 pub use config::{
     BrowserConfig, BrowserConfigBuilder, BrowserLayout, BrowserOptions, DoubleClickTarget,
@@ -115,6 +119,8 @@ pub use dialogs::{
     BrowserDialogs, Confirmation, DialogKind, MoveRequest, NameRequest, NoDialogs, PickedFiles,
     PickedMoveTarget,
 };
+#[cfg(feature = "disk")]
+pub use disk_monitor::{register_directory_monitor, WakingDirectoryMonitor};
 pub use drag::badge::{paint_plus_badge, painted_rect, register_painted};
 pub use drag::execute::{couldnt_copy_to, drop_into, drop_onto};
 pub use drag::gesture::{drag_end, drag_lost, drag_over};
