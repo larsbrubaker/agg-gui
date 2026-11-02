@@ -51,7 +51,9 @@
 //! `state` ([`BrowserState`], what a browser is looking at: the open path, the listing, view and
 //! sort, the selection and its gestures, activation, the status line and the app slot);
 //! `own_pictures` (the default pictures: each item's own); `list` ([`BrowserList`], the rows or
-//! tiles of the showing folder, or its message, with their gestures and menus).
+//! tiles of the showing folder, or its message, with their gestures and menus); `tree`
+//! ([`BrowserTree`], the folder tree over the same state, its rows as data in [`TreeModel`], each
+//! row known by its folder's location key or else its name, and its menu).
 //!
 //! The widgets come from MatterCAD's library (mattercad-rust's `mattercad-app`, same author),
 //! published here under agg-gui's MIT licence.
@@ -74,6 +76,7 @@ pub mod pictures;
 pub mod places;
 pub mod state;
 pub mod trace;
+pub mod tree;
 
 pub use actions::{
     Activation, BrowserAction, BrowserActions, BrowserCommand, BuiltinAction, Builtins, NoActions,
@@ -120,6 +123,10 @@ pub use state::{
     SearchSectionCollapseState, SectionHeader,
 };
 pub use trace::{set_tracer, trace, tracing};
+pub use tree::{
+    path_keys, BrowserTree, PathLevel, TreeKey, TreeModel, TreeNode, TreePlace, TreeRow,
+    TREE_ICON_SIZE, TREE_ROW_HEIGHT,
+};
 
 /// Every English literal this crate hands to `agg_gui_files::tr`.
 pub const ENGLISH_TEXTS: &[&str] = &[

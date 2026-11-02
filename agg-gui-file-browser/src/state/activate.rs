@@ -175,6 +175,30 @@ impl BrowserState {
             .with_live(self.me.clone())
     }
 
+    /// The browser as hooks are handed it from the folder at `depth` (0 = the root) of the open
+    /// path: that folder's path, place and writability, and the selection, read as listed there.
+    /// The folder tree's menu is handed this for the folder listing the clicked row's folder,
+    /// with that folder as the temporary selection. `None` past the open path.
+    pub fn snapshot_at(&self, depth: usize) -> Option<BrowserRef> {
+        let folder = self.path.get(depth)?.borrow();
+        let path: Rc<[String]> = self
+            .path_names()
+            .into_iter()
+            .take(depth + 1)
+            .collect::<Vec<_>>()
+            .into();
+        let selection: Vec<Entry> = self
+            .selected_entries()
+            .iter()
+            .map(|entry| entry.to_entry(Rc::clone(&path)))
+            .collect();
+        let snapshot = BrowserRef::new(path, selection)
+            .with_folder_place(folder.place())
+            .with_folder_writable(folder.as_writable().is_some())
+            .with_live(self.me.clone());
+        Some(snapshot)
+    }
+
     /// Hands the queued activations to the config's actions, with `state` not borrowed while
     /// they run. Every public way to activate a row ends here, so none waits.
     pub fn run_hooks(state: &Rc<RefCell<Self>>) {

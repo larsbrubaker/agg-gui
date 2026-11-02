@@ -5,7 +5,8 @@
 //! selection in the selection's menu, adding to the folder in the list's. The menu is an agg-gui
 //! `PopupMenu` the list holds open over everything (`paint_global_overlay`) while it routes
 //! events to it. An app command runs when picked, with the browser's state let go. The
-//! built-ins show greyed until the browser can run them itself.
+//! built-ins show greyed until the browser can run them itself. The folder tree opens its menu
+//! through the same `ListMenu` (`open_rows`, `tree/menu.rs`).
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -28,7 +29,7 @@ pub enum MenuScope {
 }
 
 /// The built-ins offered in `scope`'s menu.
-fn builtins_for(scope: MenuScope) -> Builtins {
+pub(crate) fn builtins_for(scope: MenuScope) -> Builtins {
     let offered: Vec<BuiltinAction> = BuiltinAction::ALL
         .iter()
         .copied()
@@ -73,6 +74,12 @@ impl ListMenu {
             (Rc::clone(&s.config().actions), s.snapshot())
         };
         let rows = actions.menu(&snapshot, &builtins_for(scope));
+        self.open_rows(rows, at, &format!("list menu {scope:?}"));
+    }
+
+    /// Opens a menu of `rows` (an app's ordered list, built-ins greyed) at `at`, in the opening
+    /// widget's own coordinates; `what` names it in the trace.
+    pub fn open_rows(&mut self, rows: Vec<BrowserAction>, at: Point, what: &str) {
         let mut commands = Vec::new();
         let mut items = Vec::new();
         for row in rows {
@@ -93,7 +100,7 @@ impl ListMenu {
                 }
             }
         }
-        crate::trace(|| format!("list menu {scope:?} opens with {} rows", items.len()));
+        crate::trace(|| format!("{what} opens with {} rows", items.len()));
         let mut menu = PopupMenu::new(items);
         menu.open_at(at);
         self.menu = Some(menu);

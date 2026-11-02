@@ -207,6 +207,10 @@ pub struct BrowserNames {
     /// A search section's header (template; its expand toggle is the header's name and
     /// " Toggle").
     pub search_section: String,
+    /// The folder tree.
+    pub tree: String,
+    /// One folder's row in the folder tree (template).
+    pub tree_row: String,
 }
 
 impl Default for BrowserNames {
@@ -232,6 +236,8 @@ impl Default for BrowserNames {
             sign_in_button: "Library Folder Sign In Button".into(),
             search_status: "Search Status".into(),
             search_section: "Search Section {name}".into(),
+            tree: "Library TreeView".into(),
+            tree_row: "{name} Tree Node".into(),
         }
     }
 }
@@ -250,6 +256,11 @@ impl BrowserNames {
     /// The header of the search section named `name`.
     pub fn search_section_for(&self, name: &str) -> String {
         self.search_section.replace("{name}", name)
+    }
+
+    /// The folder tree's row of the folder named `name`.
+    pub fn tree_row_for(&self, name: &str) -> String {
+        self.tree_row.replace("{name}", name)
     }
 
     /// The row or tile of the folder named `name`.

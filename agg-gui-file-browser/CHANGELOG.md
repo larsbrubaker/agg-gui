@@ -72,6 +72,24 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   centre pixel); `BrowserRow::thumbnail_pixel_size` and `name_right`; `BrowserTile::label_band`,
   `label_text_origin`, `label_printed_height` and `name_max_width`.
 - `BuiltinAction::title` and `acts_on_selection`.
+- `BrowserTree`, the folder tree over a `BrowserState`: the root's folders by name, an expand
+  arrow on each folder that may have folders of its own (asked through
+  `FolderLink::has_child_containers` where that is cheap, kept until first opened elsewhere, and
+  dropped for the session once opening finds none), a "Loading..." row while an opened folder's
+  listing is on its way, the folder's icon from `BrowserLook::icon_for_key` tinted in the accent,
+  and its name fitted to the row with the whole name as the tooltip. A press on the arrow opens or
+  folds the folder; a press elsewhere on a row shows the folder in the browser and opens it; the
+  browser's folder is opened down to and drawn selected; after a write the tree lists itself again,
+  and the showing folder's content changes list its row again; a right press shows the folder and
+  opens the tree's menu, the app's `BrowserActions::menu` for the folder as the temporary
+  selection in the folder above it (the selection's built-ins greyed until the browser runs them),
+  each command run with that selection set again. The rows as data are `TreeModel` (`TreeNode`,
+  `for_state`, `sync_to`, `toggle`, `relist`, `content_changed`, `expand_to`, `showing_row`,
+  `selected_link`, `indented_names`); rows are known by their folders' location keys, else by
+  name (`TreePlace`, `TreeKey`, `path_keys`, `PathLevel`, `BrowserState::path_levels`), so two
+  folders of one name in different places stay two rows.
+- `BrowserNames::tree` ("Library TreeView") and `tree_row` ("{name} Tree Node", `tree_row_for`).
+- `BrowserState::snapshot_at`: the snapshot a hook is handed from a folder up the open path.
 - `OwnPictures`: each item shows the picture its folder or the item itself makes of it, made on
   the spawner and kept, the look's item icon until then; the default pictures hook. It keeps at
   most `KEPT_PICTURES` (1024) pictures, the least recently asked for leaving first and made again
