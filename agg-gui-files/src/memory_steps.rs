@@ -277,8 +277,7 @@ impl MemoryStep {
             }
         }
     }
-
-    }
+}
 
 /// A memory write's history step: the change to reverse next, and the description of the write
 /// as first recorded, which every step handed back on undo and redo keeps.

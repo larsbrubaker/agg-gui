@@ -8,7 +8,7 @@
 //! and the writable folders on the path of the browser it was started from list themselves again
 //! (`after_write`, so a folder tree beside it lists again too); a read-only folder can't have
 //! changed. A browser closed meanwhile is left alone. Should a step let its callback go without
-//! calling it, the callback's guard ([`DoneGuard`]) lands it as finished with nothing kept, so
+//! calling it, the callback's guard (`DoneGuard`) lands it as finished with nothing kept, so
 //! the history is not left busy for good, and the notice says "Undo didn't finish: ...".
 //!
 //! The keys, taken by the list and the tree while they have the keyboard: Command+Z or Control+Z

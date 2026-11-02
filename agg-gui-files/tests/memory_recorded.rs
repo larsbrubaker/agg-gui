@@ -257,5 +257,8 @@ fn undoing_a_new_folder_that_holds_something_refuses_and_keeps_it() {
         .get_container()
         .expect("opens");
     assert_eq!(parts.items().len(), 1, "with what was put in it");
-    assert!(outcome.kept.is_none(), "nothing was undone, so nothing to redo");
+    assert!(
+        outcome.kept.is_none(),
+        "nothing was undone, so nothing to redo"
+    );
 }
