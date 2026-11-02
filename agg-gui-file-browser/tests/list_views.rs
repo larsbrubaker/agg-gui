@@ -1,8 +1,9 @@
 //! The list views (`BrowserList`) over a `MemoryFolder`, driven through agg-gui's `App` with real
 //! pointer events: rows and tiles carry their names and sizes, clicks select (Shift ranges,
-//! Control toggles), a double click activates through the app's hook or opens a folder, the menu
-//! button and a right press open the app's menu, a picture arriving later redraws its tile, and a
-//! folder listing only a message shows it in place of its rows.
+//! Control toggles), the keys and a rubber band move and widen the selection, a double click
+//! activates through the app's hook or opens a folder, the menu button and a right press open the
+//! app's menu, a picture arriving later redraws its tile, and a folder listing only a message
+//! shows it in place of its rows.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -489,4 +490,39 @@ fn a_folder_refused_for_the_sign_in_shows_the_apps_sign_in_and_its_warning() {
         Point::new(0.0, 0.0)
     )
     .is_none());
+}
+
+#[test]
+fn the_keys_move_and_widen_the_selection_once_the_list_has_them() {
+    let (mut app, state) = list_app(Box::new(home()), BrowserConfig::default(), ViewMode::Rows);
+    click_row(&mut app, "Row Item a.txt", Modifiers::default());
+    app.on_key_down(agg_gui::Key::ArrowDown, Modifiers::default());
+    assert_eq!(selected(&state), ["b.txt"]);
+    let shift = Modifiers {
+        shift: true,
+        ..Modifiers::default()
+    };
+    app.on_key_down(agg_gui::Key::ArrowUp, shift);
+    app.on_key_down(agg_gui::Key::ArrowUp, shift);
+    assert_eq!(selected(&state), ["Projects", "a.txt", "b.txt"]);
+    let ctrl = Modifiers {
+        ctrl: true,
+        ..Modifiers::default()
+    };
+    app.on_key_down(agg_gui::Key::Char('a'), ctrl);
+    assert_eq!(selected(&state).len(), 5);
+    app.on_key_down(agg_gui::Key::Escape, Modifiers::default());
+    assert!(selected(&state).is_empty());
+}
+
+#[test]
+fn a_band_drawn_from_empty_space_selects_the_rows_it_touches() {
+    let (mut app, state) = list_app(Box::new(home()), BrowserConfig::default(), ViewMode::Rows);
+    let b = centre(rect_of(&app, "Row Item b.txt"));
+    let (x, y) = (200.0, HEIGHT - 10.0);
+    app.on_mouse_move(x, y);
+    app.on_mouse_down(x, y, MouseButton::Left, Modifiers::default());
+    app.on_mouse_move(x, HEIGHT - b.y);
+    app.on_mouse_up(x, HEIGHT - b.y, MouseButton::Left, Modifiers::default());
+    assert_eq!(selected(&state), ["b.txt", "c.txt"]);
 }
