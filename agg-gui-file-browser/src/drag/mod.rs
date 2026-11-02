@@ -5,7 +5,9 @@
 //! Rather than hit-testing the widget tree, the folders a drop can land on record their window
 //! rectangles as they paint (`register_target`, logical units, Y up), each painter forgetting its
 //! own kind first (`clear_targets`), so a folder scrolled away or folded shut is gone by the next
-//! frame; the list records its own rectangle (`set_list_rect`). The drag looks them up.
+//! frame; the list and the tree record their own rectangles (`set_list_rect`, `set_tree_rect`),
+//! and a folder takes a drop only inside its own view's rectangle, so a row scrolled past the
+//! edge of its view, still painted under the clip, takes none. The drag looks them up.
 //!
 //! The target under the drag is `highlighted()`: the row, tile or tree row with that key fills
 //! itself with the accent at alpha 40 while it paints, and `drop_label()` says what the drop will
@@ -259,14 +261,21 @@ impl DropManager {
         key.as_ref() == Some(source)
     }
 
+    /// The tree row at `at`, when `at` is inside the tree's rectangle (which clips its rows).
+    fn tree_target_at(&self, at: Point) -> Option<&DropTarget> {
+        if self.tree_rect.is_some_and(|r| !contains(&r, at)) {
+            return None;
+        }
+        self.targets
+            .iter()
+            .find(|t| t.key.kind == DropTargetKind::Tree && contains(&t.rect, at))
+    }
+
     /// The target the drop at `at` lands on: a tree row first, then a folder in the list (only
-    /// inside the list's rectangle, which clips its rows); `None` over anything else, or over a
+    /// inside the list's rectangle, which clips its rows; a tree row likewise only inside the tree's); `None` over anything else, or over a
     /// folder that can't take it.
     fn target_at(&self, at: Point) -> Option<&DropTarget> {
-        let tree = self
-            .targets
-            .iter()
-            .find(|t| t.key.kind == DropTargetKind::Tree && contains(&t.rect, at));
+        let tree = self.tree_target_at(at);
         if let Some(tree) = tree {
             return self.takes_drop(tree.link.as_ref()).then_some(tree);
         }
@@ -291,10 +300,7 @@ impl DropManager {
     /// The folder a drag held at `at` would open: any tree row (a folder that can't take the drop
     /// may hold one that can), or a folder in the list that could take it.
     pub(crate) fn spring_target_at(&self, at: Point) -> Option<(DropKey, Rc<dyn FolderLink>)> {
-        let tree = self
-            .targets
-            .iter()
-            .find(|t| t.key.kind == DropTargetKind::Tree && contains(&t.rect, at));
+        let tree = self.tree_target_at(at);
         tree.or_else(|| {
             self.target_at(at)
                 .filter(|t| t.key.kind == DropTargetKind::Content)

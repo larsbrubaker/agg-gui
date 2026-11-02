@@ -21,6 +21,10 @@
 //! tree's and rows' names (`BrowserNames::tree`, `BrowserNames::tree_row`). The rows are built
 //! again when the model, the browser or the look's art changes.
 //!
+//! When the rows are taller than the tree they scroll: the wheel moves them, and the row of each
+//! folder the browser goes to is scrolled into sight (`scroll.rs`, kept in the model). Rows
+//! scrolled past the tree's edges are clipped, and take no drop there.
+//!
 //! Each row records itself as a drop target as it paints (the tree forgets last frame's and
 //! records its own rectangle first, so a drag knows when it is outside the browser), lights up
 //! while a drag is over it, and a closed row the drag waits over opens (`drag/spring.rs`).
@@ -34,6 +38,7 @@ pub mod menu;
 pub mod model;
 pub mod place;
 pub mod row;
+pub mod scroll;
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -147,6 +152,23 @@ impl BrowserTree {
         }
     }
 
+    /// Fits the model's scroll to the rows in a tree `height` tall (see `scroll.rs`), the showing
+    /// folder's row scrolled into sight after each navigation; answers the offset.
+    fn fit_scroll(&mut self, height: f64) -> f64 {
+        let (levels, navigation) = {
+            let s = self.state.borrow();
+            (s.path_levels(), s.navigation())
+        };
+        let mut model = self.model.borrow_mut();
+        let rows = model.rows().len() as f64;
+        let showing = model.showing_row(&levels).map(|index| {
+            let top = TREE_TOP + index as f64 * TREE_ROW_HEIGHT;
+            (top, top + TREE_ROW_HEIGHT)
+        });
+        let content = TREE_TOP * 2.0 + rows * TREE_ROW_HEIGHT;
+        model.scroll.fit(content, height, showing, navigation)
+    }
+
     /// Builds the rows again from the model and the browser as they are now.
     fn rebuild(&mut self) {
         let levels = self.state.borrow().path_levels();
@@ -223,7 +245,8 @@ impl Widget for BrowserTree {
         if self.built != Some(self.build_key()) {
             self.rebuild();
         }
-        let mut top = available.height - TREE_TOP;
+        let offset = self.fit_scroll(available.height);
+        let mut top = available.height - TREE_TOP + offset;
         for child in &mut self.children {
             top -= TREE_ROW_HEIGHT;
             child.layout(Size::new(available.width, TREE_ROW_HEIGHT));
@@ -285,6 +308,12 @@ impl Widget for BrowserTree {
             let requested = self.model.borrow_mut().take_menu_request();
             if let Some(index) = requested {
                 menu::open_tree_menu(&mut self.menu, &self.state, &self.model, index, *pos);
+                return EventResult::Consumed;
+            }
+        }
+        if let Event::MouseWheel { delta_y, .. } = event {
+            if self.model.borrow_mut().scroll.wheel(*delta_y) {
+                agg_gui::animation::request_layout();
                 return EventResult::Consumed;
             }
         }

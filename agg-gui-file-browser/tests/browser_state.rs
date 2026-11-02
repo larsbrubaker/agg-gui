@@ -369,7 +369,10 @@ fn a_taken_folder_put_back_shows_again_with_its_listing() {
     let state = BrowserState::new(Box::new(home()), BrowserConfig::default());
     let projects = state.borrow().root_child_containers()[0].clone();
     state.borrow_mut().open(projects.as_ref());
-    let taken = state.borrow_mut().take_active_container().expect("below the root");
+    let taken = state
+        .borrow_mut()
+        .take_active_container()
+        .expect("below the root");
     assert_eq!(state.borrow().path_names(), ["Home"]);
     let held = Rc::clone(&taken);
     state.borrow_mut().put_back_active_container(taken);

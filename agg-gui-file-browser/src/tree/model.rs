@@ -130,6 +130,8 @@ pub struct TreeModel {
     childless: HashSet<Vec<TreeKey>>,
     /// Opened folders whose listings are still on their way.
     pending: Vec<PendingListing>,
+    /// How far the tree is scrolled (`scroll.rs`).
+    pub(crate) scroll: super::scroll::TreeScroll,
 }
 
 impl TreeModel {
@@ -144,6 +146,11 @@ impl TreeModel {
         };
         model.nodes = model.root_nodes(&state);
         Rc::new(RefCell::new(model))
+    }
+
+    /// How far the tree's rows are scrolled up, in logical units (0 = the top).
+    pub fn scroll_offset(&self) -> f64 {
+        self.scroll.offset()
     }
 
     /// The rows in display order.

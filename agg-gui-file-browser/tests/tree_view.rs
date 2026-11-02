@@ -15,7 +15,7 @@ use agg_gui::{App, Modifiers, MouseButton, Point, Rect, Size, Widget};
 use agg_gui_file_browser::{
     tree_menu_rows, BrowserAction, BrowserActions, BrowserCommand, BrowserConfig, BrowserDialogs,
     BrowserRef, BrowserState, BrowserTree, Builtins, Confirmation, DialogKind, MovePick,
-    MoveRequest, NameRequest, PickedMoveTarget, SheetDialogs,
+    MoveRequest, NameRequest, PickedMoveTarget, SheetDialogs, TREE_ROW_HEIGHT,
 };
 use agg_gui_files::{Folder, MemoryFolder};
 
@@ -464,7 +464,11 @@ fn a_tree_rows_menu_is_for_that_row_whatever_folder_shows() {
     let (mut app, state) = tree_app(Box::new(home), config);
     let projects = row_named(&app, "Projects Tree Node");
     press_row(&mut app, projects, ARROW_X, MouseButton::Left);
-    assert_eq!(state.borrow().path_names(), ["Home"], "the arrow only opens");
+    assert_eq!(
+        state.borrow().path_names(),
+        ["Home"],
+        "the arrow only opens"
+    );
     let brackets = row_named(&app, "Brackets Tree Node");
     let rows = tree_menu_rows(&state, tree(&app).model(), brackets);
     let titles: Vec<&str> = rows
@@ -486,5 +490,60 @@ fn a_tree_rows_menu_is_for_that_row_whatever_folder_shows() {
         state.borrow().path_names(),
         ["Home", "Projects", "Brackets"],
         "the row's folder shows, as a right press shows it"
+    );
+}
+
+/// Home holding 30 folders, Folder 00 to Folder 29: more rows than the tree's height shows.
+fn tall_home() -> MemoryFolder {
+    let home = MemoryFolder::new("Home");
+    for n in 0..30 {
+        home.add_folder(&format!("Folder {n:02}")).expect("free");
+    }
+    home
+}
+
+fn wheel(app: &mut App, notches: f64) {
+    app.on_mouse_move(WIDTH / 2.0, HEIGHT / 2.0);
+    app.on_mouse_wheel(WIDTH / 2.0, HEIGHT / 2.0, notches);
+    app.layout(Size::new(WIDTH, HEIGHT));
+}
+
+#[test]
+fn the_wheel_scrolls_the_rows_within_their_length() {
+    let (mut app, _state) = tree_app(Box::new(tall_home()), BrowserConfig::default());
+    let first = row_named(&app, "Folder 00 Tree Node");
+    let last = row_named(&app, "Folder 29 Tree Node");
+    let top = nth_row(&app, first).1.y;
+    assert!(
+        nth_row(&app, last).1.y < 0.0,
+        "the last row starts out of sight"
+    );
+    wheel(&mut app, -1.0);
+    assert!(nth_row(&app, first).1.y > top, "the rows moved up");
+    wheel(&mut app, -100.0);
+    let bottom = nth_row(&app, last).1;
+    assert!(
+        bottom.y >= 0.0 && bottom.y < TREE_ROW_HEIGHT,
+        "scrolled to the last row and no further: {bottom:?}"
+    );
+    wheel(&mut app, 100.0);
+    assert_eq!(nth_row(&app, first).1.y, top, "and back to the top");
+}
+
+#[test]
+fn the_showing_folders_row_is_scrolled_into_sight() {
+    let (mut app, state) = tree_app(Box::new(tall_home()), BrowserConfig::default());
+    let link = state.borrow().root_child_containers()[29].clone();
+    assert_eq!(link.name(), "Folder 29");
+    state.borrow_mut().open(link.as_ref());
+    app.layout(Size::new(WIDTH, HEIGHT));
+    let row = nth_row(&app, row_named(&app, "Folder 29 Tree Node")).1;
+    assert!(
+        row.y >= 0.0 && row.y + row.height <= HEIGHT,
+        "the row shows: {row:?}"
+    );
+    assert_eq!(
+        row_property(&app, row_named(&app, "Folder 29 Tree Node"), "selected"),
+        "true"
     );
 }

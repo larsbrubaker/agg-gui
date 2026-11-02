@@ -22,8 +22,8 @@ use agg_gui::{
 };
 use agg_gui_file_browser::{
     run_ready_local_tasks, BrowserConfig, BrowserList, BrowserState, BrowserTree, CopyCx,
-    CopyTakeover, Entry, ItemPictures, OutsideDrops, OutsideOver, OverlayFrame, PictureCx,
-    PictureState, PlaceRules, ViewMode, SPRING_DELAY,
+    CopyTakeover, DropKey, DropTargetKind, Entry, ItemPictures, OutsideDrops, OutsideOver,
+    OverlayFrame, PictureCx, PictureState, PlaceRules, ViewMode, SPRING_DELAY,
 };
 use agg_gui_files::disk::{AllFiles, DiskFolder};
 use agg_gui_files::Item;
@@ -706,4 +706,36 @@ fn a_drop_into_the_source_folder_itself_moves_nothing() {
     assert!(dir.join("gear.stl").exists() && !dir.join("gear (2).stl").exists());
     assert!(!state.borrow().history().can_undo(), "nothing was recorded");
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_tree_row_past_the_trees_edge_takes_no_drop() {
+    let (_app, state, _desk, shelf) = two_places(BrowserConfig::default(), false);
+    let gear: Vec<Rc<dyn Item>> = state.borrow().entries().iter().map(|e| e.item()).collect();
+    {
+        let mut s = state.borrow_mut();
+        let drop = s.drop_manager_mut();
+        drop.clear_targets(DropTargetKind::Tree);
+        drop.clear_targets(DropTargetKind::Content);
+        // The tree shows from y 200 up; Shelf's row was scrolled below its bottom edge.
+        drop.set_tree_rect(Rect::new(0.0, 200.0, TREE, 200.0));
+        drop.register_target(
+            Rect::new(0.0, 150.0, TREE, 24.0),
+            shelf.link(),
+            DropKey {
+                kind: DropTargetKind::Tree,
+                index: 1,
+            },
+        );
+        drop.begin(gear, 1);
+    }
+    agg_gui_file_browser::drag_over(&state, Point::new(50.0, 160.0));
+    assert_eq!(state.borrow().drop_manager().highlighted(), None);
+    // Inside the tree, the same row takes it.
+    state
+        .borrow_mut()
+        .drop_manager_mut()
+        .set_tree_rect(Rect::new(0.0, 100.0, TREE, 300.0));
+    agg_gui_file_browser::drag_over(&state, Point::new(50.0, 160.0));
+    assert!(state.borrow().drop_manager().highlighted().is_some());
 }
