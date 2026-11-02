@@ -6,7 +6,9 @@
 //! (`BrowserState::toggle_search_section`); the toggle is not a target of its own. Both views
 //! place the headers between their rows (`list/row.rs`, `list/icon_view.rs`), each across the
 //! list's whole width. The headers' names come from the look (`BrowserNames::search_status`,
-//! `search_section`), the toggle's being the header's and " Toggle".
+//! `search_section`), the toggle's being the header's and " Toggle"; the look may build the
+//! toggle and the spinner as its app's own widgets (`BrowserLook::section_toggle`,
+//! `working_indicator`).
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -60,7 +62,11 @@ impl SectionHeaderRow {
                     .with_color(color),
             )
         };
-        let spinner = || -> Box<dyn Widget> { Box::new(Spinner::small().with_color(style.accent)) };
+        let spinner = || -> Box<dyn Widget> {
+            cx.look
+                .working_indicator()
+                .unwrap_or_else(|| Box::new(Spinner::small().with_color(style.accent)))
+        };
         let (id, section, children) = match slot {
             ListSlot::Entry(_) => return None,
             ListSlot::Searching { query } => (
@@ -76,17 +82,23 @@ impl SectionHeaderRow {
             ),
             ListSlot::Section(header) => {
                 let id = names.search_section_for(&header.name);
-                let toggle = SectionToggle {
-                    id: format!("{id} Toggle"),
-                    text: header.name.clone(),
-                    open: !header.collapsed,
-                    font: Arc::clone(&cx.font),
-                    font_size: style.font_size,
-                    color: style.text_color,
-                    bounds: Rect::default(),
-                    children: Vec::new(),
-                };
-                let mut children: Vec<Box<dyn Widget>> = vec![Box::new(toggle)];
+                let (toggle_id, open) = (format!("{id} Toggle"), !header.collapsed);
+                let toggle = cx
+                    .look
+                    .section_toggle(&toggle_id, &header.name, open, &cx.font)
+                    .unwrap_or_else(|| {
+                        Box::new(SectionToggle {
+                            id: toggle_id,
+                            text: header.name.clone(),
+                            open,
+                            font: Arc::clone(&cx.font),
+                            font_size: style.font_size,
+                            color: style.text_color,
+                            bounds: Rect::default(),
+                            children: Vec::new(),
+                        })
+                    });
+                let mut children: Vec<Box<dyn Widget>> = vec![toggle];
                 match &header.status {
                     Some(status) => children.push(label(status, style.light_text_color)),
                     // No status yet means still searching.

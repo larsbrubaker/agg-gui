@@ -6,7 +6,9 @@
 //! style is asked for (so a theme switch shows on the next build) and draws every icon as its
 //! Font Awesome glyph. An app with its own look implements [`BrowserLook`]: its colours and sizes
 //! through [`BrowserStyle`], its artwork through [`BrowserLook::icon`], which the widgets draw
-//! centred on whole device pixels at the size they ask for.
+//! centred on whole device pixels at the size they ask for. A look may also build two of the
+//! search's pieces as its app's own widgets ([`BrowserLook::section_toggle`],
+//! [`BrowserLook::working_indicator`]), so a search shows as the app's other sections do.
 //!
 //! The widget names default to the long-standing names automation scripts, tests and help
 //! articles find the browser's buttons by ("Library Up Button", "Bread Crumb Button {name}"),
@@ -15,8 +17,9 @@
 use std::sync::Arc;
 
 use agg_gui::icon_image::IconImage;
+use agg_gui::text::Font;
 use agg_gui::theme::{current_visuals, Visuals};
-use agg_gui::{Color, Size};
+use agg_gui::{Color, Size, Widget};
 use agg_gui_files::FolderLink;
 
 /// The font size the browser's text takes when agg-gui has no default set.
@@ -365,6 +368,28 @@ pub trait BrowserLook {
     /// else the folder icon's name.
     fn folder_tile_name(&self, link: &dyn FolderLink) -> Option<String> {
         let _ = link;
+        None
+    }
+
+    /// The expand toggle of the search section header for the place `name` (open while
+    /// `open`), carrying the widget id `id`, its text in `font`; `None` (the default) draws the
+    /// browser's own, a caret and the name. Clicks anywhere on the header are the header's, so
+    /// an app's toggle needs no handling of its own.
+    fn section_toggle(
+        &self,
+        id: &str,
+        name: &str,
+        open: bool,
+        font: &Arc<Font>,
+    ) -> Option<Box<dyn Widget>> {
+        let _ = (id, name, open, font);
+        None
+    }
+
+    /// The indicator a search shows while it works (after its "Searching for" line, and after a
+    /// section still searching); `None` (the default) draws agg-gui's small spinner in the
+    /// style's accent.
+    fn working_indicator(&self) -> Option<Box<dyn Widget>> {
         None
     }
 

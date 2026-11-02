@@ -18,6 +18,9 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   each right-click menu's rows to the app's own menu host, at the press in window coordinates
   with its `MenuSource` (`List(scope)` or `Tree`); `OwnMenus`, the default, declines and the
   browser opens its own menu.
+- `BrowserLook::section_toggle` and `working_indicator`: a look may build a search section
+  header's expand toggle and the search's working indicator as its app's own widgets; without
+  them the browser draws its caret toggle and agg-gui's small spinner.
 - `BrowserCommand::as_remove` and `is_remove`: an app's own command marked as the menus' Remove
   is what the Delete and Backspace keys run, in the list for the selection and in the tree for
   the folder drawn selected (the built-in Remove is one); a Remove row that can't run runs

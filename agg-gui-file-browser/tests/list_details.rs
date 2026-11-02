@@ -1,7 +1,8 @@
 //! The list views' finer parts: the default pictures keep a bounded number and make an evicted
 //! one again; the app's overlay on a picture gets its own presses, the row's hover and its
 //! tooltip; rows and tiles report where their names and pictures are; a drag that ends outside
-//! the list gives the keys back; and a search's results list under headers that roll up.
+//! the list gives the keys back; a search's results list under headers that roll up; and a
+//! look's own section toggle and working indicator show in a search's lines.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -528,4 +529,133 @@ fn a_searchs_results_list_under_a_header_that_rolls_its_section_up() {
         press(&mut app, middle);
         release(&mut app, middle);
     }
+}
+
+/// A widget of the app's own a look hands the search's lines: it reports its id and whether its
+/// section is open.
+struct AppPiece {
+    kind: &'static str,
+    id: String,
+    open: bool,
+    bounds: Rect,
+    children: Vec<Box<dyn Widget>>,
+}
+
+impl Widget for AppPiece {
+    fn type_name(&self) -> &'static str {
+        self.kind
+    }
+    fn id(&self) -> Option<&str> {
+        Some(&self.id)
+    }
+    fn bounds(&self) -> Rect {
+        self.bounds
+    }
+    fn set_bounds(&mut self, bounds: Rect) {
+        self.bounds = bounds;
+    }
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.children
+    }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+        &mut self.children
+    }
+    fn layout(&mut self, _available: Size) -> Size {
+        Size::new(40.0, 12.0)
+    }
+    fn paint(&mut self, _ctx: &mut dyn DrawCtx) {}
+    fn on_event(&mut self, _event: &Event) -> EventResult {
+        EventResult::Ignored
+    }
+    fn properties(&self) -> Vec<(&'static str, String)> {
+        vec![("open", self.open.to_string())]
+    }
+}
+
+/// agg-gui's look with the app's own section toggle and working indicator.
+struct AppPiecesLook(agg_gui_file_browser::DefaultLook);
+
+impl agg_gui_file_browser::BrowserLook for AppPiecesLook {
+    fn style(&self) -> agg_gui_file_browser::BrowserStyle {
+        self.0.style()
+    }
+    fn section_toggle(
+        &self,
+        id: &str,
+        _name: &str,
+        open: bool,
+        _font: &Arc<Font>,
+    ) -> Option<Box<dyn Widget>> {
+        Some(Box::new(AppPiece {
+            kind: "AppToggle",
+            id: id.to_string(),
+            open,
+            bounds: Rect::default(),
+            children: Vec::new(),
+        }))
+    }
+    fn working_indicator(&self) -> Option<Box<dyn Widget>> {
+        Some(Box::new(AppPiece {
+            kind: "AppIndicator",
+            id: "App Indicator".to_string(),
+            open: false,
+            bounds: Rect::default(),
+            children: Vec::new(),
+        }))
+    }
+    fn names(&self) -> &agg_gui_file_browser::BrowserNames {
+        self.0.names()
+    }
+}
+
+#[test]
+fn a_looks_own_section_toggle_and_working_indicator_show_in_a_searchs_lines() {
+    let config = || {
+        BrowserConfig::builder()
+            .look(Rc::new(AppPiecesLook(Default::default())))
+            .build()
+    };
+    // While the search runs: its line ends with the look's indicator.
+    let root = home();
+    let (mut app, state) = list_app(Box::new(root.clone()), config(), ViewMode::Rows);
+    let spawner = Rc::new(LocalSpawner::new(Rc::new(|m: &str| panic!("fault: {m}"))));
+    let mut running = SearchResultsFolder::new(&root, "gear", spawner);
+    running.start_search();
+    state.borrow_mut().push_search_results(Rc::new(running));
+    app.layout(Size::new(WIDTH, HEIGHT));
+    let (status, _) = widget(&app, "Search Status");
+    let kinds: Vec<&str> = status.children().iter().map(|c| c.type_name()).collect();
+    assert_eq!(kinds.last(), Some(&"AppIndicator"), "{kinds:?}");
+
+    // Once done: each section's toggle is the look's, open, and a click on the header rolls
+    // the section up, the toggle made again closed.
+    let root = home();
+    let (mut app, state) = list_app(Box::new(root.clone()), config(), ViewMode::Rows);
+    state
+        .borrow_mut()
+        .push_search_results(finished_search(&root, "gear"));
+    app.layout(Size::new(WIDTH, HEIGHT));
+    let section = state
+        .borrow()
+        .list_slots()
+        .into_iter()
+        .find_map(|slot| match slot {
+            agg_gui_file_browser::ListSlot::Section(h) => Some(h.name),
+            _ => None,
+        })
+        .expect("a section");
+    let header = format!("Search Section {section}");
+    let toggle = format!("{header} Toggle");
+    assert_eq!(widget(&app, &toggle).0.type_name(), "AppToggle");
+    assert_eq!(property(&app, &toggle, "open"), "true");
+    let (_, rect) = widget(&app, &header);
+    let middle = Point::new(rect.x + rect.width / 2.0, rect.y + rect.height / 2.0);
+    press(&mut app, middle);
+    release(&mut app, middle);
+    assert_eq!(property(&app, &toggle, "open"), "false", "rolled up");
+    // Open again (the rolled-up sections are the session's).
+    let (_, rect) = widget(&app, &header);
+    let middle = Point::new(rect.x + rect.width / 2.0, rect.y + rect.height / 2.0);
+    press(&mut app, middle);
+    release(&mut app, middle);
 }
