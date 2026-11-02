@@ -142,7 +142,9 @@ impl MoveController {
                 };
                 match Rc::try_unwrap(taken) {
                     Ok(folder) => folder.into_inner(),
-                    Err(_) => {
+                    Err(held) => {
+                        // Still held after all: back on the path, so the dialog stays in it.
+                        state.borrow_mut().put_back_active_container(held);
                         accepted.set(false);
                         return busy(state);
                     }

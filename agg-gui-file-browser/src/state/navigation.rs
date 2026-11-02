@@ -205,6 +205,19 @@ impl BrowserState {
         taken
     }
 
+    /// Shows `folder`, an open folder [`take_active_container`](Self::take_active_container)
+    /// took, below the one showing again, as it was: a hand-over that couldn't complete puts the
+    /// folder back rather than dropping it, so the browser stays in it.
+    pub fn put_back_active_container(&mut self, folder: OpenFolder) {
+        self.watch.leave(&self.path);
+        self.path.push(folder);
+        self.watch.enter(&self.path);
+        self.selected.clear();
+        self.restore_user_view();
+        self.changed();
+        self.navigated();
+    }
+
     /// The folders from the root down to the showing one, each borrowed while it is held.
     pub fn path_containers(&self) -> impl Iterator<Item = Ref<'_, dyn Folder>> {
         self.path

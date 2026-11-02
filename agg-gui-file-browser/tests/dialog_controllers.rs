@@ -15,7 +15,7 @@ use agg_gui::{
 use agg_gui_file_browser::{
     dialog_options, run_ready_local_tasks, BrowserConfig, BrowserDialogs, BrowserPage,
     BrowserState, MoveAnswers, MoveController, MovePick, MoveRequest, NameRequest, ReplaceQuestion,
-    SaveAnswers, SaveController, SavePick, SaveRequest,
+    SaveAnswers, SaveController, SaveMode, SavePick, SaveRequest,
 };
 use agg_gui_files::{DynamicFolder, DynamicFolderLink, Folder, MemoryFolder};
 
@@ -496,4 +496,84 @@ fn move_accept_from_an_apps_page_answers_the_picked_folder() {
     let pick = picked.borrow_mut().take().expect("answered");
     assert_eq!((pick.target.name(), pick.copy), ("Drafts", false));
     assert!(c.is_accepted());
+}
+
+#[test]
+fn a_name_differing_only_in_case_asks_to_replace_and_the_hook_hears_it_exists() {
+    let sample = Sample::new();
+    let (answers, picked) = save_answers();
+    let heard = Rc::new(RefCell::new(None));
+    let hook_heard = Rc::clone(&heard);
+    let request = SaveRequest::new("Report")
+        .with_extension(".txt")
+        .with_replace_question(Rc::new(move |target| {
+            *hook_heard.borrow_mut() = Some(target.exists);
+            None
+        }));
+    let c = SaveController::new(&sample.browser(), request, answers);
+    let mut app = app_over(save_page(&c));
+    click(&mut app, "Designs Row Item Collection", 2);
+    click(&mut app, ACCEPT, 1);
+    assert_eq!(*heard.borrow(), Some(true), "Report.txt is report.txt");
+    assert!(
+        matches!(c.mode(), SaveMode::Asking { .. }),
+        "the replace question is asked"
+    );
+    assert!(picked.borrow().is_none());
+    c.confirm();
+    assert_eq!(
+        pick_of(&picked),
+        ("Designs".into(), "Report.txt".into(), true)
+    );
+}
+
+#[test]
+fn the_replace_question_asked_in_the_page_ends_when_the_folder_changes() {
+    let sample = Sample::new();
+    sample.drafts.add_file("x.txt", b"x".to_vec());
+    let (answers, picked) = save_answers();
+    let c = SaveController::new(
+        &sample.browser(),
+        SaveRequest::new("report").with_extension(".txt"),
+        answers,
+    );
+    let mut app = app_over(save_page(&c));
+    click(&mut app, "Designs Row Item Collection", 2);
+    click(&mut app, ACCEPT, 1);
+    assert!(matches!(c.mode(), SaveMode::Asking { .. }));
+    // Navigating away before the next layout: confirming saves nothing in the other folder.
+    c.state().borrow_mut().go_to(0);
+    let drafts = c.state().borrow().root_child_containers()[1].clone();
+    c.state().borrow_mut().open(drafts.as_ref());
+    c.confirm();
+    assert!(picked.borrow().is_none(), "Drafts was never asked about");
+    // And the page's next layout takes the question down.
+    layout(&mut app);
+    assert_eq!(c.mode(), SaveMode::Normal);
+    assert!(picked.borrow().is_none());
+}
+
+#[test]
+fn the_question_hosts_answer_saves_nothing_once_the_folder_changed() {
+    let sample = Sample::new();
+    let (answers, picked) = save_answers();
+    let asked: Asked = Rc::default();
+    let host = Rc::clone(&asked);
+    let c = SaveController::new(
+        &sample.browser(),
+        SaveRequest::new("report").with_extension(".txt"),
+        answers,
+    )
+    .with_question_host(Rc::new(move |question, answer| {
+        host.borrow_mut().push((question, answer));
+    }));
+    let mut app = app_over(save_page(&c));
+    click(&mut app, "Designs Row Item Collection", 2);
+    click(&mut app, ACCEPT, 1);
+    let (_, answer) = asked.borrow_mut().pop().expect("the host was asked");
+    c.state().borrow_mut().go_to(0);
+    let drafts = c.state().borrow().root_child_containers()[1].clone();
+    c.state().borrow_mut().open(drafts.as_ref());
+    answer(true);
+    assert!(picked.borrow().is_none(), "Drafts was never asked about");
 }

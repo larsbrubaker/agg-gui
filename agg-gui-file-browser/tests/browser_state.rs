@@ -363,3 +363,18 @@ fn once_a_view_lists_the_rows_an_index_means_what_it_last_built() {
     let row = state.borrow().listed_entry(4).map(|e| e.name().to_string());
     assert_eq!(row.as_deref(), Some("c.txt"));
 }
+
+#[test]
+fn a_taken_folder_put_back_shows_again_with_its_listing() {
+    let state = BrowserState::new(Box::new(home()), BrowserConfig::default());
+    let projects = state.borrow().root_child_containers()[0].clone();
+    state.borrow_mut().open(projects.as_ref());
+    let taken = state.borrow_mut().take_active_container().expect("below the root");
+    assert_eq!(state.borrow().path_names(), ["Home"]);
+    let held = Rc::clone(&taken);
+    state.borrow_mut().put_back_active_container(taken);
+    assert_eq!(state.borrow().path_names(), ["Home", "Projects"]);
+    assert_eq!(names(&state.borrow()), ["Brackets"]);
+    drop(held);
+    assert!(state.borrow().can_hand_over_active_container());
+}

@@ -13,10 +13,14 @@
 //! [`SaveController::accept`] names the typed name through the request's
 //! [`FileNamer`](crate::FileNamer) (its refusal becomes the note), then asks the request's own
 //! question hook, else the dialog's own question when a file of that name is already there
-//! ("Confirm Save As"), else saves. A question goes to the app's [`QuestionHost`] when it has one
+//! ("Confirm Save As"), else saves. A file is already there when one has the name in any case
+//! (the cautious answer, as macOS and Windows volumes ignore case), so `Report.mcx` asks before
+//! replacing `report.mcx`; the hook's `SaveTarget::exists` says the same. A question goes to the app's [`QuestionHost`] when it has one
 //! (its modal message box: confirming saves, cancelling stays); without one the controller asks
 //! in the page ([`SaveMode::Asking`]; the page's buttons call [`SaveController::confirm`] or
-//! [`SaveController::back`]). Saving hands the showing folder over and answers with it and the
+//! [`SaveController::back`]). A question is about the folder showing as it was asked: once the
+//! showing folder changes, the page's next `update` takes an in-page question down, and an answer
+//! that arrives later (the page's confirm, the host's answer) saves nothing. Saving hands the showing folder over and answers with it and the
 //! file name ([`SavePick`]); should something still hold the folder, nothing is saved and the
 //! note says so.
 //!
@@ -90,6 +94,8 @@ struct Core {
     questions: RefCell<Option<QuestionHost>>,
     names: RefCell<Option<Rc<dyn BrowserDialogs>>>,
     focus_asked: Cell<bool>,
+    /// The browser's navigation count when the in-page question was asked.
+    asked_at: Cell<u64>,
 }
 
 /// The Save dialog's logic (see the module header). Clones share one dialog.
@@ -119,6 +125,7 @@ impl SaveController {
                 questions: RefCell::new(None),
                 names: RefCell::new(None),
                 focus_asked: Cell::new(false),
+                asked_at: Cell::new(0),
                 request,
                 answers,
             }),
@@ -265,6 +272,11 @@ impl SaveController {
     /// header).
     pub fn update(&self) {
         self.core.place.update(&self.core.state);
+        let asking = matches!(*self.core.mode.borrow(), SaveMode::Asking { .. });
+        if asking && self.navigation() != self.core.asked_at.get() {
+            *self.core.mode.borrow_mut() = SaveMode::Normal;
+            self.changed();
+        }
         if let Some(id) = self.core.request.focus_id {
             if !self.core.focus_asked.replace(true) {
                 agg_gui::focus::request_focus(id);
@@ -312,8 +324,9 @@ impl SaveController {
             exists
                 .then(|| ReplaceQuestion::replace_existing(&(core.request.shown_name)(&file_name)))
         });
+        let asked_at = self.navigation();
         let Some(question) = question else {
-            return self.finish(file_name);
+            return self.finish(file_name, asked_at);
         };
         let host = core.questions.borrow().clone();
         match host {
@@ -323,12 +336,13 @@ impl SaveController {
                     question,
                     Box::new(move |save| {
                         if let (true, Some(core)) = (save, weak.upgrade()) {
-                            SaveController { core }.finish(file_name);
+                            SaveController { core }.finish(file_name, asked_at);
                         }
                     }),
                 );
             }
             None => {
+                core.asked_at.set(asked_at);
                 *core.mode.borrow_mut() = SaveMode::Asking {
                     question,
                     file_name,
@@ -345,8 +359,13 @@ impl SaveController {
             _ => None,
         };
         if let Some(file_name) = asked {
-            self.finish(file_name);
+            self.finish(file_name, self.core.asked_at.get());
         }
+    }
+
+    /// How many times the browser's showing folder has changed.
+    fn navigation(&self) -> u64 {
+        self.core.state.borrow().navigation()
     }
 
     /// Back to taking a name from a question or the new folder's name asked in the page.
@@ -360,13 +379,15 @@ impl SaveController {
         (self.core.answers.cancel)();
     }
 
-    /// Whether the showing folder lists a file named `file_name`.
+    /// Whether the showing folder lists a file named `file_name` in any case (see the module
+    /// header).
     fn exists(&self, file_name: &str) -> bool {
+        let wanted = file_name.to_lowercase();
         self.core
             .state
             .borrow()
             .active_container()
-            .is_some_and(|c| c.items().iter().any(|i| i.name() == file_name))
+            .is_some_and(|c| c.items().iter().any(|i| i.name().to_lowercase() == wanted))
     }
 
     /// The request's own question before saving as `file_name`, if it has one: its hook handed
@@ -382,11 +403,17 @@ impl SaveController {
         })
     }
 
-    /// Hands the showing folder over with `file_name` (the user has agreed to any question).
-    fn finish(&self, file_name: String) {
+    /// Hands the showing folder over with `file_name` (the user has agreed to any question
+    /// asked while the browser's navigation count was `asked_at`). A folder changed since saves
+    /// nothing: the question was never about it.
+    fn finish(&self, file_name: String, asked_at: u64) {
         let core = &self.core;
         if core.place.accepted.get() || !self.can_save() {
             return;
+        }
+        if self.navigation() != asked_at {
+            *core.mode.borrow_mut() = SaveMode::Normal;
+            return self.changed();
         }
         // A folder something else still holds stays showing, so the user can try again there.
         if !core.state.borrow().can_hand_over_active_container() {
@@ -401,7 +428,13 @@ impl SaveController {
                 file_name,
                 replaces: exists,
             }),
-            _ => {
+            Some(Err(held)) => {
+                // Still held after all: back on the path, so the dialog stays in it.
+                core.state.borrow_mut().put_back_active_container(held);
+                core.place.accepted.set(false);
+                self.busy();
+            }
+            None => {
                 core.place.accepted.set(false);
                 self.busy();
             }
