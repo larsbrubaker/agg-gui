@@ -100,6 +100,8 @@ pub struct BrowserList {
     /// The scroll position, kept across builds; the resets it was last put back to the top at.
     offset: Rc<Cell<f64>>,
     resets_seen: u64,
+    /// The host keeps the offset and resets it (`with_offset_cell`).
+    host_offset: bool,
     menu: ListMenu,
     id: String,
     bounds: Rect,
@@ -124,6 +126,7 @@ impl BrowserList {
             arrivals: Rc::new(Cell::new(0)),
             offset: Rc::new(Cell::new(0.0)),
             resets_seen: 0,
+            host_offset: false,
             menu: ListMenu::default(),
             id,
             bounds: Rect::default(),
@@ -143,6 +146,15 @@ impl BrowserList {
     /// remembers: a phone's narrow panel, whose room fits one view only.
     pub fn with_view(mut self, mode: ViewMode) -> Self {
         self.fixed_view = Some(mode);
+        self
+    }
+
+    /// The list scrolled by `offset`, which the host keeps across lists it builds again (a dialog
+    /// page that rebuilds its list on each change) and puts back to the top itself when the
+    /// list shows new content: this list never resets it.
+    pub fn with_offset_cell(mut self, offset: Rc<Cell<f64>>) -> Self {
+        self.offset = offset;
+        self.host_offset = true;
         self
     }
 
@@ -304,7 +316,7 @@ impl Widget for BrowserList {
             self.rebuild();
         }
         let resets = self.state.borrow().list_resets();
-        if resets != self.resets_seen {
+        if !self.host_offset && resets != self.resets_seen {
             self.resets_seen = resets;
             self.offset.set(0.0);
         }

@@ -18,6 +18,9 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   answers `MoveTakeover::Taken` with how it went, which the browser reports as it reports its own
   moves; `MoveTakeover::Declined` hands the move back to the folders' recorded move. The default
   hands every move back, so nothing changes for an app that doesn't override it.
+- `BrowserList::with_offset_cell`: the list scrolled by an offset its host keeps across the lists
+  it builds again (a dialog page rebuilding its list on each change), which the host puts back to
+  the top itself.
 
 ## [0.0.4] - 2026-11-02
 
