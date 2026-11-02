@@ -21,14 +21,15 @@
 //!   spawner (where work nobody awaits runs: the app's executor, or a [`LocalSpawner`] pumped by
 //!   agg-gui's UI-queue drain), its look, and the hooks through which the app adds its own:
 //!   [`ItemPictures`] (pictures and tile overlays), [`BrowserActions`] (the ordered menu, with the
-//!   browser's [`Builtins`] placed in it, and what activating a row does), [`OutsideDrops`]
+//!   browser's [`Builtins`] placed in it, and what activating a row does), [`BrowserMenus`]
+//!   (who shows the right-click menus: the app's own menu host, or the browser's), [`OutsideDrops`]
 //!   (drags onto the app's other views), [`PlaceRules`] (move or copy, and copies the app runs:
 //!   items move within a place and are copied between places, out of folders that keep their
 //!   items, or with the copy modifier held), [`BrowserMemory`] (views per folder, the tree's
 //!   width, last locations, in the app's own store and keys) and [`BrowserDialogs`]; plus a
 //!   report for errors (without one, errors show on the browser's own status line,
 //!   [`BrowserState::status`]) and its [`BrowserOptions`]. Every hook has a default ([`OwnPictures`],
-//!   [`NoActions`], [`DefaultPlaces`], [`NoMemory`], [`NoDialogs`]), so
+//!   [`NoActions`], [`OwnMenus`], [`DefaultPlaces`], [`NoMemory`], [`NoDialogs`]), so
 //!   `BrowserConfig::default()` is a working browser; the defaults never pretend: a browser
 //!   without dialogs leaves the actions needing one unavailable ([`SheetDialogs`] is a ready set
 //!   on agg-gui's `ModalSheet` an app can give instead).
@@ -93,6 +94,7 @@ pub mod list;
 pub mod local_spawner;
 pub mod look;
 pub mod memory;
+pub mod menus;
 pub mod move_dialog;
 pub mod nav;
 pub mod own_pictures;
@@ -158,6 +160,7 @@ pub use look::{glyph_face, BrowserIcon, BrowserLook, BrowserNames, BrowserStyle,
 pub use memory::{
     remember_open_location, BrowserMemory, LocationFuture, NoMemory, ViewMode, ViewState,
 };
+pub use menus::{BrowserMenus, MenuSource, OwnMenus};
 pub use move_dialog::{
     dialog_options, move_verdict, BrowserPage, FolderKey, MoveAnswers, MovePage, MoveVerdict,
     MOVE_ITEM_SUMMARY, MOVE_ITEM_WINDOW,

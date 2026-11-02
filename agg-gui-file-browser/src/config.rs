@@ -1,8 +1,9 @@
 //! [`BrowserConfig`]: everything one browser view takes from its app, in one value: where work
-//! runs, its look, pictures, menus, drops outside it, move-or-copy rules, memory, dialogs, where
+//! runs, its look, pictures, menus and who shows them, drops outside it, move-or-copy rules, memory, dialogs, where
 //! errors go, and its [`BrowserOptions`]. Every hook has a default, so
 //! `BrowserConfig::default()` is a working browser for an app with no hooks: agg-gui's look,
-//! the items' own pictures (`OwnPictures`), the built-in menu, no outside drops, the default
+//! the items' own pictures (`OwnPictures`), the built-in menu shown in the browser's own popup
+//! menus (`OwnMenus`), no outside drops, the default
 //! places rule, nothing remembered, no dialogs (the actions needing one unavailable), errors on
 //! the browser's own status line (`BrowserState::status`), work on a [`LocalSpawner`] (whose
 //! faults, with no report given, go to standard error: it is made before any browser it could
@@ -25,6 +26,7 @@ use crate::history::BrowserHistory;
 use crate::local_spawner::LocalSpawner;
 use crate::look::{BrowserLook, DefaultLook};
 use crate::memory::{BrowserMemory, NoMemory, ViewMode};
+use crate::menus::{BrowserMenus, OwnMenus};
 use crate::own_pictures::OwnPictures;
 use crate::pictures::ItemPictures;
 use crate::places::{DefaultPlaces, PlaceRules};
@@ -121,6 +123,8 @@ pub struct BrowserConfig {
     pub pictures: Rc<dyn ItemPictures>,
     /// The menus and what activating a row does.
     pub actions: Rc<dyn BrowserActions>,
+    /// Who shows the list's and tree's right-click menus.
+    pub menus: Rc<dyn BrowserMenus>,
     /// The app's views that take a drag of the browser's items; `None` keeps drags inside.
     pub drops: Option<Rc<dyn OutsideDrops>>,
     /// Move or copy, and copies the app runs itself.
@@ -159,6 +163,7 @@ pub struct BrowserConfigBuilder {
     look: Option<Rc<dyn BrowserLook>>,
     pictures: Option<Rc<dyn ItemPictures>>,
     actions: Option<Rc<dyn BrowserActions>>,
+    menus: Option<Rc<dyn BrowserMenus>>,
     drops: Option<Rc<dyn OutsideDrops>>,
     places: Option<Rc<dyn PlaceRules>>,
     memory: Option<Rc<dyn BrowserMemory>>,
@@ -186,6 +191,12 @@ impl BrowserConfigBuilder {
 
     pub fn actions(mut self, actions: Rc<dyn BrowserActions>) -> Self {
         self.actions = Some(actions);
+        self
+    }
+
+    /// Who shows the right-click menus (the app's own menu host).
+    pub fn menus(mut self, menus: Rc<dyn BrowserMenus>) -> Self {
+        self.menus = Some(menus);
         self
     }
 
@@ -240,6 +251,7 @@ impl BrowserConfigBuilder {
             look: self.look.unwrap_or_else(|| Rc::new(DefaultLook::default())),
             pictures: self.pictures.unwrap_or_else(|| Rc::new(OwnPictures::new())),
             actions: self.actions.unwrap_or_else(|| Rc::new(NoActions)),
+            menus: self.menus.unwrap_or_else(|| Rc::new(OwnMenus)),
             drops: self.drops,
             places: self.places.unwrap_or_else(|| Rc::new(DefaultPlaces)),
             memory: self.memory.unwrap_or_else(|| Rc::new(NoMemory)),

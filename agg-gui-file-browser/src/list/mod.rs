@@ -21,7 +21,7 @@
 //! The list is also where its menus open (`list_menu.rs`) and its keys and rubber band are
 //! handled (`gestures.rs`): a row asks for the selection's menu (a right press, or its menu
 //! button, `menu_button.rs`) and the press bubbles here, which opens it where it was pressed or
-//! hanging from the button; a right press on empty space, or a click in the list's own top-right
+//! hanging from the button (or hands its rows to the app's menu host there, `menus.rs`); a right press on empty space, or a click in the list's own top-right
 //! corner, opens the list's menu. Rows hold no state of their own beyond a build: hover, the menu
 //! button's press and a press that may become a drag live in the state (`press.rs`), so they
 //! survive the rows being rebuilt under the pointer. `item_event.rs` is a row's pointer handling,
@@ -54,6 +54,7 @@ use agg_gui::{
 
 use crate::look::BrowserLook;
 use crate::memory::ViewMode;
+use crate::menus::MenuSource;
 use crate::state::BrowserState;
 
 use build::ListCx;
@@ -224,21 +225,40 @@ impl BrowserList {
     }
 
     /// Opens `scope`'s menu at `pos` (list-local); the selection's hangs from the menu button
-    /// that asked for it, when one did.
+    /// that asked for it, when one did. The rows are offered to the config's menu host first
+    /// (`menus.rs`); when it doesn't show them, the list opens them in its own menu.
     fn open_menu(&mut self, scope: MenuScope, pos: Point) {
         let anchor = match scope {
             MenuScope::Selection => self.state.borrow_mut().menu_button_mut().take_anchor(),
             MenuScope::Folder | MenuScope::Overflow => None,
         };
+        let world = agg_gui::current_mouse_world();
+        let rows = list_menu::menu_actions(&self.state, scope);
+        if rows.is_empty() {
+            self.menu.close();
+            return;
+        }
+        let (menus, look) = {
+            let s = self.state.borrow();
+            (Rc::clone(&s.config().menus), Rc::clone(&s.config().look))
+        };
+        if let Some(window_at) = anchor.or(world) {
+            if menus.open(rows.clone(), window_at, MenuSource::List(scope)) {
+                crate::trace(|| format!("menu {scope:?} shown by the app's menu host"));
+                self.menu.close();
+                return;
+            }
+        }
         // A window anchor in the list's coordinates: the list's window origin is the pointer
         // less its list-local position.
-        let at = match (anchor, agg_gui::current_mouse_world()) {
+        let at = match (anchor, world) {
             (Some(anchor), Some(world)) => {
                 Point::new(anchor.x - (world.x - pos.x), anchor.y - (world.y - pos.y))
             }
             _ => pos,
         };
-        self.menu.open(&self.state, scope, at);
+        self.menu
+            .open_rows(rows, at, &format!("menu {scope:?}"), look.as_ref());
     }
 }
 

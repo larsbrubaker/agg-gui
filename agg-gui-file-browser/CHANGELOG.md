@@ -14,6 +14,14 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 - `tree_menu_rows`, the rows a tree row's right-click menu shows, each running with the row's
   folder as the temporary selection, as `menu_actions` gives the list's.
+- `BrowserMenus` (`BrowserConfig::menus`, builder `menus`): the list and the folder tree offer
+  each right-click menu's rows to the app's own menu host, at the press in window coordinates
+  with its `MenuSource` (`List(scope)` or `Tree`); `OwnMenus`, the default, declines and the
+  browser opens its own menu.
+- `BrowserCommand::as_remove` and `is_remove`: an app's own command marked as the menus' Remove
+  is what the Delete and Backspace keys run, in the list for the selection and in the tree for
+  the folder drawn selected (the built-in Remove is one); a Remove row that can't run runs
+  nothing.
 
 - `BrowserState`, what a browser is looking at and does, made with `BrowserState::new(root,
   config)` or `with_config(root, config, app_data)`: the open path (`OpenFolder`s, shared, so a

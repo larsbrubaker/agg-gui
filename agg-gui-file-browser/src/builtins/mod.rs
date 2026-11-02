@@ -133,18 +133,21 @@ pub(crate) fn builtin_command(
 ) -> BrowserCommand {
     let enabled = is_enabled(state, action);
     let weak = Rc::downgrade(state);
-    BrowserCommand::new(action.title(), move || {
+    let command = BrowserCommand::new(action.title(), move || {
         if let Some(state) = weak.upgrade() {
             run::run(&state, action);
         }
     })
     .with_icon(action.icon_key())
     .with_scope(action.scope())
-    .enabled(enabled)
+    .enabled(enabled);
+    match action {
+        BuiltinAction::Remove => command.as_remove(),
+        _ => command,
+    }
 }
 
-/// Runs `action` in `state` when it can run now (the Delete key's Remove); answers whether it
-/// did.
+/// Runs `action` in `state` when it can run now; answers whether it did.
 pub fn run_builtin(state: &Rc<RefCell<BrowserState>>, action: BuiltinAction) -> bool {
     if !is_enabled(state, action) {
         return false;

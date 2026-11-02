@@ -147,6 +147,17 @@ pub fn menu_actions(state: &Rc<RefCell<BrowserState>>, scope: MenuScope) -> Vec<
     select_rows(resolve_builtins(state, rows, &builtins), scope)
 }
 
+/// Runs the menus' Remove among `rows` (a command marked `as_remove`, the built-in's or the
+/// app's own) when it can run: the Delete and Backspace keys. Answers whether it ran.
+pub(crate) fn run_remove_row(rows: &[BrowserAction]) -> bool {
+    rows.iter()
+        .find_map(|row| match row {
+            BrowserAction::Command(command) if command.is_remove() => Some(command),
+            _ => None,
+        })
+        .is_some_and(BrowserCommand::run)
+}
+
 /// The list's open menu, if one is open, and the commands its rows run.
 #[derive(Default)]
 pub struct ListMenu {

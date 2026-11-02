@@ -1,6 +1,6 @@
 //! The folder tree's right-click menu. A right press on a tree row shows that folder in the list
 //! and asks for this menu (`row.rs`); the press bubbles to the tree (`mod.rs`), which opens it
-//! where the press was. It is the selection's menu for the clicked folder (`list_menu.rs`'s
+//! where the press was (or hands it to the app's menu host, `menus.rs`). It is the selection's menu for the clicked folder (`list_menu.rs`'s
 //! rules: the rows that can run): the app's ordered list from `BrowserActions::menu`, with the
 //! built-ins that act on a selection placed in it, asked for and resolved with the folder as the
 //! browser's temporary selection, listed in the folder above it. So "Remove" removes the clicked
@@ -20,6 +20,7 @@ use agg_gui_files::FolderLink;
 
 use crate::actions::{BrowserAction, BrowserCommand};
 use crate::list::list_menu::{builtins_for, resolve_builtins, select_rows, ListMenu, MenuScope};
+use crate::menus::MenuSource;
 use crate::state::BrowserState;
 
 use super::model::TreeModel;
@@ -102,7 +103,15 @@ pub fn tree_menu_rows(
         return Vec::new();
     };
     // The root is at depth 0, so the folder above the row's folder is at `path.len() - 1`.
-    let selection: TreeSelection = (link, path.len() - 1);
+    folder_menu_rows(state, (link, path.len() - 1))
+}
+
+/// The selection's menu for `selection` (a folder and the depth of the folder listing it), asked
+/// and resolved with it as the temporary selection, each row run with it set again.
+fn folder_menu_rows(
+    state: &Rc<RefCell<BrowserState>>,
+    selection: TreeSelection,
+) -> Vec<BrowserAction> {
     let asked = with_temporary_selection(state, &selection, || {
         let (actions, snapshot) = {
             let s = state.borrow();
@@ -117,7 +126,8 @@ pub fn tree_menu_rows(
 }
 
 /// Opens the menu for tree row `index` at `at` (the tree's own coordinates); answers whether it
-/// opened (a menu with no rows does not).
+/// opened (a menu with no rows does not). The rows are offered to the config's menu host first
+/// (`menus.rs`), at the pointer; when it doesn't show them, the tree opens its own menu.
 pub(crate) fn open_tree_menu(
     menu: &mut ListMenu,
     state: &Rc<RefCell<BrowserState>>,
@@ -126,13 +136,27 @@ pub(crate) fn open_tree_menu(
     at: Point,
 ) -> bool {
     let rows = tree_menu_rows(state, model, index);
-    let look = Rc::clone(&state.borrow().config().look);
+    if rows.is_empty() {
+        menu.close();
+        return false;
+    }
+    let (menus, look) = {
+        let s = state.borrow();
+        (Rc::clone(&s.config().menus), Rc::clone(&s.config().look))
+    };
+    if let Some(window_at) = agg_gui::current_mouse_world() {
+        if menus.open(rows.clone(), window_at, MenuSource::Tree) {
+            crate::trace(|| "tree menu shown by the app's menu host".to_string());
+            menu.close();
+            return true;
+        }
+    }
     menu.open_rows(rows, at, "tree menu", look.as_ref())
 }
 
-/// Delete or Backspace in the tree: the menus' Remove for the folder the tree shows selected,
-/// with its question, as its menu's Remove runs it (nothing when it can't run, or at a root
-/// folder, which nothing lists that could remove it).
+/// Delete or Backspace in the tree: the Remove row of the folder's menu (the built-in's with its
+/// question, or the app's own marked `as_remove`) for the folder the tree shows selected; nothing
+/// when it can't run, or at a root folder, which nothing lists that could remove it.
 pub(crate) fn remove_selected_folder(
     state: &Rc<RefCell<BrowserState>>,
     model: &Rc<RefCell<TreeModel>>,
@@ -148,8 +172,6 @@ pub(crate) fn remove_selected_folder(
     let Some((link, depth)) = selected.filter(|(_, depth)| *depth >= 2) else {
         return;
     };
-    let selection: TreeSelection = (link, depth - 2);
-    with_temporary_selection(state, &selection, || {
-        crate::builtins::run_builtin(state, crate::actions::BuiltinAction::Remove)
-    });
+    let rows = folder_menu_rows(state, (link, depth - 2));
+    crate::list::list_menu::run_remove_row(&rows);
 }

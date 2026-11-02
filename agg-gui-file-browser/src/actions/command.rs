@@ -4,7 +4,9 @@
 //! menus it belongs to ([`ActionScope`]), whether it is left out rather than greyed while it
 //! can't run, and the rows of a submenu. [`BrowserCommand::builtin`] places one of the browser's
 //! own actions with the app's dressing (a tooltip, another icon key or shortcut): the menu runs
-//! the built-in as it always does and shows the row with what the app set. `actions.rs` places commands in the ordered list; the
+//! the built-in as it always does and shows the row with what the app set. A row marked
+//! [`BrowserCommand::as_remove`] (the built-in Remove is one) is the menus' Remove, which the
+//! Delete and Backspace keys run in the list and the tree. `actions.rs` places commands in the ordered list; the
 //! list's menu builder (`list/list_menu.rs`) turns them into agg-gui `MenuItem`s.
 
 use std::fmt;
@@ -37,6 +39,8 @@ pub struct BrowserCommand {
     submenu: Vec<BrowserAction>,
     /// The built-in this row stands for, run by the browser ([`Self::builtin`]).
     builtin: Option<BuiltinAction>,
+    /// Whether this row is the menus' Remove ([`Self::as_remove`]).
+    removes: bool,
 }
 
 impl BrowserCommand {
@@ -53,6 +57,7 @@ impl BrowserCommand {
             only_when_enabled: false,
             submenu: Vec::new(),
             builtin: None,
+            removes: false,
         }
     }
 
@@ -70,6 +75,19 @@ impl BrowserCommand {
     /// The built-in this row stands for, if it was made with [`Self::builtin`].
     pub fn builtin_action(&self) -> Option<BuiltinAction> {
         self.builtin
+    }
+
+    /// This row is the menus' Remove: the Delete and Backspace keys run it, in the list for the
+    /// selection and in the folder tree for the folder drawn selected, when it can run (an app
+    /// whose own command removes, in place of the built-in, marks it so the keys run it).
+    pub fn as_remove(mut self) -> Self {
+        self.removes = true;
+        self
+    }
+
+    /// Whether this row is the menus' Remove: marked [`Self::as_remove`], or the built-in.
+    pub fn is_remove(&self) -> bool {
+        self.removes || self.builtin == Some(BuiltinAction::Remove)
     }
 
     /// The browser's own row `self` with what the app's row `app` set on top: its tooltip, icon
@@ -208,6 +226,7 @@ impl fmt::Debug for BrowserCommand {
             .field("only_when_enabled", &self.only_when_enabled)
             .field("submenu", &self.submenu)
             .field("builtin", &self.builtin)
+            .field("removes", &self.removes)
             .finish()
     }
 }

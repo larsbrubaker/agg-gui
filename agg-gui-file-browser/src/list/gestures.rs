@@ -3,8 +3,10 @@
 //! rows and tiles the band touches, and the band is drawn over them in the accent, its corners
 //! rounded like theirs; and the keys the list takes while it has the keyboard (a press anywhere
 //! in the list asks for it): the history's undo and redo keys (`history/run.rs`), Control+A
-//! (Command+A on a Mac) selects every row, Escape empties the selection, Delete and Backspace run the menus' Remove (with its question; nothing when it can't run, `builtins/`), and the arrow keys move it (Shift extends it from the anchor), Up and Down to the
-//! nearest row or tile in the line above or below. Row rectangles are read from the list's own
+//! (Command+A on a Mac) selects every row, Escape empties the selection, Delete and Backspace run
+//! the selection menu's Remove (the built-in's with its question, or the app's own row marked
+//! `as_remove`; nothing when it can't run), and the arrow keys move it (Shift extends it from the
+//! anchor), Up and Down to the nearest row or tile in the line above or below. Row rectangles are read from the list's own
 //! widgets in the scrolled content's coordinates, which the band is kept in, so it stays on its
 //! rows as the list scrolls. A folder's message (`list/message.rs`) stands alone in the list's
 //! place with nothing to select: a press there starts no band.
@@ -176,8 +178,12 @@ pub fn list_key_event(
         }
         Key::Escape if state.borrow_mut().clear_selection() => EventResult::Consumed,
         Key::Delete | Key::Backspace if !command => {
-            // The menus' Remove, with its question; nothing when it can't run.
-            crate::builtins::run_builtin(state, crate::actions::BuiltinAction::Remove);
+            // The selection menu's Remove, with its question; nothing when it can't run.
+            let rows = crate::list::list_menu::menu_actions(
+                state,
+                crate::list::list_menu::MenuScope::Selection,
+            );
+            crate::list::list_menu::run_remove_row(&rows);
             EventResult::Consumed
         }
         Key::ArrowLeft | Key::ArrowRight | Key::ArrowUp | Key::ArrowDown if !command => {
