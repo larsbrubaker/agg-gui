@@ -170,7 +170,9 @@ pub use nav::overflow::OverflowButton;
 pub use nav::provider_message::{ProviderMessageBar, PROVIDER_MESSAGE_SIZE};
 pub use nav::splitter::{BrowserSplitter, DEFAULT_TREE_WIDTH, MIN_TREE_WIDTH, SPLITTER_WIDTH};
 pub use own_pictures::{OwnPictures, KEPT_PICTURES};
-pub use pictures::{FolderPicture, ItemPictures, NoPictures, PictureCx, PictureKind, PictureState};
+pub use pictures::{
+    FolderPicture, ItemPictures, NoPictures, OverlayFrame, PictureCx, PictureKind, PictureState,
+};
 pub use places::{
     copy_modifier_held, default_crosses_places, default_drop_copies, places_differ, CopyCx,
     CopyTakeover, DefaultPlaces, PlaceRules,

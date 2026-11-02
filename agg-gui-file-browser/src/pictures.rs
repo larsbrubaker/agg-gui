@@ -123,12 +123,21 @@ pub trait ItemPictures {
     /// What `entry` shows in a square `side` logical pixels wide.
     fn picture(&self, cx: &PictureCx<'_>, entry: &Entry, side: i32) -> PictureState;
 
-    /// A widget laid over `entry`'s tile (an app's favourite marker), or `None`. The default lays
-    /// nothing.
-    fn tile_overlay(&self, entry: &Entry) -> Option<Box<dyn Widget>> {
-        let _ = entry;
+    /// A widget laid over `entry`'s picture square in a row or tile framed as `frame` says (an
+    /// app's favourite marker), or `None`. The default lays nothing.
+    fn tile_overlay(&self, entry: &Entry, frame: OverlayFrame) -> Option<Box<dyn Widget>> {
+        let _ = (entry, frame);
         None
     }
+}
+
+/// Where an overlay's picture square sits in the row or tile that lays it: the overlay's bounds
+/// are the square, and `inset` is how far inside the row's or tile's own edge the square's left
+/// and top edges are (a tile's border), so an overlay can place itself from that edge.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct OverlayFrame {
+    /// The distance from the row's or tile's left and top edges to the picture square's.
+    pub inset: f64,
 }
 
 /// The pictures of an app with none: every entry draws the look's icon.

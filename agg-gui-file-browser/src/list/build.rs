@@ -11,9 +11,8 @@ use agg_gui::text::Font;
 use agg_gui::{Size, Widget};
 use agg_gui_files::{Item, Spawner};
 
-use crate::entry::Entry;
 use crate::look::{BrowserIcon, BrowserLook, BrowserStyle};
-use crate::pictures::{ItemPictures, PictureCx};
+use crate::pictures::{ItemPictures, OverlayFrame, PictureCx};
 use crate::state::{BrowserEntry, BrowserState};
 
 use super::menu_button::MENU_GLYPH_SIZE;
@@ -99,9 +98,9 @@ impl ListCx {
         }
     }
 
-    /// The parts of listed row `index` with its picture `side` units square; `None` past the
-    /// listing's end.
-    pub fn parts(&self, index: usize, side: i32) -> Option<RowParts> {
+    /// The parts of listed row `index` with its picture `side` units square, an overlay framed
+    /// as `frame`; `None` past the listing's end.
+    pub fn parts(&self, index: usize, side: i32, frame: OverlayFrame) -> Option<RowParts> {
         let (entry, selected, hovered) = {
             let s = self.state.borrow();
             let entry = s.listed_entry(index)?;
@@ -129,7 +128,7 @@ impl ListCx {
             &hook_entry,
             side,
         );
-        let overlay = self.overlay(&hook_entry);
+        let overlay = self.pictures.tile_overlay(&hook_entry, frame);
         Some(RowParts {
             entry,
             id,
@@ -138,9 +137,5 @@ impl ListCx {
             art,
             overlay,
         })
-    }
-
-    fn overlay(&self, entry: &Entry) -> Option<Box<dyn Widget>> {
-        self.pictures.tile_overlay(entry)
     }
 }

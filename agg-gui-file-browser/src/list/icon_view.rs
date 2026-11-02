@@ -27,6 +27,7 @@ use super::menu_button::{menu_glyph_rect, shows_menu_button};
 use super::overlay::OverlayRoute;
 use super::section_header::SectionHeaderRow;
 use super::tile_art::{paint_art, TileArt};
+use crate::pictures::OverlayFrame;
 
 /// The tile's border width.
 const BORDER: f64 = 1.0;
@@ -71,6 +72,8 @@ pub struct BrowserTile {
     named: bool,
     /// The routing of the pointer to the app's overlay (the tile's one child, if any).
     route: OverlayRoute,
+    /// The drag's rank of this tile while it paints lifted, from `paint` to `finish_paint`.
+    lifted: Option<usize>,
     bounds: Rect,
     children: Vec<Box<dyn Widget>>,
 }
@@ -79,7 +82,7 @@ impl BrowserTile {
     /// Listed row `index` of `cx`'s browser as a `thumb`-wide tile, its name shown when
     /// `named`; `None` past the listing's end.
     pub fn new(cx: &ListCx, index: usize, thumb: i32, named: bool) -> Option<Self> {
-        let mut parts = cx.parts(index, thumb)?;
+        let mut parts = cx.parts(index, thumb, OverlayFrame { inset: BORDER })?;
         let name = parts.entry.name().to_string();
         let detail_tooltip = parts
             .entry
@@ -102,6 +105,7 @@ impl BrowserTile {
             cx: cx.clone(),
             hovered: parts.hovered,
             route: OverlayRoute::default(),
+            lifted: None,
             parts,
             index,
             name,
@@ -203,7 +207,8 @@ impl Widget for BrowserTile {
         tile_size(self.thumb, &self.cx.font, style.tile_font_size, self.named)
     }
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
-        let lifted = crate::drag::picture::lift(ctx, &self.cx.state, &self.parts.entry.item());
+        // Lifted from here to `finish_paint`, so the overlay (a child) paints lifted too.
+        self.lifted = crate::drag::picture::lift(ctx, &self.cx.state, &self.parts.entry.item());
         let style = &self.cx.style;
         let (w, h) = (self.bounds.width, self.bounds.height);
         // Everything inside the border is rounded by what is left of the tile's radius there,
@@ -260,6 +265,9 @@ impl Widget for BrowserTile {
         if self.hovered && shows_menu_button(w) {
             paint_art(ctx, &self.cx.overflow, menu_glyph_rect(w, h));
         }
+    }
+    fn finish_paint(&mut self, ctx: &mut dyn DrawCtx) {
+        let lifted = self.lifted.take();
         crate::drag::picture::finish_lift(ctx, &self.cx.state, lifted, &self.parts.art.art);
     }
     /// The tile takes every press over it, and hands the overlay its own (`list/overlay.rs`).

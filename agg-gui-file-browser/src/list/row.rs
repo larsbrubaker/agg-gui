@@ -18,6 +18,7 @@ use super::menu_button::{menu_glyph_rect, shows_menu_button, MENU_GLYPH_SIZE};
 use super::overlay::OverlayRoute;
 use super::section_header::SectionHeaderRow;
 use super::tile_art::{paint_art, TileArt};
+use crate::pictures::OverlayFrame;
 
 /// The picture's side in logical units.
 pub const ROW_THUMB_SIZE: i32 = 50;
@@ -51,6 +52,8 @@ pub struct BrowserRow {
     hovered: bool,
     /// The routing of the pointer to the app's overlay (the row's one child, if any).
     route: OverlayRoute,
+    /// The drag's rank of this row while it paints lifted, from `paint` to `finish_paint`.
+    lifted: Option<usize>,
     bounds: Rect,
     children: Vec<Box<dyn Widget>>,
 }
@@ -58,7 +61,7 @@ pub struct BrowserRow {
 impl BrowserRow {
     /// Listed row `index` of `cx`'s browser; `None` past the listing's end.
     pub fn new(cx: &ListCx, index: usize) -> Option<Self> {
-        let mut parts = cx.parts(index, ROW_THUMB_SIZE)?;
+        let mut parts = cx.parts(index, ROW_THUMB_SIZE, OverlayFrame { inset: 0.0 })?;
         let name = parts.entry.name().to_string();
         let detail = parts.entry.detail_line();
         let mut children: Vec<Box<dyn Widget>> = parts.overlay.take().into_iter().collect();
@@ -69,6 +72,7 @@ impl BrowserRow {
             cx: cx.clone(),
             hovered: parts.hovered,
             route: OverlayRoute::default(),
+            lifted: None,
             index,
             shown_name: name.clone(),
             name,
@@ -157,7 +161,8 @@ impl Widget for BrowserRow {
         Size::new(available.width, ROW_HEIGHT)
     }
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
-        let lifted = crate::drag::picture::lift(ctx, &self.cx.state, &self.parts.entry.item());
+        // Lifted from here to `finish_paint`, so the overlay (a child) paints lifted too.
+        self.lifted = crate::drag::picture::lift(ctx, &self.cx.state, &self.parts.entry.item());
         let style = &self.cx.style;
         let thumb = f64::from(ROW_THUMB_SIZE);
         let item = self.item_size();
@@ -206,6 +211,9 @@ impl Widget for BrowserRow {
             let glyph = Rect::new(ROW_MARGIN + r.x, r.y, r.width, r.height);
             paint_art(ctx, &self.cx.overflow, glyph);
         }
+    }
+    fn finish_paint(&mut self, ctx: &mut dyn DrawCtx) {
+        let lifted = self.lifted.take();
         crate::drag::picture::finish_lift(ctx, &self.cx.state, lifted, &self.parts.art.art);
     }
     /// The row takes every press over it, and hands the overlay its own (`list/overlay.rs`).

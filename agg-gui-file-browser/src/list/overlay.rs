@@ -6,7 +6,9 @@
 //! where its `hit_test` says the press is its own; a press it takes is the overlay's alone (no
 //! selection, no tap, no drag), and the release and a lost capture of that press go to it too.
 //! Over its own shape its tooltip is the row's, and the row reports the overlay's properties after
-//! its own. A row rebuilt under a still pointer tells its new
+//! its own. A row the drag carries paints faded from its `paint` to its `finish_paint`, so its
+//! overlay, painted between them as its child, fades with it. The overlay is told where its
+//! square sits in the row or tile (`OverlayFrame`). A row rebuilt under a still pointer tells its new
 //! overlay it is hovered.
 
 use std::cell::RefCell;

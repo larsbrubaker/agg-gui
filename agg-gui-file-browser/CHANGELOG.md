@@ -69,6 +69,10 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 - `BrowserLook::folder_tile` is asked before a link's own tile image (`FolderLink::tile_icon`),
   so a look draws that image its own way; the tile reports `BrowserLook::folder_tile_name` as
   its `thumbnail`, by default the image's key or the folder icon's name.
+- `ItemPictures::tile_overlay` is handed an `OverlayFrame` (how far inside the row's or tile's
+  edge the picture square is: a tile's border), and a carried row or tile paints its overlay
+  faded with it (the lift ends in `finish_paint`, after the children). Migration: add the
+  `frame` argument to `tile_overlay` implementations.
 - `PictureState::Shown { image, kind, name }`: the app's own image for an entry standing for its
   picture, its generating marker or its item icon (`PictureKind`), reported by the row as
   `picture` and `thumbnail`, for an app whose icons depend on the item or whose pictures carry a

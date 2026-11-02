@@ -7,7 +7,8 @@
 //! row in place, a folder in the list in the list, where a drop on the empty space lands in it.
 //! The drag's picture follows the pointer (everywhere without a hook), hides outside the browser
 //! when the app says so whatever it answers, and a release over the app's view goes to its
-//! `OutsideDrops` hook (`cancel` when the drag comes back).
+//! `OutsideDrops` hook (`cancel` when the drag comes back). An app's overlay on a carried row
+//! paints faded with it, and learns how its square sits in a row or a tile.
 
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
@@ -21,7 +22,8 @@ use agg_gui::{
 };
 use agg_gui_file_browser::{
     run_ready_local_tasks, BrowserConfig, BrowserList, BrowserState, BrowserTree, CopyCx,
-    CopyTakeover, OutsideDrops, OutsideOver, PlaceRules, ViewMode, SPRING_DELAY,
+    CopyTakeover, Entry, ItemPictures, OutsideDrops, OutsideOver, OverlayFrame, PictureCx,
+    PictureState, PlaceRules, ViewMode, SPRING_DELAY,
 };
 use agg_gui_files::disk::{AllFiles, DiskFolder};
 use agg_gui_files::Item;
@@ -558,4 +560,116 @@ fn a_spring_wait_counts_from_the_hover_even_on_a_clock_set_before_the_epoch() {
     frame(&mut app);
     assert_eq!(property(&app, "Parts Tree Node", "expanded"), "true");
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// An overlay that fills its square opaque red.
+struct RedSquare {
+    bounds: Rect,
+    children: Vec<Box<dyn Widget>>,
+}
+
+impl Widget for RedSquare {
+    fn type_name(&self) -> &'static str {
+        "RedSquare"
+    }
+    fn id(&self) -> Option<&str> {
+        Some("Red Square")
+    }
+    fn bounds(&self) -> Rect {
+        self.bounds
+    }
+    fn set_bounds(&mut self, bounds: Rect) {
+        self.bounds = bounds;
+    }
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.children
+    }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+        &mut self.children
+    }
+    fn layout(&mut self, available: Size) -> Size {
+        available
+    }
+    fn paint(&mut self, ctx: &mut dyn DrawCtx) {
+        ctx.set_fill_color(agg_gui::Color::rgba(1.0, 0.0, 0.0, 1.0));
+        ctx.begin_path();
+        ctx.rect(0.0, 0.0, self.bounds.width, self.bounds.height);
+        ctx.fill();
+    }
+    fn on_event(&mut self, _event: &Event) -> EventResult {
+        EventResult::Ignored
+    }
+}
+
+/// A red square over gear.stl's picture, noting the frames it was laid in.
+struct RedOverGear {
+    insets: Rc<RefCell<Vec<f64>>>,
+}
+
+impl ItemPictures for RedOverGear {
+    fn picture(&self, _cx: &PictureCx<'_>, _entry: &Entry, _side: i32) -> PictureState {
+        PictureState::Default
+    }
+    fn tile_overlay(&self, entry: &Entry, frame: OverlayFrame) -> Option<Box<dyn Widget>> {
+        self.insets.borrow_mut().push(frame.inset);
+        (entry.item().name() == "gear.stl").then(|| {
+            Box::new(RedSquare {
+                bounds: Rect::default(),
+                children: Vec::new(),
+            }) as Box<dyn Widget>
+        })
+    }
+}
+
+/// The colour painted at `at` (the root's coordinates, Y up).
+fn pixel_at(app: &mut App, at: Point) -> [u8; 4] {
+    app.layout(Size::new(WIDTH, HEIGHT));
+    let mut fb = Framebuffer::new(WIDTH as u32, HEIGHT as u32);
+    let mut ctx = GfxCtx::new(&mut fb);
+    app.paint(&mut ctx);
+    drop(ctx);
+    // Saturates for a point off the framebuffer; the tests ask inside it.
+    let (x, y) = (at.x as usize, at.y as usize);
+    let i = (y * WIDTH as usize + x) * 4;
+    let p = &fb.pixels()[i..i + 4];
+    [p[0], p[1], p[2], p[3]]
+}
+
+#[test]
+fn an_overlay_paints_lifted_with_its_carried_row_and_learns_its_frame() {
+    let home = MemoryFolder::new("Home");
+    home.add_folder("Parts").expect("Parts is free");
+    home.add_file("gear.stl", b"g".to_vec());
+    let insets = Rc::new(RefCell::new(Vec::new()));
+    let pictures = Rc::new(RedOverGear {
+        insets: Rc::clone(&insets),
+    });
+    let config = BrowserConfig::builder().pictures(pictures).build();
+    let (mut app, _) = browser_app(Box::new(home), config, ViewMode::Rows);
+    assert!(
+        insets.borrow().iter().all(|i| *i == 0.0),
+        "a row's square is its edge"
+    );
+    let square = centre(&app, "Red Square");
+    assert_eq!(pixel_at(&mut app, square), [255, 0, 0, 255], "drawn whole");
+    drag_over(&mut app, "Row Item gear.stl", "Parts Row Item Collection");
+    assert_eq!(property(&app, "Row Item gear.stl", "lifted"), "true");
+    let lifted = pixel_at(&mut app, square);
+    assert!(
+        lifted[0] < 255 || lifted[1] > 0,
+        "faded with its row: {lifted:?}"
+    );
+
+    let tiles = MemoryFolder::new("Home");
+    tiles.add_file("gear.stl", b"g".to_vec());
+    let insets = Rc::new(RefCell::new(Vec::new()));
+    let pictures = Rc::new(RedOverGear {
+        insets: Rc::clone(&insets),
+    });
+    let config = BrowserConfig::builder().pictures(pictures).build();
+    let _ = browser_app(Box::new(tiles), config, ViewMode::Icons);
+    assert!(
+        !insets.borrow().is_empty() && insets.borrow().iter().all(|i| *i == 1.0),
+        "a tile's square is inside its border"
+    );
 }

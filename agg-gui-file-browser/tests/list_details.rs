@@ -14,7 +14,8 @@ use agg_gui::{
 };
 use agg_gui_file_browser::{
     run_ready_local_tasks, BrowserConfig, BrowserList, BrowserState, BrowserTile, Entry,
-    ItemPictures, LocalSpawner, OwnPictures, PictureCx, PictureKind, PictureState, ViewMode,
+    ItemPictures, LocalSpawner, OverlayFrame, OwnPictures, PictureCx, PictureKind, PictureState,
+    ViewMode,
 };
 use agg_gui_files::{
     Folder, Item, MemoryFolder, Picture, PictureFuture, SearchResultsFolder, Spawner, Thumbnail,
@@ -182,7 +183,7 @@ impl ItemPictures for Marked {
     fn picture(&self, _cx: &PictureCx<'_>, _entry: &Entry, _side: i32) -> PictureState {
         PictureState::Default
     }
-    fn tile_overlay(&self, entry: &Entry) -> Option<Box<dyn Widget>> {
+    fn tile_overlay(&self, entry: &Entry, _frame: OverlayFrame) -> Option<Box<dyn Widget>> {
         (!entry.is_folder()).then(|| {
             Box::new(Marker {
                 heard: Rc::clone(&self.heard),

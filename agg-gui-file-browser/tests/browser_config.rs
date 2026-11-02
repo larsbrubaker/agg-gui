@@ -11,8 +11,8 @@ use agg_gui::Point;
 use agg_gui_file_browser::{
     Activation, BrowserAction, BrowserActions, BrowserCommand, BrowserConfig, BrowserLayout,
     BrowserMemory, BrowserOptions, BrowserRef, BuiltinAction, Builtins, Confirmation, DialogKind,
-    DoubleClickTarget, Entry, NameRequest, OutsideDrops, OutsideOver, PictureCx, PictureState,
-    ViewMode, ViewState,
+    DoubleClickTarget, Entry, NameRequest, OutsideDrops, OutsideOver, OverlayFrame, PictureCx,
+    PictureState, ViewMode, ViewState,
 };
 use agg_gui_files::{Item, MemoryFolder, PlaceId, SortBehavior, SortKey, Spawner};
 
@@ -76,7 +76,10 @@ fn the_default_config_composes_every_default() {
         config.pictures.picture(&cx, &folder, 100),
         PictureState::Default
     ));
-    assert!(config.pictures.tile_overlay(&item).is_none());
+    assert!(config
+        .pictures
+        .tile_overlay(&item, OverlayFrame { inset: 0.0 })
+        .is_none());
 
     // Actions: every built-in in its groups; activation left to the browser.
     let menu = config.actions.menu(&state, &Builtins::all());
