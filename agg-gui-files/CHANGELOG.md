@@ -22,8 +22,28 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   `rename_on_disk` and `remove_to_trash` answering what they did (`MovedPath`, `TrashedItem`)
   and `copy_items_in`. `disk::DiskFolderLink` is a sub-folder's row, carrying the rules to the
   folder it opens; `disk::DiskFile` a file, with `set_name` and `subscribe_file_renamed`.
-- `disk::DiskRules` (`lists_file`, `read_only`, default false) and `disk::AllFiles`. A read-only
-  folder's `allow_action` refuses everything and each write fails before touching the disk.
+- `disk::DiskRules` (`lists_file`, `read_only`, default false; `list_for_copy`, default `None`)
+  and `disk::AllFiles`. A read-only folder's `allow_action` refuses everything and each write
+  fails before touching the disk.
+- Live refresh: a showing `DiskFolder` (`activate` to `deactivate`/`dispose`) watches its folder
+  through the registered `DirectoryMonitor` (`set_directory_monitor`, `directory_monitor`;
+  `PollingDirectoryMonitor` polls each `POLL_INTERVAL` natively and watches nothing in the
+  browser) and relists half a second after the last outside change, at `pump_live_refresh`
+  (`directory_contents_changed`, `pending_refresh`, `RefreshInterval`). Its own writes run with
+  the watch off.
+- The tree arrow's quick look: `has_child_containers` on `DiskFolder` and `DiskFolderLink`
+  (`folder_has_child_containers`; `DiskFolderLink::with_child_containers_unknown`; a network share
+  answers `None`).
+- Copies that keep the originals: `DiskFolder::copy_in_async` (awaiting content, copying a folder
+  that is not on disk down whole) and `WritableFolder::copy_in` (that copy as a task; the folder
+  it was started from relists at its next `pump_live_refresh`), `DiskFolder::add_async`, and the
+  copy tree: `CopyNode`, `gather`, `gather_item`, `read_dir_node`, `write_node`,
+  `sanitize_file_name`, `ListedFolder`.
+- Disk search: `DiskFolder` is a `SearchProvider` walking every folder below it for the files its
+  rules list (`file_name_contains_filter`, `SEARCH_BATCH_SIZE`, `MAX_SEARCH_DEPTH`).
+- `disk::ComputerFolder`: Downloads, Desktop and Documents (from the app's `ComputerFolders`) and
+  the drives (`drive_roots`, `ComputerFolders::with_this_computers_drives`); a search covers the
+  user's folders only.
 - Disk item IDs (`disk_item_id`, `disk_item_id_at`, `round_trip_utc`) are MatterCAD's, text for
   text, so a thumbnail cache keyed by them keeps working.
 - The system trash: `move_to_trash`, `restore_from_trash`, `set_trash_directory` (tests),

@@ -3,12 +3,14 @@
 //! (`trash`); `rename` renames a file ([`DiskFile::set_name`]) or a folder
 //! ([`DiskFolderLink::set_name`]); a move between two folders on disk renames each item into the
 //! destination ([`DiskFolder::move_from_disk`]), and from anywhere else copies the items in and
-//! keeps the originals (`copy`). `move_from_disk`, `rename_on_disk` and `remove_to_trash` answer
+//! keeps the originals (`copy`), which also runs a copy as a task (`copy_in`). `add_async` is
+//! `add` awaiting each item's content. `move_from_disk`, `rename_on_disk` and `remove_to_trash` answer
 //! what they did ([`MovedPath`], [`TrashedItem`]): the record an undo puts things back by.
 //!
 //! A folder whose [`super::DiskRules`] are read-only refuses every change: `allow_action` answers
-//! no, and each write fails before touching the disk. After a write that changed anything the
-//! folder lists itself again and raises content-changed.
+//! no, and each write fails before touching the disk. Each write runs with the folder's watch
+//! off (`DiskFolder::unwatched`), so its own changes are not reported back to it; after a write
+//! that changed anything the folder lists itself again and raises content-changed.
 
 use std::any::Any;
 use std::path::PathBuf;
@@ -21,8 +23,9 @@ use super::paths::{non_colliding_path, path_file_name};
 use super::trash::{move_to_trash, TrashedItem};
 use crate::create_folder_item::CreateFolderItem;
 use crate::item::Item;
+use crate::spawner::LocalTask;
 use crate::translate::tr;
-use crate::writable::{ContainerActions, WritableFolder};
+use crate::writable::{ContainerActions, CopyDone, WritableFolder};
 
 /// One file or folder a move or rename put somewhere else on disk.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -72,6 +75,10 @@ impl DiskFolder {
     /// on.
     pub fn add(&mut self, items: &[Rc<dyn Item>]) -> Result<(), String> {
         self.refuse_if_read_only()?;
+        self.unwatched(|folder| folder.add_now(items))
+    }
+
+    fn add_now(&mut self, items: &[Rc<dyn Item>]) -> Result<(), String> {
         if items.is_empty() {
             return Ok(());
         }
@@ -87,6 +94,41 @@ impl DiskFolder {
                 }
             }
         }
+        self.finish_add(added)
+    }
+
+    /// As [`Self::add`], awaiting each item's content, so content that has to be downloaded
+    /// first is waited for. Run on the caller's executor.
+    pub async fn add_async(&mut self, items: &[Rc<dyn Item>]) -> Result<(), String> {
+        self.refuse_if_read_only()?;
+        self.live.set_watch_enabled(false);
+        let result = self.add_async_now(items).await;
+        self.live.set_watch_enabled(true);
+        result
+    }
+
+    async fn add_async_now(&mut self, items: &[Rc<dyn Item>]) -> Result<(), String> {
+        if items.is_empty() {
+            return Ok(());
+        }
+        std::fs::create_dir_all(&self.full_path).map_err(|e| e.to_string())?;
+        let mut added = AddProgress::default();
+        for item in items {
+            if !self.create_folder_here(item.as_ref(), &mut added)
+                && !self.move_folder_here(item.as_ref(), &mut added)
+            {
+                if let Some(stream_item) = item.as_asset_stream() {
+                    let file_name = stream_item.file_name();
+                    let content = stream_item.get_stream_async().await.map_err(String::from);
+                    self.write_content(&file_name, content, &mut added);
+                }
+            }
+        }
+        self.finish_add(added)
+    }
+
+    /// The end of an add: lists the folder again when anything landed, and reports the failures.
+    fn finish_add(&mut self, added: AddProgress) -> Result<(), String> {
         if added.is_dirty {
             self.reload_content();
         }
@@ -177,6 +219,17 @@ impl DiskFolder {
         {
             return (Vec::new(), Err(e));
         }
+        source.live.set_watch_enabled(false);
+        let answer = self.unwatched(|folder| folder.move_from_disk_now(items, source));
+        source.live.set_watch_enabled(true);
+        answer
+    }
+
+    fn move_from_disk_now(
+        &mut self,
+        items: &[Rc<dyn Item>],
+        source: &mut DiskFolder,
+    ) -> (Vec<MovedPath>, Result<(), String>) {
         if let Err(e) = std::fs::create_dir_all(&self.full_path) {
             return (Vec::new(), Err(e.to_string()));
         }
@@ -227,6 +280,14 @@ impl DiskFolder {
         if let Err(e) = self.refuse_if_read_only() {
             return (None, Err(e));
         }
+        self.unwatched(|folder| folder.rename_on_disk_now(item, new_name))
+    }
+
+    fn rename_on_disk_now(
+        &mut self,
+        item: &Rc<dyn Item>,
+        new_name: &str,
+    ) -> (Option<MovedPath>, Result<(), String>) {
         let any = item.as_any();
         let renamed = if let Some(file) = any.and_then(|a| a.downcast_ref::<DiskFile>()) {
             let mut renamed = file.clone();
@@ -266,6 +327,13 @@ impl DiskFolder {
         if let Err(e) = self.refuse_if_read_only() {
             return (Vec::new(), Err(e));
         }
+        self.unwatched(|folder| folder.remove_to_trash_now(items))
+    }
+
+    fn remove_to_trash_now(
+        &mut self,
+        items: &[Rc<dyn Item>],
+    ) -> (Vec<TrashedItem>, Result<(), String>) {
         let mut result = Ok(());
         let mut trashed = Vec::new();
         for item in items {
@@ -331,5 +399,12 @@ impl WritableFolder for DiskFolder {
 
     fn as_any_mut(&mut self) -> Option<&mut dyn Any> {
         Some(self)
+    }
+
+    /// [`DiskFolder::copy_in_async`] as a task, through a folder of its own on the same path and
+    /// rules; once it has finished, this folder relists at its next `pump_live_refresh` and
+    /// `done` hears the outcome. Nothing is recorded for undo.
+    fn copy_in(&self, items: Vec<Rc<dyn Item>>, done: CopyDone) -> Option<LocalTask> {
+        Some(self.copy_task(items, done))
     }
 }

@@ -36,9 +36,11 @@
 //!   [`SearchResultsFolder`] (a search across folders, in sections, its deadline a
 //!   [`WakeTimer`]) and [`MemoryFolder`] (a writable folder in memory, for tests and demos).
 //! - **Disk** (the `disk` feature): [`disk::DiskFolder`] (a folder on the computer's disk, which
-//!   lists and takes changes), its rows [`disk::DiskFolderLink`] and files [`disk::DiskFile`],
-//!   following the app's [`disk::DiskRules`], and the system trash a remove sends items to. It
-//!   compiles for wasm32, where every disk read fails.
+//!   lists, takes changes and copies, searches itself and relists after an outside change), its
+//!   rows [`disk::DiskFolderLink`] and files [`disk::DiskFile`], following the app's
+//!   [`disk::DiskRules`]; [`disk::ComputerFolder`] (the user's folders and the drives); the
+//!   directory watch an app registers; and the system trash a remove sends items to. It compiles
+//!   for wasm32, where every disk read fails and nothing is watched.
 //! - **Stored values keep their shape.** The sort key numbers ([`SortKey`]) are the flags that
 //!   stored view states hold.
 //!

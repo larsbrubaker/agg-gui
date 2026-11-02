@@ -5,6 +5,11 @@
 //! missing, restricted or unreadable, so the user sees why it is empty. Content-changed is raised
 //! by `reload_content` (after a write), never by `load`. The writes are `folder_writes`.
 //!
+//! While it is the showing folder (`activate` to `deactivate`/`dispose`) it watches its folder
+//! and relists itself after an outside change (`live_refresh`, driven by the browser's
+//! `pump_live_refresh`); its own writes turn the watch off while they run. It answers the folder
+//! tree's arrow from its names alone (`quick_look`) and searches itself (`search`).
+//!
 //! A folder on disk is on the computer ([`PlaceId::COMPUTER`]) and is known by its path
 //! (`paths::disk_location_key`), as its row answers both.
 
@@ -14,12 +19,15 @@ use std::rc::Rc;
 
 use super::file::DiskFile;
 use super::folder_link::DiskFolderLink;
+use super::live_refresh::{LiveRefresh, RefreshInterval};
 use super::paths::{disk_location_key, path_file_name};
+use super::quick_look::folder_has_child_containers;
 use super::rules::DiskRules;
 use crate::folder::{ContentChangedEvent, ContentChangedListener, Folder};
 use crate::item::{FolderLink, Item};
 use crate::message_item::MessageItem;
 use crate::place::PlaceId;
+use crate::search::SearchProvider;
 use crate::sort::{culture_compare, SortBehavior};
 use crate::writable::WritableFolder;
 
@@ -56,6 +64,8 @@ pub struct DiskFolder {
     content_changed: ContentChangedEvent,
     /// Items listed after the folder's own files that are not in the folder (`with_extra_items`).
     extra_items: Vec<Rc<dyn Item>>,
+    /// The directory watch and its pending refresh while this is the showing folder.
+    pub(super) live: LiveRefresh,
 }
 
 impl DiskFolder {
@@ -75,6 +85,7 @@ impl DiskFolder {
             rules,
             content_changed: ContentChangedEvent::default(),
             extra_items: Vec::new(),
+            live: LiveRefresh::default(),
         }
     }
 
@@ -118,6 +129,32 @@ impl DiskFolder {
     /// The rules the folder follows.
     pub fn rules(&self) -> &Rc<dyn DiskRules> {
         &self.rules
+    }
+
+    /// The watch reported a change (marshalled to this thread). While active it arms the
+    /// coalescing refresh, which relists once half a second has passed with no further change.
+    pub fn directory_contents_changed(&mut self) {
+        self.live.contents_changed();
+    }
+
+    /// The armed refresh interval, if a change is waiting to relist.
+    pub fn pending_refresh(&self) -> Option<RefreshInterval> {
+        self.live.pending_refresh()
+    }
+
+    /// Stops watching and cancels a pending refresh; a disposed folder is not active, so a late
+    /// report cannot arm a new one.
+    pub fn dispose(&mut self) {
+        self.live.teardown();
+    }
+
+    /// Runs `write` with the watch off, so the folder's own writes are not reported back to it,
+    /// and turns it back on afterwards whatever happened.
+    pub(super) fn unwatched<T>(&mut self, write: impl FnOnce(&mut Self) -> T) -> T {
+        self.live.set_watch_enabled(false);
+        let result = write(self);
+        self.live.set_watch_enabled(true);
+        result
     }
 
     fn show_message(&mut self, message: String) {
@@ -242,6 +279,44 @@ impl Folder for DiskFolder {
     /// Lists the folder's own level.
     fn load(&mut self) {
         self.load_recursive(false);
+    }
+
+    /// Reads names only up to the first sub-folder (`quick_look`): `load` would also look up
+    /// every file's type, size and dates.
+    fn has_child_containers(&mut self) -> Option<bool> {
+        folder_has_child_containers(&self.full_path)
+    }
+
+    /// Active, and watching the folder.
+    fn activate(&mut self) {
+        let should_monitor = is_readable_directory(&self.full_path);
+        self.live.activate(&self.full_path, should_monitor);
+    }
+
+    /// Stops watching and cancels a pending refresh.
+    fn deactivate(&mut self) {
+        self.live.teardown();
+    }
+
+    /// The UI thread's turn of the live refresh: a copy task's finished writes relist at once, a
+    /// report from the watch becomes `directory_contents_changed`, and a refresh whose quiet half
+    /// second has passed relists (`reload_content`). True while a refresh is still waiting.
+    fn pump_live_refresh(&mut self) -> bool {
+        if self.live.take_relist() {
+            self.reload_content();
+        }
+        if self.live.take_report() {
+            self.directory_contents_changed();
+        }
+        if self.live.refresh_due() {
+            self.reload_content();
+        }
+        self.live.pending_refresh().is_some()
+    }
+
+    /// This folder's search (`search`).
+    fn search_provider(&self) -> Option<&dyn SearchProvider> {
+        Some(self)
     }
 
     fn as_any(&self) -> Option<&dyn Any> {

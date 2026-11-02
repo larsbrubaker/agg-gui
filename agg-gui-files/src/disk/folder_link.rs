@@ -1,6 +1,7 @@
 //! [`DiskFolderLink`]: a sub-folder's row in a folder on disk - the link a [`super::DiskFolder`]
 //! lists for each folder inside it, which opens a `DiskFolder` on that folder with the same
-//! [`super::DiskRules`], and renames the folder beside where it is ([`DiskFolderLink::set_name`]).
+//! [`super::DiskRules`], renames the folder beside where it is ([`DiskFolderLink::set_name`]), and
+//! tells the folder tree cheaply whether the folder holds folders (`quick_look`).
 //! Like its folder it lives on the computer ([`PlaceId::COMPUTER`]) and is known by its path
 //! (`paths::disk_location_key`), so a folder and its row answer the same key.
 
@@ -10,6 +11,7 @@ use std::rc::Rc;
 
 use super::folder::DiskFolder;
 use super::paths::{disk_item_id, disk_location_key, display_name, file_dates};
+use super::quick_look::folder_has_child_containers;
 use super::rules::DiskRules;
 use crate::folder::Folder;
 use crate::item::{FolderLink, Item};
@@ -26,6 +28,8 @@ pub struct DiskFolderLink {
     dates: (i64, i64),
     /// The rules the folder it opens lists and allows changes by.
     rules: Rc<dyn DiskRules>,
+    /// `has_child_containers` answers `None` (`with_child_containers_unknown`).
+    child_containers_unknown: bool,
 }
 
 impl DiskFolderLink {
@@ -40,7 +44,15 @@ impl DiskFolderLink {
             use_incremented_name_during_type_change: false,
             dates,
             rules,
+            child_containers_unknown: false,
         }
+    }
+
+    /// The tree never looks inside this folder to decide its arrow: a folder the user added may
+    /// be on a network share or a drive that has to wake.
+    pub fn with_child_containers_unknown(mut self) -> Self {
+        self.child_containers_unknown = true;
+        self
     }
 
     /// Sets `use_incremented_name_during_type_change`, passed on to the folder it opens.
@@ -142,6 +154,14 @@ impl FolderLink for DiskFolderLink {
     /// Read-only when its rules are.
     fn is_read_only(&self) -> bool {
         self.rules.read_only()
+    }
+
+    /// A quick look at the folder's names (`quick_look`), unless marked unknown.
+    fn has_child_containers(&self) -> Option<bool> {
+        if self.child_containers_unknown {
+            return None;
+        }
+        folder_has_child_containers(&self.file_path)
     }
 
     /// A folder on disk is on the computer.

@@ -5,15 +5,29 @@
 //! Trash.
 #![cfg(feature = "disk")]
 
+#[path = "disk/computer.rs"]
+mod computer;
+#[path = "disk/copies.rs"]
+mod copies;
 #[path = "disk/ids.rs"]
 mod ids;
 #[path = "disk/listing.rs"]
 mod listing;
+#[path = "disk/live_refresh.rs"]
+mod live_refresh;
+#[path = "disk/monitor.rs"]
+mod monitor;
 #[path = "disk/places.rs"]
 mod places;
+#[path = "disk/quick_look.rs"]
+mod quick_look;
 #[path = "disk/read_only.rs"]
 mod read_only;
+#[path = "disk/search.rs"]
+mod search;
 #[path = "disk/temp.rs"]
 mod temp;
+#[path = "disk/trash.rs"]
+mod trash;
 #[path = "disk/writes.rs"]
 mod writes;
