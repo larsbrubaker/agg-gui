@@ -1,10 +1,11 @@
 //! The questions a browser asks the user, through the app's dialogs ([`BrowserDialogs`]):
 //! confirming a change ([`Confirmation`]: removing items), asking for a name ([`NameRequest`]:
-//! a new folder, a rename), picking files to add, and picking the folder a Move goes to
-//! ([`MoveRequest`]). [`SheetDialogs`](crate::SheetDialogs) (`sheet_dialogs/`) is a ready set
-//! on agg-gui's `ModalSheet` for an app without its own: it confirms, asks for names and, given a
-//! root to browse from (`SheetDialogs::with_browse_root`), shows the Move dialog
-//! (`move_dialog/`); it offers no file picking (agg-gui has no file picker).
+//! a new folder, a rename), picking files to add, picking the folder a Move goes to
+//! ([`MoveRequest`]), and the app's own Save As and Open ([`SaveRequest`], [`OpenRequest`]).
+//! [`SheetDialogs`](crate::SheetDialogs) (`sheet_dialogs/`) is a ready set on agg-gui's
+//! `ModalSheet` for an app without its own: it confirms, asks for names and, given a root to
+//! browse from (`SheetDialogs::with_browse_root`), shows the Move, Save and Open dialogs; it
+//! offers no picking of files to add (agg-gui has no system file picker).
 //!
 //! The Move dialog only picks: it answers with the folder it opened for the items and whether
 //! they copy ([`MovePick`]), and the browser's Move moves or copies them there itself, as a drop
@@ -16,6 +17,14 @@
 //! names and removes nothing through its menus. Each method's default answers as if the user
 //! cancelled, so a call that reaches it changes nothing.
 //!
+//! The Save dialog picks too: a folder that takes files and a file name ([`SaveRequest`] says
+//! how a typed name becomes one and how a file's name shows in the field; [`SavePick`] answers),
+//! and the app writes the file. Before replacing a file the dialog asks; an app with more to say
+//! about a target (the file is open elsewhere) asks its own question through
+//! [`SaveRequest::with_replace_question`]. The Open dialog ([`OpenRequest`]) picks files to open
+//! from the folders it browses, answering with them and their folder ([`OpenPick`]); reading
+//! them is the app's.
+//!
 //! An answer may come before the call returns or long after (a dialog the user takes time
 //! over); the browser is not borrowed while it waits.
 
@@ -23,7 +32,9 @@ use std::rc::Rc;
 
 use agg_gui_files::{tr, Folder, Item, PlaceId};
 
+use crate::config::ItemFilter;
 use crate::move_dialog::plan::FolderKey;
+use crate::state::OpenFolder;
 
 /// A dialog a browser can ask for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -39,6 +50,8 @@ pub enum DialogKind {
     PickMoveTarget,
     /// Pick the folder and name a save goes to ([`BrowserDialogs::pick_save_target`]).
     PickSaveTarget,
+    /// Pick files to open ([`BrowserDialogs::pick_open_target`]).
+    PickOpenTarget,
 }
 
 /// Whether items copy rather than move into a folder in the given place.
@@ -224,11 +237,28 @@ pub trait BrowserDialogs {
         let _ = request;
         answer(None);
     }
+
+    /// Asks the user which files to open (the app's Open); `answer` hears them and the folder
+    /// they are in, or `None` when they cancelled. Reading them is the app's. The default answers
+    /// `None`.
+    fn pick_open_target(&self, request: OpenRequest, answer: PickedOpenTarget) {
+        let _ = request;
+        answer(None);
+    }
 }
 
 /// Turns the name the user typed into the file name to save under (an app's extension added:
 /// "Bracket" to "Bracket.mcx"), or says why it can't be used (already translated).
 pub type FileNamer = Rc<dyn Fn(&str) -> Result<String, String>>;
+
+/// A file's name as the Save dialog shows it to the user: in the name field when the user clicks
+/// the file, and in the question before replacing it ("Bracket.mcx" shown as "Bracket").
+pub type ShownName = Rc<dyn Fn(&str) -> String>;
+
+/// The app's own question before a save ([`SaveRequest::with_replace_question`]): asked of every
+/// save the namer accepted, with the state let go; `None` keeps the dialog's own (asking to
+/// replace a file already there, saving straight away otherwise).
+pub type ReplaceQuestionHook = Rc<dyn Fn(&SaveTarget<'_>) -> Option<ReplaceQuestion>>;
 
 /// The file namer adding `extension` (".mcx") unless the name already ends with it, in any
 /// case.
@@ -243,9 +273,23 @@ pub fn append_extension(extension: &str) -> FileNamer {
     })
 }
 
+/// `name` without a trailing `extension` (in any case), as the user reads a file of the app's:
+/// "Bracket.MCX" is "Bracket". A name that is only the extension, or ends otherwise, stays whole.
+pub fn without_extension(name: &str, extension: &str) -> String {
+    let cut = name.len().saturating_sub(extension.len());
+    let ends = cut > 0
+        && name.is_char_boundary(cut)
+        && name[cut..].to_lowercase() == extension.to_lowercase();
+    match ends {
+        true => name[..cut].to_string(),
+        false => name.to_string(),
+    }
+}
+
 /// The Save dialog's question: its heading, the label over the name field, the name it starts
-/// with, and how the typed name becomes the file name ([`FileNamer`], the name as typed by
-/// default).
+/// with, how the typed name becomes the file name ([`FileNamer`], the name as typed by default),
+/// how a file's name shows ([`ShownName`], whole by default) and the app's own question before a
+/// save, if it has one ([`ReplaceQuestionHook`]).
 #[derive(Clone)]
 #[non_exhaustive]
 pub struct SaveRequest {
@@ -253,6 +297,8 @@ pub struct SaveRequest {
     pub name_label: String,
     pub initial_name: String,
     pub namer: FileNamer,
+    pub shown_name: ShownName,
+    pub replace_question: Option<ReplaceQuestionHook>,
 }
 
 impl SaveRequest {
@@ -263,6 +309,8 @@ impl SaveRequest {
             name_label: tr("Name"),
             initial_name: initial_name.into(),
             namer: Rc::new(|typed: &str| Ok(typed.to_string())),
+            shown_name: Rc::new(|name: &str| name.to_string()),
+            replace_question: None,
         }
     }
 
@@ -278,6 +326,30 @@ impl SaveRequest {
         self.namer = namer;
         self
     }
+
+    /// The request saving files of the app's `extension` (".mcx"): added to a typed name that
+    /// lacks it ([`append_extension`]), and left off a file's name where the user reads it
+    /// ([`without_extension`]): a click on "Bracket.mcx" fills in "Bracket".
+    pub fn with_extension(mut self, extension: &str) -> Self {
+        self.namer = append_extension(extension);
+        let extension = extension.to_string();
+        self.shown_name = Rc::new(move |name: &str| without_extension(name, &extension));
+        self
+    }
+
+    /// The request showing a file's name as `shown_name` gives it (an app leaving off every
+    /// extension it loads).
+    pub fn with_shown_name(mut self, shown_name: ShownName) -> Self {
+        self.shown_name = shown_name;
+        self
+    }
+
+    /// The request asking `hook` before each save whether the app has its own question (the
+    /// file is open elsewhere and will close); see [`ReplaceQuestionHook`].
+    pub fn with_replace_question(mut self, hook: ReplaceQuestionHook) -> Self {
+        self.replace_question = Some(hook);
+        self
+    }
 }
 
 impl std::fmt::Debug for SaveRequest {
@@ -285,7 +357,70 @@ impl std::fmt::Debug for SaveRequest {
         f.debug_struct("SaveRequest")
             .field("title", &self.title)
             .field("initial_name", &self.initial_name)
+            .field("replace_question", &self.replace_question.is_some())
             .finish()
+    }
+}
+
+/// Where a save is about to go, as the app's question hook is handed it: the folder (borrowed
+/// while the hook runs; the browser's state is not), the file name (the namer's), and whether a
+/// file of that name is listed there.
+#[non_exhaustive]
+pub struct SaveTarget<'a> {
+    pub folder: &'a dyn Folder,
+    pub file_name: &'a str,
+    pub exists: bool,
+}
+
+/// A question the Save dialog asks before saving, in the page: its title, what it says, the
+/// button that saves (`None` when the save can't go ahead, so the user can only go back) and the
+/// button that goes back to the page, all already translated.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct ReplaceQuestion {
+    pub title: String,
+    pub message: String,
+    pub confirm_label: Option<String>,
+    pub cancel_label: String,
+}
+
+impl ReplaceQuestion {
+    /// A question whose `confirm_label` button saves, with a Cancel button going back.
+    pub fn new(
+        title: impl Into<String>,
+        message: impl Into<String>,
+        confirm_label: impl Into<String>,
+    ) -> Self {
+        Self {
+            title: title.into(),
+            message: message.into(),
+            confirm_label: Some(confirm_label.into()),
+            cancel_label: tr("Cancel"),
+        }
+    }
+
+    /// A message saying why the save can't go ahead now, with only a Cancel button going back.
+    pub fn refusal(title: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            title: title.into(),
+            message: message.into(),
+            confirm_label: None,
+            cancel_label: tr("Cancel"),
+        }
+    }
+
+    /// The question with its going-back button labelled `label` ("OK" for a refusal).
+    pub fn with_cancel_label(mut self, label: impl Into<String>) -> Self {
+        self.cancel_label = label.into();
+        self
+    }
+
+    /// The dialog's own question before replacing the file the user reads as `shown_name`:
+    /// "Confirm Save As", ""Bracket" already exists. Do you want to replace it?", Replace.
+    pub fn replace_existing(shown_name: &str) -> Self {
+        let message =
+            tr("\"{0}\" already exists.\nDo you want to replace it?").replace("{0}", shown_name);
+        Self::new(tr("Confirm Save As"), message, tr("Replace"))
     }
 }
 
@@ -309,6 +444,92 @@ impl std::fmt::Debug for SavePick {
 
 /// Hears where a save goes, or `None` when the user cancelled.
 pub type PickedSaveTarget = Box<dyn FnOnce(Option<SavePick>)>;
+
+/// The item filter keeping files whose names end with one of `extensions` (".stl"), in any
+/// case: an Open dialog's file types.
+pub fn extension_filter(extensions: &[&str]) -> ItemFilter {
+    let extensions: Vec<String> = extensions.iter().map(|e| e.to_lowercase()).collect();
+    Rc::new(move |item: &dyn Item| {
+        let name = item.name().to_lowercase();
+        extensions.iter().any(|e| name.ends_with(e.as_str()))
+    })
+}
+
+/// The Open dialog's question: its heading, whether the user may pick several files, and which
+/// files it lists ([`ItemFilter`], every file by default; folders always list, so the user can
+/// browse).
+#[derive(Clone)]
+#[non_exhaustive]
+pub struct OpenRequest {
+    pub title: String,
+    pub multiple: bool,
+    pub filter: Option<ItemFilter>,
+}
+
+impl OpenRequest {
+    /// An Open of one file of any kind, headed "Open".
+    pub fn new() -> Self {
+        Self {
+            title: tr("Open"),
+            multiple: false,
+            filter: None,
+        }
+    }
+
+    /// The request headed `title` (translated).
+    pub fn with_title(mut self, title: impl Into<String>) -> Self {
+        self.title = title.into();
+        self
+    }
+
+    /// The request letting the user pick several files at once.
+    pub fn with_multiple(mut self, multiple: bool) -> Self {
+        self.multiple = multiple;
+        self
+    }
+
+    /// The request listing only the files `filter` keeps ([`extension_filter`]).
+    pub fn with_filter(mut self, filter: ItemFilter) -> Self {
+        self.filter = Some(filter);
+        self
+    }
+}
+
+impl Default for OpenRequest {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl std::fmt::Debug for OpenRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OpenRequest")
+            .field("title", &self.title)
+            .field("multiple", &self.multiple)
+            .field("filter", &self.filter.is_some())
+            .finish()
+    }
+}
+
+/// What the user picked to open: the files, in the order they were selected, and the folder
+/// listing them (shared: the dialog's browser has let it go once it answers).
+pub struct OpenPick {
+    pub folder: OpenFolder,
+    pub items: Vec<Rc<dyn Item>>,
+}
+
+impl std::fmt::Debug for OpenPick {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let items: Vec<&str> = self.items.iter().map(|i| i.name()).collect();
+        f.debug_struct("OpenPick")
+            .field("folder", &self.folder.borrow().name().to_string())
+            .field("items", &items)
+            .finish()
+    }
+}
+
+/// Hears the files picked to open, or `None` when the user cancelled.
+pub type PickedOpenTarget = Box<dyn FnOnce(Option<OpenPick>)>;
 
 /// The dialogs of an app with none (see the module header).
 #[derive(Clone, Copy, Debug, Default)]

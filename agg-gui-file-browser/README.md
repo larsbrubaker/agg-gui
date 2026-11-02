@@ -29,8 +29,9 @@ don't compile it. It builds for `wasm32-unknown-unknown`.
 | `default_drop_copies`, `copy_modifier_held` | Move or copy: items move within a place, and are copied between places, out of folders that keep them, or with Option (Mac) or Ctrl held |
 | `LocalSpawner` | Background work for apps without an executor, run a step at a time from agg-gui's UI-queue drain |
 | `BrowserCommand`, `ActionScope`, `BuiltinAction`, `run_builtin` | Menu rows: an app's commands with icons (through the look), shortcuts, scopes, submenus and rows left out while they can't run, and the browser's own (placed bare, or dressed with the app's tooltip through `BrowserCommand::builtin`) Add, Create Folder..., Open File Location, Rename, Move and Remove, which run, recorded for Undo, asking through the app's dialogs |
-| `SheetDialogs`, `DialogSheet` | Ready dialogs on agg-gui's `ModalSheet` for an app without its own: confirming a change, asking for a name, and the Move and Save dialogs |
-| `SavePage`, `SaveRequest`, `append_extension` | The Save dialog: a folder and a name (the app's extension added), Create Folder, a confirm before replacing; the app writes the file |
+| `SheetDialogs`, `DialogSheet` | Ready dialogs on agg-gui's `ModalSheet` for an app without its own: confirming a change, asking for a name, and the Move, Save and Open dialogs |
+| `SavePage`, `SaveRequest`, `append_extension` | The Save dialog: a folder and a name (the app's extension added), a click on a file filling its name in, Create Folder, F5 to list the folder again, a confirm before replacing (or the app's own question); the app writes the file |
+| `OpenPage`, `OpenRequest`, `extension_filter` | The Open dialog for an app without a system one: the files of the kinds asked for, one or several, from any folder; the app reads them |
 | `MovePage`, `BrowserPage`, `move_verdict` | The Move dialog over a browser of its own: where the items can go, whether they move or copy, and why a folder can't take them |
 | `OverflowButton` | The navigation bar's "File" button with the folder's whole menu |
 

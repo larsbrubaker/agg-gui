@@ -6,11 +6,22 @@
 //!
 //! Save needs a folder that can take files (the showing folder, below the root, writable: "Choose
 //! a folder you can save in." otherwise) and a name. The typed name goes through the request's
-//! [`FileNamer`](crate::FileNamer) (an app's extension added or checked; its refusal shows in the note). A file of
-//! that name already in the folder asks first, in the page itself (the dialogs show one question
-//! at a time): "Confirm Save As", ""Bracket" already exists. Do you want to replace it?" with
-//! Replace and Cancel; Cancel goes back to the page. Saving hands the showing folder over and
-//! answers with it and the file name; writing the file is the app's.
+//! [`FileNamer`](crate::FileNamer) (an app's extension added or checked; its refusal shows in the
+//! note). Before saving, the request's question hook ([`SaveRequest::with_replace_question`]) is
+//! asked whether the app has a question of its own; without one, a file of that name already in
+//! the folder asks "Confirm Save As", ""Bracket" already exists. Do you want to replace it?" with
+//! Replace and Cancel. A question is asked in the page itself (the dialogs show one at a time);
+//! its Cancel goes back to the page, as does typing in the name field, and a question with no
+//! confirming button only goes back. Saving hands the showing folder over and answers with it and
+//! the file name; writing the file is the app's. Should something still hold the folder, nothing
+//! is saved and the note says so.
+//!
+//! A click on a file in a folder that takes the save puts its name in the field as the request
+//! shows names ([`SaveRequest::with_extension`]: "Bracket.mcx" fills in "Bracket"), how the user
+//! aims a save at a file already there; a double click on it saves (asking first, as it is
+//! there). The page takes the list's clicks before laying its browser page out. F5 lists the
+//! folder again (`BrowserState::relist`), for a file written there behind the dialog's back, and
+//! leaves the key unconsumed; natively only, since in a web page F5 is the browser's own reload.
 //!
 //! Create Folder asks for the folder's name in the page too ("Folder Name", Create and Cancel)
 //! and makes it in the showing folder, recorded for Undo, then opens it.
@@ -28,10 +39,10 @@ use agg_gui::{
 };
 use agg_gui_files::tr;
 
-use crate::dialogs::{SavePick, SaveRequest};
+use crate::dialogs::{ReplaceQuestion, SavePick, SaveRequest, SaveTarget};
 use crate::move_dialog::BrowserPage;
 use crate::sheet_dialogs::{CANCEL_BUTTON, CONFIRM_BUTTON};
-use crate::state::BrowserState;
+use crate::state::{BrowserState, ItemEvent};
 
 /// The Save page's widget name.
 pub const SAVE_AS_WINDOW: &str = "Save As Window";
@@ -54,8 +65,11 @@ pub struct SaveAnswers {
 #[derive(Clone, PartialEq, Eq)]
 enum Mode {
     Normal,
-    /// Asking to replace the file named this.
-    Replace(String),
+    /// Asking `question` before saving as `file_name`.
+    Ask {
+        question: ReplaceQuestion,
+        file_name: String,
+    },
     /// Asking the new folder's name.
     NewFolder,
 }
@@ -88,8 +102,9 @@ impl Core {
                 .is_some_and(|c| c.as_writable().is_some())
     }
 
-    /// Save, as the module header says; `replace` once the user agreed.
-    fn save(&self, replace: bool) {
+    /// Save, as the module header says: the typed name named, then the app's question or the
+    /// dialog's own asked, or the save handed over.
+    fn save(&self) {
         if self.accepted.get() {
             return;
         }
@@ -108,15 +123,54 @@ impl Core {
                 return self.changed();
             }
         };
-        let exists = self
-            .state
+        let exists = self.exists(&file_name);
+        let question = self.app_question(&file_name, exists).or_else(|| {
+            exists
+                .then(|| ReplaceQuestion::replace_existing(&(self.request.shown_name)(&file_name)))
+        });
+        match question {
+            Some(question) => {
+                *self.mode.borrow_mut() = Mode::Ask {
+                    question,
+                    file_name,
+                };
+                self.changed();
+            }
+            None => self.finish(file_name),
+        }
+    }
+
+    /// Whether the showing folder lists a file named `file_name`.
+    fn exists(&self, file_name: &str) -> bool {
+        self.state
             .borrow()
             .active_container()
-            .is_some_and(|c| c.items().iter().any(|i| i.name() == file_name));
-        if exists && !replace {
-            *self.mode.borrow_mut() = Mode::Replace(file_name);
-            return self.changed();
+            .is_some_and(|c| c.items().iter().any(|i| i.name() == file_name))
+    }
+
+    /// The request's own question before saving as `file_name`, if it has one: its hook handed
+    /// the showing folder with the browser's state let go.
+    fn app_question(&self, file_name: &str, exists: bool) -> Option<ReplaceQuestion> {
+        let hook = self.request.replace_question.as_ref()?;
+        let folder = self.state.borrow().open_path().last().cloned()?;
+        let folder = folder.borrow();
+        hook(&SaveTarget {
+            folder: folder.as_ref(),
+            file_name,
+            exists,
+        })
+    }
+
+    /// Hands the showing folder over with `file_name` (the user has agreed to any question).
+    fn finish(&self, file_name: String) {
+        if self.accepted.get() || !self.can_save_here() {
+            return;
         }
+        // A folder something else still holds stays showing, so the user can try again there.
+        if !self.state.borrow().can_hand_over_active_container() {
+            return self.busy();
+        }
+        let exists = self.exists(&file_name);
         self.accepted.set(true);
         let taken = self.state.borrow_mut().take_active_container();
         match taken.map(Rc::try_unwrap) {
@@ -127,9 +181,53 @@ impl Core {
             }),
             _ => {
                 self.accepted.set(false);
-                *self.mode.borrow_mut() = Mode::Normal;
-                *self.note.borrow_mut() = tr("The folder was busy, so nothing moved. Try again.");
-                self.changed();
+                self.busy();
+            }
+        }
+    }
+
+    /// Nothing was saved because the folder was held: back to the page, saying so.
+    fn busy(&self) {
+        *self.mode.borrow_mut() = Mode::Normal;
+        *self.note.borrow_mut() = tr("The folder was busy, so nothing was saved. Try again.");
+        self.changed();
+    }
+
+    /// The question's confirming button: saves under the name it asked about.
+    fn confirm_question(&self) {
+        let asked = match &*self.mode.borrow() {
+            Mode::Ask { file_name, .. } => Some(file_name.clone()),
+            _ => None,
+        };
+        if let Some(file_name) = asked {
+            self.finish(file_name);
+        }
+    }
+
+    /// Back to the page from a question or the new folder's name.
+    fn back(&self) {
+        *self.mode.borrow_mut() = Mode::Normal;
+        self.changed();
+    }
+
+    /// The list's clicks and double clicks since the last layout: a file's name fills the field
+    /// where the folder takes the save, and a double click saves.
+    fn apply_item_events(&self) {
+        let events = self.state.borrow_mut().take_item_events();
+        for event in events {
+            if !self.can_save_here() {
+                continue;
+            }
+            let (entry, save) = match event {
+                ItemEvent::Clicked(entry) => (entry, false),
+                ItemEvent::Activated(entry) => (entry, true),
+            };
+            *self.name.borrow_mut() = (self.request.shown_name)(entry.name());
+            self.note.borrow_mut().clear();
+            *self.mode.borrow_mut() = Mode::Normal;
+            self.changed();
+            if save {
+                self.save();
             }
         }
     }
@@ -206,13 +304,18 @@ impl SavePage {
             .on_change({
                 let core = Rc::clone(&core);
                 move |_| {
-                    if !core.note.borrow().is_empty() {
+                    // A new name is a new save: the note and any question were about the old.
+                    let asking = matches!(*core.mode.borrow(), Mode::Ask { .. });
+                    if asking {
+                        *core.mode.borrow_mut() = Mode::Normal;
+                    }
+                    if asking || !core.note.borrow().is_empty() {
                         core.note.borrow_mut().clear();
                         core.changed();
                     }
                 }
             })
-            .on_enter(move |_| saving.save(false))
+            .on_enter(move |_| saving.save())
             .with_name(SAVE_NAME_FIELD);
         Self {
             core,
@@ -253,7 +356,7 @@ impl SavePage {
                 });
                 let cancel = self.button(tr("Cancel"), CANCEL_BUTTON, |c| (c.answers.cancel)());
                 let save = self
-                    .button(tr("Save"), CONFIRM_BUTTON, |c| c.save(false))
+                    .button(tr("Save"), CONFIRM_BUTTON, Core::save)
                     .with_enabled_fn(move || can);
                 let row = FlexRow::new()
                     .with_gap(8.0)
@@ -263,23 +366,24 @@ impl SavePage {
                     .add(Box::new(save.with_default_action()));
                 (note, row)
             }
-            Mode::Replace(file_name) => {
-                let note = format!(
-                    "{}: {}",
-                    tr("Confirm Save As"),
-                    tr("\"{0}\" already exists.\nDo you want to replace it?")
-                        .replace("{0}", file_name)
-                );
-                let back = self.button(tr("Cancel"), CANCEL_BUTTON, |c| {
-                    *c.mode.borrow_mut() = Mode::Normal;
-                    c.changed();
-                });
-                let replace = self.button(tr("Replace"), CONFIRM_BUTTON, |c| c.save(true));
-                let row = FlexRow::new()
+            Mode::Ask { question, .. } => {
+                let note = format!("{}: {}", question.title, question.message);
+                let back = self
+                    .button(question.cancel_label.clone(), CANCEL_BUTTON, Core::back)
+                    .with_cancel_action();
+                let mut row = FlexRow::new()
                     .with_gap(8.0)
-                    .add_flex(Box::new(SizedBox::new().with_height(1.0)), 1.0)
-                    .add(Box::new(back.with_cancel_action()))
-                    .add(Box::new(replace.with_default_action()));
+                    .add_flex(Box::new(SizedBox::new().with_height(1.0)), 1.0);
+                row = match &question.confirm_label {
+                    Some(label) => {
+                        let confirm =
+                            self.button(label.clone(), CONFIRM_BUTTON, Core::confirm_question);
+                        row.add(Box::new(back))
+                            .add(Box::new(confirm.with_default_action()))
+                    }
+                    // Going back is all there is: Enter does it too.
+                    None => row.add(Box::new(back.with_default_action())),
+                };
                 (note, row)
             }
             Mode::NewFolder => {
@@ -289,10 +393,7 @@ impl SavePage {
                     .with_placeholder(tr("Folder Name"))
                     .on_enter(move |_| creating.create_folder())
                     .with_name(FOLDER_NAME_FIELD);
-                let back = self.button(tr("Cancel"), CANCEL_BUTTON, |c| {
-                    *c.mode.borrow_mut() = Mode::Normal;
-                    c.changed();
-                });
+                let back = self.button(tr("Cancel"), CANCEL_BUTTON, Core::back);
                 let create = self.button(tr("Create"), CONFIRM_BUTTON, Core::create_folder);
                 let row = FlexRow::new()
                     .with_gap(8.0)
@@ -334,6 +435,7 @@ impl Widget for SavePage {
     /// 16 of padding; the heading at the top; the label, field, note and buttons at the bottom;
     /// the browser between, 8 apart.
     fn layout(&mut self, available: Size) -> Size {
+        self.core.apply_item_events();
         let key = (
             self.core.state.borrow().navigation(),
             self.core.changes.get(),
@@ -360,14 +462,24 @@ impl Widget for SavePage {
         available
     }
     fn paint(&mut self, _ctx: &mut dyn DrawCtx) {}
-    fn on_event(&mut self, _event: &Event) -> EventResult {
+    /// F5 lists the folder again, natively (see the module header); the key goes on.
+    fn on_event(&mut self, event: &Event) -> EventResult {
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Event::KeyDown {
+            key: agg_gui::Key::F(5),
+            ..
+        } = event
+        {
+            self.core.state.borrow_mut().relist();
+        }
+        let _ = event;
         EventResult::Ignored
     }
     fn properties(&self) -> Vec<(&'static str, String)> {
         let state = self.core.state.borrow();
         let mode = match &*self.core.mode.borrow() {
             Mode::Normal => "normal".to_string(),
-            Mode::Replace(name) => format!("replace {name}"),
+            Mode::Ask { file_name, .. } => format!("replace {file_name}"),
             Mode::NewFolder => "new folder".to_string(),
         };
         vec![

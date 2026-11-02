@@ -5,8 +5,10 @@
 //! and the sorting button) over a list of a browser of its own, built again when the folder
 //! changes (the list, and its scroll, kept). [`dialog_options`] are such a browser's options:
 //! the list alone, 75-unit pictures, read-only folders hidden (nothing can go in them), item
-//! double clicks kept for the page (they do nothing here), and a folder opened by a double click
-//! or one tap of a finger. The mouse's back button goes up a folder. A page given a location key
+//! clicks and double clicks kept for the page hosting it, and a folder opened by a double click
+//! or one tap of a finger. A hosting page that acts on the item clicks (Save fills its name,
+//! Open opens) takes them in its own layout, before laying the browser page out; the browser page
+//! drops any left (the Move page's). The mouse's back button goes up a folder. A page given a location key
 //! ([`BrowserPage::remembering`]) opens where the config's memory says it was last left under
 //! that key and remembers each folder the user moves to, until the page is accepted (its folder
 //! then handed over, never remembered as the page's place).
@@ -146,7 +148,7 @@ impl Widget for BrowserPage {
         &mut self.children
     }
     fn layout(&mut self, available: Size) -> Size {
-        // Item double clicks are the page's, and do nothing here.
+        // Item clicks are the hosting page's; any it left do nothing here.
         let _ = self.state.borrow_mut().take_item_events();
         let navigation = self.state.borrow().navigation();
         if self.built != Some(navigation) {

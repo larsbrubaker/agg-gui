@@ -2,7 +2,8 @@
 //! (`push_search_results`), so the breadcrumbs show them under it, and listed in sections, one per
 //! source. While any part of the search runs a "Searching" line leads the list; each section then
 //! gets a header (its name, and "(n)", "No results" or its error once it is done) over its
-//! results, each section sorted on its own ([`search_listing`]). A rolled-up section keeps its
+//! results, each section sorted on its own ([`search_listing`]; a browser's item filter keeps
+//! only its kinds of results, counted so). A rolled-up section keeps its
 //! header and hides its rows; what is rolled up is remembered by name (ignoring case) for the
 //! session ([`SearchSectionCollapseState`]), so every search and every browser agree.
 //!
@@ -106,6 +107,16 @@ pub fn search_listing(
     results: &SearchResultsFolder,
     sort: SortBehavior,
 ) -> (Vec<ListSlot>, Vec<BrowserEntry>) {
+    listing_kept(results, sort, &|_| true)
+}
+
+/// [`search_listing`] of the results `keep` keeps (a browser's item filter), each section's
+/// count theirs.
+pub(super) fn listing_kept(
+    results: &SearchResultsFolder,
+    sort: SortBehavior,
+    keep: &dyn Fn(&dyn Item) -> bool,
+) -> (Vec<ListSlot>, Vec<BrowserEntry>) {
     let mut slots = Vec::new();
     let mut entries = Vec::new();
     if results.is_searching() {
@@ -117,7 +128,7 @@ pub fn search_listing(
         let mut items: Vec<_> = section
             .items()
             .into_iter()
-            .filter(|item| item.is_visible())
+            .filter(|item| item.is_visible() && keep(item.as_ref()))
             .collect();
         sort_items(&mut items, sort, |item| item.as_ref());
         let collapsed = SearchSectionCollapseState::session(|s| s.is_collapsed(section.name()));
@@ -214,7 +225,7 @@ impl BrowserState {
     /// otherwise one per entry.
     pub fn list_slots(&self) -> Vec<ListSlot> {
         if let Some(results) = self.showing_search_results() {
-            return search_listing(results, self.sort).0;
+            return listing_kept(results, self.sort, &|i| self.keeps_item(i)).0;
         }
         (0..self.entries().len()).map(ListSlot::Entry).collect()
     }

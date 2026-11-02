@@ -224,7 +224,7 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   `BrowserNames::overflow_menu`), opening the open folder's whole ordered menu.
 - `SheetDialogs` and `DialogSheet`: dialogs on agg-gui's `ModalSheet` for an app without its own,
   confirming a change and asking for a name (an empty name accepts nothing), and with
-  `with_browse_root` the Move dialog; they offer no file picker.
+  `with_browse_root` the Move, Save and Open dialogs; they offer no picker of files to add.
 - Delete and Backspace run Remove, with its question, in the list and in the tree (the tree's
   selected folder).
 - `FileBrowser`, the whole browser composed over one `BrowserState`: with
@@ -270,6 +270,29 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   and decides when it can run.
 - `BrowserNames::folders_toolbar` ("Folders Toolbar"); `BottomBorder`, a bar over a one-pixel
   rule.
+- The Save dialog (`save_dialog`): `SavePage` over a `BrowserPage` of its own, asked through
+  `BrowserDialogs::pick_save_target` (`DialogKind::PickSaveTarget`) and answering a `SavePick`
+  (the folder, handed over, the file name and whether it replaces a file). `SaveRequest` says how
+  a typed name becomes the file name (`FileNamer`, `append_extension`) and how a file's name
+  shows (`ShownName`, `without_extension`); `with_extension(".mcx")` sets both. A click on a file
+  fills its name in, a double click saves over it, Create Folder makes and opens a folder, F5
+  lists the folder again (natively), and a file already there asks "Confirm Save As" first; the
+  app's own question (`with_replace_question`, a `ReplaceQuestionHook` handed a `SaveTarget`,
+  answering a `ReplaceQuestion` or a `refusal` with only its going-back button) is asked instead.
+  A folder something still holds saves nothing and says so. `SheetDialogs` shows it, opening
+  where it was last left (`with_save_location_key`).
+- The Open dialog (`open_dialog`), for an app with no system one: `OpenPage`, asked through
+  `BrowserDialogs::pick_open_target` (`DialogKind::PickOpenTarget`) with an `OpenRequest` (title,
+  several files or one, a file filter such as `extension_filter(&[".stl"])`) and answering an
+  `OpenPick` (the files and their folder). Every folder lists, read-only ones too; Open opens the
+  selected files, or a selected folder; a double click opens a file. `SheetDialogs` shows it,
+  opening where it was last left (`with_open_location_key`).
+- `BrowserOptions::item_filter` (`ItemFilter`: the item rows a browser lists, a search's too, a
+  folder's message never hidden) and `BrowserOptions::multi_select` (on by default; off, a press
+  with any keys selects only its row, the band never draws and select all does nothing).
+- `BrowserState::relist`, loading the showing folder again and showing it anew, and
+  `BrowserState::can_hand_over_active_container`, whether `take_active_container` would hand the
+  folder over alone.
 
 ### Changed
 

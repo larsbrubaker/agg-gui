@@ -5,13 +5,40 @@
 //! in a folder does not reload the one behind it. `BrowserState` (`state/mod.rs`) calls `leave`
 //! before the showing folder changes and `listen` (before a new folder's load) or `enter` (for one
 //! already loaded, an ancestor shown again) after.
+//!
+//! A folder that changed behind the browser's back without saying so (a file another program
+//! wrote, in a folder no directory monitor follows) is listed again on the user's ask
+//! (`BrowserState::relist`: F5 in a dialog): it loads again and the list shows it anew; a folder
+//! that loads asynchronously raises its content change once the listing arrives, which shows it
+//! again then.
+//!
+//! A dialog hands the showing folder over to the work it closes on (`take_active_container`);
+//! it asks first whether it can (`can_hand_over_active_container`: below the root, and nothing
+//! else holding the folder), so a folder still held elsewhere stays showing and the user can be
+//! told to try again.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use agg_gui_files::{ContentChangedListener, Folder};
 
-use super::OpenFolder;
+use super::{BrowserState, OpenFolder};
+
+impl BrowserState {
+    /// Loads the showing folder again and shows the list anew (see the module header).
+    pub fn relist(&mut self) {
+        if let Some(showing) = self.path.last() {
+            showing.borrow_mut().load();
+        }
+        self.redisplay();
+    }
+
+    /// Whether `take_active_container` would hand over the showing folder alone: it is below the
+    /// root and nothing else (a hook given the path) still holds it.
+    pub fn can_hand_over_active_container(&self) -> bool {
+        self.path.len() >= 2 && self.path.last().is_some_and(|f| Rc::strong_count(f) == 1)
+    }
+}
 
 /// The counters the content-changed listener shares with the browser.
 #[derive(Default)]

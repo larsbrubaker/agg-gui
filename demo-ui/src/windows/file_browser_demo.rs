@@ -6,17 +6,24 @@
 //! each part shows a picture made from its name (a coloured tile with the name's first letter's
 //! shape stood in by a disc), so the list's icon views have something to show. The tree's rows
 //! are folders through `DefaultLook`'s icons. "Save As..." opens the Save dialog and writes a
-//! generated note into the folder and name picked. Work runs on the browser's default
-//! `LocalSpawner`. Not an egui demo: egui has no file browser.
+//! generated note into the folder and name picked (a click on a note fills its name in); "Open..."
+//! opens the Open dialog on the sample's parts (`.stl`, several at once) and names what was
+//! opened beside the buttons. Work runs on the browser's default `LocalSpawner`. Not an egui
+//! demo: egui has no file browser.
 
+use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
 use agg_gui::icon_image::IconImage;
-use agg_gui::{Button, FlexColumn, FlexRow, Font, Size, Stack, Widget};
+use agg_gui::{
+    Button, DrawCtx, Event, EventResult, FlexColumn, FlexRow, Font, Label, Rect, Size, Stack,
+    Widget,
+};
 use agg_gui_file_browser::{
-    append_extension, BrowserConfig, BrowserDialogs, BrowserState, Entry, FileBrowser,
-    ItemPictures, PictureCx, PictureState, SavePick, SaveRequest, SheetDialogs,
+    extension_filter, BrowserConfig, BrowserDialogs, BrowserState, Entry, FileBrowser,
+    ItemPictures, OpenPick, OpenRequest, PictureCx, PictureState, SavePick, SaveRequest,
+    SheetDialogs,
 };
 use agg_gui_files::{
     DynamicFolder, DynamicFolderLink, Folder, MemoryFolder, PlaceId, WritableFolder,
@@ -155,6 +162,77 @@ fn name_picture(name: &str, side: i32) -> Option<IconImage> {
 
 /// The demo's "Save As..." button's name.
 pub const SAVE_AS_BUTTON: &str = "File Browser Demo Save As";
+/// The demo's "Open..." button's name.
+pub const OPEN_BUTTON: &str = "File Browser Demo Open";
+/// The line naming what was opened.
+pub const OPENED_LINE: &str = "File Browser Demo Opened";
+
+/// What the Open dialog answered, as the demo's line says it.
+fn opened_text(pick: &OpenPick) -> String {
+    let names: Vec<&str> = pick.items.iter().map(|i| i.name()).collect();
+    let folder = pick.folder.borrow().name().to_string();
+    format!("Opened {} from {folder}", names.join(", "))
+}
+
+/// A label showing what its shared text says, built again when the text changes.
+struct CellLabel {
+    text: Rc<RefCell<String>>,
+    shown: Option<String>,
+    font: Arc<Font>,
+    children: Vec<Box<dyn Widget>>,
+    bounds: Rect,
+}
+
+impl CellLabel {
+    fn new(text: Rc<RefCell<String>>, font: Arc<Font>) -> Self {
+        Self {
+            text,
+            shown: None,
+            font,
+            children: Vec::new(),
+            bounds: Rect::default(),
+        }
+    }
+}
+
+impl Widget for CellLabel {
+    fn type_name(&self) -> &'static str {
+        "CellLabel"
+    }
+    fn id(&self) -> Option<&str> {
+        Some(OPENED_LINE)
+    }
+    fn bounds(&self) -> Rect {
+        self.bounds
+    }
+    fn set_bounds(&mut self, bounds: Rect) {
+        self.bounds = bounds;
+    }
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.children
+    }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+        &mut self.children
+    }
+    fn layout(&mut self, available: Size) -> Size {
+        let text = self.text.borrow().clone();
+        if self.shown.as_ref() != Some(&text) {
+            let label = Label::new(text.clone(), Arc::clone(&self.font));
+            self.children = vec![Box::new(label)];
+            self.shown = Some(text);
+        }
+        let size = self.children[0].layout(available);
+        self.children[0].set_bounds(Rect::new(0.0, 0.0, size.width, size.height));
+        size
+    }
+    fn paint(&mut self, _ctx: &mut dyn DrawCtx) {}
+    fn on_event(&mut self, _event: &Event) -> EventResult {
+        EventResult::Ignored
+    }
+    fn properties(&self) -> Vec<(&'static str, String)> {
+        vec![("text", self.text.borrow().clone())]
+    }
+}
 
 /// Writes a generated note into the folder the Save dialog picked (a memory folder), replacing a
 /// file of that name when the user agreed.
@@ -198,8 +276,7 @@ pub fn file_browser_demo(font: Arc<Font>) -> Box<dyn Widget> {
         .on_click(move || {
             let saves = Rc::clone(&saves);
             saves.set(saves.get() + 1);
-            let request = SaveRequest::new(format!("note {}", saves.get()))
-                .with_namer(append_extension(".txt"));
+            let request = SaveRequest::new(format!("note {}", saves.get())).with_extension(".txt");
             asking.pick_save_target(
                 request,
                 Box::new(move |pick| {
@@ -210,11 +287,33 @@ pub fn file_browser_demo(font: Arc<Font>) -> Box<dyn Widget> {
             );
         })
         .with_name(SAVE_AS_BUTTON);
+    let opened = Rc::new(RefCell::new(String::new()));
+    let (asking, showing) = (dialogs.clone(), Rc::clone(&opened));
+    let open = Button::new("Open...", Arc::clone(&font))
+        .on_click(move || {
+            let showing = Rc::clone(&showing);
+            let request = OpenRequest::new()
+                .with_multiple(true)
+                .with_filter(extension_filter(&[".stl"]));
+            asking.pick_open_target(
+                request,
+                Box::new(move |pick| {
+                    if let Some(pick) = pick {
+                        *showing.borrow_mut() = opened_text(&pick);
+                    }
+                }),
+            );
+        })
+        .with_name(OPEN_BUTTON);
+    let buttons = FlexRow::new()
+        .with_padding(4.0)
+        .with_gap(8.0)
+        .add(Box::new(save_as))
+        .add(Box::new(open))
+        .add(Box::new(CellLabel::new(opened, Arc::clone(&font))));
     let column = FlexColumn::new()
         .with_gap(4.0)
-        .add(Box::new(
-            FlexRow::new().with_padding(4.0).add(Box::new(save_as)),
-        ))
+        .add(Box::new(buttons))
         .add_flex(Box::new(browser), 1.0);
     Box::new(
         Stack::new()
@@ -337,6 +436,38 @@ mod tests {
             &mut out,
         );
         assert!(!out.is_empty(), "the note is listed");
+    }
+
+    #[test]
+    fn open_names_the_parts_picked() {
+        agg_gui::set_device_scale(1.0);
+        let font = Arc::new(
+            Font::from_slice(agg_gui::fonts::NOTO_SANS_REGULAR).expect("bundled font loads"),
+        );
+        let (w, h) = (720.0, 440.0);
+        let mut app = App::new(file_browser_demo(font));
+        let click = |app: &mut App, id: &str, clicks: u32| {
+            app.layout(Size::new(w, h));
+            app.layout(Size::new(w, h));
+            let mut found = Vec::new();
+            collect(app.root(), id, Point::new(0.0, 0.0), &mut found);
+            let r = *found.last().unwrap_or_else(|| panic!("no {id}"));
+            let (x, y) = (r.x + r.width / 2.0, h - (r.y + r.height / 2.0));
+            app.on_mouse_move(x, y);
+            for n in 1..=clicks {
+                app.on_mouse_down_clicks(x, y, MouseButton::Left, Modifiers::default(), n);
+                app.on_mouse_up(x, y, MouseButton::Left, Modifiers::default());
+                app.layout(Size::new(w, h));
+            }
+            app.layout(Size::new(w, h));
+        };
+        click(&mut app, OPEN_BUTTON, 1);
+        click(&mut app, "Examples Row Item Collection", 2);
+        click(&mut app, "Row Item vase.stl", 2);
+        assert_eq!(
+            property(&app, OPENED_LINE, "text"),
+            "Opened vase.stl from Examples"
+        );
     }
 
     /// Every widget named `id`, in paint order (the dialog's last).

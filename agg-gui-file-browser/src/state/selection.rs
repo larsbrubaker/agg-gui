@@ -95,7 +95,7 @@ impl BrowserState {
         if self.selected.iter().any(|s| s.same_row(&entry)) {
             return;
         }
-        if !ctrl {
+        if !ctrl || !self.multi_select {
             self.selected.clear();
         }
         self.selected.push(entry);

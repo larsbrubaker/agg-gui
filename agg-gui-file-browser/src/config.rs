@@ -17,7 +17,7 @@
 use std::fmt;
 use std::rc::Rc;
 
-use agg_gui_files::{FolderLink, Spawner};
+use agg_gui_files::{FolderLink, Item, Spawner};
 
 use crate::actions::{BrowserActions, NoActions};
 use crate::dialogs::{BrowserDialogs, NoDialogs};
@@ -36,6 +36,10 @@ pub type ErrorReport = Rc<dyn Fn(&str)>;
 
 /// Which folder rows a browser lists (a Move dialog lists only folders that take items).
 pub type FolderFilter = Rc<dyn Fn(&dyn FolderLink) -> bool>;
+
+/// Which item rows a browser lists (an Open dialog lists only the files it opens). A folder's
+/// message ("Loading...", why it couldn't be listed) is never filtered out.
+pub type ItemFilter = Rc<dyn Fn(&dyn Item) -> bool>;
 
 /// Whether a browser shows a folder tree beside its list.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -74,6 +78,12 @@ pub struct BrowserOptions {
     pub show_folders: bool,
     /// The folder rows the list shows, or `None` for all of them.
     pub folder_filter: Option<FolderFilter>,
+    /// The item rows the list shows, its own and a search's, or `None` for all of them.
+    pub item_filter: Option<ItemFilter>,
+    /// Whether the user can select several rows (Shift ranges, Control or Command toggles, the
+    /// rubber band, select all); without it a press selects only its row (an Open dialog
+    /// picking one file).
+    pub multi_select: bool,
     /// The picture side the list opens on when a folder has no remembered view (icons of 100;
     /// a dialog may ask for 75).
     pub thumb_size: i32,
@@ -88,6 +98,8 @@ impl Default for BrowserOptions {
             finger_tap_opens_folders: false,
             show_folders: true,
             folder_filter: None,
+            item_filter: None,
+            multi_select: true,
             thumb_size: ViewMode::Icons.thumb_size(),
         }
     }
@@ -102,6 +114,8 @@ impl fmt::Debug for BrowserOptions {
             .field("finger_tap_opens_folders", &self.finger_tap_opens_folders)
             .field("show_folders", &self.show_folders)
             .field("folder_filter", &self.folder_filter.is_some())
+            .field("item_filter", &self.item_filter.is_some())
+            .field("multi_select", &self.multi_select)
             .field("thumb_size", &self.thumb_size)
             .finish()
     }

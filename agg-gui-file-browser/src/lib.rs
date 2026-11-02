@@ -38,9 +38,10 @@
 //!   hook that calls back into the browser never meets a held borrow; [`BrowserState`]'s public
 //!   ways to activate a row take the shared state and run the hooks once its borrow has ended.
 //!   [`BrowserMemory::remember_location`] is handed the open path's shared folders, the state not
-//!   borrowed. A drop's `PlaceRules` and `OutsideDrops` calls run with the state let go too. The one exception: the memory's `view`/`set_view` and the error report may run
-//!   while the state is borrowed, since they are handed only names or a message and no way to
-//!   reach the browser.
+//!   borrowed. A drop's `PlaceRules` and `OutsideDrops` calls run with the state let go too. The
+//!   one exception: the memory's `view`/`set_view`, the error report and the options' folder and
+//!   item filters may run while the state is borrowed, since they are handed only names, a
+//!   message or a row, and no way to reach the browser.
 //! - **Tracing is the app's.** The browser's trace lines go through [`trace()`] to the tracer the
 //!   app installed ([`set_tracer`]), built only while it is on.
 //!
@@ -53,7 +54,8 @@
 //! recorded for Undo and asking through the dialogs), `sheet_dialogs` ([`SheetDialogs`] and the
 //! [`DialogSheet`] they show on), `move_dialog` ([`MovePage`] over a [`BrowserPage`] of its own,
 //! and [`move_verdict`]: where a Move can go and whether it moves or copies), `save_dialog`
-//! ([`SavePage`]: where a save goes and its name; the app writes the file), `disk_monitor`
+//! ([`SavePage`]: where a save goes and its name; the app writes the file), `open_dialog`
+//! ([`OpenPage`]: the files to open, for an app with no system Open dialog), `disk_monitor`
 //! (feature `disk`: the directory monitor that wakes the UI), `local_spawner` (the
 //! spawner for apps without an executor), `trace` (the opt-in trace through the app's tracer);
 //! `drag` ([`DropManager`], the drag of the browser's items onto its folders: targets recorded
@@ -98,6 +100,7 @@ pub mod memory;
 pub mod menus;
 pub mod move_dialog;
 pub mod nav;
+pub mod open_dialog;
 pub mod own_pictures;
 pub mod pictures;
 pub mod places;
@@ -120,12 +123,13 @@ pub use browser::{
 pub use builtins::run_builtin;
 pub use config::{
     BrowserConfig, BrowserConfigBuilder, BrowserLayout, BrowserOptions, DoubleClickTarget,
-    ErrorReport, FolderFilter,
+    ErrorReport, FolderFilter, ItemFilter,
 };
 pub use dialogs::{
-    append_extension, BrowserDialogs, Confirmation, CopiesTo, DialogKind, FileNamer, MovePick,
-    MoveRequest, NameRequest, NoDialogs, PickedFiles, PickedMoveTarget, PickedSaveTarget, SavePick,
-    SaveRequest,
+    append_extension, extension_filter, without_extension, BrowserDialogs, Confirmation, CopiesTo,
+    DialogKind, FileNamer, MovePick, MoveRequest, NameRequest, NoDialogs, OpenPick, OpenRequest,
+    PickedFiles, PickedMoveTarget, PickedOpenTarget, PickedSaveTarget, ReplaceQuestion,
+    ReplaceQuestionHook, SavePick, SaveRequest, SaveTarget, ShownName,
 };
 #[cfg(feature = "disk")]
 pub use disk_monitor::{register_directory_monitor, WakingDirectoryMonitor};
@@ -175,6 +179,7 @@ pub use nav::menu_button::{NavMenuButton, NavMenuRow, NavMenuRows};
 pub use nav::overflow::OverflowButton;
 pub use nav::provider_message::{ProviderMessageBar, PROVIDER_MESSAGE_SIZE};
 pub use nav::splitter::{BrowserSplitter, DEFAULT_TREE_WIDTH, MIN_TREE_WIDTH, SPLITTER_WIDTH};
+pub use open_dialog::{OpenAnswers, OpenPage, OPEN_SUMMARY, OPEN_WINDOW};
 pub use own_pictures::{OwnPictures, KEPT_PICTURES};
 pub use pictures::{
     FolderPicture, ItemPictures, NoPictures, OverlayFrame, PictureCx, PictureKind, PictureState,
@@ -206,6 +211,8 @@ pub const ENGLISH_TEXTS: &[&str] = &[
     "Cancel",
     "Choose a folder you can add to.",
     "Choose a folder you can save in.",
+    "Choose a file to open.",
+    "Choose files to open.",
     "Clear",
     "Click to go back",
     "Confirm Save As",
@@ -234,6 +241,7 @@ pub const ENGLISH_TEXTS: &[&str] = &[
     "Moved",
     "Name",
     "No results",
+    "Open",
     "Open File Location",
     "Redo",
     "Redone",
@@ -250,6 +258,7 @@ pub const ENGLISH_TEXTS: &[&str] = &[
     "Show Folders",
     "Sorting",
     "The folder was busy, so nothing moved. Try again.",
+    "The folder was busy, so nothing was saved. Try again.",
     "The selected items will go to the Recycle Bin, where you can restore them.",
     "The selected items will go to the Trash, where you can restore them.",
     "These items are already in {0}.",

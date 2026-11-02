@@ -4,7 +4,11 @@
 //! selected items keeps them all, so dragging carries the whole selection; only a release without
 //! a drag collapses the selection to that item. A Control (Command) press on a selected item takes
 //! it out on release, for the same reason. The band is kept in the list content's own
-//! coordinates, so it stays on the items it started over while the list scrolls under it. Part of
+//! coordinates, so it stays on the items it started over while the list scrolls under it. A
+//! browser whose options turn `multi_select` off (an Open dialog picking one file) keeps one row
+//! at most: Shift, Control and Command presses act as plain ones, Shift with an arrow moves
+//! alone, the band never draws (a press on empty space still clears) and select all does
+//! nothing. Part of
 //! `state/mod.rs`, whose fields it reads; the list widget decides where the band is drawn and
 //! which rows it covers.
 use std::cell::RefCell;
@@ -143,6 +147,7 @@ impl BrowserState {
         let Some(entry) = self.listed_entry(index) else {
             return false;
         };
+        let modifiers = self.selection_modifiers(modifiers);
         let toggle = modifiers.ctrl || modifiers.meta;
         // A list that activates on a tap, and a finger's tap on a folder that opens it, act on
         // the release (`state/activate.rs`), so the second press of a double tap does not
@@ -216,8 +221,30 @@ impl BrowserState {
         self.changed();
     }
 
-    /// Selects every row the list shows (Control+A, Command+A on a Mac).
+    /// The keys a press selects with: without `multi_select`, none of those that select several.
+    fn selection_modifiers(&self, modifiers: Modifiers) -> Modifiers {
+        match self.multi_select {
+            true => modifiers,
+            false => Modifiers {
+                shift: false,
+                ctrl: false,
+                meta: false,
+                ..modifiers
+            },
+        }
+    }
+
+    /// Whether several rows can be selected (the options' `multi_select`).
+    pub fn multi_select(&self) -> bool {
+        self.multi_select
+    }
+
+    /// Selects every row the list shows (Control+A, Command+A on a Mac); nothing where only one
+    /// row can be selected.
     pub fn select_all(&mut self) {
+        if !self.multi_select {
+            return;
+        }
         self.selected = self.listing();
         self.changed();
     }
@@ -252,7 +279,7 @@ impl BrowserState {
         let Some(entry) = self.listed_entry(index) else {
             return;
         };
-        if extend {
+        if extend && self.multi_select {
             self.selected = self.range_to(index);
         } else {
             self.selected = vec![entry.clone()];
@@ -294,6 +321,9 @@ impl BrowserState {
     /// rectangle once it has moved far enough to draw, which the caller turns into the rows it
     /// covers (`select_band`).
     pub fn drag_band(&mut self, to: Point) -> Option<Rect> {
+        if !self.multi_select {
+            return None;
+        }
         let band = self.gesture.band.as_mut()?;
         band.end = to;
         let (dx, dy) = (to.x - band.start.x, to.y - band.start.y);

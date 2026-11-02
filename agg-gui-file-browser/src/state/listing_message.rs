@@ -5,7 +5,9 @@
 //! ([`ListingMessage`], `BrowserState::listing_message`) and lists no rows for it
 //! (`mark_listed`), so Select All and the arrow keys find nothing either. A missing-file row (a
 //! file that could not be opened) stays a row, and search results never count: their sections
-//! say where each result came from. How the message is drawn is the list widget's.
+//! say where each result came from. How the message is drawn is the list widget's. A message is
+//! the folder's state rather than a file, so the options' item filter never hides it
+//! (`keeps_item`).
 
 use agg_gui_files::{Item, ListingFailure, MessageItem};
 
@@ -46,6 +48,13 @@ pub fn is_only_a_message(entries: &[BrowserEntry]) -> bool {
 }
 
 impl BrowserState {
+    /// Whether the list shows `item`: a folder's message always, anything else when the options'
+    /// item filter (if any) keeps it.
+    pub(super) fn keeps_item(&self, item: &dyn Item) -> bool {
+        let message = item.as_any().is_some_and(|a| a.is::<MessageItem>());
+        message || self.item_filter.as_ref().is_none_or(|keep| keep(item))
+    }
+
     /// The message the showing folder lists in place of its contents, if that is all it lists;
     /// a refusal for the sign-in says so (`sign_in`). Never for search results.
     pub fn listing_message(&self) -> Option<ListingMessage> {

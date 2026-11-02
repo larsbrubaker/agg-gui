@@ -1,8 +1,8 @@
 //! [`DialogSheet`]: the widget [`SheetDialogs`](super::SheetDialogs) show their questions on (the
 //! rules are in `mod.rs`). It holds nothing while no question shows; at the layout after a
 //! question is asked it builds an agg-gui `ModalSheet` for it (title, text, a name field for a
-//! name, Cancel and the confirming button; for a Move, the Move page over a browser of its own
-//! opened over the dialogs' move root), and drops it once the question is answered.
+//! name, Cancel and the confirming button; for a Move, Save or Open, its page over a browser of
+//! its own opened over the dialogs' root), and drops it once the question is answered.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -16,10 +16,11 @@ use agg_gui::{
 };
 use agg_gui_files::tr;
 
-use super::{answer_move, answer_save, Question, Shared};
-use crate::config::BrowserConfig;
+use super::{answer_move, answer_open, answer_save, Question, Shared};
+use crate::config::{BrowserConfig, BrowserOptions};
 use crate::look::{BrowserNames, DefaultLook};
 use crate::move_dialog::{dialog_options, MoveAnswers, MovePage};
+use crate::open_dialog::{OpenAnswers, OpenPage};
 use crate::save_dialog::{SaveAnswers, SavePage};
 use crate::state::BrowserState;
 
@@ -141,6 +142,10 @@ impl DialogSheet {
                 panel = MOVE_PANEL;
                 self.save_page(request.clone(), &showing)
             }
+            Question::PickOpen(request, _) => {
+                panel = MOVE_PANEL;
+                self.open_page(request.clone(), &showing)
+            }
             Question::Confirm(confirmation, _) => {
                 let text = Label::new(confirmation.message.clone(), Arc::clone(&self.font))
                     .with_wrap(true);
@@ -194,7 +199,7 @@ impl DialogSheet {
         request: crate::dialogs::SaveRequest,
         showing: &Showing,
     ) -> Box<dyn Widget> {
-        let Some(state) = self.dialog_browser() else {
+        let Some(state) = self.dialog_browser(|_| {}) else {
             return Box::new(SizedBox::new());
         };
         let key = self.shared.save_location_key.borrow().clone();
@@ -213,12 +218,47 @@ impl DialogSheet {
         ))
     }
 
+    /// The Open page over a new browser of the dialogs' root, listing every folder and the
+    /// request's files, answering through `showing`.
+    fn open_page(
+        &self,
+        request: crate::dialogs::OpenRequest,
+        showing: &Showing,
+    ) -> Box<dyn Widget> {
+        let (filter, multiple) = (request.filter.clone(), request.multiple);
+        let made = self.dialog_browser(move |options| {
+            options.folder_filter = None;
+            options.item_filter = filter;
+            options.multi_select = multiple;
+        });
+        let Some(state) = made else {
+            return Box::new(SizedBox::new());
+        };
+        let key = self.shared.open_location_key.borrow().clone();
+        let (accepting, cancelling) = (showing.clone(), showing.clone());
+        let answers = OpenAnswers {
+            accept: Rc::new(move |pick| answer_open(accepting.take(), pick)),
+            cancel: Rc::new(move || cancelling.cancel()),
+        };
+        let font = Arc::clone(&self.font);
+        Box::new(OpenPage::new(
+            &state,
+            request,
+            answers,
+            font,
+            key.as_deref(),
+        ))
+    }
+
     /// A new browser for a dialog: over the dialogs' root, in the app's config or the default
-    /// dialog one.
-    fn dialog_browser(&self) -> Option<Rc<RefCell<BrowserState>>> {
+    /// dialog one, its options changed by `adjust` (the Open dialog's filters).
+    fn dialog_browser(
+        &self,
+        adjust: impl FnOnce(&mut BrowserOptions),
+    ) -> Option<Rc<RefCell<BrowserState>>> {
         let root = self.shared.browse_root.borrow().clone()?;
         let made = self.shared.browse_config.borrow().clone();
-        let config = match made {
+        let mut config = match made {
             Some(make) => make(),
             None => {
                 // The page's view and sorting buttons are named apart from a browser's behind it.
@@ -233,6 +273,7 @@ impl DialogSheet {
                     .build()
             }
         };
+        adjust(&mut config.options);
         Some(BrowserState::new(root(), config))
     }
 
@@ -242,7 +283,7 @@ impl DialogSheet {
         request: crate::dialogs::MoveRequest,
         showing: &Showing,
     ) -> Box<dyn Widget> {
-        let Some(state) = self.dialog_browser() else {
+        let Some(state) = self.dialog_browser(|_| {}) else {
             return Box::new(SizedBox::new());
         };
         let key = self.shared.move_location_key.borrow().clone();

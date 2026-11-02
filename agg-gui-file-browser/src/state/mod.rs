@@ -23,7 +23,8 @@
 //! clicks, and which listing a row's index means), `listing_message` (a folder listing only a
 //! message), `gesture` (Shift ranges, the rubber band, keeping a multi-selection on a press, the
 //! keyboard's moves), `search` (search results in sections), `activate` (double clicks and taps, the activation queue `run_hooks`
-//! drains, the config, the report and the app slot) and `active_watch`.
+//! drains, the config, the report and the app slot) and `active_watch` (the hold on the
+//! showing folder: listening, relisting on the user's ask, handing it over).
 //!
 //! No hook runs while the state is borrowed (the crate header's rule): the public ways to
 //! activate a row run `run_hooks` once their borrow has ended, and `remember_location` hands the
@@ -40,7 +41,7 @@ use agg_gui_files::{
 };
 
 use crate::actions::Activation;
-use crate::config::{BrowserConfig, DoubleClickTarget, FolderFilter};
+use crate::config::{BrowserConfig, DoubleClickTarget, FolderFilter, ItemFilter};
 use crate::entry::{BrowserRef, Entry};
 use crate::list::menu_button::MenuButtonState;
 use crate::list::press::ItemPress;
@@ -119,6 +120,10 @@ pub struct BrowserState {
     /// Bumped by each write (`after_write`), so a folder tree lists again.
     writes: u64,
     container_filter: Option<FolderFilter>,
+    /// The options' item filter (`listing_message.rs`'s `keeps_item` applies it).
+    item_filter: Option<ItemFilter>,
+    /// Whether several rows can be selected (`state/gesture.rs`).
+    multi_select: bool,
     /// The clicks and double clicks a host hears (`DoubleClickTarget::Host`), else `None`.
     item_events: Option<Vec<ItemEvent>>,
     config: BrowserConfig,
@@ -183,6 +188,8 @@ impl BrowserState {
             temporary_selection: None,
             writes: 0,
             container_filter: options.folder_filter,
+            item_filter: options.item_filter,
+            multi_select: options.multi_select,
             item_events: (options.double_click == DoubleClickTarget::Host).then(Vec::new),
             config,
             app: Box::new(app),
@@ -353,10 +360,11 @@ impl BrowserState {
     }
 
     /// The showing folder's rows: its folders (unless "Show Folders" is off, and those the
-    /// options' folder filter keeps), then its items, the visible ones only, each group sorted.
+    /// options' folder filter keeps), then its items (those the item filter keeps), the visible
+    /// ones only, each group sorted.
     pub fn entries(&self) -> Vec<BrowserEntry> {
         if let Some(results) = self.showing_search_results() {
-            return search_listing(results, self.sort).1;
+            return search::listing_kept(results, self.sort, &|i| self.keeps_item(i)).1;
         }
         let Some(folder) = self.active_container() else {
             return Vec::new();
@@ -375,7 +383,7 @@ impl BrowserState {
         let mut items: Vec<_> = folder
             .items()
             .into_iter()
-            .filter(|item| item.is_visible())
+            .filter(|item| item.is_visible() && self.keeps_item(item.as_ref()))
             .collect();
         agg_gui_files::sort_items(&mut items, self.sort, |item| item.as_ref());
         let folders = folders.into_iter().map(BrowserEntry::Container);

@@ -1,8 +1,10 @@
 //! The Save dialog on `SheetDialogs` over folders in memory, through agg-gui's `App` with real
 //! pointer and key events: a name typed and saved answers the folder and the file name (the
 //! app's extension added); a name already there asks to replace it, and Cancel keeps the dialog
-//! open; Create Folder makes a folder and opens it; read-only folders are not offered; and the
-//! dialog opens where it was last left.
+//! open; Create Folder makes a folder and opens it; read-only folders are not offered; the
+//! dialog opens where it was last left; a click on a file fills in its name and a double click
+//! saves over it; the app's own question is asked before a save; F5 lists a folder changed behind
+//! the dialog's back; and a folder something still holds saves nothing and says so.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -10,12 +12,13 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use agg_gui::text::Font;
-use agg_gui::{App, Modifiers, MouseButton, Point, Rect, Size, Stack, Widget};
+use agg_gui::{App, Key, Modifiers, MouseButton, Point, Rect, Size, Stack, Widget};
 use agg_gui_file_browser::{
     append_extension, dialog_options, run_ready_local_tasks, BrowserConfig, BrowserDialogs,
-    BrowserMemory, LocationFuture, OpenFolder, SavePick, SaveRequest, SheetDialogs,
+    BrowserMemory, LocationFuture, OpenFolder, ReplaceQuestion, SavePick, SaveRequest,
+    SheetDialogs,
 };
-use agg_gui_files::{DynamicFolder, DynamicFolderLink, Folder, MemoryFolder};
+use agg_gui_files::{DynamicFolder, DynamicFolderLink, Folder, FolderLink, Item, MemoryFolder};
 
 const WIDTH: f64 = 800.0;
 const HEIGHT: f64 = 600.0;
@@ -100,10 +103,19 @@ struct Fixture {
 }
 
 fn fixture(sample: &Sample, memory: Option<Rc<Remembered>>) -> Fixture {
-    agg_gui::set_device_scale(1.0);
     let root_sample = sample.clone();
+    let memory = memory.map(|m| m as Rc<dyn BrowserMemory>);
+    fixture_over(move || root_sample.root(), memory)
+}
+
+/// The dialogs browsing the root `root` makes, remembering through `memory` when given.
+fn fixture_over(
+    root: impl Fn() -> Box<dyn Folder> + 'static,
+    memory: Option<Rc<dyn BrowserMemory>>,
+) -> Fixture {
+    agg_gui::set_device_scale(1.0);
     let mut dialogs = SheetDialogs::new()
-        .with_browse_root(move || root_sample.root())
+        .with_browse_root(root)
         .with_save_location_key("SaveAsLastBrowsedPath");
     if let Some(memory) = memory {
         dialogs = dialogs.with_browse_config(move || {
@@ -130,9 +142,17 @@ fn layout(app: &mut App) {
 
 /// Asks to save `name`, with ".txt" added.
 fn open_save(f: &mut Fixture, name: &str) {
+    open_request(
+        f,
+        SaveRequest::new(name).with_namer(append_extension(".txt")),
+    );
+}
+
+/// Asks `request`.
+fn open_request(f: &mut Fixture, request: SaveRequest) {
     let picked = Rc::clone(&f.picked);
     f.dialogs.pick_save_target(
-        SaveRequest::new(name).with_namer(append_extension(".txt")),
+        request,
         Box::new(move |pick| *picked.borrow_mut() = Some(pick)),
     );
     layout(&mut f.app);
@@ -292,4 +312,215 @@ fn the_dialog_opens_where_it_was_left() {
     );
     open_save(&mut f, "notes");
     assert_eq!(dialog_property(&f.app, "bread_crumb_trail"), "Top/Designs");
+}
+
+/// The text of the dialog's note.
+fn note(f: &Fixture) -> String {
+    let (note, _) = in_dialog(&f.app, "Save As Note").expect("the note");
+    note.properties()
+        .into_iter()
+        .find(|(k, _)| *k == "text")
+        .map(|(_, v)| v)
+        .unwrap_or_default()
+}
+
+#[test]
+fn a_click_on_a_file_fills_in_its_name_and_a_double_click_saves_over_it() {
+    let sample = Sample::new();
+    let mut f = fixture(&sample, None);
+    open_request(&mut f, SaveRequest::new("notes").with_extension(".txt"));
+    click(&mut f, "Designs Row Item Collection", 2);
+    click(&mut f, "Row Item report.txt", 1);
+    assert_eq!(
+        dialog_property(&f.app, "name"),
+        "report",
+        "the name as the user reads it"
+    );
+    type_into(&mut f, "Save Name Field", "x");
+    click(&mut f, "Row Item report.txt", 2);
+    assert_eq!(dialog_property(&f.app, "question"), "replace report.txt");
+    assert!(
+        note(&f).contains("\"report\" already exists."),
+        "{}",
+        note(&f)
+    );
+    assert!(f.picked.borrow().is_none(), "asked first");
+    click(&mut f, "Browser Dialog Confirm Button", 1);
+    assert_eq!(picked(&f), ("Designs".into(), "report.txt".into(), true));
+}
+
+#[test]
+fn the_apps_question_is_asked_before_a_save_and_a_refusal_only_goes_back() {
+    let sample = Sample::new();
+    let mut f = fixture(&sample, None);
+    let asked = Rc::new(RefCell::new(Vec::<String>::new()));
+    let heard = Rc::clone(&asked);
+    let request = SaveRequest::new("open")
+        .with_extension(".txt")
+        .with_replace_question(Rc::new(move |target| {
+            heard.borrow_mut().push(format!(
+                "{} {} {}",
+                target.folder.name(),
+                target.file_name,
+                target.exists
+            ));
+            match target.file_name {
+                "open.txt" => Some(ReplaceQuestion::new(
+                    "Confirm Save As",
+                    "\"open\" is open in another tab.",
+                    "Replace",
+                )),
+                "saving.txt" => Some(
+                    ReplaceQuestion::refusal("Confirm Save As", "\"saving\" is being saved.")
+                        .with_cancel_label("OK"),
+                ),
+                _ => None,
+            }
+        }));
+    open_request(&mut f, request);
+    click(&mut f, "Designs Row Item Collection", 2);
+    // A refusal offers only its going-back button.
+    type_into(&mut f, "Save Name Field", "saving");
+    click(&mut f, "Browser Dialog Confirm Button", 1);
+    assert_eq!(note(&f), "Confirm Save As: \"saving\" is being saved.");
+    let (back, _) = in_dialog(&f.app, "Browser Dialog Cancel Button").expect("going back");
+    assert!(
+        back.properties().iter().any(|(_, v)| v == "OK"),
+        "{:?}",
+        back.properties()
+    );
+    assert!(in_dialog(&f.app, "Browser Dialog Confirm Button").is_none());
+    click(&mut f, "Browser Dialog Cancel Button", 1);
+    assert_eq!(dialog_property(&f.app, "question"), "normal");
+    // A question about a file not there yet saves once agreed.
+    type_into(&mut f, "Save Name Field", "open");
+    click(&mut f, "Browser Dialog Confirm Button", 1);
+    assert_eq!(
+        note(&f),
+        "Confirm Save As: \"open\" is open in another tab."
+    );
+    click(&mut f, "Browser Dialog Confirm Button", 1);
+    assert_eq!(picked(&f), ("Designs".into(), "open.txt".into(), false));
+    assert_eq!(
+        *asked.borrow(),
+        ["Designs saving.txt false", "Designs open.txt false"]
+    );
+}
+
+#[test]
+fn typing_a_new_name_leaves_the_question() {
+    let sample = Sample::new();
+    let mut f = fixture(&sample, None);
+    open_save(&mut f, "report");
+    click(&mut f, "Designs Row Item Collection", 2);
+    click(&mut f, "Browser Dialog Confirm Button", 1);
+    assert_eq!(dialog_property(&f.app, "question"), "replace report.txt");
+    click(&mut f, "Save Name Field", 1);
+    f.app.on_text_input("s");
+    layout(&mut f.app);
+    assert_eq!(dialog_property(&f.app, "question"), "normal");
+    assert!(f.picked.borrow().is_none(), "nothing saved");
+}
+
+/// A folder listing a snapshot of `source`, taken at each load, that says nothing when `source`
+/// changes: a folder another program writes into.
+struct Snapshot {
+    source: MemoryFolder,
+    items: Vec<Rc<dyn Item>>,
+}
+
+impl Folder for Snapshot {
+    fn id(&self) -> &str {
+        "shared"
+    }
+    fn name(&self) -> &str {
+        "Shared"
+    }
+    fn is_protected(&self) -> bool {
+        true
+    }
+    fn child_containers(&self) -> Vec<Rc<dyn FolderLink>> {
+        Vec::new()
+    }
+    fn items(&self) -> Vec<Rc<dyn Item>> {
+        self.items.clone()
+    }
+    fn load(&mut self) {
+        self.items = self.source.items();
+    }
+}
+
+#[test]
+fn f5_lists_a_folder_changed_behind_the_dialogs_back() {
+    let source = MemoryFolder::new("Shared");
+    let behind = source.clone();
+    let mut f = fixture_over(
+        move || {
+            let source = behind.clone();
+            let mut root = DynamicFolder::new("Top");
+            root.data.child_containers = vec![Rc::new(DynamicFolderLink::new(
+                "Shared",
+                Rc::new(move || {
+                    Box::new(Snapshot {
+                        source: source.clone(),
+                        items: Vec::new(),
+                    }) as Box<dyn Folder>
+                }),
+            ))];
+            Box::new(root)
+        },
+        None,
+    );
+    open_save(&mut f, "notes");
+    click(&mut f, "Shared Row Item Collection", 2);
+    source.add_file("drawing.txt", b"d".to_vec());
+    layout(&mut f.app);
+    assert!(
+        in_dialog(&f.app, "Row Item drawing.txt").is_none(),
+        "not said"
+    );
+    f.app.on_key_down(Key::F(5), Modifiers::default());
+    layout(&mut f.app);
+    assert!(
+        in_dialog(&f.app, "Row Item drawing.txt").is_some(),
+        "listed"
+    );
+}
+
+/// Remembers nothing, but holds on to every folder it is handed: something else holding the
+/// folder the dialog would hand over.
+#[derive(Default)]
+struct Holding {
+    held: RefCell<Vec<OpenFolder>>,
+}
+
+impl BrowserMemory for Holding {
+    fn remember_location(&self, _key: &str, path: &[OpenFolder]) {
+        self.held.borrow_mut().extend(path.iter().cloned());
+    }
+}
+
+#[test]
+fn a_folder_something_still_holds_saves_nothing_and_says_so() {
+    let sample = Sample::new();
+    let root_sample = sample.clone();
+    let holding = Rc::new(Holding::default());
+    let memory = Rc::clone(&holding) as Rc<dyn BrowserMemory>;
+    let mut f = fixture_over(move || root_sample.root(), Some(memory));
+    open_save(&mut f, "notes");
+    click(&mut f, "Designs Row Item Collection", 2);
+    click(&mut f, "Browser Dialog Confirm Button", 1);
+    assert_eq!(
+        note(&f),
+        "The folder was busy, so nothing was saved. Try again."
+    );
+    assert!(f.picked.borrow().is_none(), "nothing saved");
+    assert_eq!(
+        dialog_property(&f.app, "bread_crumb_trail"),
+        "Top/Designs",
+        "the dialog stays in the folder"
+    );
+    holding.held.borrow_mut().clear();
+    click(&mut f, "Browser Dialog Confirm Button", 1);
+    assert_eq!(picked(&f), ("Designs".into(), "notes.txt".into(), false));
 }
