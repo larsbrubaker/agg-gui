@@ -337,6 +337,13 @@ pub trait BrowserLook {
         None
     }
 
+    /// The icon of a folder tree row whose link names no icon key (`micro_icon`), `logical` in
+    /// size in `tint`; `None` (the default) draws no icon there.
+    fn unkeyed_folder_icon(&self, logical: Size, tint: Color) -> Option<IconImage> {
+        let _ = (logical, tint);
+        None
+    }
+
     /// Changes whenever the look's art changes (an app swapping its icon files): a widget that
     /// keeps an image it was given asks again when this differs from what it was built with.
     /// The default never changes.
@@ -421,6 +428,11 @@ impl BrowserLook for DefaultLook {
         if key != BrowserIcon::Folder.key() {
             return None;
         }
+        IconImage::from_svg_data(folder_svg(tint).as_bytes(), logical).ok()
+    }
+
+    /// Every folder row draws a folder, whether or not its link names an icon.
+    fn unkeyed_folder_icon(&self, logical: Size, tint: Color) -> Option<IconImage> {
         IconImage::from_svg_data(folder_svg(tint).as_bytes(), logical).ok()
     }
 

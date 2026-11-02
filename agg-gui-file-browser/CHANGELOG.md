@@ -242,6 +242,8 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   named `BrowserNames::header_markdown`, left out when the folder has none); both forms of
   `FileBrowser` show it.
 - `BrowserList::without_drag_picture`, for a host that draws the drag's picture itself.
+- `BrowserLook::unkeyed_folder_icon`: the icon of a tree row whose link names no icon key
+  (default none); `DefaultLook` answers a folder.
 - `DefaultLook` draws the "folder" icon key (`BrowserIcon::Folder`'s key, a link's
   `micro_icon`) as a folder in the tint asked for, so a tree's rows naming it look like folders.
 - The Move dialog (`move_dialog`): `MovePage` ("Select a new Destination:", a line saying what

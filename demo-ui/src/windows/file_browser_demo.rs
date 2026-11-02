@@ -232,5 +232,14 @@ mod tests {
                 "{id} listed"
             );
         }
+        // Nested rows, whose links name no icon, are folders too.
+        for name in ["Brackets", "Gears"] {
+            let row = format!("{name} Tree Node");
+            assert_eq!(
+                property(&app, &row, "has_icon"),
+                "true",
+                "{row} is a folder"
+            );
+        }
     }
 }

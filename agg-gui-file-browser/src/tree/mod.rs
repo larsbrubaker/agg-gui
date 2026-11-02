@@ -16,7 +16,8 @@
 //!
 //! Everything a row draws comes from the config's look: its style's text, selection fill, accent
 //! and corner radius, the font size, the icon for each link's `micro_icon` key
-//! (`BrowserLook::icon_for_key`, tinted in the accent; no icon where the look has none), and the
+//! (`BrowserLook::icon_for_key`, tinted in the accent; no icon where the look has none; a link
+//! naming no key asks `BrowserLook::unkeyed_folder_icon`), and the
 //! tree's and rows' names (`BrowserNames::tree`, `BrowserNames::tree_row`). The rows are built
 //! again when the model, the browser or the look's art changes.
 //!
@@ -156,9 +157,13 @@ impl BrowserTree {
         let showing = model.showing_row(&levels);
         let mut children: Vec<Box<dyn Widget>> = Vec::with_capacity(model.rows().len());
         for (index, node) in model.rows().iter().enumerate() {
-            let icon = node
-                .micro_icon()
-                .and_then(|key| self.look.icon_for_key(key, icon_size, self.accent));
+            let icon = match node.micro_icon() {
+                Some(key) => self.look.icon_for_key(key, icon_size, self.accent),
+                None if !node.is_placeholder() => {
+                    self.look.unkeyed_folder_icon(icon_size, self.accent)
+                }
+                None => None,
+            };
             let spec = RowSpec {
                 id: names.tree_row_for(node.name()),
                 index,
