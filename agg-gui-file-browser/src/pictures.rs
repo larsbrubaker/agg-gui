@@ -25,6 +25,41 @@ pub enum PictureState {
     Generating,
     /// No picture (or none yet): the look's item or folder icon.
     Default,
+    /// The app's own image for the entry, standing for `kind` (its picture, its generating
+    /// marker, or its item icon) and reported by the row under `name` (its `thumbnail`
+    /// property): an app whose icons depend on the item (a file kind with its own default) or
+    /// whose pictures carry a name of their own (a cache file) answers this. The image is drawn
+    /// centred at its own size, shrunk to fit the square.
+    Shown {
+        /// What to draw.
+        image: IconImage,
+        /// What it stands for.
+        kind: PictureKind,
+        /// What the row reports as its `thumbnail` property.
+        name: String,
+    },
+}
+
+/// What a [`PictureState::Shown`] image stands for, reported as a row's `picture` property.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PictureKind {
+    /// The entry's own picture.
+    Picture,
+    /// A marker that the picture is being made.
+    Generating,
+    /// The entry's icon, standing in for a picture it has none of (or none yet).
+    Item,
+}
+
+impl PictureKind {
+    /// The kind as the row's `picture` property: `picture`, `generating` or `item`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            PictureKind::Picture => "picture",
+            PictureKind::Generating => "generating",
+            PictureKind::Item => "item",
+        }
+    }
 }
 
 /// The open folder's own reading of an item's picture (`Folder::get_thumbnail`), for an item at a

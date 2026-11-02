@@ -14,7 +14,7 @@ use agg_gui::{
 };
 use agg_gui_file_browser::{
     run_ready_local_tasks, BrowserConfig, BrowserList, BrowserState, BrowserTile, Entry,
-    ItemPictures, LocalSpawner, OwnPictures, PictureCx, PictureState, ViewMode,
+    ItemPictures, LocalSpawner, OwnPictures, PictureCx, PictureKind, PictureState, ViewMode,
 };
 use agg_gui_files::{
     Folder, Item, MemoryFolder, Picture, PictureFuture, SearchResultsFolder, Spawner, Thumbnail,
@@ -168,6 +168,9 @@ impl Widget for Marker {
     fn tooltip_text(&self) -> Option<&str> {
         Some("Marked")
     }
+    fn properties(&self) -> Vec<(&'static str, String)> {
+        vec![("marker_enters", self.heard.enters.get().to_string())]
+    }
 }
 
 /// No pictures, a `Marker` over every item.
@@ -272,6 +275,11 @@ fn the_overlay_takes_presses_on_its_own_shape_and_hears_the_tiles_hover() {
         heard.enters.get() >= 1,
         "the tile's hover reaches its overlay"
     );
+    assert_eq!(
+        property(&app, "Row Item gear a.stl", "marker_enters"),
+        heard.enters.get().to_string(),
+        "the tile reports its overlay's properties as its own"
+    );
     let tooltip = widget(&app, "Row Item gear a.stl").0.tooltip_text();
     assert_eq!(
         tooltip,
@@ -356,6 +364,57 @@ fn a_pictures_centre_is_reported_for_tests_of_its_colour() {
     assert_eq!(
         property(&app, "Row Item bracket.stl", "thumbnail_center"),
         "255,0,0,255"
+    );
+}
+
+/// Pictures the app draws and names itself: a part's is its "cache" picture, a folder none.
+struct Named;
+
+impl ItemPictures for Named {
+    fn picture(&self, _cx: &PictureCx<'_>, entry: &Entry, _side: i32) -> PictureState {
+        let blue = Arc::new([0u8, 0, 255, 255].repeat(4));
+        let Some(image) =
+            agg_gui::icon_image::IconImage::from_rgba(blue, 2, 2, Size::new(2.0, 2.0))
+        else {
+            return PictureState::Default;
+        };
+        let (kind, name) = match entry.item().name() {
+            "bracket.stl" => (PictureKind::Picture, "cache/bracket.png"),
+            "gear a.stl" => (PictureKind::Generating, "building.png"),
+            _ => (PictureKind::Item, "own-default.png"),
+        };
+        PictureState::Shown {
+            image,
+            kind,
+            name: name.to_string(),
+        }
+    }
+}
+
+#[test]
+fn an_apps_own_image_draws_with_the_kind_and_name_it_gives() {
+    let config = BrowserConfig::builder().pictures(Rc::new(Named)).build();
+    let (app, _) = list_app(Box::new(home()), config, ViewMode::Rows);
+    let shown = |name: &str| {
+        let id = format!("Row Item {name}");
+        (
+            property(&app, &id, "picture"),
+            property(&app, &id, "thumbnail"),
+            property(&app, &id, "thumbnail_center"),
+        )
+    };
+    let blue = "0,0,255,255".to_string();
+    assert_eq!(
+        shown("bracket.stl"),
+        ("picture".into(), "cache/bracket.png".into(), blue.clone())
+    );
+    assert_eq!(
+        shown("gear a.stl"),
+        ("generating".into(), "building.png".into(), blue.clone())
+    );
+    assert_eq!(
+        shown("gear b.stl"),
+        ("item".into(), "own-default.png".into(), blue)
     );
 }
 

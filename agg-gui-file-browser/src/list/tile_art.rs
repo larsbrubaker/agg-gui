@@ -1,9 +1,10 @@
 //! What a row or tile shows where its picture goes ([`TileArt`]), worked out once when the row is
-//! built: a folder row shows the link's own tile image (`FolderLink::tile_icon`, resolved by
-//! `BrowserLook::icon_for_key`), else the look's folder tile (`BrowserLook::folder_tile`), else
-//! the folder icon in the accent with the link's micro icon (`FolderLink::micro_icon`) over it;
+//! built: a folder row shows the look's folder tile (`BrowserLook::folder_tile`, which sees the
+//! link and so may draw its own tile image its own way), else the link's own tile image
+//! (`FolderLink::tile_icon`, resolved by `BrowserLook::icon_for_key`), else the folder icon in the accent with the link's micro icon (`FolderLink::micro_icon`) over it;
 //! an item shows what the app's `ItemPictures` answers: its picture, the generating icon while it
-//! is made, or the item icon in the text colour. An icon the look has no image for is drawn as
+//! is made, the item icon in the text colour, or the app's own image standing for one of those
+//! (`PictureState::Shown`). An icon the look has no image for is drawn as
 //! its Font Awesome glyph in the same colour. The list builds its rows again when a picture
 //! arrives or the look's art changes (`list/mod.rs`), so what is worked out here stays current.
 
@@ -76,14 +77,19 @@ pub fn tile_art(
     let square = f64::from(side);
     let size = Size::new(square, square);
     if let Some(link) = entry.link() {
+        // The look names its tile; else a link's own tile image is reported by its key, however
+        // it is drawn, and any other folder by the folder icon's name.
+        let folder = look.folder_tile_name(link).unwrap_or_else(|| {
+            link.tile_icon()
+                .map_or_else(|| look.icon_name(BrowserIcon::Folder), str::to_string)
+        });
+        if let Some(image) = look.folder_tile(link, square) {
+            return TileArt::folder(Art::Image(image), None, folder);
+        }
         let own = link
             .tile_icon()
             .and_then(|key| look.icon_for_key(key, size, style.accent));
-        if let (Some(image), Some(key)) = (own, link.tile_icon()) {
-            return TileArt::folder(Art::Image(image), None, key.to_string());
-        }
-        let folder = look.icon_name(BrowserIcon::Folder);
-        if let Some(image) = look.folder_tile(link, square) {
+        if let Some(image) = own {
             return TileArt::folder(Art::Image(image), None, folder);
         }
         let art = icon_art(look, BrowserIcon::Folder, square, style.accent);
@@ -102,6 +108,7 @@ pub fn tile_art(
         PictureState::Ready(image) => (Art::Image(image), "picture", "picture".to_string()),
         PictureState::Generating => icon(BrowserIcon::Generating, "generating"),
         PictureState::Default => icon(BrowserIcon::Item, "item"),
+        PictureState::Shown { image, kind, name } => (Art::Image(image), kind.as_str(), name),
     };
     TileArt {
         art,

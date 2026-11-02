@@ -64,7 +64,15 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 - The app's overlay on a picture (`ItemPictures::tile_overlay`) is reached through its row or
   tile (`OverlayRoute`): it hears the row's hover and every move over it, takes only the presses
   its `hit_test` says are its own (a press it takes is never the row's), and its tooltip is the
-  row's over its own shape.
+  row's over its own shape; the row reports the overlay's properties after its own
+  (`OverlayRoute::properties`).
+- `BrowserLook::folder_tile` is asked before a link's own tile image (`FolderLink::tile_icon`),
+  so a look draws that image its own way; the tile reports `BrowserLook::folder_tile_name` as
+  its `thumbnail`, by default the image's key or the folder icon's name.
+- `PictureState::Shown { image, kind, name }`: the app's own image for an entry standing for its
+  picture, its generating marker or its item icon (`PictureKind`), reported by the row as
+  `picture` and `thumbnail`, for an app whose icons depend on the item or whose pictures carry a
+  name of their own.
 - A drag that ends outside the list gives the keys back (`ItemPress::set_list_rect`,
   `list_contains`).
 - Rows and tiles report `name_right`, `thumbnail` (the art's name) and `thumbnail_center` (its

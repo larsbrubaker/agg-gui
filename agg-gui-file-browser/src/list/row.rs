@@ -257,6 +257,9 @@ impl Widget for BrowserRow {
             ("menu_glyph", self.hovered.to_string()),
         ];
         properties.extend(drag);
+        properties.extend(OverlayRoute::properties(
+            self.children.first().map(|c| c.as_ref()),
+        ));
         properties
     }
 }

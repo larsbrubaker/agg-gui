@@ -352,10 +352,19 @@ pub trait BrowserLook {
         which.key().to_string()
     }
 
-    /// The picture of the folder `link` opens, `side` units square; `None` draws the folder
-    /// icon.
+    /// The picture of the folder `link` opens, `side` units square, asked before the link's own
+    /// tile image (`FolderLink::tile_icon`), so a look may draw that its own way; `None` draws
+    /// the link's tile image, else the folder icon.
     fn folder_tile(&self, link: &dyn FolderLink, side: f64) -> Option<IconImage> {
         let _ = (link, side);
+        None
+    }
+
+    /// The name a row reports as its `thumbnail` for the folder `link` opens (the look's own
+    /// file for its folder tile, say); `None` (the default) reports the link's tile image key,
+    /// else the folder icon's name.
+    fn folder_tile_name(&self, link: &dyn FolderLink) -> Option<String> {
+        let _ = link;
         None
     }
 

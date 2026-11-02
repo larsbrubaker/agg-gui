@@ -5,7 +5,8 @@
 //! is hovered) and every move over the row in its own coordinates, and it is handed a press only
 //! where its `hit_test` says the press is its own; a press it takes is the overlay's alone (no
 //! selection, no tap, no drag), and the release and a lost capture of that press go to it too.
-//! Over its own shape its tooltip is the row's. A row rebuilt under a still pointer tells its new
+//! Over its own shape its tooltip is the row's, and the row reports the overlay's properties after
+//! its own. A row rebuilt under a still pointer tells its new
 //! overlay it is hovered.
 
 use std::cell::RefCell;
@@ -113,6 +114,12 @@ impl OverlayRoute {
             }
             _ => None,
         }
+    }
+
+    /// The overlay's own properties, which the row reports as its own after them, so a test or
+    /// script reading the row finds the overlay's state (a favourite marker's "shown") on it.
+    pub fn properties(overlay: Option<&dyn Widget>) -> Vec<(&'static str, String)> {
+        overlay.map(|o| o.properties()).unwrap_or_default()
     }
 
     /// The overlay's tooltip while the pointer is over its own shape.
