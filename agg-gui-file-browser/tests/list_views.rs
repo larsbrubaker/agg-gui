@@ -402,6 +402,72 @@ fn a_picture_arriving_later_redraws_its_tile() {
     assert_eq!(colour_at(&mut app, middle), [255, 0, 0, 255]);
 }
 
+/// The default look, but the folder message's button is the app's own (a `Label` named as asked,
+/// enabled as asked, pressed through `press`).
+struct OwnButtonLook(
+    agg_gui_file_browser::DefaultLook,
+    RefCell<Option<Rc<dyn Fn()>>>,
+);
+
+impl agg_gui_file_browser::BrowserLook for OwnButtonLook {
+    fn style(&self) -> agg_gui_file_browser::BrowserStyle {
+        self.0.style()
+    }
+    fn names(&self) -> &agg_gui_file_browser::BrowserNames {
+        self.0.names()
+    }
+    fn message_button(
+        &self,
+        title: &str,
+        name: &str,
+        enabled: Rc<dyn Fn() -> bool>,
+        press: Rc<dyn Fn()>,
+    ) -> Option<Box<dyn Widget>> {
+        *self.1.borrow_mut() = Some(press);
+        let label = agg_gui::Label::new(format!("{title} {}", enabled()), font());
+        Some(Box::new(agg_gui::widgets::named::Named::new(
+            name.to_string(),
+            Box::new(label),
+        )))
+    }
+}
+
+#[test]
+fn a_look_makes_the_folder_messages_button_its_own() {
+    let folder = message_folder(
+        MessageItem::new("Sign in to see this folder"),
+        Some(ListingFailure::SignIn),
+    );
+    let actions = Rc::new(SignsIn::default());
+    let look = Rc::new(OwnButtonLook(
+        agg_gui_file_browser::DefaultLook::default(),
+        RefCell::new(None),
+    ));
+    let config = BrowserConfig::builder()
+        .actions(actions.clone())
+        .look(look.clone())
+        .build();
+    let (app, _) = list_app(folder, config, ViewMode::Icons);
+    let (button, _) = find(
+        app.root(),
+        "Library Folder Sign In Button",
+        Point::new(0.0, 0.0),
+    )
+    .expect("the look's button under the message's name");
+    assert_eq!(button.type_name(), "Named");
+    assert_eq!(
+        button.children()[0]
+            .properties()
+            .into_iter()
+            .find(|(k, _)| *k == "text")
+            .map(|(_, v)| v)
+            .as_deref(),
+        Some("Sign In true")
+    );
+    (look.1.borrow().clone().expect("handed the press"))();
+    assert_eq!(actions.presses.get(), 1);
+}
+
 /// A folder listing one message item, refused for `failure`.
 struct MessageFolder {
     message: Rc<dyn Item>,

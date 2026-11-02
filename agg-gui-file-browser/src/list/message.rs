@@ -143,11 +143,28 @@ impl FolderMessage {
 
     /// The Sign In button for `offer`.
     fn button(&self, offer: SignInOffer) -> Box<dyn Widget> {
-        let enabled = Rc::clone(&self.enabled);
+        let shown = Rc::clone(&self.enabled);
+        let enabled: Rc<dyn Fn() -> bool> = Rc::new(move || shown.get());
+        let name = &self.names.sign_in_button;
+        let look = self
+            .sign_in
+            .as_ref()
+            .map(|state| Rc::clone(&state.borrow().config().look));
+        let made = look.and_then(|look| {
+            look.message_button(
+                &offer.action,
+                name,
+                Rc::clone(&enabled),
+                Rc::clone(&offer.press),
+            )
+        });
+        if let Some(button) = made {
+            return button;
+        }
         let press = Rc::clone(&offer.press);
         let mut button = Button::new(offer.action, Arc::clone(&self.font))
             .with_font_size(self.style.font_size)
-            .with_enabled_fn(move || enabled.get())
+            .with_enabled_fn(move || enabled())
             .on_click(move || press());
         // Named on the button itself, so what finds it by name reads the button's own state
         // (whether it takes a press).

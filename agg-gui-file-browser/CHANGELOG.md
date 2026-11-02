@@ -24,6 +24,8 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   folder.
 - The folder message's Sign In button carries `BrowserNames::sign_in_button` itself, so what
   finds it by name reads whether it takes a press (it was a wrapper that always read enabled).
+- `BrowserLook::message_button`: the app's own button for a folder message's Sign In (named as the
+  message asks, enabled and pressed through what it is handed); the default is agg-gui's `Button`.
 - The drag picture reports the art it shows as the list's `drag_picture_image` property (the
   carried row's `thumbnail`).
 

@@ -14,6 +14,7 @@
 //! articles find the browser's buttons by ("Library Up Button", "Bread Crumb Button {name}"),
 //! so a browser keeps them unless its app chooses others.
 
+use std::rc::Rc;
 use std::sync::Arc;
 
 use agg_gui::icon_image::IconImage;
@@ -352,6 +353,21 @@ pub trait BrowserLook {
     /// drawn `logical` in size in `tint`; `None` (the default) when the look has no art for it.
     fn icon_for_key(&self, key: &str, logical: Size, tint: Color) -> Option<IconImage> {
         let _ = (key, logical, tint);
+        None
+    }
+
+    /// The button a folder's message offers (its Sign In), titled `title`, taking a press while
+    /// `enabled` says so and running `press`; the widget carries `name` itself, so what finds it
+    /// by name reads whether it takes a press. `None` (the default) is agg-gui's `Button` in the
+    /// browser's font.
+    fn message_button(
+        &self,
+        title: &str,
+        name: &str,
+        enabled: Rc<dyn Fn() -> bool>,
+        press: Rc<dyn Fn()>,
+    ) -> Option<Box<dyn Widget>> {
+        let _ = (title, name, enabled, press);
         None
     }
 
