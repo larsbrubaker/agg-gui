@@ -2,29 +2,27 @@
 //! breadcrumbs and menus. It holds the open path (the showing folder with the folders above it,
 //! which the breadcrumbs show), each folder shared ([`OpenFolder`]) so a hook can be handed the
 //! path without the state being borrowed; the selected rows; how the list shows the folder (its
-//! [`ViewMode`], restored from the folder's remembered view whenever a folder shows and
-//! remembered when the user picks one, through the config's `BrowserMemory`; the sort, the
-//! folder's `default_sort` whenever it shows, then its remembered sort; folders and items each
-//! sorted on their own; and "Show Folders", on by default and not remembered, so a folder never
-//! seems empty because its sub-folders were hidden last time); and the app's own data for this
-//! browser (the app slot, opaque here); and the rows' menu button and press state
+//! [`ViewMode`], sort and "Show Folders"); the showing folder's listing (folders and items each
+//! sorted on their own, the options' filters applied); and the app's own data for this browser
+//! (the app slot, opaque here); and the rows' menu button and press state
 //! (`list/menu_button.rs`, `list/press.rs`), kept here so they survive the list being rebuilt
 //! under the pointer.
 //!
-//! Every change of the showing folder bumps a navigation counter and tells the container-changed
-//! listeners (how a search learns the user walked away from its results). Only the showing folder
-//! is activated and listened to for content changes (`state/active_watch.rs`); `sync_content`
-//! turns a change into a redisplay and `pump_live_refresh` gives the showing folder its turn. A
-//! search's results are pushed as one more folder (`state/search.rs`), so the breadcrumbs show
-//! them under the folder searched.
+//! Only the showing folder is activated and listened to for content changes
+//! (`state/active_watch.rs`); `sync_content` turns a change into a redisplay and
+//! `pump_live_refresh` gives the showing folder its turn. A search's results are pushed as one
+//! more folder (`state/search.rs`), so the breadcrumbs show them under the folder searched.
 //! Writes change the folders on the path through `container_at_mut`, then `after_write`.
 //!
-//! Children: `browser_entry` (a row and its identity), `selection` (the selection and the row
-//! clicks, and which listing a row's index means), `listing_message` (a folder listing only a
-//! message), `gesture` (Shift ranges, the rubber band, keeping a multi-selection on a press, the
-//! keyboard's moves), `search` (search results in sections), `activate` (double clicks and taps, the activation queue `run_hooks`
-//! drains, the config, the report and the app slot) and `active_watch` (the hold on the
-//! showing folder: listening, relisting on the user's ask, handing it over).
+//! This file holds the state itself, its listing and its counters. Children: `navigation` (the
+//! open path and moving along it, the container-changed listeners, remembered places), `view`
+//! (the view mode, sort and "Show Folders", remembered per folder), `browser_entry` (a row and
+//! its identity), `selection` (the selection and the row clicks, and which listing a row's index
+//! means), `listing_message` (a folder listing only a message), `gesture` (Shift ranges, the
+//! rubber band, keeping a multi-selection on a press, the keyboard's moves), `search` (search
+//! results in sections), `activate` (double clicks and taps, the activation queue `run_hooks`
+//! drains, the config, the report and the app slot) and `active_watch` (the hold on the showing
+//! folder: listening, relisting on the user's ask, handing it over).
 //!
 //! No hook runs while the state is borrowed (the crate header's rule): the public ways to
 //! activate a row run `run_hooks` once their borrow has ended, and `remember_location` hands the
@@ -33,27 +31,27 @@
 //! (a message) may run while the state is borrowed.
 
 use std::any::Any;
-use std::cell::{Ref, RefCell, RefMut};
+use std::cell::RefCell;
 use std::rc::{Rc, Weak};
 
-use agg_gui_files::{
-    tr, Folder, FolderLink, Item, PictureFuture, SearchResultsFolder, SortBehavior, SortKey,
-};
+use agg_gui_files::{Folder, FolderLink, Item, PictureFuture, SearchResultsFolder, SortBehavior};
 
 use crate::actions::Activation;
 use crate::config::{BrowserConfig, DoubleClickTarget, FolderFilter, ItemFilter};
 use crate::entry::{BrowserRef, Entry};
 use crate::list::menu_button::MenuButtonState;
 use crate::list::press::ItemPress;
-use crate::memory::{remember_open_location, ViewMode, ViewState};
+use crate::memory::ViewMode;
 
 mod activate;
 mod active_watch;
 mod browser_entry;
 mod gesture;
 mod listing_message;
+mod navigation;
 mod search;
 mod selection;
+mod view;
 
 use active_watch::ActiveWatch;
 pub use browser_entry::{item_identity_key, BrowserEntry};
@@ -211,92 +209,6 @@ impl BrowserState {
         state
     }
 
-    /// The showing folder's `default_sort`, then the folder's remembered view and sort when it
-    /// has one. The remembered view is compared with what this list shows, so a list opened on a
-    /// size of its own keeps it unless the folder remembers a different mode.
-    fn restore_user_view(&mut self) {
-        let default_sort = self.active_container().and_then(|c| c.default_sort());
-        if let Some(sort) = default_sort {
-            self.sort = sort;
-        }
-        if let Some(view) = self.config.memory.view(&self.path_names()) {
-            if view.view_mode != self.view_mode {
-                self.view_mode = view.view_mode;
-                self.thumb_size = view.view_mode.thumb_size();
-            }
-            self.sort = view.sort;
-        }
-    }
-
-    /// The picture side the list shows.
-    pub fn thumb_size(&self) -> i32 {
-        self.thumb_size
-    }
-
-    /// The key and direction the list is sorted on.
-    pub fn sort(&self) -> SortBehavior {
-        self.sort
-    }
-
-    /// Sorts on `key` and remembers it for the folder; the list is shown again only when the
-    /// sort changed.
-    pub fn set_user_sort_key(&mut self, key: SortKey) {
-        let changed = self.sort.sort_key != key as i32;
-        self.sort.sort_key = key as i32;
-        self.persist_user_view();
-        if changed {
-            self.redisplay();
-        }
-    }
-
-    /// Sorts in that direction and remembers it for the folder; the list is shown again only
-    /// when the direction changed.
-    pub fn set_user_sort_ascending(&mut self, ascending: bool) {
-        let changed = self.sort.ascending != ascending;
-        self.sort.ascending = ascending;
-        self.persist_user_view();
-        if changed {
-            self.redisplay();
-        }
-    }
-
-    /// Remembers the view and sort this list shows for the folder.
-    fn persist_user_view(&self) {
-        let view = ViewState {
-            view_mode: self.view_mode,
-            sort: self.sort,
-        };
-        self.config.memory.set_view(&self.path_names(), &view);
-    }
-
-    /// How the list shows its entries.
-    pub fn view_mode(&self) -> ViewMode {
-        self.view_mode
-    }
-
-    /// The view menu's pick: shows the folder in `mode`, remembers it for the folder, then shows
-    /// the list again.
-    pub fn set_view_mode(&mut self, mode: ViewMode) {
-        self.view_mode = mode;
-        self.thumb_size = mode.thumb_size();
-        self.persist_user_view();
-        self.redisplay();
-    }
-
-    /// Whether the list shows folders ("Show Folders").
-    pub fn show_containers(&self) -> bool {
-        self.show_containers
-    }
-
-    /// The view menu's "Show Folders": hides or shows the folders, then lists again.
-    pub fn set_show_containers(&mut self, show: bool) {
-        if self.show_containers != show {
-            self.show_containers = show;
-            self.selected.clear();
-            self.redisplay();
-        }
-    }
-
     /// The showing folder's per-frame turn (`Folder::pump_live_refresh`); whether it still has a
     /// refresh pending, so the widget keeps waking. The widget calls this before `sync_content`.
     pub fn pump_live_refresh(&mut self) -> bool {
@@ -349,14 +261,6 @@ impl BrowserState {
             )
         });
         agg_gui::animation::request_draw();
-    }
-
-    /// The names of the folders from the root down (the breadcrumbs).
-    pub fn path_names(&self) -> Vec<String> {
-        self.path
-            .iter()
-            .map(|c| c.borrow().name().to_string())
-            .collect()
     }
 
     /// The showing folder's rows: its folders (unless "Show Folders" is off, and those the
@@ -432,153 +336,12 @@ impl BrowserState {
         std::mem::take(&mut self.item_menu_requested)
     }
 
-    /// Opens the folder. A link with nothing to give that acts instead (a sign-in) leaves the
-    /// list where it is; any other refusal is said on the status line.
-    pub fn open(&mut self, link: &dyn FolderLink) {
-        match link.get_container() {
-            Ok(folder) => self.push_container(folder),
-            Err(_) if link.open_unavailable() => {}
-            Err(e) => {
-                self.set_status(e);
-                self.changed();
-            }
-        }
-    }
-
-    /// Shows `folder` below the one showing, as opening its row would.
-    pub fn set_active_container(&mut self, folder: Box<dyn Folder>) {
-        self.push_container(folder);
-    }
-
-    /// Shows `folder` below the one showing.
-    pub fn push_container(&mut self, folder: Box<dyn Folder>) {
-        self.watch.leave(&self.path);
-        self.show_below(folder);
-    }
-
-    /// Shows `folder` at the end of the path, the one showing already left: loaded here,
-    /// activated and listened to for content changes.
-    fn show_below(&mut self, mut folder: Box<dyn Folder>) {
-        self.watch.listen(folder.as_ref());
-        folder.load();
-        folder.activate();
-        self.path.push(Rc::new(RefCell::new(folder)));
-        self.selected.clear();
-        self.restore_user_view();
-        self.changed();
-        self.navigated();
-    }
-
-    /// Shows the folders `located` below the path's folder at `base` (a search's root, or the
-    /// showing folder), the last of them showing: where "Open File Location" takes the user once
-    /// the app has found where `item` lives. `None` (nowhere to go: a folder since renamed or
-    /// deleted) is said on the status line, so the user learns why nothing happened.
-    pub fn show_location(
-        &mut self,
-        item: &dyn Item,
-        base: usize,
-        located: Option<Vec<Box<dyn Folder>>>,
-    ) {
-        let Some(located) = located else {
-            self.set_status(format!(
-                "{} \"{}\"",
-                tr("Couldn't find the location of"),
-                item.name()
-            ));
-            self.changed();
-            return;
-        };
-        if located.is_empty() && base + 1 == self.path.len() {
-            return;
-        }
-        self.watch.leave(&self.path);
-        self.path.truncate(base + 1);
-        let count = located.len();
-        for (i, mut folder) in located.into_iter().enumerate() {
-            if i + 1 == count {
-                self.watch.listen(folder.as_ref());
-            }
-            folder.load();
-            if i + 1 == count {
-                folder.activate();
-            }
-            self.path.push(Rc::new(RefCell::new(folder)));
-        }
-        if count == 0 {
-            self.watch.enter(&self.path);
-        }
-        self.selected.clear();
-        self.restore_user_view();
-        self.changed();
-        self.navigated();
-    }
-
     /// The one selected row's item, a folder row as its link.
     pub fn single_selected_item(&self) -> Option<Rc<dyn Item>> {
         match self.selected_entries().as_slice() {
             [entry] => Some(entry.item()),
             _ => None,
         }
-    }
-
-    /// `listener` hears each change of the showing folder, with the new one's id, until it
-    /// answers false.
-    pub fn subscribe_container_changed(&mut self, listener: ContainerChangedListener) {
-        self.container_changed.push(listener);
-    }
-
-    /// How many times the showing folder has changed.
-    pub fn navigation(&self) -> u64 {
-        self.navigation
-    }
-
-    /// The showing folder changed: count it and tell the listeners.
-    fn navigated(&mut self) {
-        self.navigation += 1;
-        self.list_resets += 1;
-        self.parked_selection.clear();
-        self.select_when_listed.clear();
-        if self
-            .results
-            .as_ref()
-            .is_some_and(|(_, depth)| *depth >= self.path.len())
-        {
-            self.results = None;
-        }
-        self.keep_own_listing();
-        let id = self.active_container_id().unwrap_or_default();
-        let listeners = self.container_changed.clone();
-        let gone: Vec<bool> = listeners.iter().map(|l| !l(&id)).collect();
-        let mut index = 0;
-        self.container_changed.retain(|_| {
-            index += 1;
-            !gone.get(index - 1).copied().unwrap_or(false)
-        });
-    }
-
-    /// The showing folder's id.
-    pub fn active_container_id(&self) -> Option<String> {
-        self.active_container().map(|c| c.id().to_string())
-    }
-
-    /// The ids of the folders from the root down.
-    pub fn path_ids(&self) -> Vec<String> {
-        self.path
-            .iter()
-            .map(|c| c.borrow().id().to_string())
-            .collect()
-    }
-
-    /// How many folders deep the browser is (1 at the root).
-    pub fn depth(&self) -> usize {
-        self.path.len()
-    }
-
-    /// The showing folder, borrowed for as long as the answer is held.
-    pub fn active_container(&self) -> Option<Ref<'_, dyn Folder>> {
-        self.path
-            .last()
-            .map(|c| Ref::map(c.borrow(), |b| b.as_ref()))
     }
 
     /// The showing folder's reading of `item`'s picture. A search's results route an item to
@@ -600,62 +363,6 @@ impl BrowserState {
         }
     }
 
-    /// The root's folders, what a folder tree lists.
-    pub fn root_child_containers(&self) -> Vec<Rc<dyn FolderLink>> {
-        self.path
-            .first()
-            .map(|root| root.borrow().child_containers())
-            .unwrap_or_default()
-    }
-
-    /// The breadcrumb for path entry `depth` (0 = the root): shows that folder again.
-    pub fn go_to(&mut self, depth: usize) {
-        if depth + 1 < self.path.len() {
-            self.watch.leave(&self.path);
-            self.path.truncate(depth + 1);
-            self.watch.enter(&self.path);
-            self.selected.clear();
-            self.restore_user_view();
-            self.changed();
-            self.navigated();
-        }
-    }
-
-    /// Takes the showing folder out of the path, the one above it showing again: a dialog that
-    /// hands its folder to the work it closes on gives it away rather than opening a second copy
-    /// of it. `None` at the root.
-    pub fn take_active_container(&mut self) -> Option<OpenFolder> {
-        if self.path.len() < 2 {
-            return None;
-        }
-        self.watch.leave(&self.path);
-        let taken = self.path.pop();
-        self.watch.enter(&self.path);
-        self.selected.clear();
-        self.changed();
-        self.navigated();
-        taken
-    }
-
-    /// The folders from the root down to the showing one, each borrowed while it is held.
-    pub fn path_containers(&self) -> impl Iterator<Item = Ref<'_, dyn Folder>> {
-        self.path
-            .iter()
-            .map(|c| Ref::map(c.borrow(), |b| b.as_ref()))
-    }
-
-    /// The open path's shared folders, from the root down: what a hook is handed.
-    pub fn open_path(&self) -> Vec<OpenFolder> {
-        self.path.clone()
-    }
-
-    /// The folder at `depth` (0 = the root), to change it.
-    pub fn container_at_mut(&mut self, depth: usize) -> Option<RefMut<'_, dyn Folder + 'static>> {
-        self.path
-            .get(depth)
-            .map(|c| RefMut::map(c.borrow_mut(), |b| b.as_mut()))
-    }
-
     /// Sets (or with `None` ends) a folder tree's temporary selection: `link`, listed in the
     /// folder at `depth`. Answers the one it replaces.
     pub fn set_temporary_selection(
@@ -675,33 +382,6 @@ impl BrowserState {
         self.writes
     }
 
-    /// The showing folder is replaced by what `sync` makes of it (a folder renamed from the
-    /// tree). Nothing at the root. While a hook still holds the showing folder it can't be
-    /// replaced: it stays, and the user is told through the report (the status line without the
-    /// app's) that it shows as it was and how to see the change.
-    pub fn replace_active_container(
-        &mut self,
-        sync: impl FnOnce(Box<dyn Folder>) -> Box<dyn Folder>,
-    ) {
-        if self.path.len() < 2 {
-            return;
-        }
-        self.watch.leave(&self.path);
-        let Some(old) = self.path.pop() else {
-            return;
-        };
-        match Rc::try_unwrap(old) {
-            Ok(old) => self.show_below(sync(old.into_inner())),
-            Err(still_held) => {
-                self.path.push(still_held);
-                self.watch.enter(&self.path);
-                let message = tr("This folder is busy. Open it again to see the change.");
-                (self.report())(&message);
-                self.changed();
-            }
-        }
-    }
-
     /// After a write changed a folder: the selection is cleared and the listing shown again;
     /// `status` is the failure to show, empty for none.
     pub fn after_write(&mut self, status: String) {
@@ -709,47 +389,6 @@ impl BrowserState {
         self.selected.clear();
         self.set_status(status);
         self.redisplay();
-    }
-
-    /// Lends the config's memory the open path, the root first, to remember under `key`, with
-    /// `state` not borrowed while it runs.
-    pub fn remember_location(state: &Rc<RefCell<Self>>, key: &str) {
-        let (memory, path) = {
-            let s = state.borrow();
-            (Rc::clone(&s.config.memory), s.open_path())
-        };
-        remember_open_location(memory.as_ref(), key, &path);
-    }
-
-    /// Opens the folder the config's memory remembers under `key`, once found (the search runs
-    /// on the config's spawner): the folders below the root are opened down to it. Nothing
-    /// happens when none is remembered, it can't be reached, or the user has moved the browser
-    /// meanwhile (their choice wins).
-    pub fn restore_location(state: &Rc<RefCell<Self>>, key: &str) {
-        let (memory, spawner, navigation) = {
-            let s = state.borrow();
-            let c = &s.config;
-            (Rc::clone(&c.memory), Rc::clone(&c.spawner), s.navigation)
-        };
-        let Some(finding) = memory.last_location(key) else {
-            return;
-        };
-        let weak = Rc::downgrade(state);
-        spawner.spawn_task(Box::pin(async move {
-            let Some(folders) = finding.await else {
-                return;
-            };
-            let Some(state) = weak.upgrade() else {
-                return;
-            };
-            let mut s = state.borrow_mut();
-            if s.navigation != navigation || s.depth() != 1 {
-                return;
-            }
-            for folder in folders {
-                s.push_container(folder);
-            }
-        }));
     }
 }
 
