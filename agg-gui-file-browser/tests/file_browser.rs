@@ -17,7 +17,7 @@ use agg_gui_file_browser::{
     BrowserLayout, BrowserOptions, BrowserRef, BrowserState, BuiltinAction, Builtins, FileBrowser,
     ViewMode,
 };
-use agg_gui_files::{tr, MemoryFolder};
+use agg_gui_files::{tr, DynamicFolder, MemoryFolder};
 
 const WIDTH: f64 = 700.0;
 const HEIGHT: f64 = 400.0;
@@ -368,4 +368,33 @@ fn a_built_in_the_app_dresses_keeps_its_tooltip_and_still_runs_as_the_browsers()
     );
     // The browser's own Add: enabled by its rules (no dialogs to pick files with, so greyed).
     assert!(!add.enabled);
+}
+
+#[test]
+fn a_folders_header_markdown_shows_above_the_list_and_goes_with_the_folder() {
+    for config in [BrowserConfig::default(), list_only()] {
+        agg_gui::set_device_scale(1.0);
+        let root = DynamicFolder::new("Home").with_header_markdown("Parts **you** made");
+        let state = BrowserState::new(Box::new(root), config);
+        let mut app = App::new(Box::new(FileBrowser::new(&state, font())));
+        frame(&mut app);
+        let (header, list) = (
+            rect(&app, "Library Header Markdown"),
+            rect(&app, "LibraryView"),
+        );
+        assert!(header.height > 0.0);
+        assert!(
+            list.y + list.height <= header.y + 0.5,
+            "the list is under it"
+        );
+        let list_only = !has(&app, "Library TreeView");
+        // The list-only form also says it along its bottom.
+        assert_eq!(has(&app, "Provider Message"), list_only);
+        state
+            .borrow_mut()
+            .push_container(Box::new(MemoryFolder::new("Plain")));
+        frame(&mut app);
+        assert!(!has(&app, "Library Header Markdown"));
+        assert!(!has(&app, "Provider Message"));
+    }
 }

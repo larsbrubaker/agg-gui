@@ -212,6 +212,9 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   once by the browser, in the global overlay; the mouse's back button goes up a folder. Its
   properties give the path, trail, selection, counts, view, search and drag picture.
   `FileBrowser::with_search` takes an app's `SearchController`.
+- `ListColumn`: the list under the showing folder's header markdown (agg-gui's `MarkdownView`,
+  named `BrowserNames::header_markdown`, left out when the folder has none); both forms of
+  `FileBrowser` show it.
 - `BrowserList::without_drag_picture`, for a host that draws the drag's picture itself.
 - `BrowserCommand::builtin(action)`: one of the browser's own actions placed in an app's list
   with the app's tooltip, icon key or shortcut (`with_tooltip`, ...); the browser still runs it

@@ -5,11 +5,11 @@
 //!   (`parts.rs`'s `BottomBorder`): the breadcrumbs taking the room (the up button, then a link
 //!   per folder from the root down), the search box ([`SEARCH_BOX_WIDTH`] wide), Undo and Redo,
 //!   the view button, the sorting button and the overflow ("File") button; under it the folder
-//!   tree, the splitter's bar and the list.
+//!   tree, the splitter's bar and the list under the folder's header markdown.
 //! - **List only** (a popup or narrow panel): the breadcrumbs and the overflow button; then a
 //!   second bar named `BrowserNames::folders_toolbar` with the search box stretching, the view
-//!   and sorting buttons; then the list; then the showing folder's header text, small, in a bar
-//!   along the bottom (`ProviderMessageBar`).
+//!   and sorting buttons; then the list under the folder's header markdown; then that header
+//!   text again, small, in a bar along the bottom (`ProviderMessageBar`).
 //!
 //! In both the undo notice sits centred [`NOTICE_BOTTOM_GAP`] above the bottom, over the rest.
 //! Gaps, paddings and names are the ones MatterCAD's Library uses, so its tests and help
@@ -47,7 +47,7 @@ use crate::search::controller::SearchController;
 use crate::search::search_box::SearchBox;
 use crate::state::BrowserState;
 use crate::tree::{BrowserTree, TreeModel};
-use parts::{take_search_box, BottomBorder, SearchSlot};
+use parts::{take_search_box, BottomBorder, ListColumn, SearchSlot};
 
 /// The tab form's search box width, in logical units.
 pub const SEARCH_BOX_WIDTH: f64 = 200.0;
@@ -210,6 +210,9 @@ impl FileBrowser {
     /// The tree, splitter and list; or the list.
     fn body(&self) -> Box<dyn Widget> {
         let list = BrowserList::new(&self.state, Arc::clone(&self.font)).without_drag_picture();
+        let name = self.look.names().header_markdown.clone();
+        let font = Arc::clone(&self.font);
+        let list = ListColumn::new(&self.state, Box::new(list), font, name);
         let Some(model) = &self.tree else {
             return Box::new(list);
         };

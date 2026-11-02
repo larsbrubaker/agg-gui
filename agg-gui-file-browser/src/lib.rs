@@ -104,7 +104,7 @@ pub use actions::{
     Builtins, ItemLocation, NoActions, SignInOffer,
 };
 pub use bread_crumb::{folder_bread_crumb_for, FolderBreadCrumbWidget, UP_ICON_SIZE};
-pub use browser::parts::{take_search_box, BottomBorder, SearchSlot};
+pub use browser::parts::{take_search_box, BottomBorder, ListColumn, SearchSlot};
 pub use browser::{FileBrowser, BACK_MOUSE_BUTTON, NOTICE_BOTTOM_GAP, SEARCH_BOX_WIDTH};
 pub use builtins::run_builtin;
 pub use config::{
