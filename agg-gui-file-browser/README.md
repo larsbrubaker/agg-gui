@@ -13,9 +13,10 @@ don't compile it. It builds for `wasm32-unknown-unknown`.
 | `fit_name`, `fit_text`, `fill_text_within`, `centered_text_baseline` | Names fitted to their room (a file keeps its extension: "Bad+Batch+Hun….zip") and drawn inside it |
 | `FolderBreadCrumbWidget`, `folder_bread_crumb_for` | The breadcrumb trail: up button, a link per folder, eliding the crumbs after the root when it is too wide |
 | `BrowserIconButton`, `LinkLabel` | The trail's square icon button and its text links |
-| `BrowserConfig`, `BrowserOptions` | Everything one browser view takes from its app, every hook defaulted (`BrowserConfig::default()` works with none) |
+| `BrowserConfig`, `BrowserOptions` | Everything one browser view takes from its app, every hook defaulted (`BrowserConfig::default()` works with none; without the app's report, errors show on the browser's status line) |
 | `ItemPictures`, `BrowserActions`, `OutsideDrops`, `PlaceRules`, `BrowserMemory`, `BrowserDialogs` | The hooks an app extends the browser through: pictures and tile overlays, the ordered menu and activation, drags onto its own views, move or copy, what is remembered, its dialogs |
 | `NoPictures`, `NoActions`, `DefaultPlaces`, `NoMemory`, `NoDialogs` | The defaults: the look's icons, the built-in menu, the place rule, nothing remembered, no dialogs (the actions needing one unavailable) |
+| `ListingMessage`, `BrowserState::listing_message` | A folder listing only a message ("Loading...", a refusal, a sign-in to renew), shown in place of its rows |
 | `BrowserState`, `BrowserEntry`, `OpenFolder` | What a browser is looking at: the open path (shared folders), the sorted listing, view and sort remembered per folder, the selection with its clicks, Shift ranges, Ctrl/Cmd toggles and rubber band, search results in sections, activation through the app's hooks, the status line and the app's own data (`app_slot`) |
 | `Entry`, `BrowserRef` | The snapshots hooks are handed, so no hook runs while the browser's state is borrowed; a `BrowserRef` also reaches back to the live browser and its app slot |
 | `default_drop_copies`, `copy_modifier_held` | Move or copy: items move within a place, and are copied between places, out of folders that keep them, or with Option (Mac) or Ctrl held |

@@ -11,42 +11,44 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use agg_gui::Modifiers;
-use agg_gui_files::{Item, MessageItem};
+use agg_gui_files::Item;
 
 use super::browser_entry::item_identity_key;
+use super::listing_message::is_only_a_message;
 use super::{BrowserEntry, BrowserState};
-
-/// Whether `entries` is only a message the folder shows in the place of rows ("Loading...", why
-/// it could not be listed): one `MessageItem` that is not a missing-file row. The message is the
-/// folder's state, not something the user can select, open, rename or drag.
-pub fn is_only_a_message(entries: &[BrowserEntry]) -> bool {
-    let [BrowserEntry::Item(item)] = entries else {
-        return false;
-    };
-    item.as_any()
-        .and_then(|any| any.downcast_ref::<MessageItem>())
-        .is_some_and(|message| !message.is_missing_file())
-}
 
 impl BrowserState {
     /// The list is being built from `entries()` as they are now: from here a row's index means a
-    /// row of this listing (`listed_entry`). A folder whose listing is only a message
-    /// ([`is_only_a_message`]) lists no rows, so Select All and the arrow keys find nothing.
+    /// row of this listing (`listed_entry`), and the list view, not the state, keeps it current.
+    /// A folder whose listing is only a message (`is_only_a_message`) lists no rows, so Select
+    /// All and the arrow keys find nothing.
     pub fn mark_listed(&mut self) {
+        self.view_lists = true;
+        self.list_now();
+    }
+
+    /// Until a list view marks its listings (`mark_listed`), the state keeps the listing current
+    /// itself: at its making, each navigation and each redisplay, so indices mean the rows
+    /// `entries()` gives for an app or a test driving the state without a view.
+    pub(super) fn keep_own_listing(&mut self) {
+        if !self.view_lists {
+            self.list_now();
+        }
+    }
+
+    /// The listing becomes `entries()` as they are now (none for a message).
+    fn list_now(&mut self) {
         let entries = self.entries();
         let only_a_message = self.showing_search_results().is_none() && is_only_a_message(&entries);
-        self.listed = Some(if only_a_message { Vec::new() } else { entries });
+        self.listed = if only_a_message { Vec::new() } else { entries };
     }
 
     /// The row at `index` of the list the user sees: the listing the list was last built from
-    /// (`mark_listed`), or `entries()` before the first build. A click that lands after the
+    /// (`mark_listed`, or the state's own, `keep_own_listing`). A click that lands after the
     /// showing folder's content changed but before the list was rebuilt still acts on the row
     /// under the pointer, not on whatever now stands at its index.
     pub fn listed_entry(&self, index: usize) -> Option<BrowserEntry> {
-        match &self.listed {
-            Some(listed) => listed.get(index).cloned(),
-            None => self.entries().get(index).cloned(),
-        }
+        self.listed.get(index).cloned()
     }
 
     /// Whether `item` is a row the showing listing holds now (by `item_identity_key`): a row
@@ -108,10 +110,12 @@ impl BrowserState {
     /// asked (`#[track_caller]`): the redisplay's trigger.
     #[track_caller]
     pub(super) fn redisplay(&mut self) {
+        // Read here: the closure below is not `#[track_caller]`, so inside it the caller would be
+        // the closure itself.
+        let caller = std::panic::Location::caller();
         crate::trace(|| {
             format!(
-                "browser redisplay from {} (selection {} cleared)",
-                std::panic::Location::caller(),
+                "browser redisplay from {caller} (selection {} cleared unless a search)",
                 self.selected.len()
             )
         });
@@ -125,6 +129,7 @@ impl BrowserState {
                 self.select_when_listed.clear();
             }
         }
+        self.keep_own_listing();
         self.changed();
     }
 

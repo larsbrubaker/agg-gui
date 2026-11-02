@@ -95,7 +95,7 @@ impl BrowserState {
 
     /// The rows the list shows, in their order (what a range or select-all runs over).
     fn listing(&self) -> Vec<BrowserEntry> {
-        self.listed.clone().unwrap_or_else(|| self.entries())
+        self.listed.clone()
     }
 
     fn position_in(listing: &[BrowserEntry], entry: &BrowserEntry) -> Option<usize> {
@@ -134,6 +134,11 @@ impl BrowserState {
 
     /// `press`'s queueing half.
     pub(super) fn press_in(&mut self, index: usize, modifiers: Modifiers) -> bool {
+        // Every caller runs the hooks after its press; one left here would act on this press.
+        debug_assert!(
+            self.pending_activations.is_empty(),
+            "an activation was left unrun: run_hooks after each press"
+        );
         self.begin_tap(None);
         let Some(entry) = self.listed_entry(index) else {
             return false;

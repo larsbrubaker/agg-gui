@@ -24,7 +24,8 @@
 //!   items move within a place and are copied between places, out of folders that keep their
 //!   items, or with the copy modifier held), [`BrowserMemory`] (views per folder, the tree's
 //!   width, last locations, in the app's own store and keys) and [`BrowserDialogs`]; plus a
-//!   report for errors and its [`BrowserOptions`]. Every hook has a default ([`NoPictures`],
+//!   report for errors (without one, errors show on the browser's own status line,
+//!   [`BrowserState::status`]) and its [`BrowserOptions`]. Every hook has a default ([`NoPictures`],
 //!   [`NoActions`], [`DefaultPlaces`], [`NoMemory`], [`NoDialogs`]), so
 //!   `BrowserConfig::default()` is a working browser; the defaults never pretend: a browser
 //!   without dialogs leaves the actions needing one unavailable.
@@ -96,9 +97,9 @@ pub use places::{
     CopyTakeover, DefaultPlaces, PlaceRules,
 };
 pub use state::{
-    is_only_a_message, item_identity_key, search_listing, BrowserEntry, BrowserState,
-    ContainerChangedListener, ItemEvent, ListSlot, OpenFolder, SearchSectionCollapseState,
-    SectionHeader,
+    entries_message, is_only_a_message, item_identity_key, search_listing, BrowserEntry,
+    BrowserState, ContainerChangedListener, ItemEvent, ListSlot, ListingMessage, OpenFolder,
+    SearchSectionCollapseState, SectionHeader,
 };
 pub use trace::{set_tracer, trace, tracing};
 

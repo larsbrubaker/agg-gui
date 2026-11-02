@@ -148,7 +148,6 @@ fn an_items_activation_reaches_the_apps_actions_with_the_browser_free() {
     let actions = Rc::new(Recording::default());
     let config = BrowserConfig::builder().actions(actions.clone()).build();
     let state = BrowserState::with_config(Box::new(home()), config, TapCount::default());
-    state.borrow_mut().mark_listed();
     BrowserState::click(&state, 1, Default::default());
     BrowserState::activate(&state, 1, Activation::DoubleClick);
     assert_eq!(
@@ -184,7 +183,6 @@ fn a_tap_activates_on_its_release_only_where_taps_activate() {
         .options(options)
         .build();
     let state = BrowserState::new(Box::new(home()), config);
-    state.borrow_mut().mark_listed();
     BrowserState::press(&state, 1, Default::default());
     assert!(
         actions.0.borrow().is_empty(),

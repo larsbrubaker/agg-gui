@@ -18,13 +18,16 @@
 //! Writes change the folders on the path through `container_at_mut`, then `after_write`.
 //!
 //! Children: `browser_entry` (a row and its identity), `selection` (the selection and the row
-//! clicks), `gesture` (Shift ranges, the rubber band, keeping a multi-selection on a press, the
+//! clicks, and which listing a row's index means), `listing_message` (a folder listing only a
+//! message), `gesture` (Shift ranges, the rubber band, keeping a multi-selection on a press, the
 //! keyboard's moves), `search` (search results in sections), `activate` (double clicks and taps, the activation queue `run_hooks`
 //! drains, the config, the report and the app slot) and `active_watch`.
 //!
-//! No hook runs while the state is borrowed (the crate header's rule): activations wait for
-//! `run_hooks`, `remember_location` lends the memory a copy of the path's handles, and the
-//! memory's `view`/`set_view` are handed the path's names alone.
+//! No hook runs while the state is borrowed (the crate header's rule): the public ways to
+//! activate a row run `run_hooks` once their borrow has ended, and `remember_location` hands the
+//! memory a copy of the path's handles with the state free. The exception the crate header
+//! names: the memory's `view`/`set_view` (handed the path's names alone) and the error report
+//! (a message) may run while the state is borrowed.
 
 use std::any::Any;
 use std::cell::{Ref, RefCell, RefMut};
@@ -43,13 +46,14 @@ mod activate;
 mod active_watch;
 mod browser_entry;
 mod gesture;
+mod listing_message;
 mod search;
 mod selection;
 
 use active_watch::ActiveWatch;
 pub use browser_entry::{item_identity_key, BrowserEntry};
+pub use listing_message::{entries_message, is_only_a_message, ListingMessage};
 pub use search::{search_listing, ListSlot, SearchSectionCollapseState, SectionHeader};
-pub use selection::is_only_a_message;
 
 /// A folder on a browser's open path: shared, so a hook can be handed the path without the
 /// browser's state being borrowed, and changeable, since loading and writing need `&mut`.
@@ -76,8 +80,11 @@ pub struct BrowserState {
     selected: Vec<BrowserEntry>,
     /// The anchor, pending release and rubber band of the selection gestures.
     gesture: gesture::SelectionGesture,
-    /// The rows the list on screen was built from (`mark_listed`), `None` before the first.
-    listed: Option<Vec<BrowserEntry>>,
+    /// The rows the list on screen was built from: what row indices mean (`state/selection.rs`).
+    listed: Vec<BrowserEntry>,
+    /// Whether a list view marks the listings (`mark_listed`); until one does, the state keeps
+    /// `listed` current itself.
+    view_lists: bool,
     /// Bumped whenever what the view shows changes, so the view rebuilds.
     generation: u64,
     /// The showing folder's content-changed subscription.
@@ -145,7 +152,8 @@ impl BrowserState {
             path: vec![Rc::new(RefCell::new(root))],
             selected: Vec::new(),
             gesture: Default::default(),
-            listed: None,
+            listed: Vec::new(),
+            view_lists: false,
             generation: 0,
             watch,
             content_seen: 0,
@@ -178,6 +186,7 @@ impl BrowserState {
             let mut s = state.borrow_mut();
             s.me = Rc::downgrade(&state);
             s.restore_user_view();
+            s.keep_own_listing();
         }
         state
     }
@@ -495,6 +504,7 @@ impl BrowserState {
         {
             self.results = None;
         }
+        self.keep_own_listing();
         let id = self.active_container_id().unwrap_or_default();
         let listeners = self.container_changed.clone();
         let gone: Vec<bool> = listeners.iter().map(|l| !l(&id)).collect();

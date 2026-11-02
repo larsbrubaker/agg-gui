@@ -95,9 +95,6 @@ fn going_to_the_folder_showing_changes_nothing() {
 #[test]
 fn a_plain_click_selects_only_its_row_and_ctrl_toggles() {
     let state = BrowserState::new(Box::new(home()), BrowserConfig::default());
-    // As the list does at each build: a memory folder hands out a new link object per listing,
-    // and a row index means a row of the listing the user sees.
-    state.borrow_mut().mark_listed();
     BrowserState::click(&state, 2, Modifiers::default());
     assert_eq!(selected(&state.borrow()), ["a.txt"]);
     BrowserState::click(&state, 3, ctrl());
@@ -299,4 +296,50 @@ fn a_folder_row_entry_is_a_container() {
     let entries = state.borrow().entries();
     assert!(matches!(entries[0], BrowserEntry::Container(_)));
     assert!(!entries[2].is_container());
+}
+
+#[test]
+fn rows_can_be_selected_before_any_view_has_listed_them() {
+    // A memory folder hands out new link objects per listing, so a row index has to mean the
+    // listing the state made, not a fresh one.
+    let state = BrowserState::new(Box::new(home()), BrowserConfig::default());
+    BrowserState::click(&state, 0, Modifiers::default());
+    assert!(
+        state.borrow().is_selected(0),
+        "the folder row clicked is selected"
+    );
+    assert_eq!(selected(&state.borrow()), ["Notes"]);
+    BrowserState::activate(&state, 1, Activation::DoubleClick);
+    BrowserState::click(&state, 0, Modifiers::default());
+    assert!(
+        state.borrow().is_selected(0),
+        "the opened folder's rows are listed too"
+    );
+    assert_eq!(selected(&state.borrow()), ["Brackets"]);
+}
+
+#[test]
+fn without_a_view_a_content_change_lists_the_new_rows() {
+    let root = home();
+    let state = BrowserState::new(Box::new(root.clone()), BrowserConfig::default());
+    root.add_file("c.txt", b"c".to_vec());
+    state.borrow_mut().sync_content();
+    let row = state.borrow().listed_entry(4).map(|e| e.name().to_string());
+    assert_eq!(row.as_deref(), Some("c.txt"));
+}
+
+#[test]
+fn once_a_view_lists_the_rows_an_index_means_what_it_last_built() {
+    let root = home();
+    let state = BrowserState::new(Box::new(root.clone()), BrowserConfig::default());
+    state.borrow_mut().mark_listed();
+    root.add_file("c.txt", b"c".to_vec());
+    state.borrow_mut().sync_content();
+    assert!(
+        state.borrow().listed_entry(4).is_none(),
+        "the list on screen has not shown c.txt yet"
+    );
+    state.borrow_mut().mark_listed();
+    let row = state.borrow().listed_entry(4).map(|e| e.name().to_string());
+    assert_eq!(row.as_deref(), Some("c.txt"));
 }

@@ -8,7 +8,8 @@
 //! report given, go to standard error: it is made before any browser it could show them in).
 //!
 //! [`BrowserConfig::builder`] sets only what the app has; its `build` fills the rest, the
-//! default spawner reporting through the report the builder was given.
+//! default spawner reporting through the report the builder was given, or to standard error
+//! without one.
 
 use std::fmt;
 use std::rc::Rc;

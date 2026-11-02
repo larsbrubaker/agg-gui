@@ -87,7 +87,6 @@ fn the_same_results_shown_again_keep_their_selection() {
     state
         .borrow_mut()
         .push_search_results(finished_search(&root, "gear"));
-    state.borrow_mut().mark_listed();
     BrowserState::click(&state, 1, Modifiers::default());
     assert_eq!(selected(&state.borrow()), ["gear b.stl"]);
     let resets = state.borrow().list_resets();
@@ -109,7 +108,6 @@ fn a_rolled_up_section_carries_its_selected_results_until_it_opens() {
     state
         .borrow_mut()
         .push_search_results(finished_search(&root, "gear"));
-    state.borrow_mut().mark_listed();
     BrowserState::click(&state, 0, Modifiers::default());
     let section = section_names(&state.borrow())[0].0.clone();
     state.borrow_mut().toggle_search_section(&section);

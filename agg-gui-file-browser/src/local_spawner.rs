@@ -11,7 +11,8 @@
 //!   it (its `UiQueue`); a task still ready after a drain (it yielded) asks for another frame.
 //!   An app whose work needs more than a step per frame runs its own executor and passes that.
 //! - **Faults are reported, never lost.** `report_fault` hands the error's text to the report
-//!   the spawner was made with (a browser's `BrowserConfig::report`); `log_error` goes to its
+//!   the spawner was made with (a browser's `BrowserConfig::report`, or standard error for a
+//!   config given none); `log_error` goes to its
 //!   log, standard error unless an app gives one. A task that panics is dropped and the panic
 //!   goes on to the drain, which reports it through `agg_gui::report_unhandled`; the tasks that
 //!   drain had not reached yet run at the next.

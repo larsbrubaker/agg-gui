@@ -33,7 +33,13 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   selection and place, and a rolled-up section (`toggle_search_section`,
   `SearchSectionCollapseState`, shared for the session) carries its selected results until it
   opens; a result's picture is read from the folder it was found in.
-- `item_identity_key`, the identity a selection is matched back by, and `is_only_a_message`.
+- `item_identity_key`, the identity a selection is matched back by.
+- A folder listing only a message: `ListingMessage`, `entries_message`, `is_only_a_message` and
+  `BrowserState::listing_message` (its text, whether it is "Loading...", whether signing in
+  lists it); such a folder lists no rows to select.
+- Until a list view marks its listings (`mark_listed`), the state keeps its own listing current
+  (at its making, each navigation and each redisplay), so `listed_entry`, `is_selected` and the
+  clicks work for an app or a test with no view yet.
 
 ### Changed
 

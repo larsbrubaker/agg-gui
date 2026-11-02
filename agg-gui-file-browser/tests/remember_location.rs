@@ -1,5 +1,5 @@
-//! A browser view lends its memory the whole open path when it remembers where it is: the root
-//! first and the open folder last, so an app storing the path's names (or a location built from
+//! A browser view hands its memory the whole open path (its shared `OpenFolder`s) when it
+//! remembers where it is: the root first and the open folder last, so an app storing the path's names (or a location built from
 //! every folder on it) keeps the root's name too.
 
 use std::cell::RefCell;
@@ -8,7 +8,7 @@ use std::rc::Rc;
 use agg_gui_file_browser::{remember_open_location, BrowserMemory, OpenFolder};
 use agg_gui_files::{Folder, MemoryFolder};
 
-/// A memory that records the key and the folder names it was lent.
+/// A memory that records the key and the folder names it was handed.
 #[derive(Default)]
 struct Recording(RefCell<Vec<(String, Vec<String>)>>);
 
@@ -24,7 +24,7 @@ fn open_folder(folder: MemoryFolder) -> OpenFolder {
 }
 
 #[test]
-fn the_memory_is_lent_the_open_path_from_the_root_down() {
+fn the_memory_is_handed_the_open_path_from_the_root_down() {
     let open: Vec<OpenFolder> = ["Home", "Projects", "Brackets"]
         .into_iter()
         .map(|name| open_folder(MemoryFolder::new(name)))
@@ -46,7 +46,7 @@ fn the_memory_is_lent_the_open_path_from_the_root_down() {
 }
 
 #[test]
-fn a_browser_at_its_root_lends_the_root_alone() {
+fn a_browser_at_its_root_hands_over_the_root_alone() {
     let open: Vec<OpenFolder> = vec![open_folder(MemoryFolder::new("Home"))];
     let memory = Recording::default();
     remember_open_location(&memory, "main", &open);
