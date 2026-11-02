@@ -288,8 +288,9 @@ pub fn without_extension(name: &str, extension: &str) -> String {
 
 /// The Save dialog's question: its heading, the label over the name field, the name it starts
 /// with, how the typed name becomes the file name ([`FileNamer`], the name as typed by default),
-/// how a file's name shows ([`ShownName`], whole by default) and the app's own question before a
-/// save, if it has one ([`ReplaceQuestionHook`]).
+/// how a file's name shows ([`ShownName`], whole by default), the app's own question before a
+/// save, if it has one ([`ReplaceQuestionHook`]), and the name field's grey hint while empty and
+/// the focus id it is given focus through when the dialog opens (`agg_gui::focus`), if any.
 #[derive(Clone)]
 #[non_exhaustive]
 pub struct SaveRequest {
@@ -299,6 +300,8 @@ pub struct SaveRequest {
     pub namer: FileNamer,
     pub shown_name: ShownName,
     pub replace_question: Option<ReplaceQuestionHook>,
+    pub placeholder: Option<String>,
+    pub focus_id: Option<agg_gui::focus::FocusId>,
 }
 
 impl SaveRequest {
@@ -311,7 +314,23 @@ impl SaveRequest {
             namer: Rc::new(|typed: &str| Ok(typed.to_string())),
             shown_name: Rc::new(|name: &str| name.to_string()),
             replace_question: None,
+            placeholder: None,
+            focus_id: None,
         }
+    }
+
+    /// The request whose name field shows `placeholder` (translated) while empty ("Enter a Design
+    /// Name Here").
+    pub fn with_placeholder(mut self, placeholder: impl Into<String>) -> Self {
+        self.placeholder = Some(placeholder.into());
+        self
+    }
+
+    /// The request whose name field carries the focus id `id` and is given focus when the dialog
+    /// opens (`SaveController::update` asks for it once), so typing straight away names the save.
+    pub fn with_focus_id(mut self, id: agg_gui::focus::FocusId) -> Self {
+        self.focus_id = Some(id);
+        self
     }
 
     /// The request headed `title` with its field labelled `name_label` (both translated).

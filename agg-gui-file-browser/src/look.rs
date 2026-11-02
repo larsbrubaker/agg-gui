@@ -242,6 +242,18 @@ pub struct BrowserNames {
     pub notice: String,
     /// The notice's Undo or Redo button.
     pub notice_button: String,
+    /// A dialog page's accepting button (Save, Move, Open, a question's confirming button).
+    pub dialog_confirm: String,
+    /// A dialog page's going-back button (Cancel, a question's Cancel).
+    pub dialog_cancel: String,
+    /// The Save page's name field.
+    pub save_name_field: String,
+    /// The Save page's note (why Save can't run, or the question asked).
+    pub save_note: String,
+    /// The Save page's Create Folder button.
+    pub create_folder_button: String,
+    /// The Save page's field for a new folder's name, when it asks in the page.
+    pub folder_name_field: String,
 }
 
 impl Default for BrowserNames {
@@ -278,6 +290,12 @@ impl Default for BrowserNames {
             page_nav_bar: "Library Browser Nav Bar".into(),
             notice: "Library Notice".into(),
             notice_button: "Library Notice Button".into(),
+            dialog_confirm: "Browser Dialog Confirm Button".into(),
+            dialog_cancel: "Browser Dialog Cancel Button".into(),
+            save_name_field: "Save Name Field".into(),
+            save_note: "Save As Note".into(),
+            create_folder_button: "Create Folder In Button".into(),
+            folder_name_field: "Save As Folder Name Field".into(),
         }
     }
 }

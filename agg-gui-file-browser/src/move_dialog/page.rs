@@ -13,14 +13,14 @@
 //! that key and remembers each folder the user moves to, until the page is accepted (its folder
 //! then handed over, never remembered as the page's place).
 //!
-//! [`MovePage`] is the Move dialog: "Select a new Destination:", a line saying what accepting
-//! will do as the user browses and selects ("Move 11 items to Games." / "Copy ... The originals
-//! stay in Downloads." / why the folder can't take them: `plan.rs`), the browser page, then
-//! Cancel and Move or Copy as the line says (disabled while the folder can't take the items).
-//! Accepting opens the destination (the selected folder row, or hands over the folder showing)
-//! and answers with it; the browser's Move does the move. A showing folder something else still
-//! holds is not handed over: the dialog stays in it and says the folder was busy.
-
+//! [`MovePage`] is the Move dialog's default page over a [`MoveController`] (`controller.rs`,
+//! which accepts and remembers): "Select a new Destination:", a line saying what accepting will
+//! do as the user browses and selects ("Move 11 items to Games." / "Copy ... The originals stay
+//! in Downloads." / why the folder can't take them: `plan.rs`), the browser page, then Cancel and
+//! Move or Copy as the line says (disabled while the folder can't take the items), named by the
+//! look's `BrowserNames::dialog_cancel` and `dialog_confirm`. An app wanting its own page builds
+//! it over the controller instead.
+//!
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
@@ -32,15 +32,15 @@ use agg_gui::{
 };
 use agg_gui_files::tr;
 
-use super::plan::{destination, move_verdict, Destination, MoveVerdict};
+use super::controller::{MoveAnswers, MoveController};
+use super::plan::MoveVerdict;
 use crate::bread_crumb::folder_bread_crumb_for;
 use crate::browser::parts::BottomBorder;
 use crate::browser::BACK_MOUSE_BUTTON;
 use crate::config::{BrowserLayout, BrowserOptions, DoubleClickTarget};
-use crate::dialogs::{MovePick, MoveRequest};
+use crate::dialogs::MoveRequest;
 use crate::list::BrowserList;
 use crate::nav::buttons::{sorting_button, view_options_button};
-use crate::sheet_dialogs::{CANCEL_BUTTON, CONFIRM_BUTTON};
 use crate::state::BrowserState;
 
 /// The Move page's widget name.
@@ -192,19 +192,9 @@ impl Widget for BrowserPage {
     }
 }
 
-/// What the Move page answers through: a pick, or a cancel.
-pub struct MoveAnswers {
-    pub accept: Rc<dyn Fn(MovePick)>,
-    pub cancel: Rc<dyn Fn()>,
-}
-
 /// The Move dialog's page (see the module header).
 pub struct MovePage {
-    state: Rc<RefCell<BrowserState>>,
-    request: Rc<MoveRequest>,
-    answers: Rc<MoveAnswers>,
-    /// The browser page's: set on accept, so the folder handed over isn't remembered.
-    accepted: Rc<Cell<bool>>,
+    controller: MoveController,
     font: Arc<Font>,
     verdict: Rc<RefCell<MoveVerdict>>,
     built: Option<u64>,
@@ -215,8 +205,7 @@ pub struct MovePage {
 
 impl MovePage {
     /// The page moving `request`'s items, browsing `state`, answering through `answers`; with a
-    /// `location_key`, opening where it was last left and remembering where it goes
-    /// (`BrowserPage::remembering`).
+    /// `location_key`, opening where it was last left and remembering where it goes.
     pub fn new(
         state: &Rc<RefCell<BrowserState>>,
         request: MoveRequest,
@@ -224,22 +213,24 @@ impl MovePage {
         font: Arc<Font>,
         location_key: Option<&str>,
     ) -> Self {
+        let mut controller = MoveController::new(state, request, answers);
+        if let Some(key) = location_key {
+            controller = controller.remembering(key);
+        }
+        Self::over(controller, font)
+    }
+
+    /// The page over `controller` (an app's own hooks and starting folder set on it).
+    pub fn over(controller: MoveController, font: Arc<Font>) -> Self {
         let heading = Label::new(
             format!("{}:", tr("Select a new Destination")),
             Arc::clone(&font),
         )
         .with_font_size(16.0)
         .with_strong(true);
-        let mut page = BrowserPage::new(state, Arc::clone(&font));
-        if let Some(key) = location_key {
-            page = page.remembering(key);
-        }
-        let accepted = page.accepted_flag();
+        let page = BrowserPage::new(controller.state(), Arc::clone(&font));
         Self {
-            state: Rc::clone(state),
-            request: Rc::new(request),
-            answers: Rc::new(answers),
-            accepted,
+            controller,
             font,
             verdict: Rc::new(RefCell::new(MoveVerdict::Refused(String::new()))),
             built: None,
@@ -253,6 +244,11 @@ impl MovePage {
         }
     }
 
+    /// The controller the page shows.
+    pub fn controller(&self) -> &MoveController {
+        &self.controller
+    }
+
     /// What accepting does now.
     pub fn verdict(&self) -> MoveVerdict {
         self.verdict.borrow().clone()
@@ -260,29 +256,32 @@ impl MovePage {
 
     /// The summary and the buttons, for the verdict now.
     fn rebuild(&mut self) {
-        let verdict = move_verdict(&self.request, &self.state.borrow());
+        let verdict = self.controller.verdict();
+        let names = self
+            .controller
+            .state()
+            .borrow()
+            .config()
+            .look
+            .names()
+            .clone();
         let summary = Label::new(verdict.text().to_string(), Arc::clone(&self.font))
             .with_wrap(true)
             .with_name(MOVE_ITEM_SUMMARY);
-        let cancel = Rc::clone(&self.answers);
+        let cancel = self.controller.clone();
         let cancel_button = Button::new(tr("Cancel"), Arc::clone(&self.font))
-            .on_click(move || (cancel.cancel)())
+            .on_click(move || cancel.cancel())
             .with_cancel_action()
-            .with_name(CANCEL_BUTTON);
-        let (state, request, answers) = (
-            Rc::clone(&self.state),
-            Rc::clone(&self.request),
-            Rc::clone(&self.answers),
-        );
-        let accepted = Rc::clone(&self.accepted);
+            .with_name(names.dialog_cancel.clone());
+        let accept = self.controller.clone();
         let accept_button = Button::new(verdict.verb(), Arc::clone(&self.font))
-            .on_click(move || accept(&state, &request, &answers, &accepted))
+            .on_click(move || accept.accept())
             .with_enabled_fn({
                 let enabled = !verdict.is_refused();
                 move || enabled
             })
             .with_default_action()
-            .with_name(CONFIRM_BUTTON);
+            .with_name(names.dialog_confirm.clone());
         let buttons = FlexRow::new()
             .with_gap(8.0)
             .add_flex(Box::new(SizedBox::new().with_height(1.0)), 1.0)
@@ -292,56 +291,6 @@ impl MovePage {
         self.children[3] = Box::new(buttons);
         *self.verdict.borrow_mut() = verdict;
     }
-}
-
-/// Accepts the dialog when its folder can take the items: opens the destination and answers.
-fn accept(
-    state: &Rc<RefCell<BrowserState>>,
-    request: &MoveRequest,
-    answers: &MoveAnswers,
-    accepted: &Cell<bool>,
-) {
-    let verdict = move_verdict(request, &state.borrow());
-    if verdict.is_refused() || accepted.get() {
-        return;
-    }
-    let copy = matches!(verdict, MoveVerdict::Copy(_));
-    let destination = destination(&state.borrow());
-    let target = match destination {
-        Destination::Row(link) => match link.get_container() {
-            Ok(target) => target,
-            Err(why) => {
-                state.borrow_mut().after_write(why);
-                return;
-            }
-        },
-        Destination::Showing => {
-            // The folder showing is handed over: the dialog closes on accept, and the page stops
-            // remembering its place first. Should something still hold the folder, nothing
-            // moves, the dialog stays in it and the user is told so.
-            if !state.borrow().can_hand_over_active_container() {
-                let text = tr("The folder was busy, so nothing moved. Try again.");
-                state.borrow_mut().after_write(text);
-                return;
-            }
-            accepted.set(true);
-            let Some(taken) = state.borrow_mut().take_active_container() else {
-                accepted.set(false);
-                return;
-            };
-            match Rc::try_unwrap(taken) {
-                Ok(folder) => folder.into_inner(),
-                Err(_) => {
-                    accepted.set(false);
-                    let text = tr("The folder was busy, so nothing moved. Try again.");
-                    state.borrow_mut().after_write(text);
-                    return;
-                }
-            }
-        }
-    };
-    accepted.set(true);
-    (answers.accept)(MovePick { target, copy });
 }
 
 impl Widget for MovePage {
@@ -366,7 +315,8 @@ impl Widget for MovePage {
     /// 16 of padding; the heading and summary at the top, the buttons at the bottom, the browser
     /// between, 8 apart.
     fn layout(&mut self, available: Size) -> Size {
-        let generation = self.state.borrow().generation();
+        self.controller.update();
+        let generation = self.controller.state().borrow().generation();
         if self.built != Some(generation) {
             self.rebuild();
             self.built = Some(generation);
@@ -398,7 +348,7 @@ impl Widget for MovePage {
         vec![
             (
                 "bread_crumb_trail",
-                self.state.borrow().path_names().join("/"),
+                self.controller.state().borrow().path_names().join("/"),
             ),
             ("accept_enabled", (!verdict.is_refused()).to_string()),
             ("summary", verdict.text().to_string()),

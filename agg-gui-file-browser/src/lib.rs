@@ -53,8 +53,9 @@
 //! menu actions, which run: Add, Create Folder..., Open File Location, Rename, Move, Remove, each
 //! recorded for Undo and asking through the dialogs), `sheet_dialogs` ([`SheetDialogs`] and the
 //! [`DialogSheet`] they show on), `move_dialog` ([`MovePage`] over a [`BrowserPage`] of its own,
-//! and [`move_verdict`]: where a Move can go and whether it moves or copies), `save_dialog`
-//! ([`SavePage`]: where a save goes and its name; the app writes the file), `open_dialog`
+//! [`MoveController`] its logic for an app's own page, and [`move_verdict`]: where a Move can go
+//! and whether it moves or copies), `save_dialog` ([`SavePage`] over [`SaveController`]: where a
+//! save goes and its name; the app writes the file), `open_dialog`
 //! ([`OpenPage`]: the files to open, for an app with no system Open dialog), `disk_monitor`
 //! (feature `disk`: the directory monitor that wakes the UI), `local_spawner` (the
 //! spawner for apps without an executor), `trace` (the opt-in trace through the app's tracer);
@@ -169,8 +170,8 @@ pub use memory::{
 };
 pub use menus::{BrowserMenus, MenuSource, OwnMenus};
 pub use move_dialog::{
-    dialog_options, move_verdict, BrowserPage, FolderKey, MoveAnswers, MovePage, MoveVerdict,
-    MOVE_ITEM_SUMMARY, MOVE_ITEM_WINDOW,
+    dialog_options, move_verdict, BrowserPage, FolderKey, MoveAnswers, MoveController, MovePage,
+    MoveVerdict, MOVE_ITEM_SUMMARY, MOVE_ITEM_WINDOW,
 };
 pub use nav::buttons::{
     history_key_text, sorting_button, view_options_button, HistoryButtons, NAV_BUTTON_SIDE,
@@ -188,7 +189,9 @@ pub use places::{
     copy_modifier_held, default_crosses_places, default_drop_copies, places_differ, CopyCx,
     CopyTakeover, DefaultPlaces, PlaceRules,
 };
-pub use save_dialog::{SaveAnswers, SavePage, SAVE_AS_WINDOW};
+pub use save_dialog::{
+    QuestionHost, SaveAnswers, SaveController, SaveFolderRule, SaveMode, SavePage, SAVE_AS_WINDOW,
+};
 pub use search::{SearchBox, SearchController, SearchEndedListener, SearchMaker, DEBOUNCE};
 pub use sheet_dialogs::{DialogSheet, SheetDialogs};
 pub use state::{
