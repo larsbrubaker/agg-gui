@@ -9,7 +9,10 @@
 //! remembers the name each had so undo gives it back. A move from a folder that is not in memory
 //! is the plain add-then-remove, unrecorded. Undo and redo finish at once, each handing back the
 //! step that reverses it; an entry no longer where the step left it (changed meanwhile) is
-//! named in the outcome's failures and left out of the kept step.
+//! named in the outcome's failures and left out of the kept step. The step handed back keeps
+//! describing the original write ([`KeptStep`]), so after an undo the history still says
+//! "Moved gear.stl to Brackets", not the reverse. Undoing a new folder takes it away only while
+//! it is empty, as on disk: one holding something stays, "the folder isn't empty".
 
 use std::rc::Rc;
 
@@ -187,6 +190,15 @@ impl MemoryStep {
                     vec![tr("{0} is not in this folder").replace("{0}", &to)],
                 ),
             },
+            MemoryStep::Created { made, .. }
+                if !made.files.borrow().is_empty() || !made.folders.borrow().is_empty() =>
+            {
+                let name = made.name.borrow().clone();
+                (
+                    None,
+                    vec![format!("{name}: {}", tr("the folder isn't empty"))],
+                )
+            }
             MemoryStep::Created { folder, made } => match folder.take(&made.id) {
                 Some(_) => {
                     folder.content_changed.raise();
@@ -237,17 +249,8 @@ impl MemoryStep {
         }
     }
 
-    fn finish(self, done: StepDone) {
-        let (kept, failures) = self.reverse();
-        done(StepOutcome {
-            kept: kept.map(|step| Box::new(step) as Box<dyn HistoryStep>),
-            failures,
-        });
-    }
-}
-
-impl HistoryStep for MemoryStep {
-    fn description(&self) -> String {
+    /// What the write says it did, as the history shows it.
+    fn describe(&self) -> String {
         match self {
             MemoryStep::Moved { to, moved, .. } => {
                 let names: Vec<String> = moved.iter().map(|m| m.2.clone()).collect();
@@ -275,6 +278,31 @@ impl HistoryStep for MemoryStep {
         }
     }
 
+    }
+
+/// A memory write's history step: the change to reverse next, and the description of the write
+/// as first recorded, which every step handed back on undo and redo keeps.
+struct KeptStep {
+    step: MemoryStep,
+    description: String,
+}
+
+impl KeptStep {
+    fn finish(self, done: StepDone) {
+        let (kept, failures) = self.step.reverse();
+        let description = self.description;
+        done(StepOutcome {
+            kept: kept.map(|step| Box::new(KeptStep { step, description }) as Box<dyn HistoryStep>),
+            failures,
+        });
+    }
+}
+
+impl HistoryStep for KeptStep {
+    fn description(&self) -> String {
+        self.description.clone()
+    }
+
     /// Reverses the change, finished before this returns.
     fn undo(self: Box<Self>, done: StepDone) {
         (*self).finish(done);
@@ -289,7 +317,10 @@ impl HistoryStep for MemoryStep {
 fn recorded(result: Result<(), String>, step: Option<MemoryStep>) -> Recorded {
     Recorded {
         result,
-        step: step.map(|s| Box::new(s) as Box<dyn HistoryStep>),
+        step: step.map(|step| {
+            let description = step.describe();
+            Box::new(KeptStep { step, description }) as Box<dyn HistoryStep>
+        }),
     }
 }
 

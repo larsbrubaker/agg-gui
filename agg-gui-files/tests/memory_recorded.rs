@@ -182,3 +182,80 @@ fn a_remove_undoes_with_the_same_entries_and_redoes() {
     let _ = run(redo, false);
     assert!(ids_and_names(&home).is_empty());
 }
+
+/// Runs `step`'s undo (or redo) and answers its outcome, whatever it holds.
+fn outcome_of(step: Box<dyn HistoryStep>, undo: bool) -> StepOutcome {
+    let got: Rc<RefCell<Option<StepOutcome>>> = Rc::new(RefCell::new(None));
+    let keep = Rc::clone(&got);
+    let done = Box::new(move |outcome| *keep.borrow_mut() = Some(outcome));
+    match undo {
+        true => step.undo(done),
+        false => step.redo(done),
+    }
+    let outcome = got.borrow_mut().take();
+    outcome.expect("finished at once")
+}
+
+#[test]
+fn every_step_keeps_describing_what_was_done_after_undo_and_redo() {
+    let mut home = MemoryFolder::new("Home");
+    let brackets = home.add_folder("Brackets").expect("free");
+    let gear = home.add_file("gear.stl", b"g".to_vec());
+    let (mut target, mut source) = (brackets.clone(), home.clone());
+    let moved = target
+        .move_in_recorded(std::slice::from_ref(&gear), &mut source)
+        .step
+        .expect("recorded");
+    let renamed = brackets
+        .clone()
+        .rename_recorded(&item(&brackets, "gear.stl"), "cog.stl")
+        .step
+        .expect("recorded");
+    let created = home.create_folder_recorded("Parts").step.expect("recorded");
+    let removed = home
+        .remove_recorded(&[item(&home, "Parts")])
+        .step
+        .expect("recorded");
+    for (step, said) in [
+        (removed, "Removed Parts"),
+        (created, "Created folder Parts"),
+        (renamed, "Renamed gear.stl to cog.stl"),
+        (moved, "Moved gear.stl to Brackets"),
+    ] {
+        assert_eq!(step.description(), said);
+        let redo = run(step, true);
+        assert_eq!(redo.description(), said, "after undo");
+        let undo = run(redo, false);
+        assert_eq!(undo.description(), said, "after redo");
+        let redo = run(undo, true);
+        assert_eq!(redo.description(), said, "after a second undo");
+    }
+}
+
+#[test]
+fn undoing_a_new_folder_that_holds_something_refuses_and_keeps_it() {
+    let mut home = MemoryFolder::new("Home");
+    let step = home.create_folder_recorded("Parts").step.expect("recorded");
+    let parts = item(&home, "Parts")
+        .as_container_link()
+        .expect("a folder")
+        .get_container()
+        .expect("opens");
+    let id = item(&home, "Parts").id().to_string();
+    let parts = parts
+        .as_any()
+        .and_then(|a| a.downcast_ref::<MemoryFolder>())
+        .cloned()
+        .expect("a memory folder");
+    parts.add_file("inside.stl", b"i".to_vec());
+    let outcome = outcome_of(step, true);
+    assert_eq!(outcome.failures, ["Parts: the folder isn't empty"]);
+    assert_eq!(item(&home, "Parts").id(), id, "still there");
+    let parts = item(&home, "Parts")
+        .as_container_link()
+        .expect("a folder")
+        .get_container()
+        .expect("opens");
+    assert_eq!(parts.items().len(), 1, "with what was put in it");
+    assert!(outcome.kept.is_none(), "nothing was undone, so nothing to redo");
+}
