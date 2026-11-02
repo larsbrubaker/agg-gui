@@ -1,6 +1,8 @@
 //! Read-only rules (an app's folder of autosaved designs, its shipped samples): the folder allows
 //! no change, each write fails before touching the disk, its rows say the folders they open are
-//! read-only, and the folders inside it are read-only too.
+//! read-only, and the folders inside it are read-only too. The refusal says only that the folder
+//! can't be changed: the caller names the folder the user dropped on, which is not always the
+//! folder's name on disk.
 
 use std::rc::Rc;
 
@@ -74,4 +76,21 @@ fn the_folders_inside_a_read_only_folder_are_read_only() {
 
     let open_row = DiskFolderLink::new(dir.path().join("Inner"), stl_only());
     assert!(!open_row.is_read_only());
+}
+
+#[test]
+fn a_refused_write_says_the_folder_cant_be_changed_without_its_name_on_disk() {
+    let dir = TempDir::new();
+    let mut folder = DiskFolder::new(dir.path(), stl_only_read_only());
+    let new_folder: Rc<dyn Item> = Rc::new(CreateFolderItem::new("New"));
+    assert_eq!(
+        WritableFolder::add(&mut folder, &[new_folder]),
+        Err("This folder can't be changed".to_string())
+    );
+    let mut elsewhere = MemoryFolder::new("Elsewhere");
+    let incoming = elsewhere.add_file("gear.stl", b"g".to_vec());
+    assert_eq!(
+        folder.move_items(&[incoming], &mut elsewhere),
+        Err("This folder can't be changed".to_string())
+    );
 }

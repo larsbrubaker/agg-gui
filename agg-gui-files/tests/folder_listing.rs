@@ -1,7 +1,8 @@
 //! `folder_listing`: a folder loaded and its listing awaited. A folder that lists within `load`
 //! answers at once; one that lists later is waited for until it raises content-changed with its
 //! load no longer pending, then answers its listing or the kind of failure it ended in; the wait
-//! takes its listener off the folder whether it answers or is dropped.
+//! takes its listener off the folder whether it answers or is dropped. A folder that never
+//! answers is given up on once the wait's limit passes.
 
 #[path = "support/late_folder.rs"]
 mod late_folder;
@@ -13,7 +14,12 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::task::{Context, Poll, Wake, Waker};
 
-use agg_gui_files::{folder_listing, Item, ListingFailure, MemoryFolder};
+use std::time::{Duration, Instant};
+
+use agg_gui_files::{
+    folder_listing, folder_listing_within, live_folder_listing_timer_threads, Item, ListingFailure,
+    MemoryFolder,
+};
 
 use late_folder::{LateFolder, LateLink};
 
@@ -96,4 +102,41 @@ fn a_dropped_wait_takes_its_listener_off() {
         assert_eq!(state.listeners.get(), 1);
     }
     assert_eq!(state.listeners.get(), 0);
+}
+
+/// A server that never answers must not hold a copy open for ever: past the limit the wait is
+/// woken and answers that the folder couldn't be listed.
+#[test]
+fn a_folder_that_never_lists_is_given_up_on_at_the_limit() {
+    let late = LateFolder::new("Remote");
+    let state = Rc::clone(&late.state);
+    let counter = Arc::new(CountingWaker::default());
+    let waker = Waker::from(Arc::clone(&counter));
+    let mut cx = Context::from_waker(&waker);
+    let mut wait = pin!(folder_listing_within(
+        Box::new(late),
+        Duration::from_millis(50)
+    ));
+    assert!(wait.as_mut().poll(&mut cx).is_pending());
+    let started = Instant::now();
+    while counter.0.load(Ordering::SeqCst) == 0 {
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "the limit wakes the wait"
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert!(matches!(
+        wait.as_mut().poll(&mut cx),
+        Poll::Ready(Err(ListingFailure::Other))
+    ));
+    assert_eq!(state.listeners.get(), 0, "the listener came off");
+    let started = Instant::now();
+    while live_folder_listing_timer_threads() > 0 {
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "the timer thread ends with the wait"
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
 }

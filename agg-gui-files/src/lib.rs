@@ -102,7 +102,10 @@ pub use dynamic_folder_link::{DynamicFolderLink, FolderCreator, OptionalFolderCr
 pub use error::LoadError;
 pub use folder::{ContentChangedEvent, ContentChangedListener, Folder, ListingFailure};
 pub use folder_data::FolderData;
-pub use folder_listing::{folder_listing, FolderListing};
+pub use folder_listing::{
+    folder_listing, folder_listing_within, live_folder_listing_timer_threads, FolderListing,
+    FOLDER_LISTING_TIMEOUT,
+};
 pub use history::{HistoryStep, Recorded, StepDone, StepOutcome};
 pub use item::{Asset, AssetStream, FolderLink, Item, PictureFuture, StreamFuture, Thumbnail};
 pub use memory_folder::{MemoryFile, MemoryFolder, MemoryFolderLink};

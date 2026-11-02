@@ -22,8 +22,9 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   `rename_on_disk` and `remove_to_trash` answering what they did (`MovedPath`, `TrashedItem`)
   and `copy_items_in`. `disk::DiskFolderLink` is a sub-folder's row, carrying the rules to the
   folder it opens; `disk::DiskFile` a file, with `set_name` and `subscribe_file_renamed`.
-- `disk::DiskRules` (`lists_file`, `read_only`, default false) and `disk::AllFiles`. A read-only folder's `allow_action` refuses everything and each write
-  fails before touching the disk.
+- `disk::DiskRules` (`lists_file`, `read_only`, default false) and `disk::AllFiles`. A
+  read-only folder's `allow_action` refuses everything and each write fails before touching the
+  disk with "This folder can't be changed" (the caller names the folder).
 - Live refresh: a showing `DiskFolder` (`activate` to `deactivate`/`dispose`) watches its folder
   through the registered `DirectoryMonitor` (`set_directory_monitor`, `directory_monitor`;
   `PollingDirectoryMonitor` polls each `POLL_INTERVAL` natively and watches nothing in the
@@ -57,7 +58,8 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   record reader (`parse_recycle_bin_record`, `newest_recycle_bin_match`).
 - `folder_listing` (`FolderListing`): loads a folder and awaits its listing, waking on
   content-changed until its load is no longer pending; answers the folder or its
-  `ListingFailure`.
+  `ListingFailure`, or `ListingFailure::Other` once `FOLDER_LISTING_TIMEOUT` (60 s) has passed
+  (`folder_listing_within` takes another limit; `live_folder_listing_timer_threads`).
 - `ENGLISH_TEXTS` lists the disk provider's texts.
 
 - The `zip` feature: a `.zip` file browsed as a read-only folder, from MatterCAD's library.

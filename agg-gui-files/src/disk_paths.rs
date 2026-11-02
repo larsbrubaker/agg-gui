@@ -2,7 +2,7 @@
 //! and the zip provider (`zip_folder`) alike: the shown name, the dates, the ID, and the location
 //! key a folder tree knows a folder by.
 //!
-//! The ID is kept exactly as it has always been computed (an app's thumbnail cache is keyed by
+//! The ID's exact text is fixed, since an app's thumbnail cache is keyed by it (golden IDs pin
 //! it): a 64-bit FNV-1a hash over the UTF-16 bytes of the path followed by the last write time in
 //! round-trip UTC form, so the ID changes when the file is written. An entry inside a zip archive
 //! hashes the archive's path and the entry's path the same way ([`utf16_hash`]).

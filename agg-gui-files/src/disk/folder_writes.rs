@@ -56,14 +56,12 @@ pub(super) fn disk_path_of(item: &dyn Item) -> Option<PathBuf> {
 }
 
 impl DiskFolder {
-    /// `Err` with the read-only message when the rules refuse changes.
+    /// `Err` with the read-only message when the rules refuse changes. The message doesn't name
+    /// the folder: the caller names the one the user acted on, whose shown name may not be its
+    /// name on disk (an app's "History" row opening a folder named otherwise).
     pub(super) fn refuse_if_read_only(&self) -> Result<(), String> {
         if self.rules.read_only() {
-            Err(format!(
-                "{}: {}",
-                path_file_name(&self.full_path),
-                tr("This folder can't be changed")
-            ))
+            Err(tr("This folder can't be changed"))
         } else {
             Ok(())
         }

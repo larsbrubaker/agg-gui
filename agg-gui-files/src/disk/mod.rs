@@ -4,8 +4,8 @@
 //! to a folder and passed by each of its rows to the folder they open.
 //!
 //! Disk items keep their identity across listings: an item's ID hashes its path and last write
-//! time (`paths`), the same text-for-text as it has always been, since an app's thumbnail cache
-//! is keyed by it; a folder and its row answer the same location key (its path,
+//! time (`paths`), and its exact text is fixed, since an app's thumbnail cache is keyed by it
+//! (golden IDs pin it); a folder and its row answer the same location key (its path,
 //! [`disk_location_key`]) and the same place, the computer.
 //!
 //! Files: `rules` ([`DiskRules`], [`AllFiles`]), `paths` (names, dates, IDs, free names, location
