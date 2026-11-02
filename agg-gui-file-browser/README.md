@@ -6,6 +6,7 @@ don't compile it. It builds for `wasm32-unknown-unknown`.
 
 | Item | What it is |
 |---|---|
+| `FileBrowser` | The whole browser over one `BrowserState`: the tree-and-list form (one bar with breadcrumbs, search, Undo and Redo, view, sort and "File", over the tree, splitter and list) or the list-only form of a popup (with its "Folders Toolbar"), the undo notice, and the drag's picture drawn once for the whole browser |
 | `BrowserLook`, `DefaultLook` | A browser's look: its style, icons and widget names; the default is agg-gui's theme with Font Awesome glyphs |
 | `BrowserStyle` | The colours and sizes a browser draws with (`from_visuals` for agg-gui's theme) |
 | `BrowserIcon` | The icons a browser draws, each with a Font Awesome fallback glyph |
@@ -27,7 +28,7 @@ don't compile it. It builds for `wasm32-unknown-unknown`.
 | `Entry`, `BrowserRef` | The snapshots hooks are handed, so no hook runs while the browser's state is borrowed; a `BrowserRef` also reaches back to the live browser and its app slot |
 | `default_drop_copies`, `copy_modifier_held` | Move or copy: items move within a place, and are copied between places, out of folders that keep them, or with Option (Mac) or Ctrl held |
 | `LocalSpawner` | Background work for apps without an executor, run a step at a time from agg-gui's UI-queue drain |
-| `BrowserCommand`, `ActionScope`, `BuiltinAction`, `run_builtin` | Menu rows: an app's commands with icons (through the look), shortcuts, scopes, submenus and rows left out while they can't run, and the browser's own Add, Create Folder..., Open File Location, Rename, Move and Remove, which run, recorded for Undo, asking through the app's dialogs |
+| `BrowserCommand`, `ActionScope`, `BuiltinAction`, `run_builtin` | Menu rows: an app's commands with icons (through the look), shortcuts, scopes, submenus and rows left out while they can't run, and the browser's own (placed bare, or dressed with the app's tooltip through `BrowserCommand::builtin`) Add, Create Folder..., Open File Location, Rename, Move and Remove, which run, recorded for Undo, asking through the app's dialogs |
 | `SheetDialogs`, `DialogSheet` | Ready dialogs on agg-gui's `ModalSheet` for an app without its own: confirming a change and asking for a name |
 | `OverflowButton` | The navigation bar's "File" button with the folder's whole menu |
 

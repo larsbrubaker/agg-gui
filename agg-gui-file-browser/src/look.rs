@@ -231,6 +231,8 @@ pub struct BrowserNames {
     pub splitter: String,
     /// The provider message under a list-only browser's list.
     pub provider_message: String,
+    /// The list-only browser's second bar (its search box, view and sorting buttons).
+    pub folders_toolbar: String,
     /// The history's notice ("Moved 3 items to Brackets").
     pub notice: String,
     /// The notice's Undo or Redo button.
@@ -267,6 +269,7 @@ impl Default for BrowserNames {
             close_search: "Close Search".into(),
             splitter: "Library Splitter".into(),
             provider_message: "Provider Message".into(),
+            folders_toolbar: "Folders Toolbar".into(),
             notice: "Library Notice".into(),
             notice_button: "Library Notice Button".into(),
         }

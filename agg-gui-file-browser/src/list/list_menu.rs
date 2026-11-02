@@ -5,7 +5,8 @@
 //!
 //! Building a menu (`menu_actions`): the built-ins offered where it opens (the ones acting on the
 //! selection in the selection's menu, adding to the folder in the list's, every one in the
-//! overflow menu) become rows that run (`builtins/`), a built-in the menu doesn't offer is left
+//! overflow menu) become rows that run (`builtins/`), carrying the tooltip, icon or shortcut an
+//! app dressed them in (`BrowserCommand::builtin`), a built-in the menu doesn't offer is left
 //! out, and `select_rows` keeps the rows the menu shows: the selection's menu shows the rows of
 //! its scope that can run now (one that can't is left out, so a right-click menu holds only what
 //! can be done), the list's menu the rows of its scope, greyed when they can't run, and the
@@ -73,10 +74,16 @@ pub(crate) fn resolve_builtins(
                 Some(BrowserAction::Command(builtin_command(state, action)))
             }
             BrowserAction::Builtin(_) => None,
-            BrowserAction::Command(command) if !command.submenu_rows().is_empty() => {
-                let inner = resolve_builtins(state, command.submenu_rows().to_vec(), builtins);
-                Some(BrowserAction::Command(command.with_submenu_rows(inner)))
-            }
+            BrowserAction::Command(command) => match command.builtin_action() {
+                Some(action) => builtins.offers(action).then(|| {
+                    BrowserAction::Command(builtin_command(state, action).dressed_as(&command))
+                }),
+                None if !command.submenu_rows().is_empty() => {
+                    let inner = resolve_builtins(state, command.submenu_rows().to_vec(), builtins);
+                    Some(BrowserAction::Command(command.with_submenu_rows(inner)))
+                }
+                None => Some(BrowserAction::Command(command)),
+            },
             other => Some(other),
         })
         .collect()

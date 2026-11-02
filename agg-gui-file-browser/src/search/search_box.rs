@@ -98,6 +98,9 @@ impl SearchBox {
 }
 
 impl Widget for SearchBox {
+    fn as_any(&self) -> Option<&dyn std::any::Any> {
+        Some(self)
+    }
     fn type_name(&self) -> &'static str {
         "TextEditWithInlineCancel"
     }

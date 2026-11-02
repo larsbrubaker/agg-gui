@@ -10,8 +10,9 @@
 //! it, the picture follows the pointer everywhere. It comes back inside the browser. The rows and tiles being carried paint at half opacity while the drag lasts
 //! ([`lift`], [`finish_lift`]), so they read as picked up.
 //!
-//! The list draws the picture in agg-gui's global overlay pass, after the whole widget tree
-//! (`BrowserList::paint_global_overlay`), so it lies on top of everything. The art is the one a
+//! The picture is drawn in agg-gui's global overlay pass, after the whole widget tree, so it lies
+//! on top of everything: by the composed browser (`FileBrowser::paint_global_overlay`), once for
+//! its tree and list, or by a list standing alone (`BrowserList::paint_global_overlay`). The art is the one a
 //! carried row last painted, handed over as it paints: nothing is looked up or made per frame.
 
 use std::cell::RefCell;
@@ -97,7 +98,7 @@ pub fn finish_lift(
     state.borrow_mut().drop.picture.offer(rank, art);
 }
 
-/// The list's global overlay: the drag's picture by the pointer, on top of everything.
+/// The drag's picture by the pointer, on top of everything (a global overlay's paint).
 pub fn paint_drag_picture(
     ctx: &mut dyn DrawCtx,
     state: &Rc<RefCell<BrowserState>>,

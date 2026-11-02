@@ -15,7 +15,8 @@
 //! last frame's and records its own rectangle, and light up under a drag (`drag/`); a folder the
 //! drag waited over opens in the list as the list paints (`drag/spring.rs`), and the drag's
 //! picture is drawn in the list's global overlay (`drag/picture.rs`, the list's `drag_picture`
-//! properties).
+//! properties), unless the list is part of a composed browser, which draws it once for its tree
+//! and list (`BrowserList::without_drag_picture`, `browser/`).
 //!
 //! The list is also where its menus open (`list_menu.rs`) and its keys and rubber band are
 //! handled (`gestures.rs`): a row asks for the selection's menu (a right press, or its menu
@@ -88,6 +89,8 @@ pub struct BrowserList {
     font: Arc<Font>,
     /// Names under every tile, however small (`with_tile_names`).
     tile_names: bool,
+    /// Whether the list draws the drag's picture (`without_drag_picture`).
+    drag_picture: bool,
     built: Option<BuildKey>,
     /// Bumped by each picture that arrives.
     arrivals: Rc<Cell<u64>>,
@@ -112,6 +115,7 @@ impl BrowserList {
             look,
             font,
             tile_names: false,
+            drag_picture: true,
             built: None,
             arrivals: Rc::new(Cell::new(0)),
             offset: Rc::new(Cell::new(0.0)),
@@ -128,6 +132,13 @@ impl BrowserList {
     /// folder is which (a phone's popup browser).
     pub fn with_tile_names(mut self) -> Self {
         self.tile_names = true;
+        self
+    }
+
+    /// The list leaving the drag's picture to its host: a composed browser (`FileBrowser`) draws
+    /// it once for the tree and the list together.
+    pub fn without_drag_picture(mut self) -> Self {
+        self.drag_picture = false;
         self
     }
 
@@ -312,10 +323,12 @@ impl Widget for BrowserList {
             style.corner_radius,
         );
     }
-    /// The drag's picture, then the open menu, over everything.
+    /// The drag's picture (unless the host draws it), then the open menu, over everything.
     fn paint_global_overlay(&mut self, ctx: &mut dyn DrawCtx) {
         let style = self.look.style();
-        crate::drag::picture::paint_drag_picture(ctx, &self.state, &style, &self.font);
+        if self.drag_picture {
+            crate::drag::picture::paint_drag_picture(ctx, &self.state, &style, &self.font);
+        }
         self.menu
             .paint(ctx, Arc::clone(&self.font), style.font_size);
     }

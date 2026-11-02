@@ -201,6 +201,23 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   picker and no Move dialog.
 - Delete and Backspace run Remove, with its question, in the list and in the tree (the tree's
   selected folder).
+- `FileBrowser`, the whole browser composed over one `BrowserState`: with
+  `BrowserLayout::TreeAndList` one bar (breadcrumbs, the search box 200 wide, Undo and Redo, the
+  view, sorting and overflow buttons) over the tree, the splitter and the list; with
+  `BrowserLayout::ListOnly` the breadcrumbs and overflow button, a "Folders Toolbar" (the search
+  box stretching, the view and sorting buttons), the list and the folder's header text in a
+  `ProviderMessageBar`; in both the undo notice near the bottom. The header is built again when
+  the folder changes, the tree, list and notice kept and the search box moved into the new
+  header (`SearchSlot`, `take_search_box`) with its text and focus. The drag's picture is drawn
+  once by the browser, in the global overlay; the mouse's back button goes up a folder. Its
+  properties give the path, trail, selection, counts, view, search and drag picture.
+  `FileBrowser::with_search` takes an app's `SearchController`.
+- `BrowserList::without_drag_picture`, for a host that draws the drag's picture itself.
+- `BrowserCommand::builtin(action)`: one of the browser's own actions placed in an app's list
+  with the app's tooltip, icon key or shortcut (`with_tooltip`, ...); the browser still runs it
+  and decides when it can run.
+- `BrowserNames::folders_toolbar` ("Folders Toolbar"); `BottomBorder`, a bar over a one-pixel
+  rule.
 
 ### Changed
 

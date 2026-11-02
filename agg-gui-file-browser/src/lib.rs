@@ -64,13 +64,17 @@
 //! "File" button, the splitter, the provider message); `history`
 //! ([`BrowserHistory`], the undo history shared by an app's browser views, steps recorded at once
 //! or later through a [`HistoryRecorder`], an undo or redo finishing later holding the next one
-//! back, the keys, and the [`BrowserNotice`] announcing each change with its Undo or Redo).
+//! back, the keys, and the [`BrowserNotice`] announcing each change with its Undo or Redo); `browser` ([`FileBrowser`], the whole browser composed from these over one state: the tree
+//! and list form an app's browsing tab shows, or the list-only form of a popup, with its nav
+//! bar, search box kept across header rebuilds, notice, and the drag's picture drawn once for
+//! the whole browser).
 //!
 //! The widgets come from MatterCAD's library (mattercad-rust's `mattercad-app`, same author),
 //! published here under agg-gui's MIT licence.
 
 pub mod actions;
 pub mod bread_crumb;
+pub mod browser;
 pub mod builtins;
 pub mod config;
 pub mod dialogs;
@@ -100,6 +104,8 @@ pub use actions::{
     Builtins, ItemLocation, NoActions, SignInOffer,
 };
 pub use bread_crumb::{folder_bread_crumb_for, FolderBreadCrumbWidget, UP_ICON_SIZE};
+pub use browser::parts::{take_search_box, BottomBorder, SearchSlot};
+pub use browser::{FileBrowser, BACK_MOUSE_BUTTON, NOTICE_BOTTOM_GAP, SEARCH_BOX_WIDTH};
 pub use builtins::run_builtin;
 pub use config::{
     BrowserConfig, BrowserConfigBuilder, BrowserLayout, BrowserOptions, DoubleClickTarget,

@@ -2,13 +2,15 @@
 //! with its title, whether it runs now, what it does, and how its row looks: an icon key the
 //! look resolves (`BrowserLook::icon_for_key`), a shortcut shown on the right, a hover help, the
 //! menus it belongs to ([`ActionScope`]), whether it is left out rather than greyed while it
-//! can't run, and the rows of a submenu. `actions.rs` places commands in the ordered list; the
+//! can't run, and the rows of a submenu. [`BrowserCommand::builtin`] places one of the browser's
+//! own actions with the app's dressing (a tooltip, another icon key or shortcut): the menu runs
+//! the built-in as it always does and shows the row with what the app set. `actions.rs` places commands in the ordered list; the
 //! list's menu builder (`list/list_menu.rs`) turns them into agg-gui `MenuItem`s.
 
 use std::fmt;
 use std::rc::Rc;
 
-use super::BrowserAction;
+use super::{BrowserAction, BuiltinAction};
 
 /// The menus a row belongs to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -33,6 +35,8 @@ pub struct BrowserCommand {
     scope: Option<ActionScope>,
     only_when_enabled: bool,
     submenu: Vec<BrowserAction>,
+    /// The built-in this row stands for, run by the browser ([`Self::builtin`]).
+    builtin: Option<BuiltinAction>,
 }
 
 impl BrowserCommand {
@@ -48,7 +52,39 @@ impl BrowserCommand {
             scope: None,
             only_when_enabled: false,
             submenu: Vec::new(),
+            builtin: None,
         }
+    }
+
+    /// The browser's own `action` as a row the app dresses: `.with_tooltip(..)` (MatterCAD's Add
+    /// says which files it takes), `.with_icon(..)`, `.with_shortcut(..)`. The browser runs the
+    /// action, decides whether it can run and which menus it is in, as for
+    /// [`BrowserAction::Builtin`]; a menu that doesn't offer the built-in leaves the row out.
+    pub fn builtin(action: BuiltinAction) -> Self {
+        Self {
+            builtin: Some(action),
+            ..Self::new(action.title(), || {})
+        }
+    }
+
+    /// The built-in this row stands for, if it was made with [`Self::builtin`].
+    pub fn builtin_action(&self) -> Option<BuiltinAction> {
+        self.builtin
+    }
+
+    /// The browser's own row `self` with what the app's row `app` set on top: its tooltip, icon
+    /// key and shortcut, where it set one.
+    pub(crate) fn dressed_as(mut self, app: &BrowserCommand) -> Self {
+        if let Some(tooltip) = &app.tooltip {
+            self.tooltip = Some(tooltip.clone());
+        }
+        if let Some(icon) = &app.icon {
+            self.icon = Some(icon.clone());
+        }
+        if let Some(shortcut) = &app.shortcut {
+            self.shortcut = Some(shortcut.clone());
+        }
+        self
     }
 
     /// A row `title` opening a submenu of `rows` (an ordered list as the menu's own, built-ins
@@ -171,6 +207,7 @@ impl fmt::Debug for BrowserCommand {
             .field("scope", &self.scope)
             .field("only_when_enabled", &self.only_when_enabled)
             .field("submenu", &self.submenu)
+            .field("builtin", &self.builtin)
             .finish()
     }
 }
