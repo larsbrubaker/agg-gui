@@ -133,6 +133,18 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   (`OutsideOver::hides_picture`), so an app may hide the drag's picture anywhere outside the
   browser; without a hook it follows the pointer everywhere. A row ignores agg-gui's hover-clear
   move and consumes its own press's moves, so each pointer move reaches the drag once.
+- Navigation pieces (`nav`): the view options and sorting menu buttons (`view_options_button`,
+  `sorting_button`, `NavMenuButton` with `NavMenuRow` check and radio rows, opened anew each
+  time with the state's choices marked; a pick changes the state and the folder's remembered
+  view), the Undo and Redo buttons over the history (`HistoryButtons`: greyed with nothing to
+  do, "Undo - {step} ({key})" tooltips, the key as a hint, rebuilt on the history's generation;
+  `history_key_text`), the tree|list splitter keeping the tree's width in `BrowserMemory`
+  (`BrowserSplitter`, `SPLITTER_WIDTH`, `DEFAULT_TREE_WIDTH`, `MIN_TREE_WIDTH`) and the provider
+  message bar (`ProviderMessageBar`). `BrowserNames::splitter` ("Library Splitter") and
+  `provider_message` ("Provider Message").
+- `BrowserIconButton::with_hint` (shown through the new `BrowserLook::show_hint` while hovered,
+  cleared on leaving), `with_hover_fill`, `with_glyph_color`, `is_hovered`, and `tooltip` and
+  `hint` properties.
 - `CopyCx` gains `source` (the open folder the items come from), `recorder` (for the copy's
   history step) and `report`.
 - `BrowserNames::notice` ("Library Notice") and `notice_button` ("Library Notice Button");

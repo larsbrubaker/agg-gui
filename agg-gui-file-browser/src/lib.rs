@@ -55,7 +55,8 @@
 //! `own_pictures` (the default pictures: each item's own); `list` ([`BrowserList`], the rows or
 //! tiles of the showing folder, or its message, with their gestures and menus); `tree`
 //! ([`BrowserTree`], the folder tree over the same state, its rows as data in [`TreeModel`], each
-//! row known by its folder's location key or else its name, and its menu); `history`
+//! row known by its folder's location key or else its name, and its menu); `nav` (the view and
+//! sorting menus, Undo and Redo, the splitter, the provider message); `history`
 //! ([`BrowserHistory`], the undo history shared by an app's browser views, steps recorded at once
 //! or later through a [`HistoryRecorder`], an undo or redo finishing later holding the next one
 //! back, the keys, and the [`BrowserNotice`] announcing each change with its Undo or Redo).
@@ -78,6 +79,7 @@ pub mod list;
 pub mod local_spawner;
 pub mod look;
 pub mod memory;
+pub mod nav;
 pub mod own_pictures;
 pub mod pictures;
 pub mod places;
@@ -129,6 +131,12 @@ pub use look::{glyph_face, BrowserIcon, BrowserLook, BrowserNames, BrowserStyle,
 pub use memory::{
     remember_open_location, BrowserMemory, LocationFuture, NoMemory, ViewMode, ViewState,
 };
+pub use nav::buttons::{
+    history_key_text, sorting_button, view_options_button, HistoryButtons, NAV_BUTTON_SIDE,
+};
+pub use nav::menu_button::{NavMenuButton, NavMenuRow, NavMenuRows};
+pub use nav::provider_message::{ProviderMessageBar, PROVIDER_MESSAGE_SIZE};
+pub use nav::splitter::{BrowserSplitter, DEFAULT_TREE_WIDTH, MIN_TREE_WIDTH, SPLITTER_WIDTH};
 pub use own_pictures::{OwnPictures, KEPT_PICTURES};
 pub use pictures::{FolderPicture, ItemPictures, NoPictures, PictureCx, PictureState};
 pub use places::{
@@ -149,15 +157,20 @@ pub use tree::{
 /// Every English literal this crate hands to `agg_gui_files::tr`.
 pub const ENGLISH_TEXTS: &[&str] = &[
     "Add",
+    "Ascending",
     "Click to go back",
     "Copy to {0}",
     "Couldn't copy to",
     "Couldn't find the location of",
     "Couldn't move to",
     "Create Folder",
+    "Date Created",
+    "Date Modified",
+    "Descending",
     "Move",
     "Move to {0}",
     "Moved",
+    "Name",
     "No results",
     "Open File Location",
     "Remove",
@@ -166,8 +179,14 @@ pub const ENGLISH_TEXTS: &[&str] = &[
     "Redo",
     "Redone",
     "Searching for '{0}'",
+    "Show Folders",
+    "Sorting",
     "This folder can't be changed",
     "This folder is busy. Open it again to see the change.",
     "Undo",
     "Undone",
+    "View Icons",
+    "View Large Icons",
+    "View List",
+    "View Settings",
 ];

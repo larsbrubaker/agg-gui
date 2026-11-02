@@ -11,7 +11,11 @@
 //! made for the device scale lands 1:1 and stays crisp. The image is kept between paints and
 //! asked for again only when the button is enabled or disabled, the device scale changes or the
 //! look's art does (`BrowserLook::icon_generation`).
-//! The breadcrumb's up button (`bread_crumb.rs`) is one.
+//! A button may carry a hint (`with_hint`) the look shows while the pointer is over it and
+//! clears when it leaves (`BrowserLook::show_hint`, an app's status bar), and its own hover fill
+//! and glyph colour (`with_hover_fill`, `with_glyph_color`).
+//! The breadcrumb's up button (`bread_crumb.rs`) and the navigation bar's buttons (`nav/`) are
+//! ones.
 
 use std::rc::Rc;
 use std::sync::Arc;
@@ -53,6 +57,9 @@ pub struct BrowserIconButton {
     enabled: bool,
     name: Option<String>,
     on_click: Option<Box<dyn FnMut()>>,
+    /// The hint the look shows while the pointer is over the enabled button (a status bar's
+    /// "⌘Z"), `BrowserLook::show_hint`.
+    hint: Option<String>,
 }
 
 impl BrowserIconButton {
@@ -80,7 +87,40 @@ impl BrowserIconButton {
             enabled: true,
             name: None,
             on_click: None,
+            hint: None,
         }
+    }
+
+    /// Fills with `color` under the pointer in place of the look's hover colour.
+    pub fn with_hover_fill(mut self, color: Color) -> Self {
+        self.hover_fill = color;
+        self
+    }
+
+    /// Draws its glyph in `color` in place of the look's text colour.
+    pub fn with_glyph_color(mut self, color: Color) -> Self {
+        self.glyph_color = color;
+        self
+    }
+
+    /// The look shows `text` as a hint while the pointer is over the enabled button, and clears
+    /// it when the pointer leaves (`BrowserLook::show_hint`: an app's status bar).
+    pub fn with_hint(mut self, text: &str) -> Self {
+        self.hint = Some(text.to_string());
+        self
+    }
+
+    /// Sets the hover state, showing or clearing the hint as it changes.
+    fn set_hovered(&mut self, hovered: bool) -> bool {
+        if hovered == self.hovered {
+            return false;
+        }
+        self.hovered = hovered;
+        if let Some(hint) = &self.hint {
+            self.look.show_hint(hovered.then_some(hint.as_str()));
+        }
+        agg_gui::animation::request_draw();
+        true
     }
 
     /// Asks the look for its image `size` in logical units.
@@ -124,13 +164,18 @@ impl BrowserIconButton {
     /// release after it is enabled again does not click.
     pub fn set_enabled(&mut self, enabled: bool) {
         if !enabled {
-            self.hovered = false;
+            self.set_hovered(false);
             self.pressed = false;
         }
         if self.enabled != enabled {
             self.enabled = enabled;
             agg_gui::animation::request_draw();
         }
+    }
+
+    /// Whether the pointer is over the enabled button (its hint showing, when it has one).
+    pub fn is_hovered(&self) -> bool {
+        self.hovered
     }
 
     /// The icon the button draws.
@@ -249,19 +294,15 @@ impl Widget for BrowserIconButton {
         match event {
             Event::MouseMove { pos } => {
                 let hovered = self.contains(*pos);
-                if hovered != self.hovered {
-                    self.hovered = hovered;
-                    agg_gui::animation::request_draw();
-                    return EventResult::Consumed;
+                match self.set_hovered(hovered) {
+                    true => EventResult::Consumed,
+                    false => EventResult::Ignored,
                 }
-                EventResult::Ignored
             }
             // Leaving keeps a press: pressing, dragging off and back, and releasing over the
             // button still clicks.
             Event::MouseLeave => {
-                if std::mem::take(&mut self.hovered) {
-                    agg_gui::animation::request_draw();
-                }
+                self.set_hovered(false);
                 EventResult::Ignored
             }
             Event::MouseDown {
@@ -292,6 +333,8 @@ impl Widget for BrowserIconButton {
             ("icon", self.look.icon_name(self.which)),
             ("glyph", format!("U+{:04X}", self.which.glyph() as u32)),
             ("enabled", self.enabled.to_string()),
+            ("tooltip", self.base.tooltip.clone().unwrap_or_default()),
+            ("hint", self.hint.clone().unwrap_or_default()),
         ]
     }
 }

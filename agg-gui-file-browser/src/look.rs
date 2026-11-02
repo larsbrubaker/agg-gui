@@ -216,6 +216,10 @@ pub struct BrowserNames {
     pub tree: String,
     /// One folder's row in the folder tree (template).
     pub tree_row: String,
+    /// The split between the folder tree and the list.
+    pub splitter: String,
+    /// The provider message under a list-only browser's list.
+    pub provider_message: String,
     /// The history's notice ("Moved 3 items to Brackets").
     pub notice: String,
     /// The notice's Undo or Redo button.
@@ -247,6 +251,8 @@ impl Default for BrowserNames {
             search_section: "Search Section {name}".into(),
             tree: "Library TreeView".into(),
             tree_row: "{name} Tree Node".into(),
+            splitter: "Library Splitter".into(),
+            provider_message: "Provider Message".into(),
             notice: "Library Notice".into(),
             notice_button: "Library Notice Button".into(),
         }
@@ -313,6 +319,12 @@ pub trait BrowserLook {
     /// The default never changes.
     fn icon_generation(&self) -> u64 {
         0
+    }
+
+    /// Shows `hint` while the pointer is over a button that carries one (an app's status bar:
+    /// "⌘Z" over Undo), or clears it (`None`) when the pointer leaves. The default shows nothing.
+    fn show_hint(&self, hint: Option<&str>) {
+        let _ = hint;
     }
 
     /// The name a widget reports for `which` as its `icon` property (an app's icon file, say).
