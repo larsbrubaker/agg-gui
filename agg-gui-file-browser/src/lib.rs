@@ -133,4 +133,5 @@ pub const ENGLISH_TEXTS: &[&str] = &[
     "Remove",
     "Rename",
     "Searching for '{0}'",
+    "This folder is busy. Open it again to see the change.",
 ];

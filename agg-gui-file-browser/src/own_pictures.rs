@@ -13,11 +13,17 @@
 //! At most [`KEPT_PICTURES`] pictures are kept (the least recently asked for leave first), so a
 //! browser walked through many folders holds a bounded amount of pixels: 1024 covers a folder of
 //! a few hundred items shown at two sides (rows and an icon size) with the one walked back to.
-//! A picture that left is made again at its next ask, the item icon showing meanwhile.
+//! A picture that left is made again at its next ask, the item icon showing meanwhile. The
+//! pictures one build of the list asks for never leave before the next build begins: every build
+//! asks for every row's picture, so a folder with more items than the capacity would otherwise
+//! evict its first rows' pictures to make its last ones, each arrival would build the list again
+//! and the list would never settle. While one build asks for more than the capacity, the kept
+//! pictures grow to hold them all. A build is the asks made with one `arrived` callback
+//! ([`PictureCx::arrived_callback`]): the browser's list hands each build a new one.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 use std::sync::Arc;
 
 use agg_gui::icon_image::IconImage;
@@ -45,9 +51,29 @@ struct Kept {
     slots: HashMap<Key, (Slot, u64)>,
     clock: u64,
     capacity: usize,
+    /// The `arrived` callback of the build asking now: held weakly, so its allocation (what
+    /// identifies the build) is never reused by a later build's callback while it is compared.
+    build: Option<Weak<dyn Fn()>>,
+    /// The tick the build asking now began at: pictures asked for since stay.
+    build_start: u64,
 }
 
 impl Kept {
+    /// An ask under `arrived`: when that is a new build's callback, the asks of the build before
+    /// it may now leave.
+    fn begin(&mut self, arrived: &Rc<dyn Fn()>) {
+        let current = Rc::downgrade(arrived);
+        if self
+            .build
+            .as_ref()
+            .is_some_and(|b| Weak::ptr_eq(b, &current))
+        {
+            return;
+        }
+        self.build = Some(current);
+        self.build_start = self.clock + 1;
+    }
+
     /// The slot of `key`, marked as asked for now.
     fn ask(&mut self, key: &Key) -> Option<&Slot> {
         self.clock += 1;
@@ -57,7 +83,8 @@ impl Kept {
         Some(slot)
     }
 
-    /// Keeps `slot` for `key`, the least recently asked for leaving while over the capacity.
+    /// Keeps `slot` for `key`, the least recently asked for leaving while over the capacity;
+    /// none asked for by the build asking now leaves (see the module header).
     fn keep(&mut self, key: Key, slot: Slot) {
         self.clock += 1;
         self.slots.insert(key, (slot, self.clock));
@@ -66,6 +93,7 @@ impl Kept {
             let oldest = self
                 .slots
                 .iter()
+                .filter(|(_, (_, asked))| *asked < self.build_start)
                 .min_by_key(|(_, (_, asked))| *asked)
                 .map(|(key, _)| key.clone());
             match oldest {
@@ -100,6 +128,8 @@ impl OwnPictures {
                 slots: HashMap::new(),
                 clock: 0,
                 capacity: capacity.max(1),
+                build: None,
+                build_start: 0,
             })),
         }
     }
@@ -129,6 +159,7 @@ impl ItemPictures for OwnPictures {
             return PictureState::Default;
         }
         let key = (item_identity_key(entry.item().as_ref()), side);
+        self.kept.borrow_mut().begin(&cx.arrived_callback());
         if let Some(slot) = self.kept.borrow_mut().ask(&key) {
             return match slot {
                 Slot::Made(Some(image)) => PictureState::Ready(image.clone()),

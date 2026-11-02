@@ -71,11 +71,13 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 - Rows and tiles report `name_right`, `thumbnail` (the art's name) and `thumbnail_center` (its
   centre pixel); `BrowserRow::thumbnail_pixel_size` and `name_right`; `BrowserTile::label_band`,
   `label_text_origin`, `label_printed_height` and `name_max_width`.
-- `OwnPictures` keeps at most `KEPT_PICTURES` (1024) pictures, the least recently asked for
-  leaving first and made again when asked for (`with_capacity`, `kept`).
 - `BuiltinAction::title` and `acts_on_selection`.
 - `OwnPictures`: each item shows the picture its folder or the item itself makes of it, made on
-  the spawner and kept, the look's item icon until then; the default pictures hook.
+  the spawner and kept, the look's item icon until then; the default pictures hook. It keeps at
+  most `KEPT_PICTURES` (1024) pictures, the least recently asked for leaving first and made again
+  when asked for (`with_capacity`, `kept`), but never one the list's current build asked for: a
+  folder with more items than that grows the kept pictures rather than making them again on
+  every build. A picture that lands while the list builds shows at the next layout.
 - `BrowserLook::tinted_icon` (an icon in a colour: a folder's accent, an item's text colour),
   `icon_for_key` (the art an item names by key: a folder link's `micro_icon` and `tile_icon`) and
   `icon_generation` (changes when the look's art does: the list builds again and

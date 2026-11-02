@@ -147,6 +147,10 @@ impl BrowserList {
 
     /// Builds the rows, tiles or message again from the state as it is now.
     fn rebuild(&mut self) {
+        // Read before building: a picture that lands while the rows are built (an inline
+        // spawner, or a hook answering `picture_arrived` at once) bumps `arrivals` after this, so
+        // the next layout builds again and shows it.
+        let key = self.build_key();
         self.state.borrow_mut().mark_listed();
         let arrivals = Rc::clone(&self.arrivals);
         let arrived: Rc<dyn Fn()> = Rc::new(move || {
@@ -181,7 +185,7 @@ impl BrowserList {
             }
         };
         self.children = vec![child];
-        self.built = Some(self.build_key());
+        self.built = Some(key);
     }
 
     /// Opens `scope`'s menu at `pos` (list-local); the selection's hangs from the menu button

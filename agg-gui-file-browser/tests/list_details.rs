@@ -88,6 +88,10 @@ fn a_picture_evicted_from_the_kept_ones_is_made_again_when_asked_for() {
         "kept, not made again"
     );
     assert_eq!(bolt_made.get(), 1);
+    // Pictures one build asked for never leave during it: the washer is asked for by a later
+    // build, with its own `arrived` callback, as the list hands each build.
+    let arrived: Rc<dyn Fn()> = Rc::new(|| {});
+    let cx = PictureCx::new(&spawner, &arrived);
     pictures.picture(&cx, &washer, 50);
     run_ready_local_tasks();
     assert!(is_ready(&pictures.picture(&cx, &washer, 50)));
@@ -96,6 +100,8 @@ fn a_picture_evicted_from_the_kept_ones_is_made_again_when_asked_for() {
         1,
         "the bolt's picture left for the washer's"
     );
+    let arrived: Rc<dyn Fn()> = Rc::new(|| {});
+    let cx = PictureCx::new(&spawner, &arrived);
     assert!(!is_ready(&pictures.picture(&cx, &bolt, 50)), "made again");
     run_ready_local_tasks();
     assert!(

@@ -263,6 +263,26 @@ fn with_the_apps_report_the_status_line_stays_empty() {
 }
 
 #[test]
+fn a_showing_folder_still_held_is_kept_and_the_user_told_why_it_did_not_change() {
+    let state = BrowserState::new(Box::new(home()), BrowserConfig::default());
+    BrowserState::activate(&state, 1, Activation::DoubleClick);
+    let held = state.borrow().open_path();
+    let replaced = std::cell::Cell::new(false);
+    state.borrow_mut().replace_active_container(|folder| {
+        replaced.set(true);
+        folder
+    });
+    assert!(!replaced.get(), "a folder still held is not replaced");
+    let s = state.borrow();
+    assert_eq!(s.path_names(), ["Home", "Projects"], "it stays showing");
+    assert_eq!(
+        s.status(),
+        "This folder is busy. Open it again to see the change."
+    );
+    drop(held);
+}
+
+#[test]
 fn a_location_that_cannot_be_found_is_said_on_the_status_line() {
     let state = BrowserState::new(Box::new(home()), BrowserConfig::default());
     let item: Rc<dyn Item> = state.borrow().entries()[2].item();

@@ -665,7 +665,9 @@ impl BrowserState {
     }
 
     /// The showing folder is replaced by what `sync` makes of it (a folder renamed from the
-    /// tree). Nothing at the root, or while a hook still holds the showing folder.
+    /// tree). Nothing at the root. While a hook still holds the showing folder it can't be
+    /// replaced: it stays, and the user is told through the report (the status line without the
+    /// app's) that it shows as it was and how to see the change.
     pub fn replace_active_container(
         &mut self,
         sync: impl FnOnce(Box<dyn Folder>) -> Box<dyn Folder>,
@@ -682,6 +684,9 @@ impl BrowserState {
             Err(still_held) => {
                 self.path.push(still_held);
                 self.watch.enter(&self.path);
+                let message = tr("This folder is busy. Open it again to see the change.");
+                (self.report())(&message);
+                self.changed();
             }
         }
     }
