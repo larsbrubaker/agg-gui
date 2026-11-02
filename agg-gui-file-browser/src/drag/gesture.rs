@@ -52,6 +52,7 @@ fn outside_over(state: &Rc<RefCell<BrowserState>>, at: Point) {
     }
     state.borrow_mut().drop.outside = over;
 }
+use crate::move_dialog::plan::FolderKey;
 use crate::places::copy_modifier_held;
 use crate::state::BrowserState;
 
@@ -73,7 +74,12 @@ pub fn drag_over(state: &Rc<RefCell<BrowserState>>, at: Point) {
             let items = selected_items(&s);
             if !items.is_empty() {
                 let source = s.depth().saturating_sub(1);
+                let key = s
+                    .open_path()
+                    .get(source)
+                    .and_then(|folder| FolderKey::of_folder(&**folder.borrow()));
                 s.drop.begin(items, source);
+                s.drop.set_source_key(key);
             }
         }
         if !s.drop.is_dragging() {

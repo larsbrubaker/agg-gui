@@ -10,7 +10,8 @@
 //! The target under the drag is `highlighted()`: the row, tile or tree row with that key fills
 //! itself with the accent at alpha 40 while it paints, and `drop_label()` says what the drop will
 //! do ("Move to Brackets", or "Copy to Brackets" with a "+" badge, `badge.rs`). A folder the
-//! drop can't land on (read-only, one of the dragged items) is never highlighted.
+//! drop can't land on (read-only, one of the dragged items, or the folder the items are already
+//! in, told apart by place and location key as Move does, `FolderKey`) is never highlighted.
 //!
 //! Whether a drop moves or copies is the config's `PlaceRules` (the copy modifier, a source that
 //! keeps its items, two places); the drop itself is `execute.rs`, which records its history step.
@@ -22,12 +23,14 @@ pub mod gesture;
 pub mod picture;
 pub mod spring;
 
+use std::cell::RefCell;
 use std::rc::Rc;
 
 use agg_gui::{Point, Rect};
 use agg_gui_files::{FolderLink, Item, PlaceId};
 
 use crate::drops::OutsideOver;
+use crate::move_dialog::plan::FolderKey;
 use crate::state::BrowserState;
 
 /// Which painter recorded a drop target, so each forgets only its own.
@@ -91,6 +94,10 @@ pub struct DropManager {
     target_places: Vec<(String, Option<PlaceId>)>,
     /// The folder tree's window rectangle.
     tree_rect: Option<Rect>,
+    /// The key of the folder the drag came from, when it has one: that folder takes no drop.
+    source_key: Option<FolderKey>,
+    /// The key of each folder the drag has been over, by its ID, asked once per drag.
+    target_keys: RefCell<Vec<(String, Option<FolderKey>)>>,
     /// The folder the drag waits over to open, and the ones it opened (`spring.rs`).
     pub(crate) spring: spring::SpringOpen,
     /// What the app said is under the drag outside the browser, while it is there.
@@ -189,7 +196,15 @@ impl DropManager {
         crate::trace(|| format!("drag begins with {} items", items.len()));
         self.items = Some(items);
         self.source_depth = source_depth;
+        self.source_key = None;
         self.target_places.clear();
+        self.target_keys.borrow_mut().clear();
+    }
+
+    /// Names the folder the drag came from (its place and location key), which then takes no
+    /// drop: dropping items on their own folder would only rename them.
+    pub fn set_source_key(&mut self, key: Option<FolderKey>) {
+        self.source_key = key;
     }
 
     /// Ends the drag without a drop (the outside drop hook, if the drag was over the app's
@@ -202,6 +217,8 @@ impl DropManager {
     fn take_items(&mut self) -> Option<Vec<Rc<dyn Item>>> {
         let items = self.items.take();
         self.target_places.clear();
+        self.target_keys.borrow_mut().clear();
+        self.source_key = None;
         self.spring.clear();
         self.outside = None;
         self.picture = picture::DragPicture::default();
@@ -217,9 +234,29 @@ impl DropManager {
         self.label = label;
     }
 
-    /// Whether a folder can take the drop: not read-only, and not one of the dragged items.
+    /// Whether a folder can take the drop: not read-only, not one of the dragged items, and not
+    /// the folder they came from.
     fn takes_drop(&self, link: &dyn FolderLink) -> bool {
-        !link.is_read_only() && !self.dragged_items().iter().any(|i| i.id() == link.id())
+        !link.is_read_only()
+            && !self.dragged_items().iter().any(|i| i.id() == link.id())
+            && !self.is_source(link)
+    }
+
+    /// Whether `link` opens the folder the drag came from, its key asked once per drag.
+    fn is_source(&self, link: &dyn FolderLink) -> bool {
+        let Some(source) = &self.source_key else {
+            return false;
+        };
+        let mut keys = self.target_keys.borrow_mut();
+        let key = match keys.iter().find(|(id, _)| id == link.id()) {
+            Some((_, key)) => key.clone(),
+            None => {
+                let key = FolderKey::of_link(link);
+                keys.push((link.id().to_string(), key.clone()));
+                key
+            }
+        };
+        key.as_ref() == Some(source)
     }
 
     /// The target the drop at `at` lands on: a tree row first, then a folder in the list (only

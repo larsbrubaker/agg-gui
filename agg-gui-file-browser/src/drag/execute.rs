@@ -2,7 +2,9 @@
 //! there. A drop and (later) the Move dialog's accept land here.
 //!
 //! The target is opened from its link first; a folder that can't be opened is an ordinary failed
-//! move, reported. The drop copies when the drag asked for a copy (the copy modifier, or a source
+//! move, reported. A target that is the items' own folder (the same place and location key,
+//! `FolderKey`) takes nothing: the drag never offers it, and a drop that reaches it anyway does
+//! nothing, as a move there would only rename the items. The drop copies when the drag asked for a copy (the copy modifier, or a source
 //! that keeps its items, `PlaceRules::drop_copies`) or when the opened folders turn out to be in
 //! two places (`PlaceRules::crosses_places`).
 //!
@@ -22,6 +24,7 @@ use std::rc::Rc;
 
 use agg_gui_files::{names_of_items_gone_from_source, tr, Folder, FolderLink, Item, Recorded};
 
+use crate::move_dialog::plan::FolderKey;
 use crate::places::{CopyCx, CopyTakeover};
 use crate::state::{BrowserState, OpenFolder};
 
@@ -78,6 +81,14 @@ pub fn drop_into(
         let places = Rc::clone(&s.config().places);
         (s.open_path().get(source_depth).cloned(), places, s.report())
     };
+    let into_itself = source.as_ref().is_some_and(|source| {
+        let key = FolderKey::of_folder(&**source.borrow());
+        key.is_some() && key == FolderKey::of_folder(target.as_ref())
+    });
+    if into_itself {
+        crate::trace(|| format!("drop on {target_name}, the items' own folder: nothing moves"));
+        return false;
+    }
     target.load();
     let crosses = source
         .as_ref()

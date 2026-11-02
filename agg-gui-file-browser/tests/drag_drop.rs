@@ -673,3 +673,37 @@ fn an_overlay_paints_lifted_with_its_carried_row_and_learns_its_frame() {
         "a tile's square is inside its border"
     );
 }
+
+#[test]
+fn the_folder_the_items_are_in_takes_no_drop() {
+    let (mut app, state, desk, shelf) = two_places(BrowserConfig::default(), false);
+    let at = drag_over(&mut app, "Row Item gear.stl", "Desk Tree Node");
+    assert_eq!(
+        property(&app, "Desk Tree Node", "drop_highlighted"),
+        "false"
+    );
+    assert_eq!(property(&app, "Desk Tree Node", "drop_label"), "");
+    release(&mut app, at, Modifiers::default());
+    assert_eq!(names(&desk), ["gear.stl"]);
+    assert!(names(&shelf).is_empty());
+    assert!(!state.borrow().history().can_undo(), "nothing was recorded");
+}
+
+#[test]
+fn a_drop_into_the_source_folder_itself_moves_nothing() {
+    let dir = workshop("into-source");
+    let (_app, state) = browser_app(disk(&dir), BrowserConfig::default(), ViewMode::Rows);
+    let items: Vec<Rc<dyn Item>> = state
+        .borrow()
+        .entries()
+        .iter()
+        .filter(|e| e.item().name() == "gear.stl")
+        .map(|e| e.item())
+        .collect();
+    assert_eq!(items.len(), 1);
+    let moved = agg_gui_file_browser::drop_into(&state, disk(&dir), "here", &items, 0, false);
+    assert!(!moved);
+    assert!(dir.join("gear.stl").exists() && !dir.join("gear (2).stl").exists());
+    assert!(!state.borrow().history().can_undo(), "nothing was recorded");
+    let _ = std::fs::remove_dir_all(&dir);
+}
