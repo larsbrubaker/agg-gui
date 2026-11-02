@@ -106,6 +106,7 @@ mod lcd_rounded_window;
 mod lcd_text_at_scale;
 mod line_box_snapped;
 mod logical_root_transform;
+mod mouse_button_held;
 mod mouse_down_focus_grab_tests;
 mod nested_child_transform;
 mod stale_capture_ancestor;

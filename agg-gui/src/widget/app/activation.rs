@@ -36,7 +36,9 @@ impl App {
     ///    release of its press goes to whatever the user switched to, so
     ///    without this the drag would follow the pointer, button up, until
     ///    the next click. No `MouseUp` is synthesized — a button would
-    ///    click, a drag would commit.
+    ///    click, a drag would commit. Every button stops counting as held
+    ///    ([`crate::event::mouse_button_held`]) for the same reason: its
+    ///    release may never arrive here.
     /// 2. Every widget receives [`Event::WindowDeactivated`].
     ///
     /// Keyboard focus is left alone (no `FocusLost`), as agg-sharp leaves a
@@ -46,6 +48,7 @@ impl App {
             return;
         }
         self.resolve_tracked_paths();
+        crate::event::release_all_buttons();
         self.cancel_pointer_capture();
         deliver_to_all(self.root.as_mut(), &Event::WindowDeactivated);
         crate::animation::request_draw();

@@ -1,6 +1,7 @@
 //! Pointer-input methods on [`App`] — mouse move/down/up plus the
 //! modal-subtree hit extension they share, with the hover a modal lets
-//! pass outside its bounds. Split out of `app.rs`
+//! pass outside its bounds. The press and release entry points keep
+//! [`crate::event::mouse_button_held`] current before dispatching. Split out of `app.rs`
 //! (800-line guardrail); keyboard routing is in `keyboard.rs`, wheel
 //! routing stays in `app.rs`.
 
@@ -173,6 +174,8 @@ impl App {
         stated: bool,
     ) {
         crate::event::begin_press(clicks, stated);
+        // Held from here, whoever (if anyone) handles the press.
+        crate::event::note_button_down(button);
         crate::touch_emulation::long_press::note_press();
         self.on_modifiers_changed(mods);
         self.resolve_tracked_paths();
@@ -254,6 +257,8 @@ impl App {
     }
 
     fn release(&mut self, screen_x: f64, screen_y: f64, button: MouseButton, mods: Modifiers) {
+        // Up before anything hears the release, wherever it is delivered.
+        crate::event::note_button_up(button);
         self.on_modifiers_changed(mods);
         self.resolve_tracked_paths();
         let screen = self.flip_y(screen_x, screen_y);

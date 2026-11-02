@@ -10,6 +10,14 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- `mouse_button_held(MouseButton) -> bool`: whether a mouse button is held down, as of the last
+  pointer event `App` processed, whichever widget (if any) heard it. A release counts even when it
+  reaches only an ancestor (the pressed widget's subtree left the tree mid-press) or no widget at
+  all, and the window losing activation lets go of every button. Touch emulation's finger presses
+  count as the button they are dispatched as. A widget that keeps its own "press under way" state
+  (a drag source waiting for the pointer to travel) asks it on each `MouseMove`, which carries no
+  buttons, and ends a press whose release it never heard (0.5.4).
+
 - A picture says its own pixel density and `MarkdownView` and the rich editor lay it out by it:
   a PNG whose `pHYs` chunk says 144 ppi (5669 px/m) is a 2x picture and shows at half its pixel
   size in logical points, so a high-density screenshot appears at the size it was taken at, pixel

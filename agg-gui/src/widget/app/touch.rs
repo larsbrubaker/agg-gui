@@ -36,6 +36,12 @@
 //! down: `replay_emu_cmds` skips the release that came with the press and
 //! the emulator turns the finger's slide into moves and its lift into the
 //! release.
+//!
+//! A finger counts as the button it is dispatched as for
+//! [`crate::event::mouse_button_held`]: a declined middle offer leaves only
+//! the left press held, and a press the finger ends without a release
+//! (`EmuCmd::CancelPress`, a held lift whose capture was dropped) stops
+//! counting as held.
 
 use super::super::keyboard_scroll;
 use crate::draw_ctx::DrawCtx;
@@ -247,12 +253,19 @@ impl App {
                     let lift = self.touch_mouse_emu.take_held_lift();
                     if !lift || self.has_captured_pointer() {
                         self.on_mouse_up(x, y, MouseButton::Right, Modifiers::default());
+                    } else {
+                        // The finger is up all the same.
+                        crate::event::note_button_up(MouseButton::Right);
                     }
                 }
                 EmuCmd::MouseDown(x, y, btn) => self.on_mouse_down(x, y, btn, Modifiers::default()),
                 EmuCmd::MouseUp(x, y, btn) => self.on_mouse_up(x, y, btn, Modifiers::default()),
                 EmuCmd::MouseLeave => self.on_mouse_leave(),
-                EmuCmd::CancelPress => self.cancel_pointer_capture(),
+                EmuCmd::CancelPress => {
+                    // The finger let go of its press without a release.
+                    crate::event::release_all_buttons();
+                    self.cancel_pointer_capture();
+                }
             }
         }
     }
@@ -270,6 +283,8 @@ impl App {
         self.on_mouse_down(x, y, MouseButton::Middle, Modifiers::default());
         crate::touch_emulation::set_touch_pan_travel(None);
         if !self.has_captured_pointer() {
+            // The offer was declined: the finger holds the left button now.
+            crate::event::note_button_up(MouseButton::Middle);
             self.touch_mouse_emu.press_instead();
             self.on_mouse_down(x, y, MouseButton::Left, Modifiers::default());
         }

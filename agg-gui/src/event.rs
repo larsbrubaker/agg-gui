@@ -6,12 +6,17 @@
 //!
 //! The click count of the button event being processed (C#'s
 //! `MouseEventArgs.Clicks`, `IsDoubleClick`) lives in the `click_count`
-//! submodule and is re-exported here.
+//! submodule and is re-exported here; which buttons are held down
+//! ([`mouse_button_held`]) lives in `button_held`.
 
 use crate::geometry::Point;
 use crate::touch_state::MultiTouchInfo;
 
+mod button_held;
 mod click_count;
+
+pub use button_held::mouse_button_held;
+pub(crate) use button_held::{note_button_down, note_button_up, release_all_buttons};
 
 pub(crate) use click_count::{begin_press, begin_release, end_release};
 pub use click_count::{
