@@ -22,6 +22,8 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   it when the drag comes back into the browser (a browser panel lying over that view); the drag's
   end then tells the hook `cancel` after a drop on a folder, or hands it the `release` over no
   folder.
+- The folder message's Sign In button carries `BrowserNames::sign_in_button` itself, so what
+  finds it by name reads whether it takes a press (it was a wrapper that always read enabled).
 - `BrowserList::with_offset_cell`: the list scrolled by an offset its host keeps across the lists
   it builds again (a dialog page rebuilding its list on each change), which the host puts back to
   the top itself.

@@ -145,14 +145,14 @@ impl FolderMessage {
     fn button(&self, offer: SignInOffer) -> Box<dyn Widget> {
         let enabled = Rc::clone(&self.enabled);
         let press = Rc::clone(&offer.press);
-        let button = Button::new(offer.action, Arc::clone(&self.font))
+        let mut button = Button::new(offer.action, Arc::clone(&self.font))
             .with_font_size(self.style.font_size)
             .with_enabled_fn(move || enabled.get())
             .on_click(move || press());
-        Box::new(agg_gui::widgets::named::Named::new(
-            self.names.sign_in_button.clone(),
-            Box::new(button),
-        ))
+        // Named on the button itself, so what finds it by name reads the button's own state
+        // (whether it takes a press).
+        button.set_name(Some(self.names.sign_in_button.clone()));
+        Box::new(button)
     }
 
     /// The wrapped `text` in its `ScrollView`.

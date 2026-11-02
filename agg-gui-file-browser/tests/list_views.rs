@@ -443,10 +443,11 @@ fn a_loading_folder_shows_its_message_in_place_of_rows() {
     }
 }
 
-/// Actions offering a Sign In and counting its presses.
+/// Actions offering a Sign In and counting its presses; `waiting` greys it.
 #[derive(Default)]
 struct SignsIn {
     presses: Rc<Cell<u32>>,
+    waiting: Cell<bool>,
 }
 
 impl BrowserActions for SignsIn {
@@ -455,7 +456,7 @@ impl BrowserActions for SignsIn {
         Some(SignInOffer {
             text: format!("{folder_text} (signed out)"),
             action: "Sign In".to_string(),
-            enabled: true,
+            enabled: !self.waiting.get(),
             press: Rc::new(move || presses.set(presses.get() + 1)),
         })
     }
@@ -480,6 +481,24 @@ fn a_folder_refused_for_the_sign_in_shows_the_apps_sign_in_and_its_warning() {
     let button = centre(rect_of(&app, "Library Folder Sign In Button"));
     click_at(&mut app, button, MouseButton::Left, Modifiers::default(), 1);
     assert_eq!(actions.presses.get(), 1);
+    // The button found by its name says whether it takes a press.
+    let enabled = |app: &App| {
+        let (button, _) = find(
+            app.root(),
+            "Library Folder Sign In Button",
+            Point::new(0.0, 0.0),
+        )
+        .expect("the Sign In");
+        button.is_enabled()
+    };
+    assert!(enabled(&app));
+    actions.waiting.set(true);
+    agg_gui::animation::request_layout();
+    app.layout(Size::new(WIDTH, HEIGHT));
+    assert!(
+        !enabled(&app),
+        "a Sign In waiting for its answer takes no press"
+    );
     // Without the app's Sign In the message stands alone.
     let folder = message_folder(
         MessageItem::new("Sign in to see this folder"),
