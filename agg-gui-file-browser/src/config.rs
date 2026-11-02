@@ -3,8 +3,9 @@
 //! errors go, and its [`BrowserOptions`]. Every hook has a default, so
 //! `BrowserConfig::default()` is a working browser for an app with no hooks: agg-gui's look,
 //! the look's icons for pictures, the built-in menu, no outside drops, the default places rule,
-//! nothing remembered, no dialogs (the actions needing one unavailable), errors to standard
-//! error and work on a [`LocalSpawner`].
+//! nothing remembered, no dialogs (the actions needing one unavailable), errors on the browser's
+//! own status line (`BrowserState::status`) and work on a [`LocalSpawner`] (whose faults, with no
+//! report given, go to standard error: it is made before any browser it could show them in).
 //!
 //! [`BrowserConfig::builder`] sets only what the app has; its `build` fills the rest, the
 //! default spawner reporting through the report the builder was given.
@@ -99,7 +100,7 @@ impl fmt::Debug for BrowserOptions {
     }
 }
 
-/// The report of an app that gives none: standard error.
+/// Where the default spawner reports a fault when the app gives no report: standard error.
 fn report_to_stderr(message: &str) {
     eprintln!("{message}");
 }
@@ -123,8 +124,9 @@ pub struct BrowserConfig {
     pub memory: Rc<dyn BrowserMemory>,
     /// Confirming, asking for a name, picking files.
     pub dialogs: Rc<dyn BrowserDialogs>,
-    /// Shows the user an error the browser met (already translated).
-    pub report: ErrorReport,
+    /// Shows the user an error the browser met (already translated); `None` shows it on the
+    /// browser's own status line (`BrowserState::report`).
+    pub report: Option<ErrorReport>,
     /// How the view behaves.
     pub options: BrowserOptions,
 }
@@ -211,12 +213,13 @@ impl BrowserConfigBuilder {
 
     /// The config: what was set, and the module header's defaults for the rest.
     pub fn build(self) -> BrowserConfig {
-        let report = self
-            .report
-            .unwrap_or_else(|| Rc::new(report_to_stderr) as ErrorReport);
-        let spawner = self
-            .spawner
-            .unwrap_or_else(|| Rc::new(LocalSpawner::new(Rc::clone(&report))));
+        let report = self.report;
+        let spawner = self.spawner.unwrap_or_else(|| {
+            let faults = report
+                .clone()
+                .unwrap_or_else(|| Rc::new(report_to_stderr) as ErrorReport);
+            Rc::new(LocalSpawner::new(faults))
+        });
         BrowserConfig {
             spawner,
             look: self.look.unwrap_or_else(|| Rc::new(DefaultLook::default())),

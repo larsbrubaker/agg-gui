@@ -13,6 +13,8 @@ use std::pin::Pin;
 
 use agg_gui_files::{Folder, SortBehavior};
 
+use crate::state::OpenFolder;
+
 /// How a folder's entries are shown: in rows, or as icons of one of four sizes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ViewMode {
@@ -130,18 +132,17 @@ pub trait BrowserMemory {
 
     /// Remembers `path` under `key`: the whole open path, the browser's root first and the open
     /// folder last ([`remember_open_location`]), so an app can store where the path starts (its
-    /// root's name) as well as where it ends. The one hook the browser lends part of its state
-    /// to: it is handed no way to reach the browser, so it cannot call back into it.
-    fn remember_location(&self, key: &str, path: &[&dyn Folder]) {
+    /// root's name) as well as where it ends. The folders are the browser's own, shared, handed
+    /// over with the browser's state not borrowed (`BrowserState::remember_location`).
+    fn remember_location(&self, key: &str, path: &[OpenFolder]) {
         let _ = (key, path);
     }
 }
 
-/// Lends `memory` the browser's open path (`open`: its root first, the open folder last) to
+/// Hands `memory` the browser's open path (`open`: its root first, the open folder last) to
 /// remember under `key`, the way every browser view remembers where it is.
-pub fn remember_open_location(memory: &dyn BrowserMemory, key: &str, open: &[Box<dyn Folder>]) {
-    let path: Vec<&dyn Folder> = open.iter().map(|folder| folder.as_ref()).collect();
-    memory.remember_location(key, &path);
+pub fn remember_open_location(memory: &dyn BrowserMemory, key: &str, open: &[OpenFolder]) {
+    memory.remember_location(key, open);
 }
 
 /// The memory of an app that remembers nothing.

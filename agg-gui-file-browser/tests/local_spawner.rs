@@ -184,7 +184,11 @@ fn the_default_configs_spawner_reports_through_the_configs_report() {
         }))
         .build();
     config.spawner.report_fault(Arc::new(Failure));
-    (config.report)("Couldn't rename Bracket");
+    let report = config
+        .report
+        .as_ref()
+        .expect("the builder was given a report");
+    report("Couldn't rename Bracket");
     assert_eq!(
         *reported.borrow(),
         vec![

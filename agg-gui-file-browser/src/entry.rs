@@ -4,14 +4,19 @@
 //!
 //! Both are owned values, cheap to clone (shared `Rc`s), taken before a hook is called, so a hook
 //! never runs while the browser's state is borrowed (the crate header's rule) and may keep them
-//! as long as it likes. A `BrowserRef` is a snapshot only; a hook that needs to change the
-//! browser does it through what its own closures captured. A handle asking the live browser for
-//! more belongs here, borrowing the browser only for the length of each call.
+//! as long as it likes. A `BrowserRef` is a snapshot, plus a live handle back to the browser it
+//! was taken from (`live`, and the app slot through `with_app_slot`): a hook that needs more, or
+//! to change the browser, borrows it through the handle for the length of each call, which is
+//! safe because hooks run with the state not borrowed. The handle is weak: a browser closed since
+//! answers `None`.
 
+use std::cell::RefCell;
 use std::fmt;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 
 use agg_gui_files::{FolderLink, Item, PlaceId};
+
+use crate::state::BrowserState;
 
 /// One listed row: an item, or a folder row (an item answering `as_container_link`), with the
 /// names of the folders from the browser's root down to the one listing it.
@@ -80,6 +85,7 @@ pub struct BrowserRef {
     folder_place: Option<PlaceId>,
     folder_writable: bool,
     selection: Rc<[Entry]>,
+    live: Weak<RefCell<BrowserState>>,
 }
 
 impl BrowserRef {
@@ -91,7 +97,28 @@ impl BrowserRef {
             folder_place: None,
             folder_writable: false,
             selection: selection.into(),
+            live: Weak::new(),
         }
+    }
+
+    /// The same snapshot, its live handle the browser `live` (`BrowserState::snapshot` gives it).
+    pub fn with_live(mut self, live: Weak<RefCell<BrowserState>>) -> Self {
+        self.live = live;
+        self
+    }
+
+    /// The browser the snapshot was taken from, while it is open (`None` for a snapshot made
+    /// without one, or once the browser has closed).
+    pub fn live(&self) -> Option<Rc<RefCell<BrowserState>>> {
+        self.live.upgrade()
+    }
+
+    /// Runs `f` on the browser's app slot when the browser is open, its slot holds a `T` and the
+    /// browser is not borrowed elsewhere; otherwise `None`.
+    pub fn with_app_slot<T: 'static, R>(&self, f: impl FnOnce(&mut T) -> R) -> Option<R> {
+        let live = self.live()?;
+        let mut state = live.try_borrow_mut().ok()?;
+        state.app_slot_mut::<T>().map(f)
     }
 
     /// The same snapshot, its open folder in `place`.

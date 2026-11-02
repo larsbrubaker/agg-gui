@@ -30,10 +30,13 @@
 //!   without dialogs leaves the actions needing one unavailable.
 //! - **No hook is called while the browser's state is borrowed.** Hooks are handed owned
 //!   snapshots ([`Entry`], [`BrowserRef`]) or plain values, or are run from the UI queue, so a
-//!   hook that calls back into the browser never meets a held borrow. The one hook lent part of
-//!   the state, [`BrowserMemory::remember_location`] (the open path from the root), is handed no
-//!   way to reach the browser.
-//! - **Tracing is the app's.** The browser's trace lines go through [`trace`] to the tracer the
+//!   hook that calls back into the browser never meets a held borrow; [`BrowserState`]'s public
+//!   ways to activate a row take the shared state and run the hooks once its borrow has ended.
+//!   [`BrowserMemory::remember_location`] is handed the open path's shared folders, the state not
+//!   borrowed. The one exception: the memory's `view`/`set_view` and the error report may run
+//!   while the state is borrowed, since they are handed only names or a message and no way to
+//!   reach the browser.
+//! - **Tracing is the app's.** The browser's trace lines go through [`trace()`] to the tracer the
 //!   app installed ([`set_tracer`]), built only while it is on.
 //!
 //! Modules (each item is also re-exported at the root): `look` (the look and its defaults),
@@ -41,7 +44,9 @@
 //! square icon button), `bread_crumb` (the breadcrumb trail and its builder); `config` (the
 //! config and its options), `entry` (what hooks are handed), `pictures`, `actions`, `drops`,
 //! `places`, `memory` and `dialogs` (the hooks and their defaults), `local_spawner` (the
-//! spawner for apps without an executor), `trace` (the opt-in trace through the app's tracer).
+//! spawner for apps without an executor), `trace` (the opt-in trace through the app's tracer);
+//! `state` ([`BrowserState`], what a browser is looking at: the open path, the listing, view and
+//! sort, the selection and its gestures, activation, the status line and the app slot).
 //!
 //! The widgets come from MatterCAD's library (mattercad-rust's `mattercad-app`, same author),
 //! published here under agg-gui's MIT licence.
@@ -60,6 +65,7 @@ pub mod look;
 pub mod memory;
 pub mod pictures;
 pub mod places;
+pub mod state;
 pub mod trace;
 
 pub use actions::{
@@ -89,7 +95,11 @@ pub use places::{
     copy_modifier_held, default_crosses_places, default_drop_copies, places_differ, CopyCx,
     CopyTakeover, DefaultPlaces, PlaceRules,
 };
+pub use state::{
+    is_only_a_message, item_identity_key, BrowserEntry, BrowserState, ContainerChangedListener,
+    ItemEvent, OpenFolder,
+};
 pub use trace::{set_tracer, trace, tracing};
 
 /// Every English literal this crate hands to `agg_gui_files::tr`.
-pub const ENGLISH_TEXTS: &[&str] = &["Click to go back"];
+pub const ENGLISH_TEXTS: &[&str] = &["Click to go back", "Couldn't find the location of"];

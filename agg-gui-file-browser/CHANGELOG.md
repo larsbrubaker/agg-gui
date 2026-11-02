@@ -8,6 +8,40 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ## [Unreleased]
 
+## [0.0.3] - 2026-11-02
+
+### Added
+
+- `BrowserState`, what a browser is looking at and does, made with `BrowserState::new(root,
+  config)` or `with_config(root, config, app_data)`: the open path (`OpenFolder`s, shared, so a
+  hook can be handed them with the state not borrowed); the showing folder's rows
+  (`BrowserEntry`: folders first, then items, each sorted, Show Folders and the options' folder
+  filter applied); the view mode and sort, restored from `BrowserMemory::view` whenever a folder
+  shows and remembered through `set_view` when picked; navigation (`open`, `go_to`,
+  `push_container`, `show_location`, `take_active_container`, `replace_active_container`) with
+  container-changed listeners; only the showing folder activated and listened to, its content
+  changes listing it again (`sync_content`, `pump_live_refresh`); the selection and its
+  gestures (`click`, `press`/`release_press`, Shift ranges, Ctrl/Cmd toggles, the rubber band,
+  select all, arrow moves, `select_when_listed`); tap activation; double clicks to the app's
+  `BrowserActions::activate` or, with `DoubleClickTarget::Host`, as `ItemEvent`s for the host.
+- The app slot: `app_slot`, `app_slot_mut`, `set_app_slot`, the app's own data per browser.
+- `BrowserRef::live` and `BrowserRef::with_app_slot`: a hook reaches the browser it was handed a
+  snapshot of, borrowing it only for the call.
+- `item_identity_key`, the identity a selection is matched back by, and `is_only_a_message`.
+
+### Changed
+
+- `BrowserConfig::report` is an `Option`: `None` (the default) shows errors on the browser's own
+  status line (`BrowserState::status`), where the user sees them, rather than on standard error.
+  The default spawner still reports its faults to standard error when no report is given.
+  Migration: read `config.report` as an `Option`; `BrowserState::report()` gives the report in
+  use.
+- `BrowserMemory::remember_location` and `remember_open_location` take the open path as
+  `&[OpenFolder]`; `BrowserState::remember_location(&state, key)` hands it over with the state
+  not borrowed. Migration: borrow each folder (`folder.borrow().name()`).
+- The public ways to activate a row (`BrowserState::activate`, `click`, `press`, `finish_tap`)
+  take the shared state and run the hooks once its borrow has ended, so no activation waits.
+
 ## [0.0.2] - 2026-11-02
 
 ### Added
