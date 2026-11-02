@@ -12,6 +12,8 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- `BrowserList`'s `picture_arrivals` property: how many times the pictures hook said a picture of
+  its rows changed, each building the rows again.
 - `SaveController`, `MoveController` and `OpenController`: the Save, Move and Open dialogs'
   logic without their widgets, so an app can wrap them in its own dialog page (its heading,
   field, buttons, footer and names); `SavePage`, `MovePage` and `OpenPage` are the default pages

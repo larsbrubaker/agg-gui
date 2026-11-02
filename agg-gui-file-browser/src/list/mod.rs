@@ -374,6 +374,9 @@ impl Widget for BrowserList {
         let mut properties = vec![
             ("dragging", drop.is_dragging().to_string()),
             ("drop_label", drop.label_for(crate::drag::LIST_DROP_KEY)),
+            // How many times a picture hook said a picture of these rows changed (each builds
+            // the rows again): tests see which changes reach which list.
+            ("picture_arrivals", self.arrivals.get().to_string()),
         ];
         properties.extend(crate::drag::picture::picture_properties(&state));
         properties
