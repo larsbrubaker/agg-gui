@@ -8,6 +8,26 @@ use std::path::Path;
 
 use agg_gui_file_browser::ENGLISH_TEXTS;
 
+/// The value of the string literal whose body starts `rest` (after its opening quote), its
+/// escapes read as Rust reads them (`\"`, `\\`, `\n`, `\t`).
+fn string_literal(rest: &str) -> String {
+    let mut value = String::new();
+    let mut chars = rest.chars();
+    while let Some(c) = chars.next() {
+        match c {
+            '"' => return value,
+            '\\' => match chars.next() {
+                Some('n') => value.push('\n'),
+                Some('t') => value.push('\t'),
+                Some(other) => value.push(other),
+                None => break,
+            },
+            c => value.push(c),
+        }
+    }
+    panic!("an unclosed string literal");
+}
+
 /// Every `tr("...")` literal in the `.rs` files under `dir`.
 fn literals_in(dir: &Path, found: &mut BTreeSet<String>) {
     let mut entries: Vec<_> = fs::read_dir(dir)
@@ -30,9 +50,7 @@ fn literals_in(dir: &Path, found: &mut BTreeSet<String>) {
             if before.is_some_and(|c| c.is_alphanumeric() || c == '_') {
                 continue;
             }
-            let rest = &text[at + 4..];
-            let end = rest.find('"').expect("a closed string literal");
-            found.insert(rest[..end].to_string());
+            found.insert(string_literal(&text[at + 4..]));
         }
     }
 }

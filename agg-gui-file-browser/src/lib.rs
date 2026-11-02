@@ -52,7 +52,8 @@
 //! menu actions, which run: Add, Create Folder..., Open File Location, Rename, Move, Remove, each
 //! recorded for Undo and asking through the dialogs), `sheet_dialogs` ([`SheetDialogs`] and the
 //! [`DialogSheet`] they show on), `move_dialog` ([`MovePage`] over a [`BrowserPage`] of its own,
-//! and [`move_verdict`]: where a Move can go and whether it moves or copies), `disk_monitor`
+//! and [`move_verdict`]: where a Move can go and whether it moves or copies), `save_dialog`
+//! ([`SavePage`]: where a save goes and its name; the app writes the file), `disk_monitor`
 //! (feature `disk`: the directory monitor that wakes the UI), `local_spawner` (the
 //! spawner for apps without an executor), `trace` (the opt-in trace through the app's tracer);
 //! `drag` ([`DropManager`], the drag of the browser's items onto its folders: targets recorded
@@ -100,6 +101,7 @@ pub mod nav;
 pub mod own_pictures;
 pub mod pictures;
 pub mod places;
+pub mod save_dialog;
 pub mod search;
 pub mod sheet_dialogs;
 pub mod state;
@@ -121,8 +123,9 @@ pub use config::{
     ErrorReport, FolderFilter,
 };
 pub use dialogs::{
-    BrowserDialogs, Confirmation, CopiesTo, DialogKind, MovePick, MoveRequest, NameRequest,
-    NoDialogs, PickedFiles, PickedMoveTarget,
+    append_extension, BrowserDialogs, Confirmation, CopiesTo, DialogKind, FileNamer, MovePick,
+    MoveRequest, NameRequest, NoDialogs, PickedFiles, PickedMoveTarget, PickedSaveTarget, SavePick,
+    SaveRequest,
 };
 #[cfg(feature = "disk")]
 pub use disk_monitor::{register_directory_monitor, WakingDirectoryMonitor};
@@ -180,6 +183,7 @@ pub use places::{
     copy_modifier_held, default_crosses_places, default_drop_copies, places_differ, CopyCx,
     CopyTakeover, DefaultPlaces, PlaceRules,
 };
+pub use save_dialog::{SaveAnswers, SavePage, SAVE_AS_WINDOW};
 pub use search::{SearchBox, SearchController, SearchEndedListener, SearchMaker, DEBOUNCE};
 pub use sheet_dialogs::{DialogSheet, SheetDialogs};
 pub use state::{
@@ -201,8 +205,10 @@ pub const ENGLISH_TEXTS: &[&str] = &[
     "Ascending",
     "Cancel",
     "Choose a folder you can add to.",
+    "Choose a folder you can save in.",
     "Clear",
     "Click to go back",
+    "Confirm Save As",
     "Copy",
     "Copy to {0}",
     "Copy {0} items to {1}. The originals stay in {2}.",
@@ -235,6 +241,9 @@ pub const ENGLISH_TEXTS: &[&str] = &[
     "Remove Items?",
     "Rename",
     "Rename Item",
+    "Replace",
+    "Save",
+    "Save As",
     "Search",
     "Searching for '{0}'",
     "Select a new Destination",
@@ -252,6 +261,7 @@ pub const ENGLISH_TEXTS: &[&str] = &[
     "View Large Icons",
     "View List",
     "View Settings",
+    "\"{0}\" already exists.\nDo you want to replace it?",
     "{0} can't go inside itself. Choose another folder.",
     "{0} is already in {1}.",
 ];

@@ -53,7 +53,7 @@ struct Fixture {
 fn fixture(dir: &Path, places: Option<Rc<dyn PlaceRules>>) -> Fixture {
     agg_gui::set_device_scale(1.0);
     let root = dir.to_path_buf();
-    let dialogs = SheetDialogs::new().with_move_root(move || disk(&root));
+    let dialogs = SheetDialogs::new().with_browse_root(move || disk(&root));
     let mut builder = BrowserConfig::builder().dialogs(Rc::new(dialogs.clone()));
     if let Some(places) = places {
         builder = builder.places(places);
@@ -302,8 +302,8 @@ fn the_dialog_browses_with_the_apps_config_and_opens_where_it_was_left() {
         Rc::new(agg_gui_file_browser::DefaultLook::with_names(names));
     let (root, config_memory) = (dir.clone(), Rc::clone(&memory));
     let dialogs = SheetDialogs::new()
-        .with_move_root(move || disk(&root))
-        .with_move_config(move || {
+        .with_browse_root(move || disk(&root))
+        .with_browse_config(move || {
             BrowserConfig::builder()
                 .look(Rc::clone(&look))
                 .memory(config_memory.clone())

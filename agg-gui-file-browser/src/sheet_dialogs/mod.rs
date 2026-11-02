@@ -11,11 +11,14 @@
 //!   type one. Whether the name is free is the folder's to say: a name it refuses shows on the
 //!   browser's status line, the dialog closed.
 //! - The Move dialog (`move_dialog/`), once given a root to browse from
-//!   ([`SheetDialogs::with_move_root`]): a browser of its own over a new root, saying what
+//!   ([`SheetDialogs::with_browse_root`]): a browser of its own over a new root, saying what
 //!   accepting will do, answering with the folder picked and whether the items copy; browsing
-//!   with the app's config when given one ([`SheetDialogs::with_move_config`]) and opening where
+//!   with the app's config when given one ([`SheetDialogs::with_browse_config`]) and opening where
 //!   it was last left under the app's key ([`SheetDialogs::with_move_location_key`]). Without a
 //!   root Move is left unoffered.
+//! - The Save dialog (`save_dialog.rs`'s `SavePage`) over the same root and config, opening
+//!   where it was last left under its own key ([`SheetDialogs::with_save_location_key`]),
+//!   answering with the folder and file name; the app writes the file.
 //! - No file picker (agg-gui has none): Add stays greyed rather than doing nothing.
 //!
 //! Each question answers exactly once: a button, Escape, or the sheet closing any other way
@@ -31,13 +34,14 @@ use agg_gui_files::Folder;
 
 use crate::dialogs::{
     BrowserDialogs, Confirmation, DialogKind, MovePick, MoveRequest, NameRequest, PickedMoveTarget,
+    PickedSaveTarget, SavePick, SaveRequest,
 };
 
 /// Makes the root the Move dialog's browser opens over (a new one per dialog).
-pub type MoveRoot = Rc<dyn Fn() -> Box<dyn Folder>>;
+pub type BrowseRoot = Rc<dyn Fn() -> Box<dyn Folder>>;
 
 /// Makes the config of the Move dialog's browser (a new one per dialog).
-pub type MoveConfig = Rc<dyn Fn() -> crate::config::BrowserConfig>;
+pub type BrowseConfig = Rc<dyn Fn() -> crate::config::BrowserConfig>;
 
 mod sheet;
 
@@ -48,6 +52,7 @@ pub(crate) enum Question {
     Confirm(Confirmation, Box<dyn FnOnce(bool)>),
     AskName(NameRequest, Box<dyn FnOnce(Option<String>)>),
     PickMove(MoveRequest, PickedMoveTarget),
+    PickSave(SaveRequest, PickedSaveTarget),
 }
 
 impl Question {
@@ -57,6 +62,7 @@ impl Question {
             Question::Confirm(_, answer) => answer(false),
             Question::AskName(_, answer) => answer(None),
             Question::PickMove(_, answer) => answer(None),
+            Question::PickSave(_, answer) => answer(None),
         }
     }
 }
@@ -67,9 +73,10 @@ impl Question {
 pub(crate) struct Shared {
     pub pending: RefCell<Option<Question>>,
     pub showing: Cell<bool>,
-    pub move_root: RefCell<Option<MoveRoot>>,
-    pub move_config: RefCell<Option<MoveConfig>>,
+    pub browse_root: RefCell<Option<BrowseRoot>>,
+    pub browse_config: RefCell<Option<BrowseConfig>>,
     pub move_location_key: RefCell<Option<String>>,
+    pub save_location_key: RefCell<Option<String>>,
 }
 
 /// Dialogs shown on a [`DialogSheet`] (see the module header).
@@ -85,19 +92,19 @@ impl SheetDialogs {
     }
 
     /// The dialogs, with the Move dialog browsing from the root `root` makes.
-    pub fn with_move_root(self, root: impl Fn() -> Box<dyn Folder> + 'static) -> Self {
-        *self.shared.move_root.borrow_mut() = Some(Rc::new(root));
+    pub fn with_browse_root(self, root: impl Fn() -> Box<dyn Folder> + 'static) -> Self {
+        *self.shared.browse_root.borrow_mut() = Some(Rc::new(root));
         self
     }
 
     /// The dialogs, with the Move dialog's browser made with the config `config` makes: the
     /// app's look, spawner and memory (start its options from `move_dialog::dialog_options`).
     /// Without one the dialog browses in `DefaultLook` on the default spawner.
-    pub fn with_move_config(
+    pub fn with_browse_config(
         self,
         config: impl Fn() -> crate::config::BrowserConfig + 'static,
     ) -> Self {
-        *self.shared.move_config.borrow_mut() = Some(Rc::new(config));
+        *self.shared.browse_config.borrow_mut() = Some(Rc::new(config));
         self
     }
 
@@ -106,6 +113,13 @@ impl SheetDialogs {
     /// `MoveItemLastBrowsedPath`).
     pub fn with_move_location_key(self, key: impl Into<String>) -> Self {
         *self.shared.move_location_key.borrow_mut() = Some(key.into());
+        self
+    }
+
+    /// The dialogs, with the Save dialog opening where it was last left, remembered under `key`
+    /// (MatterCAD's is `SaveAsLastBrowsedPath`).
+    pub fn with_save_location_key(self, key: impl Into<String>) -> Self {
+        *self.shared.save_location_key.borrow_mut() = Some(key.into());
         self
     }
 
@@ -133,7 +147,9 @@ impl BrowserDialogs for SheetDialogs {
     fn offers(&self, kind: DialogKind) -> bool {
         match kind {
             DialogKind::Confirm | DialogKind::AskName => true,
-            DialogKind::PickMoveTarget => self.shared.move_root.borrow().is_some(),
+            DialogKind::PickMoveTarget | DialogKind::PickSaveTarget => {
+                self.shared.browse_root.borrow().is_some()
+            }
             DialogKind::PickFiles => false,
         }
     }
@@ -146,11 +162,25 @@ impl BrowserDialogs for SheetDialogs {
         self.ask(Question::AskName(request, answer));
     }
 
+    fn pick_save_target(&self, request: SaveRequest, answer: PickedSaveTarget) {
+        match self.shared.browse_root.borrow().is_some() {
+            true => self.ask(Question::PickSave(request, answer)),
+            false => answer(None),
+        }
+    }
+
     fn pick_move_target(&self, request: MoveRequest, answer: PickedMoveTarget) {
-        match self.shared.move_root.borrow().is_some() {
+        match self.shared.browse_root.borrow().is_some() {
             true => self.ask(Question::PickMove(request, answer)),
             false => answer(None),
         }
+    }
+}
+
+/// Answers a Save question with `pick`.
+pub(crate) fn answer_save(question: Option<Question>, pick: SavePick) {
+    if let Some(Question::PickSave(_, answer)) = question {
+        answer(Some(pick));
     }
 }
 

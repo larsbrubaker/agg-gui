@@ -16,10 +16,11 @@ use agg_gui::{
 };
 use agg_gui_files::tr;
 
-use super::{answer_move, Question, Shared};
+use super::{answer_move, answer_save, Question, Shared};
 use crate::config::BrowserConfig;
 use crate::look::{BrowserNames, DefaultLook};
 use crate::move_dialog::{dialog_options, MoveAnswers, MovePage};
+use crate::save_dialog::{SaveAnswers, SavePage};
 use crate::state::BrowserState;
 
 /// The name of a name question's text field.
@@ -136,6 +137,10 @@ impl DialogSheet {
                 panel = MOVE_PANEL;
                 self.move_page(request.clone(), &showing)
             }
+            Question::PickSave(request, _) => {
+                panel = MOVE_PANEL;
+                self.save_page(request.clone(), &showing)
+            }
             Question::Confirm(confirmation, _) => {
                 let text = Label::new(confirmation.message.clone(), Arc::clone(&self.font))
                     .with_wrap(true);
@@ -183,17 +188,36 @@ impl DialogSheet {
         self.showing = Some(showing);
     }
 
-    /// The Move page over a new browser of the move root, answering through `showing`.
-    fn move_page(
+    /// The Save page over a new browser of the dialogs' root, answering through `showing`.
+    fn save_page(
         &self,
-        request: crate::dialogs::MoveRequest,
+        request: crate::dialogs::SaveRequest,
         showing: &Showing,
     ) -> Box<dyn Widget> {
-        let root = self.shared.move_root.borrow().clone();
-        let Some(root) = root else {
+        let Some(state) = self.dialog_browser() else {
             return Box::new(SizedBox::new());
         };
-        let made = self.shared.move_config.borrow().clone();
+        let key = self.shared.save_location_key.borrow().clone();
+        let (accepting, cancelling) = (showing.clone(), showing.clone());
+        let answers = SaveAnswers {
+            accept: Rc::new(move |pick| answer_save(accepting.take(), pick)),
+            cancel: Rc::new(move || cancelling.cancel()),
+        };
+        let font = Arc::clone(&self.font);
+        Box::new(SavePage::new(
+            &state,
+            request,
+            answers,
+            font,
+            key.as_deref(),
+        ))
+    }
+
+    /// A new browser for a dialog: over the dialogs' root, in the app's config or the default
+    /// dialog one.
+    fn dialog_browser(&self) -> Option<Rc<RefCell<BrowserState>>> {
+        let root = self.shared.browse_root.borrow().clone()?;
+        let made = self.shared.browse_config.borrow().clone();
         let config = match made {
             Some(make) => make(),
             None => {
@@ -209,8 +233,19 @@ impl DialogSheet {
                     .build()
             }
         };
+        Some(BrowserState::new(root(), config))
+    }
+
+    /// The Move page over a new browser of the dialogs' root, answering through `showing`.
+    fn move_page(
+        &self,
+        request: crate::dialogs::MoveRequest,
+        showing: &Showing,
+    ) -> Box<dyn Widget> {
+        let Some(state) = self.dialog_browser() else {
+            return Box::new(SizedBox::new());
+        };
         let key = self.shared.move_location_key.borrow().clone();
-        let state = BrowserState::new(root(), config);
         let (accepting, cancelling) = (showing.clone(), showing.clone());
         let answers = MoveAnswers {
             accept: Rc::new(move |pick| answer_move(accepting.take(), pick)),

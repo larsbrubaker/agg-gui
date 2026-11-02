@@ -5,19 +5,22 @@
 //! parts) and a read-only one ("Examples", whose parts can be copied out but nothing put in), and
 //! each part shows a picture made from its name (a coloured tile with the name's first letter's
 //! shape stood in by a disc), so the list's icon views have something to show. The tree's rows
-//! are folders through `DefaultLook`'s "folder" icon. Work runs on the browser's default
+//! are folders through `DefaultLook`'s icons. "Save As..." opens the Save dialog and writes a
+//! generated note into the folder and name picked. Work runs on the browser's default
 //! `LocalSpawner`. Not an egui demo: egui has no file browser.
 
 use std::rc::Rc;
 use std::sync::Arc;
 
 use agg_gui::icon_image::IconImage;
-use agg_gui::{Font, Size, Stack, Widget};
+use agg_gui::{Button, FlexColumn, FlexRow, Font, Size, Stack, Widget};
 use agg_gui_file_browser::{
-    BrowserConfig, BrowserState, Entry, FileBrowser, ItemPictures, PictureCx, PictureState,
-    SheetDialogs,
+    append_extension, BrowserConfig, BrowserDialogs, BrowserState, Entry, FileBrowser,
+    ItemPictures, PictureCx, PictureState, SavePick, SaveRequest, SheetDialogs,
 };
-use agg_gui_files::{DynamicFolder, DynamicFolderLink, Folder, MemoryFolder, PlaceId};
+use agg_gui_files::{
+    DynamicFolder, DynamicFolderLink, Folder, MemoryFolder, PlaceId, WritableFolder,
+};
 
 /// The demo window's title.
 pub const TITLE: &str = "\u{F07C} File Browser";
@@ -150,20 +153,72 @@ fn name_picture(name: &str, side: i32) -> Option<IconImage> {
     IconImage::from_rgba(Arc::new(rgba), px, px, logical)
 }
 
-/// The demo's content: the browser over the sample, with its dialogs' sheet over it.
+/// The demo's "Save As..." button's name.
+pub const SAVE_AS_BUTTON: &str = "File Browser Demo Save As";
+
+/// Writes a generated note into the folder the Save dialog picked (a memory folder), replacing a
+/// file of that name when the user agreed.
+fn save_note(pick: SavePick, count: u32) {
+    let Some(folder) = pick
+        .folder
+        .as_any()
+        .and_then(|a| a.downcast_ref::<MemoryFolder>())
+        .cloned()
+    else {
+        return;
+    };
+    if pick.replaces {
+        let old: Vec<_> = folder
+            .items()
+            .into_iter()
+            .filter(|i| i.name() == pick.file_name)
+            .collect();
+        let mut writable = folder.clone();
+        let _ = writable.remove(&old);
+    }
+    let text = format!("Note {count}, saved from the agg-gui File Browser demo.\n");
+    folder.add_file(&pick.file_name, text.into_bytes());
+}
+
+/// The demo's content: a "Save As..." button over the browser on the sample, with the dialogs'
+/// sheet over both.
 pub fn file_browser_demo(font: Arc<Font>) -> Box<dyn Widget> {
     let sample = Sample::new();
     let move_sample = sample.clone();
-    let dialogs = SheetDialogs::new().with_move_root(move || move_sample.root());
+    let dialogs = SheetDialogs::new().with_browse_root(move || move_sample.root());
     let config = BrowserConfig::builder()
         .dialogs(Rc::new(dialogs.clone()))
         .pictures(Rc::new(SamplePictures))
         .build();
     let state = BrowserState::new(sample.root(), config);
     let browser = FileBrowser::new(&state, Arc::clone(&font));
+    let asking = dialogs.clone();
+    let saves = Rc::new(std::cell::Cell::new(0u32));
+    let save_as = Button::new("Save As...", Arc::clone(&font))
+        .on_click(move || {
+            let saves = Rc::clone(&saves);
+            saves.set(saves.get() + 1);
+            let request = SaveRequest::new(format!("note {}", saves.get()))
+                .with_namer(append_extension(".txt"));
+            asking.pick_save_target(
+                request,
+                Box::new(move |pick| {
+                    if let Some(pick) = pick {
+                        save_note(pick, saves.get());
+                    }
+                }),
+            );
+        })
+        .with_name(SAVE_AS_BUTTON);
+    let column = FlexColumn::new()
+        .with_gap(4.0)
+        .add(Box::new(
+            FlexRow::new().with_padding(4.0).add(Box::new(save_as)),
+        ))
+        .add_flex(Box::new(browser), 1.0);
     Box::new(
         Stack::new()
-            .add(Box::new(browser))
+            .add(Box::new(column))
             .add(Box::new(dialogs.sheet(font))),
     )
 }
@@ -240,6 +295,59 @@ mod tests {
                 "true",
                 "{row} is a folder"
             );
+        }
+    }
+
+    #[test]
+    fn save_as_writes_a_note_into_the_folder_picked() {
+        agg_gui::set_device_scale(1.0);
+        let font = Arc::new(
+            Font::from_slice(agg_gui::fonts::NOTO_SANS_REGULAR).expect("bundled font loads"),
+        );
+        let (w, h) = (720.0, 440.0);
+        let mut app = App::new(file_browser_demo(font));
+        let click = |app: &mut App, id: &str, clicks: u32| {
+            app.layout(Size::new(w, h));
+            app.layout(Size::new(w, h));
+            let found: Vec<Rect> = {
+                let mut out = Vec::new();
+                collect(app.root(), id, Point::new(0.0, 0.0), &mut out);
+                out
+            };
+            let r = *found.last().unwrap_or_else(|| panic!("no {id}"));
+            let (x, y) = (r.x + r.width / 2.0, h - (r.y + r.height / 2.0));
+            app.on_mouse_move(x, y);
+            for n in 1..=clicks {
+                app.on_mouse_down_clicks(x, y, MouseButton::Left, Modifiers::default(), n);
+                app.on_mouse_up(x, y, MouseButton::Left, Modifiers::default());
+                app.layout(Size::new(w, h));
+            }
+            app.layout(Size::new(w, h));
+        };
+        click(&mut app, SAVE_AS_BUTTON, 1);
+        click(&mut app, "My Designs Row Item Collection", 2);
+        click(&mut app, "Browser Dialog Confirm Button", 1);
+        // The note lands in My Designs, which the browser behind lists once opened.
+        click(&mut app, "My Designs Tree Node", 1);
+        let mut out = Vec::new();
+        collect(
+            app.root(),
+            "Row Item note 1.txt",
+            Point::new(0.0, 0.0),
+            &mut out,
+        );
+        assert!(!out.is_empty(), "the note is listed");
+    }
+
+    /// Every widget named `id`, in paint order (the dialog's last).
+    fn collect(w: &dyn Widget, id: &str, origin: Point, out: &mut Vec<Rect>) {
+        let b = w.bounds();
+        let here = Point::new(origin.x + b.x, origin.y + b.y);
+        if w.id() == Some(id) {
+            out.push(Rect::new(here.x, here.y, b.width, b.height));
+        }
+        for c in w.children() {
+            collect(c.as_ref(), id, here, out);
         }
     }
 }

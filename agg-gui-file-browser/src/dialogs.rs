@@ -3,7 +3,7 @@
 //! a new folder, a rename), picking files to add, and picking the folder a Move goes to
 //! ([`MoveRequest`]). [`SheetDialogs`](crate::SheetDialogs) (`sheet_dialogs/`) is a ready set
 //! on agg-gui's `ModalSheet` for an app without its own: it confirms, asks for names and, given a
-//! root to browse from (`SheetDialogs::with_move_root`), shows the Move dialog
+//! root to browse from (`SheetDialogs::with_browse_root`), shows the Move dialog
 //! (`move_dialog/`); it offers no file picking (agg-gui has no file picker).
 //!
 //! The Move dialog only picks: it answers with the folder it opened for the items and whether
@@ -21,7 +21,7 @@
 
 use std::rc::Rc;
 
-use agg_gui_files::{Folder, Item, PlaceId};
+use agg_gui_files::{tr, Folder, Item, PlaceId};
 
 use crate::move_dialog::plan::FolderKey;
 
@@ -37,6 +37,8 @@ pub enum DialogKind {
     PickFiles,
     /// Pick the folder a Move goes to ([`BrowserDialogs::pick_move_target`]).
     PickMoveTarget,
+    /// Pick the folder and name a save goes to ([`BrowserDialogs::pick_save_target`]).
+    PickSaveTarget,
 }
 
 /// Whether items copy rather than move into a folder in the given place.
@@ -214,7 +216,99 @@ pub trait BrowserDialogs {
         let _ = request;
         answer(None);
     }
+
+    /// Asks the user where a save goes and under what name (the app's Save As); `answer` hears
+    /// the folder and the file name, or `None` when they cancelled. Saving is the app's. The
+    /// default answers `None`.
+    fn pick_save_target(&self, request: SaveRequest, answer: PickedSaveTarget) {
+        let _ = request;
+        answer(None);
+    }
 }
+
+/// Turns the name the user typed into the file name to save under (an app's extension added:
+/// "Bracket" to "Bracket.mcx"), or says why it can't be used (already translated).
+pub type FileNamer = Rc<dyn Fn(&str) -> Result<String, String>>;
+
+/// The file namer adding `extension` (".mcx") unless the name already ends with it, in any
+/// case.
+pub fn append_extension(extension: &str) -> FileNamer {
+    let extension = extension.to_string();
+    Rc::new(move |typed: &str| {
+        let lower = typed.to_lowercase();
+        match lower.ends_with(&extension.to_lowercase()) {
+            true => Ok(typed.to_string()),
+            false => Ok(format!("{typed}{extension}")),
+        }
+    })
+}
+
+/// The Save dialog's question: its heading, the label over the name field, the name it starts
+/// with, and how the typed name becomes the file name ([`FileNamer`], the name as typed by
+/// default).
+#[derive(Clone)]
+#[non_exhaustive]
+pub struct SaveRequest {
+    pub title: String,
+    pub name_label: String,
+    pub initial_name: String,
+    pub namer: FileNamer,
+}
+
+impl SaveRequest {
+    /// A save starting with `initial_name`, headed "Save As", its field labelled "Name".
+    pub fn new(initial_name: impl Into<String>) -> Self {
+        Self {
+            title: tr("Save As"),
+            name_label: tr("Name"),
+            initial_name: initial_name.into(),
+            namer: Rc::new(|typed: &str| Ok(typed.to_string())),
+        }
+    }
+
+    /// The request headed `title` with its field labelled `name_label` (both translated).
+    pub fn with_labels(mut self, title: impl Into<String>, name_label: impl Into<String>) -> Self {
+        self.title = title.into();
+        self.name_label = name_label.into();
+        self
+    }
+
+    /// The request naming its file through `namer` (an extension added or checked).
+    pub fn with_namer(mut self, namer: FileNamer) -> Self {
+        self.namer = namer;
+        self
+    }
+}
+
+impl std::fmt::Debug for SaveRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SaveRequest")
+            .field("title", &self.title)
+            .field("initial_name", &self.initial_name)
+            .finish()
+    }
+}
+
+/// Where the user chose to save: the folder (opened, handed over by the dialog), the file name
+/// (the namer's), and whether a file of that name is there and the user agreed to replace it.
+pub struct SavePick {
+    pub folder: Box<dyn Folder>,
+    pub file_name: String,
+    pub replaces: bool,
+}
+
+impl std::fmt::Debug for SavePick {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SavePick")
+            .field("folder", &self.folder.name())
+            .field("file_name", &self.file_name)
+            .field("replaces", &self.replaces)
+            .finish()
+    }
+}
+
+/// Hears where a save goes, or `None` when the user cancelled.
+pub type PickedSaveTarget = Box<dyn FnOnce(Option<SavePick>)>;
 
 /// The dialogs of an app with none (see the module header).
 #[derive(Clone, Copy, Debug, Default)]

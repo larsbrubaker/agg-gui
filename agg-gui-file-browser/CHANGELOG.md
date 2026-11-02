@@ -224,7 +224,7 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   `BrowserNames::overflow_menu`), opening the open folder's whole ordered menu.
 - `SheetDialogs` and `DialogSheet`: dialogs on agg-gui's `ModalSheet` for an app without its own,
   confirming a change and asking for a name (an empty name accepts nothing), and with
-  `with_move_root` the Move dialog; they offer no file picker.
+  `with_browse_root` the Move dialog; they offer no file picker.
 - Delete and Backspace run Remove, with its question, in the list and in the tree (the tree's
   selected folder).
 - `FileBrowser`, the whole browser composed over one `BrowserState`: with
@@ -242,7 +242,7 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   named `BrowserNames::header_markdown`, left out when the folder has none); both forms of
   `FileBrowser` show it.
 - `BrowserList::without_drag_picture`, for a host that draws the drag's picture itself.
-- `SheetDialogs::with_move_config` (the Move dialog's browser in the app's look, spawner and
+- `SheetDialogs::with_browse_config` (the Move dialog's browser in the app's look, spawner and
   memory) and `with_move_location_key` (the dialog opens where it was last left, remembered
   through `BrowserMemory` under the app's key). `BrowserPage::remembering(key)` and
   `BrowserState::restore_location(&state, key)` do it for any page; `MovePage::new` takes the key.
@@ -255,7 +255,7 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   moves within a place and copies between places or out of a folder that keeps its items, and
   refuses a read-only folder or the top, the items' own folder ("... is already in ..."), and a
   moved folder or one inside it ("... can't go inside itself."), folders told apart by
-  `FolderKey` (place and location key). `SheetDialogs::with_move_root` shows it; the browser's
+  `FolderKey` (place and location key). `SheetDialogs::with_browse_root` shows it; the browser's
   Move then moves or copies into the folder picked with `drop_into`, recorded for Undo.
   `BrowserPage` and `dialog_options` are a dialog's browser (nav bar named
   `BrowserNames::page_nav_bar`, 75-unit pictures, read-only folders hidden).
