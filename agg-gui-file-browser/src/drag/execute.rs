@@ -155,20 +155,29 @@ pub fn drop_into(
         }
         report(&message);
     }
-    reload_open_target(state, target.id(), source_depth);
+    reload_open_target(state, target.as_ref(), source_depth);
     state.borrow_mut().after_write(String::new());
     crate::trace(|| format!("drop moved {} items to {target_name}", items.len()));
     result.is_ok()
 }
 
-/// The nearest open folder on the path with `target_id` lists itself again (the source, already
-/// listed again, is skipped): the folder showing, when the drop landed in it, or one above it.
-fn reload_open_target(state: &Rc<RefCell<BrowserState>>, target_id: &str, source_depth: usize) {
+/// The nearest open folder on the path that is `target` lists itself again (the source, already
+/// listed again, is skipped): the folder showing, when the drop landed in it, or one above it. A
+/// folder is told by where it is (`FolderKey`) when it says, else by its ID: an app's folders may
+/// all answer the same empty ID.
+fn reload_open_target(state: &Rc<RefCell<BrowserState>>, target: &dyn Folder, source_depth: usize) {
+    let key = FolderKey::of_folder(target);
+    let same = |folder: &dyn Folder| match &key {
+        Some(key) => FolderKey::of_folder(folder).as_ref() == Some(key),
+        None => folder.id() == target.id(),
+    };
     let path = state.borrow().open_path();
     let open = path
         .iter()
-        .rposition(|folder| folder.borrow().id() == target_id)
-        .filter(|depth| *depth != source_depth);
+        .enumerate()
+        .filter(|(depth, _)| *depth != source_depth)
+        .rfind(|(_, folder)| same(&**folder.borrow()))
+        .map(|(depth, _)| depth);
     if let Some(depth) = open {
         path[depth].borrow_mut().load();
     }

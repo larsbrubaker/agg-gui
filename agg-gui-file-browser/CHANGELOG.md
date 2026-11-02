@@ -34,6 +34,9 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 - A picture arriving built every row and tile of the list again, so the one under the pointer was
   a new widget mid-press; the rows and tiles now ask for their art again in place
   (`BrowserRow::refresh_art`, `BrowserTile::refresh_art`, `ListCx::art`).
+- A move into a folder open above the source (the Move dialog's into the parent) left that folder
+  listing what it held before, when the app's folders answer one ID for all: the open folder is
+  now told by its location (`FolderKey`), else its ID, and the source is never the one found.
 - A drag dropped on a folder tree row kept no keys: the list gave them up for any drop outside
   itself. Only a drag ending outside the browser (list and tree) gives them up now, so the undo
   keys take back a drop on the tree.

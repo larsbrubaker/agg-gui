@@ -262,6 +262,89 @@ fn a_drop_on_a_tree_row_leaves_the_list_its_keys_and_one_outside_the_browser_giv
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A folder with no ID of its own (the app's disk folders may answer an empty one): only its
+/// location tells it apart.
+struct Unnamed(DiskFolder);
+
+impl Folder for Unnamed {
+    fn id(&self) -> &str {
+        ""
+    }
+    fn name(&self) -> &str {
+        self.0.name()
+    }
+    fn is_protected(&self) -> bool {
+        self.0.is_protected()
+    }
+    fn child_containers(&self) -> Vec<Rc<dyn FolderLink>> {
+        self.0.child_containers()
+    }
+    fn items(&self) -> Vec<Rc<dyn Item>> {
+        self.0.items()
+    }
+    fn load(&mut self) {
+        self.0.load()
+    }
+    fn place(&self) -> Option<PlaceId> {
+        self.0.place()
+    }
+    fn location_key(&self) -> Option<String> {
+        self.0.location_key()
+    }
+    fn as_writable(&self) -> Option<&dyn agg_gui_files::WritableFolder> {
+        self.0.as_writable()
+    }
+    fn as_writable_mut(&mut self) -> Option<&mut dyn agg_gui_files::WritableFolder> {
+        self.0.as_writable_mut()
+    }
+}
+
+#[test]
+fn a_move_into_the_folder_above_lists_that_open_folder_again() {
+    let dir = workshop("into-above");
+    std::fs::write(dir.join("Parts/bolt.stl"), b"solid bolt").expect("written");
+    let root: Box<dyn Folder> = Box::new(Unnamed(DiskFolder::new(&dir, Rc::new(AllFiles))));
+    let (mut app, state) = browser_app(root, BrowserConfig::default(), ViewMode::Rows);
+    let parts = state
+        .borrow()
+        .entries()
+        .iter()
+        .find(|e| e.name() == "Parts")
+        .and_then(|e| e.item().as_container_link().map(|_| ()))
+        .is_some();
+    assert!(parts, "the workshop lists Parts");
+    let link = state.borrow().open_path()[0]
+        .borrow()
+        .child_containers()
+        .into_iter()
+        .find(|l| l.name() == "Parts")
+        .expect("Parts");
+    state.borrow_mut().open(link.as_ref());
+    frame(&mut app);
+    let bolt = state.borrow().open_path()[1].borrow().items()[0].clone();
+    let above: Box<dyn Folder> = Box::new(Unnamed(DiskFolder::new(&dir, Rc::new(AllFiles))));
+    assert!(agg_gui_file_browser::drop_into(
+        &state,
+        above,
+        "workshop",
+        &[bolt],
+        1,
+        false
+    ));
+    assert!(dir.join("bolt.stl").exists());
+    let listed: Vec<String> = state.borrow().open_path()[0]
+        .borrow()
+        .items()
+        .iter()
+        .map(|i| i.name().to_string())
+        .collect();
+    assert!(
+        listed.contains(&"bolt.stl".to_string()),
+        "the open folder above lists what landed in it: {listed:?}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn the_copy_modifier_copies() {
     let dir = workshop("copy");
