@@ -4,9 +4,10 @@
 //! folder under it stay in view. More than one item carried puts the count on its top-right corner
 //! (a disc in the accent with the number in white); a drop that would copy puts the "+" badge on
 //! its bottom-right corner, by the rule the folder's own badge follows
-//! (`DropManager::copy_target`). Over a view of the app's that shows the items itself
-//! (`OutsideOver::Target { hides_picture: true }`) the picture is gone, and it comes back
-//! elsewhere. The rows and tiles being carried paint at half opacity while the drag lasts
+//! (`DropManager::copy_target`). Outside the browser the app's `OutsideDrops::over` may hide it,
+//! whatever it answers (`OutsideOver::hides_picture`: a view that shows the items itself, or an
+//! app whose drag pictures show only over the browser); without a hook, or where the hook leaves
+//! it, the picture follows the pointer everywhere. It comes back inside the browser. The rows and tiles being carried paint at half opacity while the drag lasts
 //! ([`lift`], [`finish_lift`]), so they read as picked up.
 //!
 //! The list draws the picture in agg-gui's global overlay pass, after the whole widget tree
@@ -107,12 +108,7 @@ pub fn paint_drag_picture(
     let shown = {
         let s = state.borrow();
         let count = s.drop.dragged_items().len();
-        let hidden = matches!(
-            s.drop.outside,
-            Some(OutsideOver::Target {
-                hides_picture: true
-            })
-        );
+        let hidden = s.drop.outside.is_some_and(OutsideOver::hides_picture);
         let at = s
             .item_press()
             .last_pointer()

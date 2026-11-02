@@ -9,11 +9,12 @@
 //! to the list, which opens the menu where it was pressed; a click on the menu button a hovered
 //! row draws asks for the same menu hanging from the button (`list/menu_button.rs`). A press
 //! that loses the pointer without a release (a finger lifting, the window deactivating) ends
-//! without a click: no selection settled, no menu, no tap. A drag that ends outside the list
+//! without a click: no selection settled, no menu, no tap. A row consumes every move of a press
+//! under way, so the list never hears it a second time, and ignores agg-gui's hover-clear move
+//! (sent to the row the pointer left, at the root's `(-1, -1)`), which is no pointer move. A drag that ends outside the list
 //! gives the keys back (`drag_ended`), so the view it ended over has them. A press that is a drag
 //! carries the selection onto the browser's folders or the app's views (`drag/gesture.rs`): each
-//! move updates it (the same move heard twice, by the row and by the list holding the press, is
-//! one), the release drops, and a release the list hears after the row was rebuilt away
+//! move updates it, the release drops, and a release the list hears after the row was rebuilt away
 //! (`release_rowless`) drops the same way.
 
 use std::cell::RefCell;
@@ -53,10 +54,18 @@ pub fn item_event(
             agg_gui::animation::request_draw();
             EventResult::Ignored
         }
-        Event::MouseMove { pos } => match press_moved(state, *pos) {
-            true => EventResult::Consumed,
-            false => EventResult::Ignored,
-        },
+        // A move the pointer didn't make (the hover-clear agg-gui sends the row the pointer
+        // left) is no move of the press.
+        Event::MouseMove { pos } if !is_pointer_move(*pos) => EventResult::Ignored,
+        // The press's own moves stop here, so the list holding the browser never hears them a
+        // second time; it hears a press's moves only once its row is gone.
+        Event::MouseMove { pos } => {
+            let pressed = state.borrow().item_press().is_pressed();
+            match press_moved(state, *pos) || pressed {
+                true => EventResult::Consumed,
+                false => EventResult::Ignored,
+            }
+        }
         Event::MouseDown {
             button: MouseButton::Left,
             pos,
@@ -146,6 +155,21 @@ fn release(
     EventResult::Consumed
 }
 
+/// Whether a `MouseMove` at `local` (the handling widget's coordinates) is where the pointer
+/// is: agg-gui also sends the leaf the pointer left a move at the root's `(-1, -1)` so it can
+/// clear its hover, which is no move of the pointer.
+pub fn is_pointer_move(local: Point) -> bool {
+    let (Some(to_root), Some(world)) = (
+        agg_gui::event_root_transform(),
+        agg_gui::current_mouse_world(),
+    ) else {
+        return true;
+    };
+    let (mut x, mut y) = (local.x, local.y);
+    to_root.transform(&mut x, &mut y);
+    (x - world.x).abs() < 1e-6 && (y - world.y).abs() < 1e-6
+}
+
 /// A press's pointer move to `pos`: whether the press is a drag. A press whose left button is no
 /// longer held (released where the list never heard it) ends here without a click.
 pub fn press_moved(state: &Rc<RefCell<BrowserState>>, pos: Point) -> bool {
@@ -154,15 +178,8 @@ pub fn press_moved(state: &Rc<RefCell<BrowserState>>, pos: Point) -> bool {
         return false;
     }
     let at = pointer(pos);
-    let (dragging, moved) = {
-        let mut s = state.borrow_mut();
-        let was_dragging = s.item_press().is_dragging();
-        let before = s.item_press().last_pointer();
-        let dragging = s.item_press_mut().moved(at);
-        (dragging, !was_dragging || before != Some(at))
-    };
-    // The same move heard twice (by its row and by the list holding the press) is one move.
-    if dragging && moved {
+    let dragging = state.borrow_mut().item_press_mut().moved(at);
+    if dragging {
         crate::drag::gesture::drag_over(state, at);
         agg_gui::animation::request_draw();
     }

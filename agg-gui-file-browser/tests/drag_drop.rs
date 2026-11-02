@@ -5,8 +5,9 @@
 //! a copy is offered to the app first (`take_over_copy`), which may run it or hand it back. A
 //! drag held over a folder opens it after the spring delay (on agg-gui's virtual clock): a tree
 //! row in place, a folder in the list in the list, where a drop on the empty space lands in it.
-//! The drag's picture follows the pointer, hides over the app's view when the app says so, and a
-//! release there goes to the app's `OutsideDrops` hook (`cancel` when the drag comes back).
+//! The drag's picture follows the pointer (everywhere without a hook), hides outside the browser
+//! when the app says so whatever it answers, and a release over the app's view goes to its
+//! `OutsideDrops` hook (`cancel` when the drag comes back).
 
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
@@ -422,6 +423,9 @@ fn a_drag_held_over_a_folder_in_the_list_opens_it_there_and_drops_into_it() {
     let empty = Point::new(TREE + 150.0, 20.0);
     move_to(&mut app, empty);
     move_to(&mut app, Point::new(empty.x + 1.0, empty.y));
+    // The list is lit as a folder is, and says what the drop does.
+    assert_eq!(property(&app, "LibraryView", "dragging"), "true");
+    assert_eq!(property(&app, "LibraryView", "drop_label"), "Move to Parts");
     release(
         &mut app,
         Point::new(empty.x + 1.0, empty.y),
@@ -493,4 +497,47 @@ fn the_picture_follows_hides_over_the_apps_view_and_a_release_there_is_the_apps(
     assert!(dir.join("gear.stl").exists(), "the browser moved nothing");
     assert_eq!(list_property(&app, "drag_picture"), "");
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// An app whose drag pictures show only over the browser: nothing outside takes the items.
+struct OnlyOverBrowser;
+
+impl OutsideDrops for OnlyOverBrowser {
+    fn over(&self, _items: &[Rc<dyn Item>], _window_at: Point) -> OutsideOver {
+        OutsideOver::NoTarget {
+            hides_picture: true,
+        }
+    }
+    fn release(&self, _items: &[Rc<dyn Item>], _window_at: Point) -> bool {
+        false
+    }
+    fn cancel(&self) {}
+}
+
+#[test]
+fn outside_the_picture_follows_without_a_hook_and_hides_where_the_app_says() {
+    for hook in [false, true] {
+        let dir = workshop(if hook { "only-over" } else { "no-hook" });
+        let config = match hook {
+            true => BrowserConfig::builder()
+                .drops(Rc::new(OnlyOverBrowser))
+                .build(),
+            false => BrowserConfig::default(),
+        };
+        let (mut app, _state) = browser_app(disk(&dir), config, ViewMode::Rows);
+        drag_over(&mut app, "Row Item gear.stl", "Parts Row Item Collection");
+        let outside = Point::new(WIDTH - VIEW / 2.0, HEIGHT / 2.0);
+        move_to(&mut app, outside);
+        let picture = list_property(&app, "drag_picture");
+        match hook {
+            true => assert_eq!(picture, "", "hidden by a no-target answer"),
+            false => assert_eq!(
+                picture,
+                format!("{},{},64,64", outside.x + 16.0, outside.y - 16.0 - 64.0)
+            ),
+        }
+        release(&mut app, outside, Modifiers::default());
+        assert!(dir.join("gear.stl").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

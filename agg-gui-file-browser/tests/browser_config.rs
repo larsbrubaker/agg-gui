@@ -209,7 +209,9 @@ impl OutsideDrops for Bed {
                 hides_picture: true,
             }
         } else {
-            OutsideOver::NoTarget
+            OutsideOver::NoTarget {
+                hides_picture: false,
+            }
         }
     }
     fn release(&self, items: &[Rc<dyn Item>], at: Point) -> bool {
@@ -280,7 +282,9 @@ fn an_apps_hooks_replace_only_what_it_sets() {
     let items = vec![Rc::clone(item.item())];
     assert_eq!(
         drops.over(&items, Point::new(10.0, 0.0)),
-        OutsideOver::NoTarget
+        OutsideOver::NoTarget {
+            hides_picture: false,
+        }
     );
     assert!(drops.release(&items, Point::new(200.0, 0.0)));
     assert_eq!(*bed.0.borrow(), ["bracket.stl"]);

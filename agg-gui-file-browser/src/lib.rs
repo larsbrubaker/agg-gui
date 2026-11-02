@@ -100,7 +100,7 @@ pub use drag::execute::{couldnt_copy_to, drop_into, drop_onto};
 pub use drag::gesture::{drag_end, drag_lost, drag_over};
 pub use drag::picture::{DragPicture, CARRIED_ALPHA, PICTURE_SIDE};
 pub use drag::spring::{SpringOpen, SPRING_DELAY};
-pub use drag::{DropKey, DropLabel, DropManager, DropTargetKind};
+pub use drag::{DropKey, DropLabel, DropManager, DropTargetKind, LIST_DROP_KEY};
 pub use drops::{OutsideDrops, OutsideOver};
 pub use entry::{BrowserRef, Entry};
 pub use fitted_text::{

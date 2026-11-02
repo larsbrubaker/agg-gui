@@ -37,7 +37,16 @@ pub enum DropTargetKind {
     Tree,
     /// A folder row or tile in the list.
     Content,
+    /// The list's empty space, while a drop there lands in the folder showing (one the drag
+    /// opened, `spring.rs`); its index is always 0 ([`LIST_DROP_KEY`]).
+    List,
 }
+
+/// The key of the list's empty space as a drop target: the list lights up as a folder does.
+pub const LIST_DROP_KEY: DropKey = DropKey {
+    kind: DropTargetKind::List,
+    index: 0,
+};
 
 /// What a target is known by: its kind and its index (tree row, or listed row).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

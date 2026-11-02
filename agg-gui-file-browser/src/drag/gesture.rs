@@ -19,13 +19,7 @@ use std::rc::Rc;
 use agg_gui::{Modifiers, Point};
 use agg_gui_files::{tr, Item};
 
-use super::{DropKey, DropLabel, DropTargetKind};
-
-/// The list's empty space as the target, while a drop there lands in the folder the drag opened.
-const LIST_KEY: DropKey = DropKey {
-    kind: DropTargetKind::Content,
-    index: usize::MAX,
-};
+use super::{DropLabel, LIST_DROP_KEY};
 
 /// The drag at `at` outside the browser asks the app what is there; back inside, the app's view
 /// is told to put itself back.
@@ -98,7 +92,7 @@ pub fn drag_over(state: &Rc<RefCell<BrowserState>>, at: Point) {
         let target = s.drop.target_link_at(at).or_else(|| {
             s.drop
                 .dropped_into_showing(at, showing)
-                .map(|link| (LIST_KEY, link))
+                .map(|link| (LIST_DROP_KEY, link))
         });
         target.map(|(key, link)| {
             let place = s.drop.place_of(link.as_ref());
@@ -145,7 +139,7 @@ pub fn drag_end(state: &Rc<RefCell<BrowserState>>, at: Point, modifiers: Modifie
         let target = s
             .drop
             .target_link_at(at)
-            .or_else(|| into_showing.map(|link| (LIST_KEY, link)));
+            .or_else(|| into_showing.map(|link| (LIST_DROP_KEY, link)));
         let outside = s.drop.outside.is_some() && !s.drop.browser_contains(at);
         let source_depth = s.drop.source_depth();
         let items = s.drop.take_items().unwrap_or_default();

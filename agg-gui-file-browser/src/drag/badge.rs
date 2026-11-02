@@ -127,3 +127,33 @@ pub(crate) fn entry_drop_properties(
         ("lifted", s.drop.carries(&entry.item()).to_string()),
     ]
 }
+
+/// The list lit as a drop target ([`super::LIST_DROP_KEY`]) over its whole `size`, while a drop on
+/// its empty space lands in the folder showing.
+pub(crate) fn paint_list_light(
+    ctx: &mut dyn DrawCtx,
+    state: &Rc<RefCell<BrowserState>>,
+    size: (f64, f64),
+    style: &crate::look::BrowserStyle,
+) {
+    let key = super::LIST_DROP_KEY;
+    let (lit, copies) = {
+        let s = state.borrow();
+        (
+            s.drop.highlighted() == Some(key),
+            s.drop.copy_target() == Some(key),
+        )
+    };
+    if !lit {
+        return;
+    }
+    let (w, h) = size;
+    ctx.set_fill_color(style.accent.with_alpha(HIGHLIGHT_ALPHA));
+    ctx.begin_path();
+    ctx.rounded_rect(0.0, 0.0, w, h, style.corner_radius);
+    ctx.fill();
+    if copies {
+        let radius = (h * 0.3).clamp(5.0, 9.0);
+        paint_plus_badge(ctx, w - radius - 4.0, h / 2.0, radius, style.accent);
+    }
+}

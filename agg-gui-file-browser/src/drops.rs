@@ -3,9 +3,12 @@
 //! (`BrowserConfig::drops` is `None`) keeps drags inside the browser: a release anywhere else
 //! drops nothing.
 //!
-//! The browser asks the hook while its drag is outside its own folders, with the items carried
-//! and the pointer in window coordinates; the hook says whether a view of its takes the drop and
-//! whether that view shows the items itself (so the browser hides the picture its drag carries).
+//! The browser asks the hook while its drag is outside the browser (over neither its list nor its
+//! folder tree), with the items carried and the pointer in window coordinates; the hook says
+//! whether a view of its takes the drop, and, whatever the answer, whether the browser hides the
+//! picture its drag carries there (a view that shows the items itself, or an app whose drags show
+//! their picture only over the browser). Without a hook, or where the hook leaves it shown, the
+//! picture follows the pointer everywhere.
 
 use std::rc::Rc;
 
@@ -16,10 +19,20 @@ use agg_gui_files::Item;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OutsideOver {
     /// Nothing of the app's that takes the items: a release here drops nothing.
-    NoTarget,
-    /// A view of the app's takes the items. `hides_picture`: the view shows them itself, so the
-    /// browser hides the picture its drag carries.
+    /// `hides_picture`: the browser hides the picture its drag carries here.
+    NoTarget { hides_picture: bool },
+    /// A view of the app's takes the items. `hides_picture`: the browser hides the picture its
+    /// drag carries (the view shows the items itself).
     Target { hides_picture: bool },
+}
+
+impl OutsideOver {
+    /// Whether the browser hides the drag's picture here.
+    pub fn hides_picture(self) -> bool {
+        match self {
+            Self::NoTarget { hides_picture } | Self::Target { hides_picture } => hides_picture,
+        }
+    }
 }
 
 /// An app's views that take a drag of the browser's items.

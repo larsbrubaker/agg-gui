@@ -291,10 +291,13 @@ impl Widget for BrowserList {
         s.drop_manager_mut()
             .clear_targets(crate::drag::DropTargetKind::Content);
     }
-    /// The rubber band over the rows.
+    /// The rubber band over the rows; while a drop on the list's empty space would land in the
+    /// folder showing (one the drag opened), the list is lit as a folder is (the accent at alpha
+    /// 40, with the "+" badge for a copy).
     fn paint_overlay(&mut self, ctx: &mut dyn DrawCtx) {
         let style = self.look.style();
         let size = (self.bounds.width, self.bounds.height);
+        crate::drag::badge::paint_list_light(ctx, &self.state, size, &style);
         paint_band(
             ctx,
             &self.state,
@@ -311,9 +314,18 @@ impl Widget for BrowserList {
         self.menu
             .paint(ctx, Arc::clone(&self.font), style.font_size);
     }
-    /// What the drag's picture showed in the last frame (`drag/picture.rs`).
+    /// Whether a drag is under way, what a drop on the list's empty space does while it is lit
+    /// (empty otherwise), and what the drag's picture showed in the last frame
+    /// (`drag/picture.rs`).
     fn properties(&self) -> Vec<(&'static str, String)> {
-        crate::drag::picture::picture_properties(&self.state.borrow()).to_vec()
+        let state = self.state.borrow();
+        let drop = state.drop_manager();
+        let mut properties = vec![
+            ("dragging", drop.is_dragging().to_string()),
+            ("drop_label", drop.label_for(crate::drag::LIST_DROP_KEY)),
+        ];
+        properties.extend(crate::drag::picture::picture_properties(&state));
+        properties
     }
     /// While a menu is open it takes every event: a click outside closes it.
     fn has_active_modal(&self) -> bool {
@@ -339,7 +351,10 @@ impl Widget for BrowserList {
         }
         // A press whose row was rebuilt away still ends here.
         match event {
-            Event::MouseMove { pos } if self.state.borrow().item_press().is_pressed() => {
+            Event::MouseMove { pos }
+                if self.state.borrow().item_press().is_pressed()
+                    && item_event::is_pointer_move(*pos) =>
+            {
                 if press_moved(&self.state, *pos) {
                     return EventResult::Consumed;
                 }

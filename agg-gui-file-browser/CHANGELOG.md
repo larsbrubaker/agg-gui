@@ -127,6 +127,12 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   list and tree the app's `OutsideDrops` is asked (`over`, hiding the picture when it says so),
   handed a release there, and told `cancel` when the drag comes back or is lost to another
   window. Carried rows paint at half opacity.
+- The list lights up as a folder does while a drop on its empty space would land in a folder the
+  drag opened (`LIST_DROP_KEY`, `DropTargetKind::List`), and reports `dragging` and that drop's
+  `drop_label`. `OutsideOver::NoTarget` carries `hides_picture` as `Target` does
+  (`OutsideOver::hides_picture`), so an app may hide the drag's picture anywhere outside the
+  browser; without a hook it follows the pointer everywhere. A row ignores agg-gui's hover-clear
+  move and consumes its own press's moves, so each pointer move reaches the drag once.
 - `CopyCx` gains `source` (the open folder the items come from), `recorder` (for the copy's
   history step) and `report`.
 - `BrowserNames::notice` ("Library Notice") and `notice_button` ("Library Notice Button");
