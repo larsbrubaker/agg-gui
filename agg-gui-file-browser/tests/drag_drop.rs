@@ -739,3 +739,24 @@ fn a_tree_row_past_the_trees_edge_takes_no_drop() {
     agg_gui_file_browser::drag_over(&state, Point::new(50.0, 160.0));
     assert!(state.borrow().drop_manager().highlighted().is_some());
 }
+
+#[test]
+fn a_drop_holding_a_protected_item_moves_nothing_and_says_why() {
+    let home = MemoryFolder::new("Home");
+    let parts = home.add_folder("Parts").expect("free");
+    let gear = home.add_file("gear.stl", b"g".to_vec());
+    let state = BrowserState::new(Box::new(home.clone()), BrowserConfig::default());
+    let top: Rc<dyn Item> = MemoryFolder::new("Desk").link();
+    assert!(top.is_protected());
+    let items = vec![gear, top];
+    let moved =
+        agg_gui_file_browser::drop_into(&state, Box::new(parts.clone()), "Parts", &items, 0, false);
+    assert!(!moved);
+    assert_eq!(names(&home), ["gear.stl"], "nothing moved");
+    assert!(names(&parts).is_empty());
+    assert_eq!(
+        state.borrow().status(),
+        "Couldn't move to \"Parts\": Protected items can't be moved"
+    );
+    assert!(!state.borrow().history().can_undo());
+}

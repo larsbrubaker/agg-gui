@@ -2,7 +2,8 @@
 //! starts in the list and moves past the drag threshold carries the selection (what the press
 //! selected, read once as the drag starts) from the folder showing; each move highlights the
 //! folder under the pointer and labels what a drop there does with the modifiers held now; the
-//! release drops there (`execute.rs`), and a press lost while the window is still active (a
+//! release drops there (`execute.rs`); a folder where the drop would move a protected item is not
+//! highlighted, as the drop moves nothing there, and a press lost while the window is still active (a
 //! finger lifting) drops where the pointer last was, while one lost to another window drops
 //! nothing. A drag held over a folder waits to open it (`spring.rs`); in a folder the list opened
 //! that way, a release on the list's empty space drops into it.
@@ -118,6 +119,17 @@ pub fn drag_over(state: &Rc<RefCell<BrowserState>>, at: Point) {
         Some(source) => places.drop_copies(Some(&**source.borrow()), place, modifier),
         None => places.drop_copies(None, place, modifier),
     };
+    // A protected item never moves (`execute.rs`): a drop that would move one is not offered.
+    let protected = state
+        .borrow()
+        .drop
+        .dragged_items()
+        .iter()
+        .any(|item| item.is_protected());
+    if protected && !copies {
+        state.borrow_mut().drop.set_highlight(None, None);
+        return;
+    }
     let verb = match copies {
         true => tr("Copy to {0}"),
         false => tr("Move to {0}"),

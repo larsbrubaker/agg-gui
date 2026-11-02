@@ -8,6 +8,10 @@
 //! that keeps its items, `PlaceRules::drop_copies`) or when the opened folders turn out to be in
 //! two places (`PlaceRules::crosses_places`).
 //!
+//! A protected item never moves, as the browser's own Move and Remove never take one: a drop
+//! holding one copies where the copy rule already copies, and otherwise moves nothing and says
+//! why ("Protected items can't be moved").
+//!
 //! A move runs at once through the folders' recorded form (`WritableFolder::move_in_recorded`):
 //! its step goes on the history, the source and any open ancestor that is the target list again,
 //! the browser lists again, and a failure is reported naming what did move.
@@ -99,6 +103,13 @@ pub fn drop_into(
     let Some(source) = source else {
         return false;
     };
+    if items.iter().any(|item| item.is_protected()) {
+        report(&couldnt_move_to(
+            target_name,
+            &tr("Protected items can't be moved"),
+        ));
+        return false;
+    }
     if target.as_writable_mut().is_none() {
         report(&couldnt_move_to(
             target_name,

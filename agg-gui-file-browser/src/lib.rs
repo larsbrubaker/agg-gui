@@ -246,6 +246,7 @@ pub const ENGLISH_TEXTS: &[&str] = &[
     "No results",
     "Open",
     "Open File Location",
+    "Protected items can't be moved",
     "Redo",
     "Redone",
     "Remove",
