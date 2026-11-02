@@ -251,3 +251,105 @@ fn where_the_rule_copies_the_dialog_says_copy_and_the_original_stays() {
     assert!(dir.join("gear.stl").exists(), "the original stays");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// An app's memory: each key's open path by folder names, found again from a new root on disk.
+struct Remembered {
+    dir: PathBuf,
+    saved: RefCell<std::collections::HashMap<String, Vec<String>>>,
+}
+
+impl agg_gui_file_browser::BrowserMemory for Remembered {
+    fn remember_location(&self, key: &str, path: &[agg_gui_file_browser::OpenFolder]) {
+        let names = path[1..]
+            .iter()
+            .map(|f| f.borrow().name().to_string())
+            .collect();
+        self.saved.borrow_mut().insert(key.to_string(), names);
+    }
+    fn last_location(&self, key: &str) -> Option<agg_gui_file_browser::LocationFuture> {
+        let names = self.saved.borrow().get(key).cloned()?;
+        let dir = self.dir.clone();
+        Some(Box::pin(async move {
+            let mut opened: Vec<Box<dyn Folder>> = Vec::new();
+            let mut at = disk(&dir);
+            for name in names {
+                at.load();
+                let link = at
+                    .child_containers()
+                    .into_iter()
+                    .find(|l| l.name() == name)?;
+                opened.push(link.get_container().ok()?);
+                at = link.get_container().ok()?;
+            }
+            Some(opened)
+        }))
+    }
+}
+
+#[test]
+fn the_dialog_browses_with_the_apps_config_and_opens_where_it_was_left() {
+    let dir = workshop("remembers");
+    agg_gui::set_device_scale(1.0);
+    let memory = Rc::new(Remembered {
+        dir: dir.clone(),
+        saved: RefCell::default(),
+    });
+    let names = agg_gui_file_browser::BrowserNames {
+        page_nav_bar: "App Page Bar".into(),
+        ..agg_gui_file_browser::BrowserNames::default()
+    };
+    let look: Rc<dyn agg_gui_file_browser::BrowserLook> =
+        Rc::new(agg_gui_file_browser::DefaultLook::with_names(names));
+    let (root, config_memory) = (dir.clone(), Rc::clone(&memory));
+    let dialogs = SheetDialogs::new()
+        .with_move_root(move || disk(&root))
+        .with_move_config(move || {
+            BrowserConfig::builder()
+                .look(Rc::clone(&look))
+                .memory(config_memory.clone())
+                .options(agg_gui_file_browser::dialog_options())
+                .build()
+        })
+        .with_move_location_key("MoveItemLastBrowsedPath");
+    let state = BrowserState::new(
+        disk(&dir),
+        BrowserConfig::builder()
+            .dialogs(Rc::new(dialogs.clone()))
+            .build(),
+    );
+    state.borrow_mut().set_view_mode(ViewMode::Rows);
+    let root = Stack::new()
+        .add(Box::new(FileBrowser::new(&state, font())))
+        .add(Box::new(dialogs.sheet(font())));
+    let mut f = Fixture {
+        app: App::new(Box::new(root)),
+        state,
+    };
+    layout(&mut f.app);
+    select_in_browser(&mut f, "Row Item gear.stl");
+    open_move(&mut f);
+    assert!(
+        in_dialog(&f.app, "App Page Bar").is_some(),
+        "the app's look"
+    );
+    click_in_dialog(&mut f, "Projects Row Item Collection", 2);
+    assert_eq!(
+        memory.saved.borrow().get("MoveItemLastBrowsedPath"),
+        Some(&vec!["Projects".to_string()])
+    );
+    click_in_dialog(&mut f, "Browser Dialog Cancel Button", 1);
+    // Opened again: where it was left.
+    open_move(&mut f);
+    settle(&mut f);
+    let trail = dialog_property(&f.app, "bread_crumb_trail");
+    assert!(trail.ends_with("/Projects"), "{trail}");
+    // Accepting there moves into Projects and remembers nothing new.
+    click_in_dialog(&mut f, "Browser Dialog Confirm Button", 1);
+    settle(&mut f);
+    assert!(dir.join("Projects").join("gear.stl").exists());
+    assert_eq!(
+        memory.saved.borrow().get("MoveItemLastBrowsedPath"),
+        Some(&vec!["Projects".to_string()])
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

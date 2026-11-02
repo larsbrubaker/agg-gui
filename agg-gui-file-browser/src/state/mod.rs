@@ -712,6 +712,37 @@ impl BrowserState {
         };
         remember_open_location(memory.as_ref(), key, &path);
     }
+
+    /// Opens the folder the config's memory remembers under `key`, once found (the search runs
+    /// on the config's spawner): the folders below the root are opened down to it. Nothing
+    /// happens when none is remembered, it can't be reached, or the user has moved the browser
+    /// meanwhile (their choice wins).
+    pub fn restore_location(state: &Rc<RefCell<Self>>, key: &str) {
+        let (memory, spawner, navigation) = {
+            let s = state.borrow();
+            let c = &s.config;
+            (Rc::clone(&c.memory), Rc::clone(&c.spawner), s.navigation)
+        };
+        let Some(finding) = memory.last_location(key) else {
+            return;
+        };
+        let weak = Rc::downgrade(state);
+        spawner.spawn_task(Box::pin(async move {
+            let Some(folders) = finding.await else {
+                return;
+            };
+            let Some(state) = weak.upgrade() else {
+                return;
+            };
+            let mut s = state.borrow_mut();
+            if s.navigation != navigation || s.depth() != 1 {
+                return;
+            }
+            for folder in folders {
+                s.push_container(folder);
+            }
+        }));
+    }
 }
 
 /// When the browser closes, the showing folder is deactivated (a folder following something

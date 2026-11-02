@@ -6,7 +6,10 @@
 //! changes (the list, and its scroll, kept). [`dialog_options`] are such a browser's options:
 //! the list alone, 75-unit pictures, read-only folders hidden (nothing can go in them), item
 //! double clicks kept for the page (they do nothing here), and a folder opened by a double click
-//! or one tap of a finger. The mouse's back button goes up a folder.
+//! or one tap of a finger. The mouse's back button goes up a folder. A page given a location key
+//! ([`BrowserPage::remembering`]) opens where the config's memory says it was last left under
+//! that key and remembers each folder the user moves to, until the page is accepted (its folder
+//! then handed over, never remembered as the page's place).
 //!
 //! [`MovePage`] is the Move dialog: "Select a new Destination:", a line saying what accepting
 //! will do as the user browses and selects ("Move 11 items to Games." / "Copy ... The originals
@@ -15,7 +18,7 @@
 //! Accepting opens the destination (the selected folder row, or hands over the folder showing)
 //! and answers with it; the browser's Move does the move.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -60,6 +63,10 @@ pub fn dialog_options() -> BrowserOptions {
 pub struct BrowserPage {
     state: Rc<RefCell<BrowserState>>,
     font: Arc<Font>,
+    /// The memory key the page's place is remembered under, if any.
+    location_key: Option<String>,
+    /// Set once the page is accepted: from then on its moves are not remembered.
+    accepted: Rc<Cell<bool>>,
     built: Option<u64>,
     bounds: Rect,
     /// The nav bar, then the list.
@@ -73,10 +80,26 @@ impl BrowserPage {
         Self {
             state: Rc::clone(state),
             font,
+            location_key: None,
+            accepted: Rc::new(Cell::new(false)),
             built: None,
             bounds: Rect::default(),
             children: vec![Box::new(SizedBox::new()), Box::new(list)],
         }
+    }
+
+    /// The page opening where it was last left under `key`, and remembering where it goes.
+    pub fn remembering(mut self, key: impl Into<String>) -> Self {
+        let key = key.into();
+        BrowserState::restore_location(&self.state, &key);
+        self.location_key = Some(key);
+        self
+    }
+
+    /// Set to stop remembering the page's place (the page's accept, which hands its folder
+    /// over).
+    pub fn accepted_flag(&self) -> Rc<Cell<bool>> {
+        Rc::clone(&self.accepted)
     }
 
     fn nav_bar(&self) -> Box<dyn Widget> {
@@ -127,6 +150,12 @@ impl Widget for BrowserPage {
         let _ = self.state.borrow_mut().take_item_events();
         let navigation = self.state.borrow().navigation();
         if self.built != Some(navigation) {
+            // A move by the user (not the first build): remember where the page is.
+            if let Some(key) = self.location_key.as_ref().filter(|_| self.built.is_some()) {
+                if !self.accepted.get() {
+                    BrowserState::remember_location(&self.state, key);
+                }
+            }
             self.children[0] = self.nav_bar();
             self.built = Some(navigation);
         }
@@ -171,6 +200,8 @@ pub struct MovePage {
     state: Rc<RefCell<BrowserState>>,
     request: Rc<MoveRequest>,
     answers: Rc<MoveAnswers>,
+    /// The browser page's: set on accept, so the folder handed over isn't remembered.
+    accepted: Rc<Cell<bool>>,
     font: Arc<Font>,
     verdict: Rc<RefCell<MoveVerdict>>,
     built: Option<u64>,
@@ -180,12 +211,15 @@ pub struct MovePage {
 }
 
 impl MovePage {
-    /// The page moving `request`'s items, browsing `state`, answering through `answers`.
+    /// The page moving `request`'s items, browsing `state`, answering through `answers`; with a
+    /// `location_key`, opening where it was last left and remembering where it goes
+    /// (`BrowserPage::remembering`).
     pub fn new(
         state: &Rc<RefCell<BrowserState>>,
         request: MoveRequest,
         answers: MoveAnswers,
         font: Arc<Font>,
+        location_key: Option<&str>,
     ) -> Self {
         let heading = Label::new(
             format!("{}:", tr("Select a new Destination")),
@@ -193,11 +227,16 @@ impl MovePage {
         )
         .with_font_size(16.0)
         .with_strong(true);
-        let page = BrowserPage::new(state, Arc::clone(&font));
+        let mut page = BrowserPage::new(state, Arc::clone(&font));
+        if let Some(key) = location_key {
+            page = page.remembering(key);
+        }
+        let accepted = page.accepted_flag();
         Self {
             state: Rc::clone(state),
             request: Rc::new(request),
             answers: Rc::new(answers),
+            accepted,
             font,
             verdict: Rc::new(RefCell::new(MoveVerdict::Refused(String::new()))),
             built: None,
@@ -232,8 +271,9 @@ impl MovePage {
             Rc::clone(&self.request),
             Rc::clone(&self.answers),
         );
+        let accepted = Rc::clone(&self.accepted);
         let accept_button = Button::new(verdict.verb(), Arc::clone(&self.font))
-            .on_click(move || accept(&state, &request, &answers))
+            .on_click(move || accept(&state, &request, &answers, &accepted))
             .with_enabled_fn({
                 let enabled = !verdict.is_refused();
                 move || enabled
@@ -252,27 +292,39 @@ impl MovePage {
 }
 
 /// Accepts the dialog when its folder can take the items: opens the destination and answers.
-fn accept(state: &Rc<RefCell<BrowserState>>, request: &MoveRequest, answers: &MoveAnswers) {
+fn accept(
+    state: &Rc<RefCell<BrowserState>>,
+    request: &MoveRequest,
+    answers: &MoveAnswers,
+    accepted: &Cell<bool>,
+) {
     let verdict = move_verdict(request, &state.borrow());
-    if verdict.is_refused() {
+    if verdict.is_refused() || accepted.get() {
         return;
     }
     let copy = matches!(verdict, MoveVerdict::Copy(_));
-    let target = match destination(&state.borrow()) {
-        Destination::Row(link) => link.get_container().ok(),
-        Destination::Showing => None,
-    };
-    let target = match target {
-        Some(target) => target,
-        None => {
-            // The folder showing is handed over: the dialog closes on accept. Should something
-            // still hold it, nothing moves and the user is told so.
+    let destination = destination(&state.borrow());
+    let target = match destination {
+        Destination::Row(link) => match link.get_container() {
+            Ok(target) => target,
+            Err(why) => {
+                state.borrow_mut().after_write(why);
+                return;
+            }
+        },
+        Destination::Showing => {
+            // The folder showing is handed over: the dialog closes on accept, and the page stops
+            // remembering its place first. Should something still hold the folder, nothing
+            // moves and the user is told so.
+            accepted.set(true);
             let Some(taken) = state.borrow_mut().take_active_container() else {
+                accepted.set(false);
                 return;
             };
             match Rc::try_unwrap(taken) {
                 Ok(folder) => folder.into_inner(),
                 Err(_) => {
+                    accepted.set(false);
                     let text = tr("The folder was busy, so nothing moved. Try again.");
                     state.borrow_mut().after_write(text);
                     return;
@@ -280,6 +332,7 @@ fn accept(state: &Rc<RefCell<BrowserState>>, request: &MoveRequest, answers: &Mo
             }
         }
     };
+    accepted.set(true);
     (answers.accept)(MovePick { target, copy });
 }
 

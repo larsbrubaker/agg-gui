@@ -242,6 +242,10 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   named `BrowserNames::header_markdown`, left out when the folder has none); both forms of
   `FileBrowser` show it.
 - `BrowserList::without_drag_picture`, for a host that draws the drag's picture itself.
+- `SheetDialogs::with_move_config` (the Move dialog's browser in the app's look, spawner and
+  memory) and `with_move_location_key` (the dialog opens where it was last left, remembered
+  through `BrowserMemory` under the app's key). `BrowserPage::remembering(key)` and
+  `BrowserState::restore_location(&state, key)` do it for any page; `MovePage::new` takes the key.
 - `BrowserLook::unkeyed_folder_icon`: the icon of a tree row whose link names no icon key
   (default none); `DefaultLook` answers a folder.
 - `DefaultLook` draws the "folder" icon key (`BrowserIcon::Folder`'s key, a link's

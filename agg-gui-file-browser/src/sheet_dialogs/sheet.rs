@@ -193,27 +193,36 @@ impl DialogSheet {
         let Some(root) = root else {
             return Box::new(SizedBox::new());
         };
-        // The page's view and sorting buttons are named apart from a browser's behind it.
-        let names = BrowserNames {
-            view_options_button: "Library Browser View Options Button".into(),
-            sort_button: "Library Browser Sorting Button".into(),
-            ..BrowserNames::default()
+        let made = self.shared.move_config.borrow().clone();
+        let config = match made {
+            Some(make) => make(),
+            None => {
+                // The page's view and sorting buttons are named apart from a browser's behind it.
+                let names = BrowserNames {
+                    view_options_button: "Library Browser View Options Button".into(),
+                    sort_button: "Library Browser Sorting Button".into(),
+                    ..BrowserNames::default()
+                };
+                BrowserConfig::builder()
+                    .look(Rc::new(DefaultLook::with_names(names)))
+                    .options(dialog_options())
+                    .build()
+            }
         };
-        let config = BrowserConfig::builder()
-            .look(Rc::new(DefaultLook::with_names(names)))
-            .options(dialog_options())
-            .build();
+        let key = self.shared.move_location_key.borrow().clone();
         let state = BrowserState::new(root(), config);
         let (accepting, cancelling) = (showing.clone(), showing.clone());
         let answers = MoveAnswers {
             accept: Rc::new(move |pick| answer_move(accepting.take(), pick)),
             cancel: Rc::new(move || cancelling.cancel()),
         };
+        let font = Arc::clone(&self.font);
         Box::new(MovePage::new(
             &state,
             request,
             answers,
-            Arc::clone(&self.font),
+            font,
+            key.as_deref(),
         ))
     }
 

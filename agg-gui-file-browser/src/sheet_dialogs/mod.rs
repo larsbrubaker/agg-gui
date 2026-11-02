@@ -12,7 +12,9 @@
 //!   browser's status line, the dialog closed.
 //! - The Move dialog (`move_dialog/`), once given a root to browse from
 //!   ([`SheetDialogs::with_move_root`]): a browser of its own over a new root, saying what
-//!   accepting will do, answering with the folder picked and whether the items copy. Without a
+//!   accepting will do, answering with the folder picked and whether the items copy; browsing
+//!   with the app's config when given one ([`SheetDialogs::with_move_config`]) and opening where
+//!   it was last left under the app's key ([`SheetDialogs::with_move_location_key`]). Without a
 //!   root Move is left unoffered.
 //! - No file picker (agg-gui has none): Add stays greyed rather than doing nothing.
 //!
@@ -33,6 +35,9 @@ use crate::dialogs::{
 
 /// Makes the root the Move dialog's browser opens over (a new one per dialog).
 pub type MoveRoot = Rc<dyn Fn() -> Box<dyn Folder>>;
+
+/// Makes the config of the Move dialog's browser (a new one per dialog).
+pub type MoveConfig = Rc<dyn Fn() -> crate::config::BrowserConfig>;
 
 mod sheet;
 
@@ -63,6 +68,8 @@ pub(crate) struct Shared {
     pub pending: RefCell<Option<Question>>,
     pub showing: Cell<bool>,
     pub move_root: RefCell<Option<MoveRoot>>,
+    pub move_config: RefCell<Option<MoveConfig>>,
+    pub move_location_key: RefCell<Option<String>>,
 }
 
 /// Dialogs shown on a [`DialogSheet`] (see the module header).
@@ -80,6 +87,25 @@ impl SheetDialogs {
     /// The dialogs, with the Move dialog browsing from the root `root` makes.
     pub fn with_move_root(self, root: impl Fn() -> Box<dyn Folder> + 'static) -> Self {
         *self.shared.move_root.borrow_mut() = Some(Rc::new(root));
+        self
+    }
+
+    /// The dialogs, with the Move dialog's browser made with the config `config` makes: the
+    /// app's look, spawner and memory (start its options from `move_dialog::dialog_options`).
+    /// Without one the dialog browses in `DefaultLook` on the default spawner.
+    pub fn with_move_config(
+        self,
+        config: impl Fn() -> crate::config::BrowserConfig + 'static,
+    ) -> Self {
+        *self.shared.move_config.borrow_mut() = Some(Rc::new(config));
+        self
+    }
+
+    /// The dialogs, with the Move dialog opening where it was last left, remembered through its
+    /// config's `BrowserMemory` under `key` (an app's own key: MatterCAD's is
+    /// `MoveItemLastBrowsedPath`).
+    pub fn with_move_location_key(self, key: impl Into<String>) -> Self {
+        *self.shared.move_location_key.borrow_mut() = Some(key.into());
         self
     }
 
