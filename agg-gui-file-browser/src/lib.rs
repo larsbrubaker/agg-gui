@@ -185,6 +185,7 @@ pub use state::{
     SearchSectionCollapseState, SectionHeader,
 };
 pub use trace::{set_tracer, trace, tracing};
+pub use tree::menu::tree_menu_rows;
 pub use tree::{
     path_keys, BrowserTree, PathLevel, TreeKey, TreeModel, TreeNode, TreePlace, TreeRow,
     TREE_ICON_SIZE, TREE_ROW_HEIGHT,

@@ -81,8 +81,10 @@ fn wrap(
 }
 
 /// The rows of the menu for tree row `index` of `model`: empty when the row is gone or stands
-/// for no folder.
-pub(crate) fn tree_menu_rows(
+/// for no folder. Each row runs with the row's folder as the temporary selection, as the menu
+/// the tree opens runs it (an app checks its tree menu through this, as through
+/// [`menu_actions`](crate::menu_actions) for the list's).
+pub fn tree_menu_rows(
     state: &Rc<RefCell<BrowserState>>,
     model: &Rc<RefCell<TreeModel>>,
     index: usize,

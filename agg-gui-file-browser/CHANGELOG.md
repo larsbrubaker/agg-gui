@@ -12,6 +12,9 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- `tree_menu_rows`, the rows a tree row's right-click menu shows, each running with the row's
+  folder as the temporary selection, as `menu_actions` gives the list's.
+
 - `BrowserState`, what a browser is looking at and does, made with `BrowserState::new(root,
   config)` or `with_config(root, config, app_data)`: the open path (`OpenFolder`s, shared, so a
   hook can be handed them with the state not borrowed); the showing folder's rows
