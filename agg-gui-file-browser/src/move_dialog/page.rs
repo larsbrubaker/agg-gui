@@ -222,12 +222,9 @@ impl MovePage {
 
     /// The page over `controller` (an app's own hooks and starting folder set on it).
     pub fn over(controller: MoveController, font: Arc<Font>) -> Self {
-        let heading = Label::new(
-            format!("{}:", tr("Select a new Destination")),
-            Arc::clone(&font),
-        )
-        .with_font_size(16.0)
-        .with_strong(true);
+        let heading = Label::new(tr("Select a new Destination:"), Arc::clone(&font))
+            .with_font_size(16.0)
+            .with_strong(true);
         let page = BrowserPage::new(controller.state(), Arc::clone(&font));
         Self {
             controller,

@@ -75,10 +75,9 @@ impl BrowserState {
         located: Option<Vec<Box<dyn Folder>>>,
     ) {
         let Some(located) = located else {
-            self.set_status(format!(
-                "{} \"{}\"",
-                tr("Couldn't find the location of"),
-                item.name()
+            self.set_status(crate::move_dialog::plan::fill(
+                &tr("Couldn't find the location of \"{0}\""),
+                &[item.name()],
             ));
             self.changed();
             return;

@@ -6,6 +6,12 @@
 //! same trait, so one stack holds both.
 
 /// One recorded change, able to take itself back and to replay itself.
+///
+/// `undo` and `redo` must call their `done` exactly once, now or later, whatever happens: the
+/// history is busy (it starts no other undo or redo) until `done` is called. A step that fails
+/// calls it with nothing kept and the failures named. A callback dropped uncalled is a bug in the
+/// step; a browser's history guards against it (it frees itself and says the undo didn't
+/// finish), but anything else waiting on the outcome never hears it.
 pub trait HistoryStep {
     /// What the change was, for the user ("Moved 3 items to Brackets"), already translated.
     fn description(&self) -> String;
@@ -24,7 +30,8 @@ pub struct StepOutcome {
     pub failures: Vec<String>,
 }
 
-/// Takes an undo's or redo's outcome once it has finished.
+/// Takes an undo's or redo's outcome once it has finished; called exactly once (see
+/// [`HistoryStep`]).
 pub type StepDone = Box<dyn FnOnce(StepOutcome)>;
 
 /// A change's result, and the step that takes it back when the folder recorded one. A change

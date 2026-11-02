@@ -330,3 +330,70 @@ fn a_write_to_a_folder_that_takes_none_is_refused_and_records_nothing() {
     assert_eq!(state.borrow().status(), "This folder can't be changed");
     assert!(state.borrow().history().notice().is_none());
 }
+
+#[test]
+fn a_step_recorded_while_an_undo_finishes_leaves_no_redo() {
+    let (state, log) = (browser(), Log::default());
+    let history = state.borrow().history();
+    let parked = Parked::default();
+    history.record(Box::new(Later {
+        parked: Rc::clone(&parked),
+    }));
+    assert!(BrowserState::undo(&state));
+    history.record(Logged::boxed("new", &log));
+    land(&parked);
+    assert!(
+        !history.can_redo(),
+        "the undone step is stale after a new one"
+    );
+    assert_eq!(history.depths(), (1, 0));
+    assert_eq!(history.undo_description().as_deref(), Some("Changed new"));
+}
+
+#[test]
+fn a_redo_landing_after_a_new_step_goes_below_it() {
+    let (state, log) = (browser(), Log::default());
+    let history = state.borrow().history();
+    let parked = Parked::default();
+    history.record(Box::new(Later {
+        parked: Rc::clone(&parked),
+    }));
+    assert!(BrowserState::undo(&state));
+    land(&parked);
+    assert!(BrowserState::redo(&state));
+    history.record(Logged::boxed("new", &log));
+    land(&parked);
+    assert_eq!(history.depths(), (2, 0));
+    assert_eq!(history.undo_description().as_deref(), Some("Changed new"));
+}
+
+/// A step whose undo lets its callback go without calling it.
+struct Dropped;
+
+impl HistoryStep for Dropped {
+    fn description(&self) -> String {
+        "Moved Gear to Cloud".to_string()
+    }
+    fn undo(self: Box<Self>, done: StepDone) {
+        drop(done);
+    }
+    fn redo(self: Box<Self>, done: StepDone) {
+        drop(done);
+    }
+}
+
+#[test]
+fn an_undo_that_never_finishes_frees_the_history_and_says_so() {
+    let (state, log) = (browser(), Log::default());
+    let history = state.borrow().history();
+    history.record(Logged::boxed("a", &log));
+    history.record(Box::new(Dropped));
+    assert!(BrowserState::undo(&state));
+    assert!(!history.is_busy(), "the history is free again");
+    assert_eq!(
+        notice(&state),
+        ("Undo didn't finish: Moved Gear to Cloud".to_string(), None)
+    );
+    assert!(BrowserState::undo(&state), "the next undo runs");
+    assert_eq!(*log.borrow(), ["undo a"]);
+}

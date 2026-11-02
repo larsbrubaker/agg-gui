@@ -28,18 +28,18 @@ use std::rc::Rc;
 
 use agg_gui_files::{names_of_items_gone_from_source, tr, Folder, FolderLink, Item, Recorded};
 
-use crate::move_dialog::plan::FolderKey;
+use crate::move_dialog::plan::{fill, FolderKey};
 use crate::places::{CopyCx, CopyTakeover};
 use crate::state::{BrowserState, OpenFolder};
 
-/// "Couldn't move to "Brackets": why".
+/// "Couldn't move to "Brackets": why", one translated line.
 fn couldnt_move_to(name: &str, why: &str) -> String {
-    format!("{} \"{name}\": {why}", tr("Couldn't move to"))
+    fill(&tr("Couldn't move to \"{0}\": {1}"), &[name, why])
 }
 
-/// "Couldn't copy to "Brackets": why".
+/// "Couldn't copy to "Brackets": why", one translated line.
 pub fn couldnt_copy_to(name: &str, why: &str) -> String {
-    format!("{} \"{name}\": {why}", tr("Couldn't copy to"))
+    fill(&tr("Couldn't copy to \"{0}\": {1}"), &[name, why])
 }
 
 /// Opens `target_link` and moves (or copies) `items` into it from the folder at `source_depth`
@@ -131,7 +131,8 @@ pub fn drop_into(
         let gone = names_of_items_gone_from_source(items, &**source.borrow());
         let mut message = couldnt_move_to(target_name, e);
         if !gone.is_empty() {
-            message += &format!(" ({}: {})", tr("Moved"), gone.join(", "));
+            message.push(' ');
+            message += &fill(&tr("(Moved: {0})"), &[&gone.join(", ")]);
         }
         report(&message);
     }

@@ -7,7 +7,9 @@
 //! notice says "Undone: ..." or "Redone: ..." (and "Couldn't put back: ..." naming what failed),
 //! and the writable folders on the path of the browser it was started from list themselves again
 //! (`after_write`, so a folder tree beside it lists again too); a read-only folder can't have
-//! changed. A browser closed meanwhile is left alone.
+//! changed. A browser closed meanwhile is left alone. Should a step let its callback go without
+//! calling it, the callback's guard ([`DoneGuard`]) lands it as finished with nothing kept, so
+//! the history is not left busy for good, and the notice says "Undo didn't finish: ...".
 //!
 //! The keys, taken by the list and the tree while they have the keyboard: Command+Z or Control+Z
 //! undoes, Command+Shift+Z, Control+Shift+Z, Command+Y or Control+Y redoes. They are taken even
@@ -44,8 +46,17 @@ impl BrowserHistory {
             let what = if undo { "undo" } else { "redo" };
             format!("history {what} starts: {}", step.description())
         });
-        let (history, state) = (Rc::downgrade(self), Rc::downgrade(state));
-        let done = Box::new(move |outcome: StepOutcome| finish(&history, &state, outcome, undo));
+        let mut guard = DoneGuard {
+            history: Rc::downgrade(self),
+            state: Rc::downgrade(state),
+            undo,
+            description: step.description(),
+            called: false,
+        };
+        let done = Box::new(move |outcome: StepOutcome| {
+            guard.called = true;
+            finish(&guard.history, &guard.state, outcome, undo);
+        });
         match undo {
             true => step.undo(done),
             false => step.redo(done),
@@ -54,22 +65,57 @@ impl BrowserHistory {
     }
 }
 
-/// What the notice says after an undo or redo: what came back, then what failed.
+/// The callback's guard: an undo or redo whose step drops its callback uncalled still ends,
+/// with nothing kept and the notice saying it didn't finish.
+struct DoneGuard {
+    history: Weak<BrowserHistory>,
+    state: Weak<RefCell<BrowserState>>,
+    undo: bool,
+    /// The step's description, for the notice.
+    description: String,
+    called: bool,
+}
+
+impl Drop for DoneGuard {
+    fn drop(&mut self) {
+        if self.called {
+            return;
+        }
+        let template = match self.undo {
+            true => tr("Undo didn't finish: {0}"),
+            false => tr("Redo didn't finish: {0}"),
+        };
+        let text = template.replace("{0}", &self.description);
+        crate::trace(|| format!("history step dropped its callback: {text}"));
+        if let Some(history) = self.history.upgrade() {
+            history.land(None, text, self.undo);
+        }
+        if let Some(state) = self.state.upgrade() {
+            // A step dropping its callback may do so while the state is borrowed.
+            if let Ok(mut state) = state.try_borrow_mut() {
+                state.after_write(String::new());
+            }
+        }
+    }
+}
+
+/// What the notice says after an undo or redo: what came back, then what failed, each a whole
+/// translated line so a translation can order its words freely.
 fn finish_text(kept: Option<&dyn HistoryStep>, failures: &[String], undo: bool) -> String {
-    let done = if undo { tr("Undone") } else { tr("Redone") };
+    let done = if undo {
+        tr("Undone: {0}")
+    } else {
+        tr("Redone: {0}")
+    };
     let mut text = match kept {
-        Some(step) => format!("{done}: {}", step.description()),
+        Some(step) => done.replace("{0}", &step.description()),
         None => String::new(),
     };
     if !failures.is_empty() {
         if !text.is_empty() {
             text.push_str(". ");
         }
-        text.push_str(&format!(
-            "{}: {}",
-            tr("Couldn't put back"),
-            failures.join(", ")
-        ));
+        text.push_str(&tr("Couldn't put back: {0}").replace("{0}", &failures.join(", ")));
     }
     text
 }

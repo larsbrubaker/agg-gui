@@ -17,7 +17,11 @@
 //! buttons wait rather than start another (`run.rs`). When it finishes, the step keeps only what
 //! came back and goes on the other list (nothing goes when nothing came back), the notice says
 //! what happened and names what failed, and the writable folders on the browser's path list
-//! themselves again.
+//! themselves again. A step recorded while one is still finishing is the newest action: an undo
+//! landing after it leaves nothing to redo (the redo list stays empty after a new step, whatever
+//! order things land in), and a redo landing after it goes below it. A step that lets its
+//! callback go without calling it frees the history all the same, and the notice says the undo
+//! (or redo) didn't finish (`run.rs`).
 //!
 //! Every change shows a [`Notice`] ("Moved 3 items to Brackets", with Undo; "Undone: ..." with
 //! Redo) that the notice widget (`notice.rs`) reads, and bumps [`BrowserHistory::generation`],
@@ -62,6 +66,10 @@ struct Lists {
     generation: u64,
     /// An undo or redo has started and not yet finished.
     busy: bool,
+    /// How many steps the undo list held when the running undo or redo started.
+    started_at: usize,
+    /// A step was recorded while an undo or redo was finishing.
+    recorded_while_busy: bool,
 }
 
 impl Lists {
@@ -78,6 +86,7 @@ impl Lists {
     }
 
     fn push(&mut self, step: Box<dyn HistoryStep>, text: String) {
+        self.recorded_while_busy |= self.busy;
         self.undo.push(step);
         self.redo.clear();
         self.show(text, Some(NoticeAction::Undo));
@@ -206,6 +215,8 @@ impl BrowserHistory {
                 false => h.redo.pop(),
             }?;
             h.busy = true;
+            h.started_at = h.undo.len();
+            h.recorded_while_busy = false;
             h.generation += 1;
             Some(step)
         })
@@ -213,18 +224,26 @@ impl BrowserHistory {
 
     /// The end of an undo or redo: `kept` goes on the other list and `text` shows, with the
     /// button for `kept` when there is one.
+    /// A step recorded meanwhile (see the module header) makes an undone step stale, and puts a
+    /// redone one below it.
     fn land(&self, kept: Option<Box<dyn HistoryStep>>, text: String, undo: bool) {
         self.with(|h| {
             h.busy = false;
+            let newer = std::mem::take(&mut h.recorded_while_busy);
             let action = match undo {
                 true => NoticeAction::Redo,
                 false => NoticeAction::Undo,
             };
+            let kept = kept.filter(|_| !(undo && newer));
             let offered = kept.is_some().then_some(action);
             if let Some(step) = kept {
-                match undo {
-                    true => h.redo.push(step),
-                    false => h.undo.push(step),
+                match (undo, newer) {
+                    (true, _) => h.redo.push(step),
+                    (false, false) => h.undo.push(step),
+                    (false, true) => {
+                        let at = h.started_at.min(h.undo.len());
+                        h.undo.insert(at, step);
+                    }
                 }
             }
             h.show(text, offered);

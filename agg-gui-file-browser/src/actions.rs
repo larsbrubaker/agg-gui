@@ -57,7 +57,7 @@ impl BuiltinAction {
     pub fn title(self) -> String {
         match self {
             BuiltinAction::Add => tr("Add"),
-            BuiltinAction::CreateFolder => format!("{}...", tr("Create Folder")),
+            BuiltinAction::CreateFolder => tr("Create Folder..."),
             BuiltinAction::OpenFileLocation => tr("Open File Location"),
             BuiltinAction::Rename => tr("Rename"),
             BuiltinAction::Move => tr("Move"),
