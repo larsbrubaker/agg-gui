@@ -40,6 +40,9 @@ reflect = ["agg-gui/reflect"]
 agg-gui = { path = "../agg-gui", version = "0.5.3", default-features = false }
 # A 0.0.x requirement is written as a range: plain "0.0.2" would pin that one version.
 agg-gui-files = { path = "../agg-gui-files", version = ">=0.0.2, <0.1.0" }
+# The UI clock's instants (std's own Instant natively; the browser's clock on wasm32), as agg-gui
+# and agg-gui-files use them.
+web-time = "1"
 
 [dev-dependencies]
 # The history's tests undo and redo real changes on a folder on disk (a scratch folder under the

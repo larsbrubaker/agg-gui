@@ -541,3 +541,21 @@ fn outside_the_picture_follows_without_a_hook_and_hides_where_the_app_says() {
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
+
+#[test]
+fn a_spring_wait_counts_from_the_hover_even_on_a_clock_set_before_the_epoch() {
+    // A virtual clock standing before the UI epoch reads zero time since the epoch until it
+    // passes it: a wait counted from the epoch would never end here.
+    let before = agg_gui::clock::epoch()
+        .checked_sub(std::time::Duration::from_secs(5))
+        .expect("five seconds before the epoch is a time");
+    let _clock = agg_gui::clock::scoped_virtual(Some(before));
+    let dir = nested_workshop("spring-before-epoch");
+    let (mut app, _state) = browser_app(disk(&dir), BrowserConfig::default(), ViewMode::Rows);
+    drag_over(&mut app, "Row Item gear.stl", "Parts Tree Node");
+    agg_gui::clock::advance(SPRING_DELAY);
+    frame(&mut app);
+    frame(&mut app);
+    assert_eq!(property(&app, "Parts Tree Node", "expanded"), "true");
+    let _ = std::fs::remove_dir_all(&dir);
+}

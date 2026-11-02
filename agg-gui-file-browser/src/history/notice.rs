@@ -13,6 +13,8 @@
 //! stays at full strength, so a user reaching for Undo never sees it fade under them; once both
 //! end it holds its full time again before fading. While it shows it asks the UI clock for the
 //! frames it needs: one when the hold ends, then one every few dozen milliseconds while it fades.
+//! Its age is counted from the instant it was shown on the UI clock (`agg_gui::clock`), never as
+//! time since the clock's epoch, which a virtual clock set before it would hold at zero.
 //! Its names are the look's (`BrowserNames::notice`, `notice_button`), so two browsers' notices
 //! can be told apart.
 
@@ -27,6 +29,7 @@ use agg_gui::{
     Widget, WidgetBase,
 };
 use agg_gui_files::tr;
+use web_time::Instant;
 
 use super::{Notice, NoticeAction};
 use crate::fitted_text::fit_text;
@@ -80,16 +83,16 @@ pub struct BrowserNotice {
     /// The notice's text as it fits beside the button, set at each layout.
     shown_text: String,
     alpha: Rc<Cell<f64>>,
-    /// The UI clock time a wake is already asked for, so layouts don't pile up timers.
-    wake_at: Option<u64>,
+    /// The UI clock instant a wake is already asked for, so layouts don't pile up timers.
+    wake_at: Option<Instant>,
     state: Rc<RefCell<BrowserState>>,
     /// The pointer is over the notice.
     hovered: Rc<Cell<bool>>,
     /// The notice's button has the keyboard.
     button_focused: Rc<Cell<bool>>,
-    /// The UI clock time the notice was last held (hovered or focused); its hold counts from
+    /// The UI clock instant the notice was last held (hovered or focused); its hold counts from
     /// then when that is later than when it was shown.
-    held_at: u64,
+    held_at: Option<Instant>,
 }
 
 impl BrowserNotice {
@@ -113,7 +116,7 @@ impl BrowserNotice {
             state: Rc::clone(state),
             hovered: Rc::new(Cell::new(false)),
             button_focused: Rc::new(Cell::new(false)),
-            held_at: 0,
+            held_at: None,
         }
     }
 
@@ -154,29 +157,34 @@ impl BrowserNotice {
             self.alpha.set(0.0);
             return;
         };
-        let now = agg_gui::ui_thread::current_timer_ms();
+        let now = agg_gui::clock::now();
         if self.hovered.get() || self.button_focused.get() {
-            self.held_at = now;
+            self.held_at = Some(now);
             self.alpha.set(1.0);
             return;
         }
-        let start = notice.shown_at_ms.max(self.held_at);
-        let age = now.saturating_sub(start);
+        let start = match self.held_at {
+            Some(held) if held > notice.shown_at => held,
+            _ => notice.shown_at,
+        };
+        // Whole milliseconds, as the hold and fade are written; `as` is exact far beyond any
+        // notice's age.
+        let age = agg_gui::clock::since(start).as_millis() as u64;
         self.alpha.set(notice_alpha(age));
         if age >= NOTICE_HOLD_MS + NOTICE_FADE_MS {
             return;
         }
         let next = if age < NOTICE_HOLD_MS {
-            start + NOTICE_HOLD_MS
+            start + Duration::from_millis(NOTICE_HOLD_MS)
         } else {
-            now + FADE_FRAME.as_millis() as u64
+            now + FADE_FRAME
         };
         if self
             .wake_at
             .is_none_or(|at| at <= now || (age < NOTICE_HOLD_MS && at != next))
         {
             self.wake_at = Some(next);
-            agg_gui::ui_thread::run_on_idle_after(Duration::from_millis(next - now), || {
+            agg_gui::ui_thread::run_on_idle_after(next.saturating_duration_since(now), || {
                 agg_gui::animation::request_layout();
             });
         }

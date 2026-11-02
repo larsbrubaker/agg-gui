@@ -49,8 +49,9 @@ pub struct Notice {
     pub action: Option<NoticeAction>,
     /// Counts up with every notice, so the widget restarts its fade for a new one.
     pub id: u64,
-    /// The UI clock when it was shown, in milliseconds (`agg_gui::ui_thread::current_timer_ms`).
-    pub shown_at_ms: u64,
+    /// The UI clock's instant when it was shown (`agg_gui::clock::now`): its hold and fade count
+    /// from here.
+    pub shown_at: web_time::Instant,
 }
 
 #[derive(Default)]
@@ -70,7 +71,7 @@ impl Lists {
             text,
             action,
             id,
-            shown_at_ms: agg_gui::ui_thread::current_timer_ms(),
+            shown_at: agg_gui::clock::now(),
         });
         self.generation += 1;
         agg_gui::animation::request_draw();

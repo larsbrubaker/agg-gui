@@ -224,3 +224,19 @@ fn the_notice_holds_five_seconds_then_fades_over_one() {
     assert_eq!(property(&app, "Library Notice", "text"), "Nothing to move");
     assert!(find(app.root(), "Library Notice Button", Point::new(0.0, 0.0)).is_none());
 }
+
+#[test]
+fn the_notice_fades_on_a_clock_set_before_the_epoch_too() {
+    // A virtual clock standing before the UI epoch reads zero time since the epoch until it
+    // passes it: an age counted from the epoch would never grow here.
+    let before = agg_gui::clock::epoch()
+        .checked_sub(Duration::from_secs(60))
+        .expect("a minute before the epoch is a time");
+    let _clock = agg_gui::clock::scoped_virtual(Some(before));
+    let (state, _) = browser_with_a_step();
+    let mut app = App::new(Box::new(BrowserNotice::new(&state, font())));
+    app.layout(Size::new(WIDTH, HEIGHT));
+    agg_gui::clock::advance(Duration::from_millis(5500));
+    app.layout(Size::new(WIDTH, HEIGHT));
+    assert_eq!(property(&app, "Library Notice", "alpha"), "0.5");
+}

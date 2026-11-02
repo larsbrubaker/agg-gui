@@ -145,6 +145,10 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 - `BrowserIconButton::with_hint` (shown through the new `BrowserLook::show_hint` while hovered,
   cleared on leaving), `with_hover_fill`, `with_glyph_color`, `is_hovered`, and `tooltip` and
   `hint` properties.
+- A drag's spring wait and the history notice's hold and fade count from the instant they
+  began on the UI clock (`Notice::shown_at` is that instant), never as time since the clock's
+  epoch, which a virtual clock started before it holds at zero. `web-time` is a dependency (the
+  UI clock's `Instant`, as agg-gui's).
 - `CopyCx` gains `source` (the open folder the items come from), `recorder` (for the copy's
   history step) and `report`.
 - `BrowserNames::notice` ("Library Notice") and `notice_button` ("Library Notice Button");

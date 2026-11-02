@@ -6,9 +6,11 @@
 //! folder. In a folder the list opened that way, a drop on the list's empty space lands in that
 //! folder (`DropManager::dropped_into_showing`).
 //!
-//! The wait runs on agg-gui's UI clock (`agg_gui::clock`), which headless tests advance, and each
-//! wait asks for a draw when it is due (`request_draw_after`): a pointer held perfectly still
-//! sends no events, so the paint that opens the folder has to be asked for.
+//! The wait runs on agg-gui's UI clock (`agg_gui::clock`), which headless tests advance, measured
+//! from the instant the drag reached the folder (never as time since the clock's epoch, which a
+//! virtual clock set before it would hold at zero), and each wait asks for a draw when it is due
+//! (`request_draw_after`): a pointer held perfectly still sends no events, so the paint that opens
+//! the folder has to be asked for.
 //!
 //! A spring open is never the user's own open: a folder with nothing to give that acts instead (a
 //! cloud folder's sign-in while signed out) stays shut and starts nothing. When the wait is over,
@@ -19,6 +21,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use agg_gui_files::FolderLink;
+use web_time::Instant;
 
 use super::{DropKey, DropTargetKind};
 use crate::state::BrowserState;
@@ -27,16 +30,11 @@ use crate::tree::TreeModel;
 /// How long a drag has to stay over a folder before it opens.
 pub const SPRING_DELAY: Duration = Duration::from_millis(800);
 
-/// The UI clock's time since its epoch.
-fn clock_now() -> Duration {
-    agg_gui::clock::since(agg_gui::clock::epoch())
-}
-
 /// The folder a drag is waiting over and the folders it opened.
 #[derive(Default)]
 pub struct SpringOpen {
     /// The folder under the drag (its target key and folder ID) and when the drag reached it.
-    waiting: Option<(DropKey, String, Duration)>,
+    waiting: Option<(DropKey, String, Instant)>,
     /// The folder the last wait opened, which doesn't open again until the drag leaves it.
     opened_last: Option<(DropKey, String)>,
     /// The folder the list opened for this drag, with its depth in the browser's path.
@@ -60,7 +58,7 @@ impl SpringOpen {
         if self.waiting.as_ref().is_some_and(|(k, id, _)| same(k, id)) {
             return;
         }
-        self.waiting = Some((key, link.id().to_string(), clock_now()));
+        self.waiting = Some((key, link.id().to_string(), agg_gui::clock::now()));
         agg_gui::animation::request_draw_after(SPRING_DELAY);
     }
 
@@ -71,7 +69,7 @@ impl SpringOpen {
         if key.kind != kind {
             return None;
         }
-        let waited = clock_now().saturating_sub(*since);
+        let waited = agg_gui::clock::since(*since);
         if waited < SPRING_DELAY {
             agg_gui::animation::request_draw_after(SPRING_DELAY - waited);
             return None;
