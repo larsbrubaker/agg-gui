@@ -366,6 +366,26 @@ fn colour_at(app: &mut App, at: Point) -> [u8; 4] {
     [pixels[i], pixels[i + 1], pixels[i + 2], pixels[i + 3]]
 }
 
+#[test]
+fn a_list_on_its_hosts_offset_keeps_it_and_never_resets_it() {
+    let offset = Rc::new(Cell::new(10.0));
+    let state = BrowserState::new(Box::new(home()), BrowserConfig::default());
+    // Rows in a list far shorter than them, so the offset is never clamped away.
+    state.borrow_mut().set_view_mode(ViewMode::Rows);
+    let list = BrowserList::new(&state, font()).with_offset_cell(Rc::clone(&offset));
+    let mut app = App::new(Box::new(list));
+    app.layout(Size::new(WIDTH, 30.0));
+    assert_eq!(
+        offset.get(),
+        10.0,
+        "a new list takes the host's offset as it is"
+    );
+    // The host decides when new content goes back to the top.
+    state.borrow_mut().go_to(0);
+    app.layout(Size::new(WIDTH, 30.0));
+    assert_eq!(offset.get(), 10.0);
+}
+
 /// The address of the widget named `id`: the same widget keeps it.
 fn address_of(app: &App, id: &str) -> usize {
     let (widget, _) = find(app.root(), id, Point::new(0.0, 0.0)).expect("the widget");

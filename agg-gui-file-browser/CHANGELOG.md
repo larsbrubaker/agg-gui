@@ -22,15 +22,18 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   it when the drag comes back into the browser (a browser panel lying over that view); the drag's
   end then tells the hook `cancel` after a drop on a folder, or hands it the `release` over no
   folder.
-- The folder message's Sign In button carries `BrowserNames::sign_in_button` itself, so what
-  finds it by name reads whether it takes a press (it was a wrapper that always read enabled).
 - `BrowserLook::message_button`: the app's own button for a folder message's Sign In (named as the
   message asks, enabled and pressed through what it is handed); the default is agg-gui's `Button`.
 - The drag picture reports the art it shows as the list's `drag_picture_image` property (the
   carried row's `thumbnail`).
+- `BrowserList::with_offset_cell`: the list scrolled by an offset its host keeps across the lists
+  it builds again (a dialog page rebuilding its list on each change), which the host puts back to
+  the top itself.
 
 ### Fixed
 
+- The folder message's Sign In button carries `BrowserNames::sign_in_button` itself, so what
+  finds it by name reads whether it takes a press (it was a wrapper that always read enabled).
 - A picture arriving built every row and tile of the list again, so the one under the pointer was
   a new widget mid-press; the rows and tiles now ask for their art again in place
   (`BrowserRow::refresh_art`, `BrowserTile::refresh_art`, `ListCx::art`).
@@ -40,13 +43,6 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 - A drag dropped on a folder tree row kept no keys: the list gave them up for any drop outside
   itself. Only a drag ending outside the browser (list and tree) gives them up now, so the undo
   keys take back a drop on the tree.
-
-### Added
-
-- `BrowserList::with_offset_cell`: the list scrolled by an offset its host keeps across the lists
-  it builds again (a dialog page rebuilding its list on each change), which the host puts back to
-  the top itself.
-
 ## [0.0.4] - 2026-11-02
 
 ### Added
