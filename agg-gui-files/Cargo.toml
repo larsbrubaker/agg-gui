@@ -4,7 +4,8 @@
 # can change adds, removes, renames and moves, searches and sorts behave the
 # same everywhere, and changes can be recorded for undo. No agg-gui, agg-rust
 # or wgpu dependency, so a model crate with no UI (a server, a website build)
-# can depend on it; it builds for wasm32-unknown-unknown.
+# can depend on it; it builds for wasm32-unknown-unknown with any of its features (`disk`,
+# `zip`).
 #
 # The model comes from mattercad-rust's mattercad-model (`src/library/`, same
 # author), published here under agg-gui's MIT licence.
@@ -30,6 +31,9 @@ path = "src/lib.rs"
 # The search walk's deadline reads the clock, and std's Instant panics in the browser
 # (wasm32-unknown-unknown); web-time is std's own Instant natively.
 web-time = "1"
+# The `zip` feature: the same versions and features mattercad-model uses.
+zip = { version = "2.4", optional = true, default-features = false, features = ["deflate"] }
+indexmap = { version = "2", optional = true }
 
 [features]
 # Folders on the computer's disk (`disk`): listing, writes and the system trash. The trash needs
@@ -37,6 +41,10 @@ web-time = "1"
 # recycle bin through windows-sys on Windows (MIT OR Apache-2.0); the freedesktop trash is plain
 # file work. Neither compiles C. On wasm32 the disk code compiles and every read fails.
 disk = ["dep:objc2-foundation", "dep:windows-sys"]
+# A `.zip` file browsed as a read-only folder (`zip`): the `zip` crate, pure Rust with Deflate
+# only (MIT), and `indexmap` (MIT OR Apache-2.0) for listing entries in archive order. With
+# `disk` too, a folder on disk lists its zip files as folders.
+zip = ["dep:zip", "dep:indexmap"]
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-foundation = { version = "0.3", optional = true, default-features = false, features = ["std", "NSString", "NSURL", "NSError", "NSFileManager"] }

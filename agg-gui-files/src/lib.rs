@@ -1,7 +1,8 @@
 //! `agg-gui-files`: the folder and item model behind agg-gui's file browser, with no drawing code.
 //! It depends on std and `web-time` alone (no agg-gui, agg-rust or wgpu; the `disk` feature adds
-//! the operating system's own trash calls on macOS and Windows), so a crate with no UI can use
-//! it, and it builds for `wasm32-unknown-unknown` with or without `disk`.
+//! the operating system's own trash calls on macOS and Windows, the `zip` feature the `zip` and
+//! `indexmap` crates), so a crate with no UI can use it, and it builds for
+//! `wasm32-unknown-unknown` with any of its features.
 //!
 //! A [`Folder`] lists [`FolderLink`]s (rows that open another folder) and [`Item`]s. An item says
 //! what kind it is by answering `as_container_link`, `as_asset` or `as_asset_stream`, and an app
@@ -35,13 +36,18 @@
 //!   a row whose folder is made when opened), [`FolderData`] (the state a plain folder keeps),
 //!   [`SearchResultsFolder`] (a search across folders, in sections, its deadline a
 //!   [`WakeTimer`]) and [`MemoryFolder`] (a writable folder in memory, for tests and demos).
-//! - **Disk** (the `disk` feature): [`disk::DiskFolder`] (a folder on the computer's disk, which
-//!   lists, takes changes and copies, records them as [`disk::DiskStep`]s, searches itself and
+//! - **Disk** (the `disk` feature): `disk::DiskFolder` (a folder on the computer's disk, which
+//!   lists, takes changes and copies, records them as `disk::DiskStep`s, searches itself and
 //!   relists after an outside change), its
-//!   rows [`disk::DiskFolderLink`] and files [`disk::DiskFile`], following the app's
-//!   [`disk::DiskRules`]; [`disk::ComputerFolder`] (the user's folders and the drives); the
+//!   rows `disk::DiskFolderLink` and files `disk::DiskFile`, following the app's
+//!   `disk::DiskRules`; `disk::ComputerFolder` (the user's folders and the drives); the
 //!   directory watch an app registers; and the system trash a remove sends items to. It compiles
 //!   for wasm32, where every disk read fails and nothing is watched.
+//! - **Zip** (the `zip` feature): `zip_folder::ZipFolder` (a `.zip` browsed as a read-only
+//!   folder, in no place, keyed by `zip_folder::zip_location_key`), its rows
+//!   `zip_folder::ZipFolderLink` and files `zip_folder::ZipEntry`. With `disk` too, a folder
+//!   on disk lists its zip files as folders. The names, dates, IDs and location keys disk and zip
+//!   items share are `disk_paths`.
 //! - **Stored values keep their shape.** The sort key numbers ([`SortKey`]) are the flags that
 //!   stored view states hold.
 //!
@@ -52,7 +58,8 @@
 //! `history` (recorded changes), `error` (why content could not be given), `search`,
 //! `search_terms`, `sort`, `picture`, `spawner`, `place` and `translate`; the providers
 //! `message_item`, `folder_data`, `dynamic_folder`, `dynamic_folder_link`, `search_results`
-//! (with `search_walk` and `wake_timer`) and `memory_folder`; and `disk`.
+//! (with `search_walk` and `wake_timer`) and `memory_folder`; and `disk`, `zip_folder` and
+//! their shared `disk_paths`.
 //!
 //! The model comes from mattercad-rust's `mattercad-model` (`src/library/`), the same author's,
 //! published here under agg-gui's MIT licence. MatterCAD keeps its own names for these types by
@@ -63,6 +70,8 @@
 mod create_folder_item;
 #[cfg(feature = "disk")]
 pub mod disk;
+#[cfg(any(feature = "disk", feature = "zip"))]
+mod disk_paths;
 mod dynamic_folder;
 mod dynamic_folder_link;
 mod error;
@@ -84,6 +93,8 @@ mod spawner;
 mod translate;
 mod wake_timer;
 mod writable;
+#[cfg(feature = "zip")]
+pub mod zip_folder;
 
 pub use create_folder_item::CreateFolderItem;
 pub use dynamic_folder::{DynamicFolder, FolderInitializer};

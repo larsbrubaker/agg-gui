@@ -38,6 +38,7 @@ mod rules;
 mod search;
 mod trash;
 
+pub use crate::disk_paths::{disk_item_id, disk_item_id_at, disk_location_key, round_trip_utc};
 pub use computer::{drive_roots, ComputerFolder, ComputerFolders};
 pub use copy_tree::{gather, gather_item, read_dir_node, sanitize_file_name, write_node, CopyNode};
 pub use file::{subscribe_file_renamed, DiskFile, FileRenamedListener};
@@ -50,10 +51,7 @@ pub use monitor::{
     directory_monitor, set_directory_monitor, DirectoryChanged, DirectoryMonitor, DirectoryWatch,
     PollingDirectoryMonitor, POLL_INTERVAL,
 };
-pub use paths::{
-    disk_item_id, disk_item_id_at, disk_location_key, extension_lower, round_trip_utc,
-    with_extension,
-};
+pub use paths::{extension_lower, with_extension};
 pub use quick_look::folder_has_child_containers;
 pub use rules::{AllFiles, DiskRules};
 pub use search::{file_name_contains_filter, MAX_SEARCH_DEPTH, SEARCH_BATCH_SIZE};

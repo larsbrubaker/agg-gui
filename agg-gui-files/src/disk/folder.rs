@@ -1,5 +1,6 @@
 //! [`DiskFolder`]: a folder on disk as a [`Folder`] - what it is, and its listing. `load` lists
-//! the folder's sub-folders as [`DiskFolderLink`]s (sorted by name) and the files its
+//! the folder's sub-folders as [`DiskFolderLink`]s and, with the `zip` feature, its zip files as
+//! `zip_folder::ZipFolderLink`s (sorted together by name), and the files its
 //! [`DiskRules`] accept as [`DiskFile`]s (sorted by path), reads an `index.md` into
 //! `header_markdown` (shown above the rows), and lists a single message row for a folder that is
 //! missing, restricted or unreadable, so the user sees why it is empty. Content-changed is raised
@@ -182,9 +183,13 @@ impl DiskFolder {
             self.show_message(format!("Error loading container - {e}"));
             return;
         }
+        // Zip files list as folders after the directories (with the `zip` feature); the name sort
+        // below orders them together.
+        let (zip_links, files) = zip_folder_links(files);
         let mut links: Vec<Rc<dyn FolderLink>> = directories
             .into_iter()
             .map(|d| Rc::new(DiskFolderLink::new(d, self.rules.clone())) as Rc<dyn FolderLink>)
+            .chain(zip_links)
             .collect();
         links.sort_by(|a, b| culture_compare(a.name(), b.name()));
         self.child_containers = links;
@@ -214,6 +219,27 @@ impl DiskFolder {
         self.load_recursive(false);
         self.content_changed.raise();
     }
+}
+
+/// The folder rows of the zip files among `files` ([`crate::zip_folder::ZipFolderLink`]), and the
+/// rest of the files.
+#[cfg(feature = "zip")]
+fn zip_folder_links(files: Vec<PathBuf>) -> (Vec<Rc<dyn FolderLink>>, Vec<PathBuf>) {
+    use crate::zip_folder::ZipFolderLink;
+    let (zips, rest): (Vec<PathBuf>, Vec<PathBuf>) = files
+        .into_iter()
+        .partition(|f| super::paths::lists_as_folder(f));
+    let links = zips
+        .into_iter()
+        .map(|f| Rc::new(ZipFolderLink::new(f, None)) as Rc<dyn FolderLink>)
+        .collect();
+    (links, rest)
+}
+
+/// Without the `zip` feature a zip file is a file like any other.
+#[cfg(not(feature = "zip"))]
+fn zip_folder_links(files: Vec<PathBuf>) -> (Vec<Rc<dyn FolderLink>>, Vec<PathBuf>) {
+    (Vec::new(), files)
 }
 
 /// The files and the folders of `dir` (every level below when `recursive`).

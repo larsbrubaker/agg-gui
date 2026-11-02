@@ -60,8 +60,18 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   `ListingFailure`.
 - `ENGLISH_TEXTS` lists the disk provider's texts.
 
+- The `zip` feature: a `.zip` file browsed as a read-only folder, from MatterCAD's library.
+  `zip_folder::ZipFolder` lists one directory level of an archive (files in archive order,
+  folders in the order first seen; a missing archive lists a missing-file row, an unreadable one
+  an error row); `zip_folder::ZipFolderLink` is the row of an archive or a directory inside it
+  (read-only, `tile_icon` `zip_folder.png`); `zip_folder::ZipEntry` one file, read out on demand,
+  with MatterCAD's IDs. Both answer no place and `zip_location_key` (the archive, a NUL, the
+  directory). `lists_as_zip_folder`: with `disk` too, a folder on disk lists its zip files as
+  folders, the tree's quick look counts them, and a search does not report them as files.
+
 ### Changed
 
+- With `zip` on, depends on `zip` 2.4 (Deflate only, pure Rust) and `indexmap` 2.
 - With `disk` on, depends on `objc2-foundation` on macOS and `windows-sys` on Windows (the system
   trash); neither compiles C.
 

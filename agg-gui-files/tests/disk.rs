@@ -35,3 +35,6 @@ mod temp;
 mod trash;
 #[path = "disk/writes.rs"]
 mod writes;
+#[cfg(feature = "zip")]
+#[path = "disk/zip_in_folder.rs"]
+mod zip_in_folder;

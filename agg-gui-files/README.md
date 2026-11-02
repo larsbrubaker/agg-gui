@@ -2,7 +2,8 @@
 
 The folder and item model behind agg-gui's file browser, with no drawing code: no agg-gui,
 agg-rust or wgpu dependency, so a crate with no UI (a server, a website build, an app's model)
-can depend on it. It builds for `wasm32-unknown-unknown`, with or without its `disk` feature.
+can depend on it. It builds for `wasm32-unknown-unknown`, with or without its `disk` and `zip`
+features.
 
 | Type | What it is |
 |---|---|
@@ -21,6 +22,7 @@ can depend on it. It builds for `wasm32-unknown-unknown`, with or without its `d
 | `MemoryFolder` | A writable folder held in memory, for tests and demos |
 | `folder_listing` | A folder loaded and its listing awaited, for one that lists later |
 | `disk::DiskFolder`, `disk::DiskFolderLink`, `disk::DiskFile`, `disk::DiskRules` | With the `disk` feature: folders on the computer's disk, listing the files the app's rules accept, taking changes and copies (recorded for undo as `disk::DiskStep`s), searching themselves, relisting after an outside change, and removing to the system trash |
+| `zip_folder::ZipFolder`, `zip_folder::ZipFolderLink`, `zip_folder::ZipEntry` | With the `zip` feature: a `.zip` file browsed as a read-only folder (with `disk`, folders on disk list their zip files this way) |
 | `disk::ComputerFolder`, `disk::PollingDirectoryMonitor` | With `disk`: the user's folders and the drives; the directory watch an app registers |
 
 Everything is single-threaded (`Rc`, local futures, no async runtime): a folder's `load` lists at

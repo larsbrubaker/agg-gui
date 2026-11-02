@@ -14,6 +14,7 @@ use std::rc::Rc;
 
 use super::file::DiskFile;
 use super::folder::{is_readable_directory, DiskFolder};
+use super::paths::lists_as_folder;
 use crate::item::Item;
 use crate::search::{yield_now, SearchCancel, SearchFuture, SearchProvider, SearchReport};
 use crate::search_terms::name_matches;
@@ -83,6 +84,7 @@ impl SearchProvider for DiskFolder {
                         .unwrap_or_default();
                     if file_name_contains_filter(&file_name, &filter)
                         && rules.lists_file(&file_name)
+                        && !lists_as_folder(&file)
                     {
                         batch.push(Rc::new(DiskFile::new(file)) as Rc<dyn Item>);
                         if batch.len() >= SEARCH_BATCH_SIZE {
