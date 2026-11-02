@@ -13,7 +13,8 @@
 //! remove, rename, move; [`MovedPath`]), `copy` (copying in, keeping the originals, also as a
 //! task) with `copy_tree` (a folder read into a [`CopyNode`] tree and written out), `live_refresh`
 //! (relisting after an outside change) over `monitor` (the directory watch an app registers),
-//! `quick_look` (whether a folder has folders, for a tree's arrow), `search` (a folder searching
+//! `recorded` (the recorded writes) with `history_steps` ([`DiskStep`], how each is taken back
+//! and replayed), `quick_look` (whether a folder has folders, for a tree's arrow), `search` (a folder searching
 //! itself), `computer` ([`ComputerFolder`], the user's folders and the drives) and `trash` (the
 //! system trash a remove sends items to, and puts them back from).
 //!
@@ -27,22 +28,23 @@ mod file;
 mod folder;
 mod folder_link;
 mod folder_writes;
+mod history_steps;
 mod live_refresh;
 mod monitor;
 mod paths;
 mod quick_look;
+mod recorded;
 mod rules;
 mod search;
 mod trash;
 
 pub use computer::{drive_roots, ComputerFolder, ComputerFolders};
-pub use copy_tree::{
-    gather, gather_item, read_dir_node, sanitize_file_name, write_node, CopyNode, ListedFolder,
-};
+pub use copy_tree::{gather, gather_item, read_dir_node, sanitize_file_name, write_node, CopyNode};
 pub use file::{subscribe_file_renamed, DiskFile, FileRenamedListener};
 pub use folder::DiskFolder;
 pub use folder_link::DiskFolderLink;
 pub use folder_writes::MovedPath;
+pub use history_steps::DiskStep;
 pub use live_refresh::RefreshInterval;
 pub use monitor::{
     directory_monitor, set_directory_monitor, DirectoryChanged, DirectoryMonitor, DirectoryWatch,

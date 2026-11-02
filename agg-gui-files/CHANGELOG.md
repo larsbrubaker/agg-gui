@@ -22,8 +22,7 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   `rename_on_disk` and `remove_to_trash` answering what they did (`MovedPath`, `TrashedItem`)
   and `copy_items_in`. `disk::DiskFolderLink` is a sub-folder's row, carrying the rules to the
   folder it opens; `disk::DiskFile` a file, with `set_name` and `subscribe_file_renamed`.
-- `disk::DiskRules` (`lists_file`, `read_only`, default false; `list_for_copy`, default `None`)
-  and `disk::AllFiles`. A read-only folder's `allow_action` refuses everything and each write
+- `disk::DiskRules` (`lists_file`, `read_only`, default false) and `disk::AllFiles`. A read-only folder's `allow_action` refuses everything and each write
   fails before touching the disk.
 - Live refresh: a showing `DiskFolder` (`activate` to `deactivate`/`dispose`) watches its folder
   through the registered `DirectoryMonitor` (`set_directory_monitor`, `directory_monitor`;
@@ -38,7 +37,14 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   that is not on disk down whole) and `WritableFolder::copy_in` (that copy as a task; the folder
   it was started from relists at its next `pump_live_refresh`), `DiskFolder::add_async`, and the
   copy tree: `CopyNode`, `gather`, `gather_item`, `read_dir_node`, `write_node`,
-  `sanitize_file_name`, `ListedFolder`.
+  `sanitize_file_name`. A folder from another place that lists later is awaited through
+  `folder_listing`.
+- Recorded writes on `DiskFolder`: `move_in_recorded` (the moves from another folder on disk,
+  the copies from anywhere else), `rename_recorded`, `create_folder_recorded` (only a new folder)
+  and `remove_recorded` hand back `disk::DiskStep`, a `HistoryStep` that undoes and redoes on disk
+  (moves back under the old name, renames back, removes the new folder while it is empty,
+  restores from the trash; never overwriting, keeping only what came back). `copy_in` records its
+  copies, which an undo sends to the trash.
 - Disk search: `DiskFolder` is a `SearchProvider` walking every folder below it for the files its
   rules list (`file_name_contains_filter`, `SEARCH_BATCH_SIZE`, `MAX_SEARCH_DEPTH`).
 - `disk::ComputerFolder`: Downloads, Desktop and Documents (from the app's `ComputerFolders`) and
@@ -49,6 +55,9 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 - The system trash: `move_to_trash`, `restore_from_trash`, `set_trash_directory` (tests),
   `move_to_system_trash`, the freedesktop trash (`move_to_freedesktop_trash`) and the Recycle Bin
   record reader (`parse_recycle_bin_record`, `newest_recycle_bin_match`).
+- `folder_listing` (`FolderListing`): loads a folder and awaits its listing, waking on
+  content-changed until its load is no longer pending; answers the folder or its
+  `ListingFailure`.
 - `ENGLISH_TEXTS` lists the disk provider's texts.
 
 ### Changed

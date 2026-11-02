@@ -19,7 +19,9 @@ use super::copy_tree::{gather_item, sanitize_file_name, write_node};
 use super::folder::DiskFolder;
 use super::folder_link::DiskFolderLink;
 use super::paths::{non_colliding_path, path_file_name};
-use crate::history::Recorded;
+use super::recorded::copies_step;
+use crate::folder::Folder;
+use crate::history::{HistoryStep, Recorded};
 use crate::item::Item;
 use crate::spawner::LocalTask;
 use crate::translate::tr;
@@ -156,8 +158,8 @@ impl DiskFolder {
     }
 
     /// As [`Self::copy_items_in`], awaiting each item's content, so an item that has to be
-    /// downloaded first is; a folder that is not on disk is copied down whole (its folders that
-    /// list later through the rules' `list_for_copy`). Run on the caller's executor.
+    /// downloaded first is; a folder that is not on disk is copied down whole, a folder that
+    /// lists later awaited until it has. Run on the caller's executor.
     pub async fn copy_in_async(
         &mut self,
         items: &[Rc<dyn Item>],
@@ -179,14 +181,12 @@ impl DiskFolder {
         if let Err(e) = std::fs::create_dir_all(self.full_path()) {
             return (Vec::new(), Err(e.to_string()));
         }
-        let rules = Rc::clone(self.rules());
         for item in items {
             if self.copy_folder_in(item.as_ref(), &mut progress) {
                 continue;
             }
             if item.as_container_link().is_some() {
-                let gathered =
-                    gather_item(Rc::clone(item), rules.as_ref(), &mut progress.errors).await;
+                let gathered = gather_item(Rc::clone(item), &mut progress.errors).await;
                 if let Some(node) = gathered {
                     let to =
                         non_colliding_path(&self.full_path().join(sanitize_file_name(item.name())));
@@ -223,16 +223,21 @@ impl DiskFolder {
 
     /// [`Self::copy_in_async`] as a task through a folder of its own on this path and rules,
     /// which asks this folder to relist once the copy has landed (`live_refresh`'s relist flag)
-    /// and hands `done` the outcome. A read-only folder's copy fails at once, inside the task.
+    /// and hands `done` the outcome, recorded as the copies made here (`recorded`). A read-only folder's copy fails at once, inside the task.
     pub(super) fn copy_task(&self, items: Vec<Rc<dyn Item>>, done: CopyDone) -> LocalTask {
         let mut target = DiskFolder::new(self.full_path(), Rc::clone(self.rules()));
         let relist = self.live.relist_handle();
+        let name = Folder::name(self).to_string();
         Box::pin(async move {
             let (made, result) = target.copy_in_async(&items).await;
             if !made.is_empty() {
                 relist.set(true);
             }
-            done(Recorded::unrecorded(result));
+            let step = copies_step(made, &name);
+            done(Recorded {
+                result,
+                step: step.map(|step| Box::new(step) as Box<dyn HistoryStep>),
+            });
         })
     }
 }

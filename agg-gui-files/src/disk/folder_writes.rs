@@ -22,6 +22,7 @@ use super::folder_link::DiskFolderLink;
 use super::paths::{non_colliding_path, path_file_name};
 use super::trash::{move_to_trash, TrashedItem};
 use crate::create_folder_item::CreateFolderItem;
+use crate::history::Recorded;
 use crate::item::Item;
 use crate::spawner::LocalTask;
 use crate::translate::tr;
@@ -401,9 +402,33 @@ impl WritableFolder for DiskFolder {
         Some(self)
     }
 
+    /// The moves (or, from a folder not on disk, the copies), recorded (`recorded`).
+    fn move_in_recorded(
+        &mut self,
+        items: &[Rc<dyn Item>],
+        source: &mut dyn WritableFolder,
+    ) -> Recorded {
+        self.move_in_recording(items, source)
+    }
+
+    /// The rename, recorded (`recorded`).
+    fn rename_recorded(&mut self, item: &Rc<dyn Item>, new_name: &str) -> Recorded {
+        self.rename_recording(item, new_name)
+    }
+
+    /// The new folder, recorded when it is new (`recorded`).
+    fn create_folder_recorded(&mut self, name: &str) -> Recorded {
+        self.create_folder_recording(name)
+    }
+
+    /// The remove, recorded with where each item went in the trash (`recorded`).
+    fn remove_recorded(&mut self, items: &[Rc<dyn Item>]) -> Recorded {
+        self.remove_recording(items)
+    }
+
     /// [`DiskFolder::copy_in_async`] as a task, through a folder of its own on the same path and
     /// rules; once it has finished, this folder relists at its next `pump_live_refresh` and
-    /// `done` hears the outcome. Nothing is recorded for undo.
+    /// `done` hears the outcome, with the step that sends the copies to the trash.
     fn copy_in(&self, items: Vec<Rc<dyn Item>>, done: CopyDone) -> Option<LocalTask> {
         Some(self.copy_task(items, done))
     }

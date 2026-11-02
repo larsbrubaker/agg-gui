@@ -2,12 +2,7 @@
 //! only the files its rules accept (folders always list), and refuses every change when its rules
 //! are read-only. The rules travel with the folder: each folder row it lists carries them, and
 //! the folder that row opens is made with them, so one rule covers a folder and everything inside
-//! it. The rules also list, for a copy onto the disk, a folder elsewhere that lists later rather
-//! than at once (`list_for_copy`). [`AllFiles`] lists every file and allows every change.
-
-use crate::item::Item;
-
-use super::copy_tree::ListedFolder;
+//! it. [`AllFiles`] lists every file and allows every change.
 
 /// What an app decides about its folders on disk.
 pub trait DiskRules {
@@ -19,15 +14,6 @@ pub trait DiskRules {
     /// default.
     fn read_only(&self) -> bool {
         false
-    }
-
-    /// Opens and lists the folder `link` opens, for a copy into a folder on disk
-    /// (`DiskFolder::copy_in_async`), when that folder lists later rather than at once (a
-    /// server's folder, whose `load` only starts the listing). `None` (the default) for a folder
-    /// a copy opens with `get_container` and `load`.
-    fn list_for_copy(&self, link: &dyn Item) -> Option<ListedFolder> {
-        let _ = link;
-        None
     }
 }
 

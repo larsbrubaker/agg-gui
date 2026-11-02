@@ -19,7 +19,8 @@ can depend on it. It builds for `wasm32-unknown-unknown`, with or without its `d
 | `MessageItem`, `DynamicFolder`, `DynamicFolderLink`, `FolderData` | Ready-made rows and folders: a message, a folder filled when it loads, a row whose folder is made when opened |
 | `SearchResultsFolder`, `WakeTimer` | A search across folders, in sections, and the deadline that bounds its wait for a late listing |
 | `MemoryFolder` | A writable folder held in memory, for tests and demos |
-| `disk::DiskFolder`, `disk::DiskFolderLink`, `disk::DiskFile`, `disk::DiskRules` | With the `disk` feature: folders on the computer's disk, listing the files the app's rules accept, taking changes and copies, searching themselves, relisting after an outside change, and removing to the system trash |
+| `folder_listing` | A folder loaded and its listing awaited, for one that lists later |
+| `disk::DiskFolder`, `disk::DiskFolderLink`, `disk::DiskFile`, `disk::DiskRules` | With the `disk` feature: folders on the computer's disk, listing the files the app's rules accept, taking changes and copies (recorded for undo as `disk::DiskStep`s), searching themselves, relisting after an outside change, and removing to the system trash |
 | `disk::ComputerFolder`, `disk::PollingDirectoryMonitor` | With `disk`: the user's folders and the drives; the directory watch an app registers |
 
 Everything is single-threaded (`Rc`, local futures, no async runtime): a folder's `load` lists at

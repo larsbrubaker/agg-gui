@@ -1,16 +1,19 @@
 //! Copies onto the disk that keep the originals: `copy_in_async` awaits each item's content and
 //! copies down a folder that is not on disk with its structure (folders first, then files),
-//! listing a folder that lists later through the rules' `list_for_copy`; `add_async` awaits
+//! waiting for a folder that lists later; `add_async` awaits
 //! content as `add` takes it; a folder is never copied into itself; a read-only folder copies
 //! nothing.
 
 use std::path::Path;
 use std::rc::Rc;
 
-use agg_gui_files::disk::{
-    gather, read_dir_node, CopyNode, DiskFolder, DiskFolderLink, DiskRules, ListedFolder,
-};
-use agg_gui_files::{Folder, Item, MemoryFolder};
+use std::future::Future;
+use std::task::{Context, Poll, Waker};
+
+use agg_gui_files::disk::{gather, read_dir_node, CopyNode, DiskFolder, DiskFolderLink};
+use agg_gui_files::{Folder, Item, ListingFailure, MemoryFolder};
+
+use super::late_folder::{LateFolder, LateLink};
 
 use super::temp::{block_on, stl_only, stl_only_read_only, TempDir};
 
@@ -101,37 +104,56 @@ fn add_async_awaits_content_as_add_takes_it() {
     assert_eq!(folder.items().len(), 1);
 }
 
-/// Rules that list the copied folder named "Late" themselves, as an app does for a folder whose
-/// `load` only starts the listing; the folder it hands back is a memory folder with one file.
-struct ListsLateFolders;
-
-impl DiskRules for ListsLateFolders {
-    fn lists_file(&self, _name: &str) -> bool {
-        true
-    }
-    fn list_for_copy(&self, link: &dyn Item) -> Option<ListedFolder> {
-        if link.name() != "Late" {
-            return None;
-        }
-        Some(Box::pin(async {
-            let folder = MemoryFolder::new("Late");
-            folder.add_file("listed late.stl", b"late".to_vec());
-            Some(Box::new(folder) as Box<dyn Folder>)
-        }))
-    }
-}
-
+/// A folder elsewhere that lists later (a server's) is waited for: the copy holds until the
+/// folder raises content-changed with its listing, then writes what landed.
 #[test]
-fn a_folder_that_lists_later_is_listed_by_the_rules() {
+fn a_folder_that_lists_later_is_waited_for() {
     let dir = TempDir::new();
-    let root = MemoryFolder::new("Elsewhere");
-    let late: Rc<dyn Item> = root.add_folder("Late").expect("made").link();
-    let mut folder = DiskFolder::new(dir.path(), Rc::new(ListsLateFolders));
-    let (_, result) = block_on(folder.copy_in_async(&[late]));
+    let late = LateFolder::new("Late");
+    let state = Rc::clone(&late.state);
+    let link: Rc<dyn Item> = Rc::new(LateLink(late));
+    let mut folder = DiskFolder::new(dir.path(), stl_only());
+    let items = [link];
+    let mut copy = std::pin::pin!(folder.copy_in_async(&items));
+    let mut cx = Context::from_waker(Waker::noop());
+    assert!(copy.as_mut().poll(&mut cx).is_pending());
+    assert!(
+        !dir.path().join("Late").exists(),
+        "nothing is written before the listing"
+    );
+    let elsewhere = MemoryFolder::new("Elsewhere");
+    state.land(vec![elsewhere.add_file("listed late.stl", b"late".to_vec())]);
+    let Poll::Ready((made, result)) = copy.as_mut().poll(&mut cx) else {
+        panic!("the copy finishes once the listing has landed");
+    };
     result.expect("the copy lands");
+    assert_eq!(made, [dir.path().join("Late")]);
     assert_eq!(
         file(&dir.path().join("Late").join("listed late.stl")),
         "late"
+    );
+}
+
+/// A folder elsewhere whose listing fails is named in the copy's failure; nothing is made.
+#[test]
+fn a_folder_whose_listing_fails_is_named() {
+    let dir = TempDir::new();
+    let late = LateFolder::new("Late");
+    let state = Rc::clone(&late.state);
+    let link: Rc<dyn Item> = Rc::new(LateLink(late));
+    let mut folder = DiskFolder::new(dir.path(), stl_only());
+    let items = [link];
+    let mut copy = std::pin::pin!(folder.copy_in_async(&items));
+    let mut cx = Context::from_waker(Waker::noop());
+    assert!(copy.as_mut().poll(&mut cx).is_pending());
+    state.fail(ListingFailure::Other);
+    let Poll::Ready((made, result)) = copy.as_mut().poll(&mut cx) else {
+        panic!("the copy finishes once the listing has failed");
+    };
+    assert!(made.is_empty());
+    assert_eq!(
+        result,
+        Err("Late: the folder couldn't be listed".to_string())
     );
 }
 
@@ -156,7 +178,7 @@ fn a_folder_on_disk_reads_into_a_tree_in_name_order() {
         .collect();
     assert_eq!(names, ["a.stl", "b.stl"]);
     let link: Rc<dyn Item> = Rc::new(DiskFolderLink::new(&kit, stl_only()));
-    let (nodes, failures) = block_on(gather(&[link], stl_only().as_ref()));
+    let (nodes, failures) = block_on(gather(&[link]));
     assert!(failures.is_empty());
     assert_eq!(nodes.len(), 1);
 }

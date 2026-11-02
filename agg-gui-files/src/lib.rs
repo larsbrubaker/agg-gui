@@ -36,7 +36,8 @@
 //!   [`SearchResultsFolder`] (a search across folders, in sections, its deadline a
 //!   [`WakeTimer`]) and [`MemoryFolder`] (a writable folder in memory, for tests and demos).
 //! - **Disk** (the `disk` feature): [`disk::DiskFolder`] (a folder on the computer's disk, which
-//!   lists, takes changes and copies, searches itself and relists after an outside change), its
+//!   lists, takes changes and copies, records them as [`disk::DiskStep`]s, searches itself and
+//!   relists after an outside change), its
 //!   rows [`disk::DiskFolderLink`] and files [`disk::DiskFile`], following the app's
 //!   [`disk::DiskRules`]; [`disk::ComputerFolder`] (the user's folders and the drives); the
 //!   directory watch an app registers; and the system trash a remove sends items to. It compiles
@@ -45,7 +46,8 @@
 //!   stored view states hold.
 //!
 //! Modules: `item` (items, assets, streams, links and their futures), `folder` (folders, the
-//! content-changed event, listing failures), `writable` (writable folders and the default
+//! content-changed event, listing failures), `folder_listing` (a folder's listing awaited),
+//! `writable` (writable folders and the default
 //! move), `create_folder_item` (the item that asks a writable folder for a new folder),
 //! `history` (recorded changes), `error` (why content could not be given), `search`,
 //! `search_terms`, `sort`, `picture`, `spawner`, `place` and `translate`; the providers
@@ -66,6 +68,7 @@ mod dynamic_folder_link;
 mod error;
 mod folder;
 mod folder_data;
+mod folder_listing;
 mod history;
 mod item;
 mod memory_folder;
@@ -88,6 +91,7 @@ pub use dynamic_folder_link::{DynamicFolderLink, FolderCreator, OptionalFolderCr
 pub use error::LoadError;
 pub use folder::{ContentChangedEvent, ContentChangedListener, Folder, ListingFailure};
 pub use folder_data::FolderData;
+pub use folder_listing::{folder_listing, FolderListing};
 pub use history::{HistoryStep, Recorded, StepDone, StepOutcome};
 pub use item::{Asset, AssetStream, FolderLink, Item, PictureFuture, StreamFuture, Thumbnail};
 pub use memory_folder::{MemoryFile, MemoryFolder, MemoryFolderLink};

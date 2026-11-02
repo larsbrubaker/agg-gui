@@ -9,8 +9,12 @@
 mod computer;
 #[path = "disk/copies.rs"]
 mod copies;
+#[path = "disk/history.rs"]
+mod history;
 #[path = "disk/ids.rs"]
 mod ids;
+#[path = "support/late_folder.rs"]
+mod late_folder;
 #[path = "disk/listing.rs"]
 mod listing;
 #[path = "disk/live_refresh.rs"]

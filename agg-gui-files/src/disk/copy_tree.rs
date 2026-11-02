@@ -2,9 +2,9 @@
 //! halves of a copy that keeps the structure of a folder that is not on disk (another place's
 //! folder, a read-only one). A file gives its bytes (awaited, so content that has to be
 //! downloaded is), a folder on disk is read straight from the disk, and any other folder is
-//! opened and listed, giving its folders and then its files. A folder that lists later rather
-//! than at once (a server's) is listed by the app's [`super::DiskRules::list_for_copy`]. A part
-//! that can't be read is named in the failures and the rest is still gathered.
+//! opened and listed ([`crate::folder_listing`], which waits for a folder that lists later, a
+//! server's), giving its folders and then its files. A part that can't be read is named in the
+//! failures and the rest is still gathered.
 
 use std::future::Future;
 use std::path::Path;
@@ -12,8 +12,8 @@ use std::pin::Pin;
 use std::rc::Rc;
 
 use super::folder_link::DiskFolderLink;
-use super::rules::DiskRules;
 use crate::folder::Folder;
+use crate::folder_listing::folder_listing;
 use crate::item::Item;
 use crate::translate::tr;
 
@@ -31,10 +31,6 @@ pub enum CopyNode {
         children: Vec<CopyNode>,
     },
 }
-
-/// A folder being opened and listed for a copy (see [`super::DiskRules::list_for_copy`]):
-/// the listed folder, or `None` when it couldn't be listed.
-pub type ListedFolder = Pin<Box<dyn Future<Output = Option<Box<dyn Folder>>>>>;
 
 /// A name made safe to use as a file name: the characters no file name may hold (and a trailing
 /// run of dots) become `_`. Another place may allow names a disk does not.
@@ -59,13 +55,12 @@ pub fn sanitize_file_name(name: &str) -> String {
 }
 
 /// Reads `items` into copy trees, in order: the trees of the items that could be read and a line
-/// for each part that couldn't (a folder keeps whatever of it could be read). `rules` lists the
-/// folders that list later.
-pub async fn gather(items: &[Rc<dyn Item>], rules: &dyn DiskRules) -> (Vec<CopyNode>, Vec<String>) {
+/// for each part that couldn't (a folder keeps whatever of it could be read).
+pub async fn gather(items: &[Rc<dyn Item>]) -> (Vec<CopyNode>, Vec<String>) {
     let mut nodes = Vec::new();
     let mut failures = Vec::new();
     for item in items {
-        if let Some(node) = gather_item(Rc::clone(item), rules, &mut failures).await {
+        if let Some(node) = gather_item(Rc::clone(item), &mut failures).await {
             nodes.push(node);
         }
     }
@@ -76,7 +71,6 @@ pub async fn gather(items: &[Rc<dyn Item>], rules: &dyn DiskRules) -> (Vec<CopyN
 /// a folder gathers its folders through it.
 pub fn gather_item<'a>(
     item: Rc<dyn Item>,
-    rules: &'a dyn DiskRules,
     failures: &'a mut Vec<String>,
 ) -> Pin<Box<dyn Future<Output = Option<CopyNode>> + 'a>> {
     Box::pin(async move {
@@ -92,35 +86,23 @@ pub fn gather_item<'a>(
                 }
             };
         }
-        if let Some(listing) = rules.list_for_copy(item.as_ref()) {
-            let Some(folder) = listing.await else {
-                failures.push(format!(
-                    "{}: {}",
-                    item.name(),
-                    tr("the folder couldn't be listed")
-                ));
-                return None;
-            };
-            return Some(gather_folder(item.name(), folder.as_ref(), rules, failures).await);
-        }
         if let Some(link) = item.as_container_link() {
-            let mut folder = match link.get_container() {
+            let folder = match link.get_container() {
                 Ok(folder) => folder,
                 Err(e) => {
                     failures.push(format!("{}: {e}", item.name()));
                     return None;
                 }
             };
-            folder.load();
-            if folder.is_load_pending() || folder.last_load_failed() {
+            let Ok(folder) = folder_listing(folder).await else {
                 failures.push(format!(
                     "{}: {}",
                     item.name(),
                     tr("the folder couldn't be listed")
                 ));
                 return None;
-            }
-            return Some(gather_folder(item.name(), folder.as_ref(), rules, failures).await);
+            };
+            return Some(gather_folder(item.name(), folder.as_ref(), failures).await);
         }
         let Some(stream) = item.as_asset_stream() else {
             failures.push(format!("{}: {}", item.name(), tr("it can't be copied")));
@@ -149,12 +131,7 @@ pub fn gather_item<'a>(
 }
 
 /// A listed folder's tree: its folders first, then its files, each in listing order.
-async fn gather_folder(
-    name: &str,
-    folder: &dyn Folder,
-    rules: &dyn DiskRules,
-    failures: &mut Vec<String>,
-) -> CopyNode {
+async fn gather_folder(name: &str, folder: &dyn Folder, failures: &mut Vec<String>) -> CopyNode {
     let mut children = Vec::new();
     let all = folder
         .child_containers()
@@ -162,7 +139,7 @@ async fn gather_folder(
         .map(|f| f as Rc<dyn Item>)
         .chain(folder.items());
     for child in all {
-        if let Some(node) = gather_item(child, rules, failures).await {
+        if let Some(node) = gather_item(child, failures).await {
             children.push(node);
         }
     }
