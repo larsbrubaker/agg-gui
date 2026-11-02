@@ -4,9 +4,10 @@
 //! [`BrowserState`] and drawn through the config's look and pictures.
 //!
 //! The list builds its rows again at its next layout whenever what they show changes: the
-//! state's generation (a selection, a navigation, new content), a picture arriving (the
-//! `ItemPictures` hook calls `PictureCx::picture_arrived`), or the look's art
-//! (`BrowserLook::icon_generation`); each build marks the listing the rows were built from
+//! state's generation (a selection, a navigation, new content) or the look's art
+//! (`BrowserLook::icon_generation`). A picture arriving (the `ItemPictures` hook calls
+//! `PictureCx::picture_arrived`) only has the rows and tiles ask for their art again, in place,
+//! so the one under the pointer stays the widget a press on it started on. Each build marks the listing the rows were built from
 //! (`BrowserState::mark_listed`), so a row's index always means the row under the pointer. A
 //! list shown anew goes back to the top; one keeping its place (a selection) keeps its scroll; a
 //! row the app selected for the user is scrolled into view (`reveal.rs`).
@@ -81,6 +82,23 @@ fn in_list_corner(pos: Point, width: f64, height: f64) -> bool {
         && pos.x <= width
         && pos.y >= height - MENU_GLYPH_SIZE
         && pos.y <= height
+}
+
+/// Every row and tile under `widgets` asks for its art again.
+fn refresh_art(widgets: &mut [Box<dyn Widget>]) {
+    for widget in widgets.iter_mut() {
+        if let Some(any) = widget.as_any_mut() {
+            if let Some(row) = any.downcast_mut::<row::BrowserRow>() {
+                row.refresh_art();
+                continue;
+            }
+            if let Some(tile) = any.downcast_mut::<icon_view::BrowserTile>() {
+                tile.refresh_art();
+                continue;
+            }
+        }
+        refresh_art(widget.children_mut());
+    }
 }
 
 /// The list of what the showing folder holds (see the module header).
@@ -312,8 +330,17 @@ impl Widget for BrowserList {
         if pending {
             agg_gui::animation::request_draw();
         }
-        if self.built != Some(self.build_key()) {
-            self.rebuild();
+        let key = self.build_key();
+        match self.built {
+            // Only pictures arrived: the rows and tiles ask for their art again in place, so the
+            // one under the pointer stays the widget a press started on.
+            Some(built) if built.generation == key.generation && built.icons == key.icons => {
+                if built.arrivals != key.arrivals {
+                    self.built = Some(key);
+                    refresh_art(&mut self.children);
+                }
+            }
+            _ => self.rebuild(),
         }
         let resets = self.state.borrow().list_resets();
         if !self.host_offset && resets != self.resets_seen {

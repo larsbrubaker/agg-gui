@@ -366,12 +366,19 @@ fn colour_at(app: &mut App, at: Point) -> [u8; 4] {
     [pixels[i], pixels[i + 1], pixels[i + 2], pixels[i + 3]]
 }
 
+/// The address of the widget named `id`: the same widget keeps it.
+fn address_of(app: &App, id: &str) -> usize {
+    let (widget, _) = find(app.root(), id, Point::new(0.0, 0.0)).expect("the widget");
+    widget as *const dyn Widget as *const () as usize
+}
+
 #[test]
 fn a_picture_arriving_later_redraws_its_tile() {
     let pictures = Rc::new(LaterPictures::default());
     let config = BrowserConfig::builder().pictures(pictures.clone()).build();
     let (mut app, _) = list_app(Box::new(home()), config, ViewMode::Icons);
     assert_eq!(property(&app, "Row Item a.txt", "picture"), "generating");
+    let before = address_of(&app, "Row Item a.txt");
     let tile = rect_of(&app, "Row Item a.txt");
     // The picture's square is the tile's top 100 inside its border.
     let middle = Point::new(tile.x + 51.0, tile.y + tile.height - 51.0);
@@ -387,6 +394,11 @@ fn a_picture_arriving_later_redraws_its_tile() {
     arrived();
     app.layout(Size::new(WIDTH, HEIGHT));
     assert_eq!(property(&app, "Row Item a.txt", "picture"), "picture");
+    assert_eq!(
+        address_of(&app, "Row Item a.txt"),
+        before,
+        "the tile is the same widget, so a press on it carries on"
+    );
     assert_eq!(colour_at(&mut app, middle), [255, 0, 0, 255]);
 }
 

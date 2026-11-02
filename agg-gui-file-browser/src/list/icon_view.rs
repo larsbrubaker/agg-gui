@@ -119,6 +119,13 @@ impl BrowserTile {
     }
 
     /// Whether the tile opens a folder.
+    /// Asks for its art again (a picture arrived), keeping the tile itself.
+    pub fn refresh_art(&mut self) {
+        if let Some(art) = self.cx.art(self.index, self.thumb) {
+            self.parts.art = art;
+        }
+    }
+
     pub fn is_container(&self) -> bool {
         self.parts.entry.is_container()
     }
@@ -177,6 +184,9 @@ impl BrowserTile {
 
 impl Widget for BrowserTile {
     fn as_any(&self) -> Option<&dyn std::any::Any> {
+        Some(self)
+    }
+    fn as_any_mut(&mut self) -> Option<&mut dyn std::any::Any> {
         Some(self)
     }
     fn type_name(&self) -> &'static str {

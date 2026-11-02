@@ -100,6 +100,34 @@ impl ListCx {
 
     /// The parts of listed row `index` with its picture `side` units square, an overlay framed
     /// as `frame`; `None` past the listing's end.
+    /// What listed row `index` shows where its `side`-wide picture goes, asked again (a picture
+    /// that arrived); `None` past the listing's end.
+    pub fn art(&self, index: usize, side: i32) -> Option<TileArt> {
+        let entry = self.state.borrow().listed_entry(index)?;
+        let hook_entry = entry.to_entry(Rc::clone(&self.path));
+        Some(self.art_of(&hook_entry, side))
+    }
+
+    /// The art for `hook_entry` at `side`.
+    fn art_of(&self, hook_entry: &crate::entry::Entry, side: i32) -> TileArt {
+        let state = Rc::clone(&self.state);
+        let folder_picture = move |item: &Rc<dyn Item>, w: i32, h: i32| {
+            state
+                .try_borrow()
+                .ok()
+                .and_then(|s| s.container_thumbnail(item, w, h))
+        };
+        let cx = PictureCx::new(&self.spawner, &self.arrived).with_folder_picture(&folder_picture);
+        tile_art(
+            self.look.as_ref(),
+            &self.style,
+            self.pictures.as_ref(),
+            &cx,
+            hook_entry,
+            side,
+        )
+    }
+
     pub fn parts(&self, index: usize, side: i32, frame: OverlayFrame) -> Option<RowParts> {
         let (entry, selected, hovered) = {
             let s = self.state.borrow();
@@ -112,22 +140,7 @@ impl ListCx {
         };
         let id = entry.row_name(self.look.names());
         let hook_entry = entry.to_entry(Rc::clone(&self.path));
-        let state = Rc::clone(&self.state);
-        let folder_picture = move |item: &Rc<dyn Item>, w: i32, h: i32| {
-            state
-                .try_borrow()
-                .ok()
-                .and_then(|s| s.container_thumbnail(item, w, h))
-        };
-        let cx = PictureCx::new(&self.spawner, &self.arrived).with_folder_picture(&folder_picture);
-        let art = tile_art(
-            self.look.as_ref(),
-            &self.style,
-            self.pictures.as_ref(),
-            &cx,
-            &hook_entry,
-            side,
-        );
+        let art = self.art_of(&hook_entry, side);
         let overlay = self.pictures.tile_overlay(&hook_entry, frame);
         Some(RowParts {
             entry,

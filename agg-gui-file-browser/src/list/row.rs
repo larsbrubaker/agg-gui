@@ -84,6 +84,13 @@ impl BrowserRow {
         })
     }
 
+    /// Asks for its art again (a picture arrived), keeping the row itself.
+    pub fn refresh_art(&mut self) {
+        if let Some(art) = self.cx.art(self.index, ROW_THUMB_SIZE) {
+            self.parts.art = art;
+        }
+    }
+
     /// The row's index in the listing it was built from.
     pub fn index(&self) -> usize {
         self.index
@@ -120,6 +127,9 @@ impl BrowserRow {
 
 impl Widget for BrowserRow {
     fn as_any(&self) -> Option<&dyn std::any::Any> {
+        Some(self)
+    }
+    fn as_any_mut(&mut self) -> Option<&mut dyn std::any::Any> {
         Some(self)
     }
     fn type_name(&self) -> &'static str {
