@@ -55,8 +55,9 @@
 //! `own_pictures` (the default pictures: each item's own); `list` ([`BrowserList`], the rows or
 //! tiles of the showing folder, or its message, with their gestures and menus); `tree`
 //! ([`BrowserTree`], the folder tree over the same state, its rows as data in [`TreeModel`], each
-//! row known by its folder's location key or else its name, and its menu); `nav` (the view and
-//! sorting menus, Undo and Redo, the splitter, the provider message); `history`
+//! row known by its folder's location key or else its name, and its menu); `search` (the search
+//! box and its controller); `nav` (the view and sorting menus, Undo and Redo, the splitter, the
+//! provider message); `history`
 //! ([`BrowserHistory`], the undo history shared by an app's browser views, steps recorded at once
 //! or later through a [`HistoryRecorder`], an undo or redo finishing later holding the next one
 //! back, the keys, and the [`BrowserNotice`] announcing each change with its Undo or Redo).
@@ -83,6 +84,7 @@ pub mod nav;
 pub mod own_pictures;
 pub mod pictures;
 pub mod places;
+pub mod search;
 pub mod state;
 pub mod trace;
 pub mod tree;
@@ -143,6 +145,7 @@ pub use places::{
     copy_modifier_held, default_crosses_places, default_drop_copies, places_differ, CopyCx,
     CopyTakeover, DefaultPlaces, PlaceRules,
 };
+pub use search::{SearchBox, SearchController, SearchEndedListener, SearchMaker, DEBOUNCE};
 pub use state::{
     entries_message, is_only_a_message, item_identity_key, search_listing, BrowserEntry,
     BrowserState, ContainerChangedListener, ItemEvent, ListSlot, ListingMessage, OpenFolder,
@@ -158,6 +161,7 @@ pub use tree::{
 pub const ENGLISH_TEXTS: &[&str] = &[
     "Add",
     "Ascending",
+    "Clear",
     "Click to go back",
     "Copy to {0}",
     "Couldn't copy to",
@@ -175,6 +179,7 @@ pub const ENGLISH_TEXTS: &[&str] = &[
     "Open File Location",
     "Remove",
     "Rename",
+    "Search",
     "Couldn't put back",
     "Redo",
     "Redone",

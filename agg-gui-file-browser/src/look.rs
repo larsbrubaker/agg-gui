@@ -52,6 +52,8 @@ pub enum BrowserIcon {
     Warning,
     /// A row's or the browser's overflow menu.
     Overflow,
+    /// The search box's clear button.
+    ClearSearch,
 }
 
 impl BrowserIcon {
@@ -67,6 +69,7 @@ impl BrowserIcon {
         BrowserIcon::Generating,
         BrowserIcon::Warning,
         BrowserIcon::Overflow,
+        BrowserIcon::ClearSearch,
     ];
 
     /// The Font Awesome 4.7 glyph drawn when the look has no image for the icon (agg-gui's
@@ -78,11 +81,12 @@ impl BrowserIcon {
             BrowserIcon::Sort => '\u{F0DC}',        // sort
             BrowserIcon::Undo => agg_gui::icon_font::UNDO,
             BrowserIcon::Redo => agg_gui::icon_font::REDO,
-            BrowserIcon::Item => '\u{F1B2}',       // cube
-            BrowserIcon::Folder => '\u{F07B}',     // folder
-            BrowserIcon::Generating => '\u{F252}', // hourglass-half
-            BrowserIcon::Warning => '\u{F071}',    // exclamation-triangle
-            BrowserIcon::Overflow => '\u{F142}',   // ellipsis-v
+            BrowserIcon::Item => '\u{F1B2}',        // cube
+            BrowserIcon::Folder => '\u{F07B}',      // folder
+            BrowserIcon::Generating => '\u{F252}',  // hourglass-half
+            BrowserIcon::Warning => '\u{F071}',     // exclamation-triangle
+            BrowserIcon::Overflow => '\u{F142}',    // ellipsis-v
+            BrowserIcon::ClearSearch => '\u{F00D}', // times
         }
     }
 
@@ -99,6 +103,7 @@ impl BrowserIcon {
             BrowserIcon::Generating => "generating",
             BrowserIcon::Warning => "warning",
             BrowserIcon::Overflow => "overflow",
+            BrowserIcon::ClearSearch => "clear-search",
         }
     }
 }
@@ -216,6 +221,12 @@ pub struct BrowserNames {
     pub tree: String,
     /// One folder's row in the folder tree (template).
     pub tree_row: String,
+    /// The search box.
+    pub search_panel: String,
+    /// The search box's text field.
+    pub search_input: String,
+    /// The search box's clear button.
+    pub close_search: String,
     /// The split between the folder tree and the list.
     pub splitter: String,
     /// The provider message under a list-only browser's list.
@@ -251,6 +262,9 @@ impl Default for BrowserNames {
             search_section: "Search Section {name}".into(),
             tree: "Library TreeView".into(),
             tree_row: "{name} Tree Node".into(),
+            search_panel: "Library Search Panel".into(),
+            search_input: "Library Search Input".into(),
+            close_search: "Close Search".into(),
             splitter: "Library Splitter".into(),
             provider_message: "Provider Message".into(),
             notice: "Library Notice".into(),

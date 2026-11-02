@@ -145,6 +145,14 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 - `BrowserIconButton::with_hint` (shown through the new `BrowserLook::show_hint` while hovered,
   cleared on leaving), `with_hover_fill`, `with_glyph_color`, `is_hovered`, and `tooltip` and
   `hint` properties.
+- Search (`search`): `SearchController` (typing debounced by `DEBOUNCE`, 300 ms on the UI clock,
+  through a queued layout the view's `poll` runs it in; Enter runs it at once; a new query
+  disposes the one before; refining searches the folder the results came from; clearing returns
+  to the folder searched with what was selected there; walking away from the results ends the
+  search; `SearchMaker` lets an app make its own searches, `with_maker`) and `SearchBox` (a text
+  field, "Search" while empty, with a clear button, `BrowserIcon::ClearSearch`, "Clear"; Escape
+  clears too; it polls its controller as it lays out). `BrowserNames::search_panel` ("Library
+  Search Panel"), `search_input` ("Library Search Input") and `close_search` ("Close Search").
 - A drag's spring wait and the history notice's hold and fade count from the instant they
   began on the UI clock (`Notice::shown_at` is that instant), never as time since the clock's
   epoch, which a virtual clock started before it holds at zero. `web-time` is a dependency (the
