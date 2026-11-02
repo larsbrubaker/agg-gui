@@ -11,7 +11,9 @@
 //!   it shows, gives way to the folder above it first.
 //! - Move asks the app's Move dialog for a folder, handing it the folder the items leave (its
 //!   name, identity and copy rule), then moves (or copies, as the dialog said) into the folder
-//!   it picked, as a drop into it does (`drag/execute.rs`).
+//!   it picked, as a drop into it does (`drag/execute.rs`). The tree's folder, moved while it
+//!   shows, gives way to the folder above it first, as for Remove, so the browser is never left
+//!   inside a folder at a path it no longer has.
 //! - Add picks files through the app and adds them (unrecorded: a folder's add has no undo).
 //! - Open File Location asks the app where the item lives (`BrowserActions::locate`) and shows
 //!   it (`BrowserState::show_location`).
@@ -203,13 +205,17 @@ fn move_items(state: &Rc<RefCell<BrowserState>>) {
     let copies_to: CopiesTo = Rc::new(move |target| {
         keeps || places.drop_copies(Some(&**source.borrow()), target.cloned(), false)
     });
-    let depth = target.depth;
+    let (depth, from_tree) = (target.depth, target.from_tree);
     let (dialogs, weak) = dialogs_of(state);
     let request = MoveRequest::new(items.clone(), place).with_source(name, key, copies_to);
     dialogs.pick_move_target(
         request,
         Box::new(move |picked| {
             if let (Some(state), Some(pick)) = (weak.upgrade(), picked) {
+                // The tree's folder leaving while it shows: the folder above shows first.
+                if from_tree && !pick.copy && state.borrow().depth() > depth + 1 {
+                    state.borrow_mut().go_to(depth);
+                }
                 let name = pick.target.name().to_string();
                 drop_into(&state, pick.target, &name, &items, depth, pick.copy);
             }

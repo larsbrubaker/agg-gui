@@ -13,8 +13,9 @@ use std::sync::Arc;
 use agg_gui::text::Font;
 use agg_gui::{App, Modifiers, MouseButton, Point, Rect, Size, Widget};
 use agg_gui_file_browser::{
-    BrowserAction, BrowserActions, BrowserCommand, BrowserConfig, BrowserRef, BrowserState,
-    BrowserTree, Builtins, SheetDialogs,
+    tree_menu_rows, BrowserAction, BrowserActions, BrowserCommand, BrowserConfig, BrowserDialogs,
+    BrowserRef, BrowserState, BrowserTree, Builtins, Confirmation, DialogKind, MovePick,
+    MoveRequest, NameRequest, PickedMoveTarget, SheetDialogs,
 };
 use agg_gui_files::{Folder, MemoryFolder};
 
@@ -377,4 +378,113 @@ fn the_menus_command_runs_with_the_folder_as_the_selection() {
     assert!(ran, "the command ran");
     assert_eq!(*actions.ran_with.borrow(), ["Notes"]);
     assert!(state.borrow().temporary_selection().is_none());
+}
+
+/// Dialogs that confirm, ask names, and pick `target` for every Move.
+struct MoveInto {
+    target: MemoryFolder,
+}
+
+impl BrowserDialogs for MoveInto {
+    fn offers(&self, _kind: DialogKind) -> bool {
+        true
+    }
+    fn confirm(&self, _question: Confirmation, answer: Box<dyn FnOnce(bool)>) {
+        answer(true);
+    }
+    fn ask_name(&self, _request: NameRequest, answer: Box<dyn FnOnce(Option<String>)>) {
+        answer(None);
+    }
+    fn pick_move_target(&self, _request: MoveRequest, answer: PickedMoveTarget) {
+        answer(Some(MovePick {
+            target: Box::new(self.target.clone()),
+            copy: false,
+        }));
+    }
+}
+
+/// Runs the row titled `title` of `rows`.
+fn run_row(rows: &[BrowserAction], title: &str) {
+    let ran = rows.iter().any(|row| match row {
+        BrowserAction::Command(command) if command.title() == title => command.run(),
+        _ => false,
+    });
+    assert!(ran, "{title} ran");
+}
+
+#[test]
+fn moving_the_showing_folder_from_its_tree_menu_shows_the_folder_above() {
+    let (home, projects) = home();
+    let notes = home
+        .child_containers()
+        .into_iter()
+        .find(|l| l.name() == "Notes")
+        .expect("Notes")
+        .get_container()
+        .expect("opens");
+    let notes = notes
+        .as_any()
+        .and_then(|a| a.downcast_ref::<MemoryFolder>())
+        .cloned()
+        .expect("a memory folder");
+    let config = BrowserConfig::builder()
+        .dialogs(Rc::new(MoveInto {
+            target: notes.clone(),
+        }))
+        .build();
+    let (mut app, state) = tree_app(Box::new(home.clone()), config);
+    let row = row_named(&app, "Projects Tree Node");
+    press_row(&mut app, row, NAME_X, MouseButton::Left);
+    assert_eq!(state.borrow().path_names(), ["Home", "Projects"]);
+    let row = row_named(&app, "Projects Tree Node");
+    let rows = tree_menu_rows(&state, tree(&app).model(), row);
+    run_row(&rows, "Move");
+    assert_eq!(
+        state.borrow().path_names(),
+        ["Home"],
+        "the browser left the folder before it moved"
+    );
+    assert_eq!(notes.child_containers()[0].name(), "Projects");
+    // A write through the browser lands in Home, not in a stale Projects.
+    drop(projects);
+    assert!(home
+        .child_containers()
+        .iter()
+        .all(|l| l.name() != "Projects"));
+}
+
+#[test]
+fn a_tree_rows_menu_is_for_that_row_whatever_folder_shows() {
+    let (home, _) = home();
+    let actions = Rc::new(Menus::default());
+    let config = BrowserConfig::builder()
+        .actions(actions.clone())
+        .dialogs(Rc::new(SheetDialogs::new()))
+        .build();
+    let (mut app, state) = tree_app(Box::new(home), config);
+    let projects = row_named(&app, "Projects Tree Node");
+    press_row(&mut app, projects, ARROW_X, MouseButton::Left);
+    assert_eq!(state.borrow().path_names(), ["Home"], "the arrow only opens");
+    let brackets = row_named(&app, "Brackets Tree Node");
+    let rows = tree_menu_rows(&state, tree(&app).model(), brackets);
+    let titles: Vec<&str> = rows
+        .iter()
+        .filter_map(|row| match row {
+            BrowserAction::Command(command) => Some(command.title()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(titles, ["Rename", "Remove", "Show Info"]);
+    assert_eq!(
+        *actions.asked.borrow(),
+        vec![(
+            vec!["Home".to_string(), "Projects".to_string()],
+            vec!["Brackets".to_string()]
+        )]
+    );
+    assert_eq!(
+        state.borrow().path_names(),
+        ["Home", "Projects", "Brackets"],
+        "the row's folder shows, as a right press shows it"
+    );
 }

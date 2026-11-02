@@ -136,11 +136,7 @@ impl TreeRow {
             None => return,
         };
         crate::trace(|| format!("tree row {} shows its folder", self.spec.name));
-        let mut state = self.state.borrow_mut();
-        state.go_to(0);
-        for link in &path {
-            state.open(link.as_ref());
-        }
+        super::menu::show_row_path(&self.state, &path);
     }
 
     /// Paints the arrow: right when folded, down when open.

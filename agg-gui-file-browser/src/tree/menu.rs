@@ -81,10 +81,24 @@ fn wrap(
     })
 }
 
+/// Shows the folder at the end of `path` (the links from the root down) in the browser `state`,
+/// as a press on its tree row does.
+pub(crate) fn show_row_path(state: &Rc<RefCell<BrowserState>>, path: &[Rc<dyn FolderLink>]) {
+    let mut state = state.borrow_mut();
+    state.go_to(0);
+    for link in path {
+        state.open(link.as_ref());
+    }
+}
+
 /// The rows of the menu for tree row `index` of `model`: empty when the row is gone or stands
 /// for no folder. Each row runs with the row's folder as the temporary selection, as the menu
 /// the tree opens runs it (an app checks its tree menu through this, as through
 /// [`menu_actions`](crate::menu_actions) for the list's).
+///
+/// The menu is the selection's menu in the folder above the row's, so that folder must be on the
+/// browser's path: the row's folder is shown first, as a right press on the row shows it, unless
+/// it is the one showing. Any row can be asked for, whatever the browser shows.
 pub fn tree_menu_rows(
     state: &Rc<RefCell<BrowserState>>,
     model: &Rc<RefCell<TreeModel>>,
@@ -102,6 +116,13 @@ pub fn tree_menu_rows(
     let Some(link) = path.last().cloned() else {
         return Vec::new();
     };
+    let showing = {
+        let levels = state.borrow().path_levels();
+        model.borrow().showing_row(&levels) == Some(index)
+    };
+    if !showing {
+        show_row_path(state, &path);
+    }
     // The root is at depth 0, so the folder above the row's folder is at `path.len() - 1`.
     folder_menu_rows(state, (link, path.len() - 1))
 }
