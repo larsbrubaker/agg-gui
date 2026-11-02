@@ -9,7 +9,8 @@
 //!
 //! The look's image is drawn centred with its corner moved to a whole device pixel, so an icon
 //! made for the device scale lands 1:1 and stays crisp. The image is kept between paints and
-//! asked for again only when the button is enabled or disabled or the device scale changes.
+//! asked for again only when the button is enabled or disabled, the device scale changes or the
+//! look's art does (`BrowserLook::icon_generation`).
 //! The breadcrumb's up button (`bread_crumb.rs`) is one.
 
 use std::rc::Rc;
@@ -29,9 +30,9 @@ const GLYPH_SHARE: f64 = 0.6;
 /// The alpha a disabled glyph keeps.
 const DISABLED_ALPHA: f64 = 0.2;
 
-/// The look's image as last asked for: whether the button was enabled, the device scale, and
-/// the answer.
-type IconCache = (bool, f64, Option<IconImage>);
+/// The look's image as last asked for: whether the button was enabled, the device scale, the
+/// look's icon generation, and the answer.
+type IconCache = (bool, f64, u64, Option<IconImage>);
 
 /// A square button showing a browser icon ([module docs](self)).
 pub struct BrowserIconButton {
@@ -144,12 +145,16 @@ impl BrowserIconButton {
     /// The look's image for the button as it is now, asked for again when it changed.
     fn current_icon(&mut self) -> Option<IconImage> {
         let scale = agg_gui::device_scale();
-        let fresh = matches!(&self.icon, Some((enabled, at, _)) if *enabled == self.enabled && *at == scale);
+        let generation = self.look.icon_generation();
+        let fresh = matches!(&self.icon, Some((enabled, at, made_in, _))
+            if *enabled == self.enabled && *at == scale && *made_in == generation);
         if !fresh {
             let image = self.look.icon(self.which, self.icon_size, self.enabled);
-            self.icon = Some((self.enabled, scale, image));
+            self.icon = Some((self.enabled, scale, generation, image));
         }
-        self.icon.as_ref().and_then(|(_, _, image)| image.clone())
+        self.icon
+            .as_ref()
+            .and_then(|(_, _, _, image)| image.clone())
     }
 }
 

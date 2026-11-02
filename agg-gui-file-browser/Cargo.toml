@@ -16,7 +16,7 @@ edition = "2021"
 # Matches the rest of the agg-gui workspace.
 rust-version = "1.88"
 license = "MIT"
-description = "The widgets of agg-gui's file browser: its look, fitted names, the folder breadcrumb trail, the browser state (open path, listing, view, selection and its gestures), and the config and hooks through which an app extends it, over agg-gui-files' folder model."
+description = "The widgets of agg-gui's file browser: its look, fitted names, the folder breadcrumb trail, the browser state (open path, listing, view, selection and its gestures), the list views (rows, tiles, a folder's message, their menus), and the config and hooks through which an app extends it, over agg-gui-files' folder model."
 authors = ["Lars Brubaker <larsbrubaker@matterhackers.com>"]
 repository = "https://github.com/larsbrubaker/agg-gui"
 readme = "README.md"

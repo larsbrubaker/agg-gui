@@ -21,6 +21,8 @@ use agg_gui_files::FolderLink;
 
 /// The font size the browser's text takes when agg-gui has no default set.
 const BUILTIN_FONT_SIZE: f64 = 14.0;
+/// The size of a tile's name: 9 pt at 96 pixels to the inch.
+const TILE_FONT_SIZE: f64 = 12.0;
 
 /// An icon a browser widget draws. Each has a Font Awesome glyph it falls back to
 /// ([`BrowserIcon::glyph`]) and a name the widgets report for inspection
@@ -104,6 +106,8 @@ impl BrowserIcon {
 pub struct BrowserStyle {
     /// The size of a row's, a link's and a label's text.
     pub font_size: f64,
+    /// The size of the name under an icon view's tile (9 pt).
+    pub tile_font_size: f64,
     /// Text, links, separators and tinted icons.
     pub text_color: Color,
     /// Secondary text: a row's detail line, hints.
@@ -133,6 +137,7 @@ impl BrowserStyle {
     pub fn from_visuals(visuals: &Visuals) -> Self {
         Self {
             font_size: agg_gui::font_settings::default_font_size_or(BUILTIN_FONT_SIZE),
+            tile_font_size: TILE_FONT_SIZE,
             text_color: visuals.text_color,
             light_text_color: visuals.text_dim,
             background: visuals.window_fill,
@@ -186,6 +191,14 @@ pub struct BrowserNames {
     pub item_row: String,
     /// A folder's row or tile (template).
     pub folder_row: String,
+    /// The list's area around its rows or tiles, where a right press on empty space lands.
+    pub list_area: String,
+    /// What the list shows in place of a folder whose listing is only a message.
+    pub folder_message: String,
+    /// The message's wrapped text.
+    pub folder_message_text: String,
+    /// The Sign In button under a folder refused for the sign-in.
+    pub sign_in_button: String,
 }
 
 impl Default for BrowserNames {
@@ -205,6 +218,10 @@ impl Default for BrowserNames {
             overflow_menu: "Print Library Overflow Menu".into(),
             item_row: "Row Item {name}".into(),
             folder_row: "{name} Row Item Collection".into(),
+            list_area: "LibraryView".into(),
+            folder_message: "Library Folder Message".into(),
+            folder_message_text: "Library Folder Message Text".into(),
+            sign_in_button: "Library Folder Sign In Button".into(),
         }
     }
 }
@@ -237,6 +254,28 @@ pub trait BrowserLook {
     fn icon(&self, which: BrowserIcon, logical: Size, enabled: bool) -> Option<IconImage> {
         let _ = (which, logical, enabled);
         None
+    }
+
+    /// The image for `which` drawn `logical` in size in `tint` (a folder's accent, a part's text
+    /// colour); `None` draws the icon's Font Awesome glyph in `tint`. The default is
+    /// [`Self::icon`] enabled, for a look whose art keeps its own colours.
+    fn tinted_icon(&self, which: BrowserIcon, logical: Size, tint: Color) -> Option<IconImage> {
+        let _ = tint;
+        self.icon(which, logical, true)
+    }
+
+    /// The image an item names by an icon key (a folder link's `micro_icon` or `tile_icon`),
+    /// drawn `logical` in size in `tint`; `None` (the default) when the look has no art for it.
+    fn icon_for_key(&self, key: &str, logical: Size, tint: Color) -> Option<IconImage> {
+        let _ = (key, logical, tint);
+        None
+    }
+
+    /// Changes whenever the look's art changes (an app swapping its icon files): a widget that
+    /// keeps an image it was given asks again when this differs from what it was built with.
+    /// The default never changes.
+    fn icon_generation(&self) -> u64 {
+        0
     }
 
     /// The name a widget reports for `which` as its `icon` property (an app's icon file, say).

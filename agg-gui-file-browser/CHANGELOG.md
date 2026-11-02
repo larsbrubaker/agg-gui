@@ -40,6 +40,33 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 - Until a list view marks its listings (`mark_listed`), the state keeps its own listing current
   (at its making, each navigation and each redisplay), so `listed_entry`, `is_selected` and the
   clicks work for an app or a test with no view yet.
+- `BrowserList`, the list views over a `BrowserState`: the showing folder's rows (`BrowserRow`,
+  `RowStack`: a 50-unit picture, the name fitted beside it and an item's detail line under it) or
+  tiles (`BrowserTile`, `TileStack`: 18, 70, 100 or 256 units, folders on rows of their own, names
+  under tiles of 75 and up or under all with `with_tile_names`), built again whenever the state
+  changes, a picture arrives or the look's art changes; clicks, Shift ranges, Ctrl/Cmd toggles,
+  the rubber band and Control+A, Escape and the arrow keys; double clicks and taps through the
+  app's `BrowserActions::activate`; a press that moves 40 units is a drag and never clicks
+  (`ItemPress`, `DRAG_THRESHOLD`; what a drag carries comes with the browser's drag and drop); the
+  selection's menu from a right press or a hovered row's menu button (`MenuButtonState`), the
+  folder's from a right press on empty space or the list's top-right corner, each the app's
+  `BrowserActions::menu` with the built-ins offered there (`MenuScope`; the built-ins show greyed
+  until the browser runs them); a row the app selects scrolled into view; and a folder whose
+  listing is only a message shows it in place of the rows (`FolderMessage`), under the look's
+  warning for a refusal, with the app's Sign In (`BrowserActions::sign_in`, `SignInOffer`).
+- `BrowserState::menu_button`, `menu_button_mut`, `item_press` and `item_press_mut`: the rows'
+  menu button and press state, kept with the browser so they survive the rows being rebuilt under
+  the pointer.
+- `BuiltinAction::title` and `acts_on_selection`.
+- `OwnPictures`: each item shows the picture its folder or the item itself makes of it, made on
+  the spawner and kept, the look's item icon until then; the default pictures hook.
+- `BrowserLook::tinted_icon` (an icon in a colour: a folder's accent, an item's text colour),
+  `icon_for_key` (the art an item names by key: a folder link's `micro_icon` and `tile_icon`) and
+  `icon_generation` (changes when the look's art does: the list builds again and
+  `BrowserIconButton` asks for its image again).
+- `BrowserStyle::tile_font_size` (the name under a tile, 9 pt) and the names
+  `BrowserNames::list_area` ("LibraryView"), `folder_message`, `folder_message_text` and
+  `sign_in_button`.
 
 ### Changed
 
@@ -53,6 +80,10 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   not borrowed. Migration: borrow each folder (`folder.borrow().name()`).
 - The public ways to activate a row (`BrowserState::activate`, `click`, `press`, `finish_tap`)
   take the shared state and run the hooks once its borrow has ended, so no activation waits.
+- `BrowserConfig::default()` shows each item's own picture (`OwnPictures`) where it showed the
+  look's icon (`NoPictures`, still there for an app that wants icons only).
+- `BrowserStyle` and `BrowserNames` have new fields. Migration: a look building either with a
+  struct literal adds them or ends with `..Default::default()`.
 
 ## [0.0.2] - 2026-11-02
 

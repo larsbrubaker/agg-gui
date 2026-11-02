@@ -7,7 +7,9 @@
 //! folder's `default_sort` whenever it shows, then its remembered sort; folders and items each
 //! sorted on their own; and "Show Folders", on by default and not remembered, so a folder never
 //! seems empty because its sub-folders were hidden last time); and the app's own data for this
-//! browser (the app slot, opaque here).
+//! browser (the app slot, opaque here); and the rows' menu button and press state
+//! (`list/menu_button.rs`, `list/press.rs`), kept here so they survive the list being rebuilt
+//! under the pointer.
 //!
 //! Every change of the showing folder bumps a navigation counter and tells the container-changed
 //! listeners (how a search learns the user walked away from its results). Only the showing folder
@@ -40,6 +42,8 @@ use agg_gui_files::{
 use crate::actions::Activation;
 use crate::config::{BrowserConfig, DoubleClickTarget, FolderFilter};
 use crate::entry::{BrowserRef, Entry};
+use crate::list::menu_button::MenuButtonState;
+use crate::list::press::ItemPress;
 use crate::memory::{remember_open_location, ViewMode, ViewState};
 
 mod activate;
@@ -125,6 +129,10 @@ pub struct BrowserState {
     tap_activates: bool,
     tap_pending: Option<usize>,
     finger_tap_opens_folders: bool,
+    /// The rows' menu button: hover, press and where the menu it asked for hangs.
+    menu_button: MenuButtonState,
+    /// A press on a row or tile and whether it became a drag.
+    item_press: ItemPress,
     /// This state's own handle, which snapshots carry back to it.
     me: Weak<RefCell<BrowserState>>,
 }
@@ -180,6 +188,8 @@ impl BrowserState {
             tap_activates: options.tap_activates,
             tap_pending: None,
             finger_tap_opens_folders: options.finger_tap_opens_folders,
+            menu_button: MenuButtonState::default(),
+            item_press: ItemPress::default(),
             me: Weak::new(),
         }));
         {
@@ -384,6 +394,26 @@ impl BrowserState {
     pub fn request_item_menu(&mut self) {
         crate::trace(|| "browser item menu requested".to_string());
         self.item_menu_requested = true;
+    }
+
+    /// The rows' menu button state, which outlives the rows rebuilt under the pointer.
+    pub fn menu_button(&self) -> &MenuButtonState {
+        &self.menu_button
+    }
+
+    /// The rows' menu button state, to change it.
+    pub fn menu_button_mut(&mut self) -> &mut MenuButtonState {
+        &mut self.menu_button
+    }
+
+    /// The press on a row or tile under way, which outlives the rows rebuilt under the pointer.
+    pub fn item_press(&self) -> &ItemPress {
+        &self.item_press
+    }
+
+    /// The press on a row or tile, to change it.
+    pub fn item_press_mut(&mut self) -> &mut ItemPress {
+        &mut self.item_press
     }
 
     /// Whether a row asked for its menu since the last ask, clearing it.

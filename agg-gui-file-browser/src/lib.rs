@@ -5,7 +5,9 @@
 //!
 //! - **The look is the app's.** Every colour, size, icon and widget name a widget draws or
 //!   carries comes from one [`BrowserLook`]: [`BrowserStyle`] for colours and sizes,
-//!   [`BrowserLook::icon`] for artwork (else the icon's Font Awesome glyph, [`BrowserIcon`]) and
+//!   [`BrowserLook::icon`] for artwork (else the icon's Font Awesome glyph, [`BrowserIcon`]; tinted
+//!   through `tinted_icon`, an item's icon keys through `icon_for_key`, and asked for again when
+//!   `icon_generation` changes) and
 //!   [`BrowserNames`] for the names automation, tests and help articles find widgets by.
 //!   [`DefaultLook`] is agg-gui's theme with Font Awesome glyphs.
 //! - **Text the user reads** goes through `agg_gui_files::tr`, the translation hook an app points
@@ -25,7 +27,7 @@
 //!   items, or with the copy modifier held), [`BrowserMemory`] (views per folder, the tree's
 //!   width, last locations, in the app's own store and keys) and [`BrowserDialogs`]; plus a
 //!   report for errors (without one, errors show on the browser's own status line,
-//!   [`BrowserState::status`]) and its [`BrowserOptions`]. Every hook has a default ([`NoPictures`],
+//!   [`BrowserState::status`]) and its [`BrowserOptions`]. Every hook has a default ([`OwnPictures`],
 //!   [`NoActions`], [`DefaultPlaces`], [`NoMemory`], [`NoDialogs`]), so
 //!   `BrowserConfig::default()` is a working browser; the defaults never pretend: a browser
 //!   without dialogs leaves the actions needing one unavailable.
@@ -47,7 +49,9 @@
 //! `places`, `memory` and `dialogs` (the hooks and their defaults), `local_spawner` (the
 //! spawner for apps without an executor), `trace` (the opt-in trace through the app's tracer);
 //! `state` ([`BrowserState`], what a browser is looking at: the open path, the listing, view and
-//! sort, the selection and its gestures, activation, the status line and the app slot).
+//! sort, the selection and its gestures, activation, the status line and the app slot);
+//! `own_pictures` (the default pictures: each item's own); `list` ([`BrowserList`], the rows or
+//! tiles of the showing folder, or its message, with their gestures and menus).
 //!
 //! The widgets come from MatterCAD's library (mattercad-rust's `mattercad-app`, same author),
 //! published here under agg-gui's MIT licence.
@@ -61,9 +65,11 @@ pub mod entry;
 pub mod fitted_text;
 pub mod icon_button;
 pub mod link_label;
+pub mod list;
 pub mod local_spawner;
 pub mod look;
 pub mod memory;
+pub mod own_pictures;
 pub mod pictures;
 pub mod places;
 pub mod state;
@@ -71,6 +77,7 @@ pub mod trace;
 
 pub use actions::{
     Activation, BrowserAction, BrowserActions, BrowserCommand, BuiltinAction, Builtins, NoActions,
+    SignInOffer,
 };
 pub use bread_crumb::{folder_bread_crumb_for, FolderBreadCrumbWidget, UP_ICON_SIZE};
 pub use config::{
@@ -86,11 +93,20 @@ pub use fitted_text::{
 };
 pub use icon_button::BrowserIconButton;
 pub use link_label::LinkLabel;
+pub use list::icon_view::{BrowserTile, TileStack};
+pub use list::list_menu::MenuScope;
+pub use list::menu_button::MenuButtonState;
+pub use list::message::FolderMessage;
+pub use list::press::{ItemPress, DRAG_THRESHOLD};
+pub use list::row::{BrowserRow, RowStack, ROW_HEIGHT, ROW_THUMB_SIZE};
+pub use list::tile_art::TileArt;
+pub use list::BrowserList;
 pub use local_spawner::{run_ready_local_tasks, unfinished_local_tasks, ErrorLog, LocalSpawner};
 pub use look::{glyph_face, BrowserIcon, BrowserLook, BrowserNames, BrowserStyle, DefaultLook};
 pub use memory::{
     remember_open_location, BrowserMemory, LocationFuture, NoMemory, ViewMode, ViewState,
 };
+pub use own_pictures::OwnPictures;
 pub use pictures::{FolderPicture, ItemPictures, NoPictures, PictureCx, PictureState};
 pub use places::{
     copy_modifier_held, default_crosses_places, default_drop_copies, places_differ, CopyCx,
@@ -105,7 +121,13 @@ pub use trace::{set_tracer, trace, tracing};
 
 /// Every English literal this crate hands to `agg_gui_files::tr`.
 pub const ENGLISH_TEXTS: &[&str] = &[
+    "Add",
     "Click to go back",
     "Couldn't find the location of",
+    "Create Folder",
+    "Move",
     "No results",
+    "Open File Location",
+    "Remove",
+    "Rename",
 ];

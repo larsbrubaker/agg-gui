@@ -1,7 +1,7 @@
 //! The pictures a browser's tiles and rows show: the [`ItemPictures`] hook, asked for each listed
 //! entry's picture ([`PictureState`]) with a [`PictureCx`] (where work runs, how to say a picture
 //! arrived, and the open folder's own reading of an item), and for a widget laid over a tile
-//! (an app's favourite marker). [`NoPictures`] is the hook of an app with no pictures: every
+//! (an app's favourite marker). [`NoPictures`] is the hook of an app that wants no pictures: every
 //! entry draws the look's item or folder icon (`BrowserIcon::Item`, `BrowserIcon::Folder`).
 //!
 //! A picture that takes time is started on the first ask and answered `Generating` (or

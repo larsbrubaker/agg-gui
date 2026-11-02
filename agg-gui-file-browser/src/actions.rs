@@ -6,10 +6,13 @@
 //!
 //! An app's menu is the whole ordered list ([`BrowserAction`]s), so it decides where the
 //! built-ins sit among its own commands. The browser turns each `Builtin` into its own action
-//! and each `Command` into a menu row.
+//! and each `Command` into a menu row. A folder refused for the sign-in shows the app's Sign In
+//! ([`BrowserActions::sign_in`], a [`SignInOffer`]) under its message.
 
 use std::fmt;
 use std::rc::Rc;
+
+use agg_gui_files::tr;
 
 use crate::entry::{BrowserRef, Entry};
 
@@ -41,6 +44,24 @@ impl BuiltinAction {
         BuiltinAction::Move,
         BuiltinAction::Remove,
     ];
+
+    /// The title its menu row shows, translated.
+    pub fn title(self) -> String {
+        match self {
+            BuiltinAction::Add => tr("Add"),
+            BuiltinAction::CreateFolder => format!("{}...", tr("Create Folder")),
+            BuiltinAction::OpenFileLocation => tr("Open File Location"),
+            BuiltinAction::Rename => tr("Rename"),
+            BuiltinAction::Move => tr("Move"),
+            BuiltinAction::Remove => tr("Remove"),
+        }
+    }
+
+    /// Whether the action acts on the selected rows (an item's menu) rather than on the open
+    /// folder (the list's menu on its empty space).
+    pub fn acts_on_selection(self) -> bool {
+        !matches!(self, BuiltinAction::Add | BuiltinAction::CreateFolder)
+    }
 
     /// The default menu's group: adding to the folder, finding the item, changing it. Groups are
     /// parted by separators.
@@ -177,6 +198,32 @@ pub enum Activation {
     Tap,
 }
 
+/// The Sign In a folder refused for the sign-in offers under its message: what the message
+/// says now, the button's title, whether it can be pressed now, and what pressing it does. The
+/// browser asks again at each layout, so the app may change any of it as signing in goes on
+/// ("Waiting for the browser...").
+#[derive(Clone)]
+pub struct SignInOffer {
+    /// The message shown above the button (already translated).
+    pub text: String,
+    /// The button's title (already translated).
+    pub action: String,
+    /// Whether the button takes a press now.
+    pub enabled: bool,
+    /// Starts signing in; the folder lists itself again when it is done.
+    pub press: Rc<dyn Fn()>,
+}
+
+impl fmt::Debug for SignInOffer {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SignInOffer")
+            .field("text", &self.text)
+            .field("action", &self.action)
+            .field("enabled", &self.enabled)
+            .finish()
+    }
+}
+
 /// What a browser's menus hold and what activating a row does.
 pub trait BrowserActions {
     /// The whole ordered menu for `state`, the built-ins `builtins` offers placed where the app
@@ -192,6 +239,14 @@ pub trait BrowserActions {
     fn activate(&self, state: &BrowserRef, entry: &Entry, how: Activation) -> bool {
         let _ = (state, entry, how);
         false
+    }
+
+    /// The Sign In for the open folder of `state`, refused for the sign-in, whose own message is
+    /// `folder_text`; `None` (the default) shows the message with no button, for an app that
+    /// cannot sign in.
+    fn sign_in(&self, state: &BrowserRef, folder_text: &str) -> Option<SignInOffer> {
+        let _ = (state, folder_text);
+        None
     }
 }
 

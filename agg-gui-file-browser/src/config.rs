@@ -2,10 +2,11 @@
 //! runs, its look, pictures, menus, drops outside it, move-or-copy rules, memory, dialogs, where
 //! errors go, and its [`BrowserOptions`]. Every hook has a default, so
 //! `BrowserConfig::default()` is a working browser for an app with no hooks: agg-gui's look,
-//! the look's icons for pictures, the built-in menu, no outside drops, the default places rule,
-//! nothing remembered, no dialogs (the actions needing one unavailable), errors on the browser's
-//! own status line (`BrowserState::status`) and work on a [`LocalSpawner`] (whose faults, with no
-//! report given, go to standard error: it is made before any browser it could show them in).
+//! the items' own pictures (`OwnPictures`), the built-in menu, no outside drops, the default
+//! places rule, nothing remembered, no dialogs (the actions needing one unavailable), errors on
+//! the browser's own status line (`BrowserState::status`) and work on a [`LocalSpawner`] (whose
+//! faults, with no report given, go to standard error: it is made before any browser it could
+//! show them in).
 //!
 //! [`BrowserConfig::builder`] sets only what the app has; its `build` fills the rest, the
 //! default spawner reporting through the report the builder was given, or to standard error
@@ -22,7 +23,8 @@ use crate::drops::OutsideDrops;
 use crate::local_spawner::LocalSpawner;
 use crate::look::{BrowserLook, DefaultLook};
 use crate::memory::{BrowserMemory, NoMemory, ViewMode};
-use crate::pictures::{ItemPictures, NoPictures};
+use crate::own_pictures::OwnPictures;
+use crate::pictures::ItemPictures;
 use crate::places::{DefaultPlaces, PlaceRules};
 
 /// Shows the user an error the browser met (already translated).
@@ -224,7 +226,7 @@ impl BrowserConfigBuilder {
         BrowserConfig {
             spawner,
             look: self.look.unwrap_or_else(|| Rc::new(DefaultLook::default())),
-            pictures: self.pictures.unwrap_or_else(|| Rc::new(NoPictures)),
+            pictures: self.pictures.unwrap_or_else(|| Rc::new(OwnPictures::new())),
             actions: self.actions.unwrap_or_else(|| Rc::new(NoActions)),
             drops: self.drops,
             places: self.places.unwrap_or_else(|| Rc::new(DefaultPlaces)),
