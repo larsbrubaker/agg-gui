@@ -289,6 +289,7 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   copy) and the browser runs the move into it; `MoveRequest` carries the source folder's name,
   `FolderKey` and copy rule (`with_source`). Migration: an app's Move dialog answers
   `Some(MovePick { target: link.get_container()?, copy })` where it answered the link.
+- Requires `agg-gui-files` 0.0.4 (memory folders that record undo).
 - `BrowserStyle` and `BrowserNames` have new fields. Migration: a look building either with a
   struct literal adds them or ends with `..Default::default()`.
 

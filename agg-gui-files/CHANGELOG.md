@@ -8,6 +8,18 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ## [Unreleased]
 
+## [0.0.4] - 2026-11-02
+
+### Added
+
+- `MemoryFolder`'s recorded writes keep IDs and record undo steps: `move_in_recorded` from
+  another memory folder takes the very files and folders across (a folder joining the place it
+  lands in; a taken name numbered, given back on undo), and `rename_recorded`,
+  `create_folder_recorded` (nothing recorded for a folder already there) and `remove_recorded`
+  (the removed entries kept to put back) each hand back a step whose undo and redo finish at
+  once. A move from a folder not in memory stays the unrecorded add-then-remove.
+- `ENGLISH_TEXTS` gains "Removed {0}" and "Removed {0} items" (a memory removal's step).
+
 ## [0.0.3] - 2026-11-02
 
 ### Added

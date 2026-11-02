@@ -30,6 +30,8 @@ pub const ENGLISH_TEXTS: &[&str] = &[
     "Missing",
     "Moved {0} items to {1}",
     "Moved {0} to {1}",
+    "Removed {0}",
+    "Removed {0} items",
     "Renamed {0} to {1}",
     "Search Results",
     "These items could not be copied",

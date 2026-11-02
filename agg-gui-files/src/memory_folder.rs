@@ -14,8 +14,10 @@
 //! (an existing one of that name is kept; a file of that name refuses it, as a folder on disk
 //! can't be made where a file of its name is). A copied file or folder whose name is already in
 //! the folder gets a number, before its extension ("gear (2).stl"). A rename to an empty name or
-//! to another item's name is refused. A move is the default add-then-remove. Nothing is recorded
-//! for undo. IDs (`memory-<n>`) are unique within a run and never stored; a folder's location key
+//! to another item's name is refused. The plain move is the default add-then-remove (new IDs).
+//! The recorded writes (`move_in_recorded`, `rename_recorded`, `create_folder_recorded`,
+//! `remove_recorded`) keep IDs and hand back undo steps (`memory_steps.rs`): a recorded move
+//! from another memory folder takes the very entries across. IDs (`memory-<n>`) are unique within a run and never stored; a folder's location key
 //! is its ID, the same from the folder and its link.
 //!
 //! A folder made by [`MemoryFolder::new`] is protected; its sub-folders are not. Every folder in a
@@ -30,10 +32,14 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use crate::create_folder_item::CreateFolderItem;
 use crate::error::LoadError;
 use crate::folder::{ContentChangedEvent, ContentChangedListener, Folder};
+use crate::history::Recorded;
 use crate::item::{Asset, AssetStream, FolderLink, Item};
 use crate::place::PlaceId;
 use crate::translate::tr;
 use crate::writable::WritableFolder;
+
+#[path = "memory_steps.rs"]
+mod memory_steps;
 
 /// Counts the folders and files made in this run, for their IDs.
 static NEXT_NUMBER: AtomicU64 = AtomicU64::new(1);
@@ -507,6 +513,31 @@ impl WritableFolder for MemoryFolder {
             }
             Err(tr("{0} is not in this folder").replace("{0}", item.name()))
         })
+    }
+
+    /// From another memory folder: the entries themselves, IDs kept, with the step moving them
+    /// back; from any other folder the plain add-then-remove, unrecorded.
+    fn move_in_recorded(
+        &mut self,
+        items: &[Rc<dyn Item>],
+        source: &mut dyn WritableFolder,
+    ) -> Recorded {
+        match memory_steps::memory_source(source) {
+            Some(memory) => self.move_in_from(items, &memory),
+            None => Recorded::unrecorded(self.move_items(items, source)),
+        }
+    }
+
+    fn rename_recorded(&mut self, item: &Rc<dyn Item>, new_name: &str) -> Recorded {
+        self.rename_recording(item, new_name)
+    }
+
+    fn create_folder_recorded(&mut self, name: &str) -> Recorded {
+        self.create_folder_recording(name)
+    }
+
+    fn remove_recorded(&mut self, items: &[Rc<dyn Item>]) -> Recorded {
+        self.remove_recording(items)
     }
 
     fn as_any_mut(&mut self) -> Option<&mut dyn Any> {
