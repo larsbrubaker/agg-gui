@@ -137,6 +137,11 @@ impl BrowserList {
         self.menu.rows()
     }
 
+    /// The open menu's entries as built (icons, shortcuts and submenus included).
+    pub fn menu_entries(&self) -> &[agg_gui::widgets::menu::MenuEntry] {
+        self.menu.entries()
+    }
+
     /// Whether one of the list's menus is open.
     pub fn menu_is_open(&self) -> bool {
         self.menu.is_open()
@@ -199,7 +204,7 @@ impl BrowserList {
     fn open_menu(&mut self, scope: MenuScope, pos: Point) {
         let anchor = match scope {
             MenuScope::Selection => self.state.borrow_mut().menu_button_mut().take_anchor(),
-            MenuScope::Folder => None,
+            MenuScope::Folder | MenuScope::Overflow => None,
         };
         // A window anchor in the list's coordinates: the list's window origin is the pointer
         // less its list-local position.

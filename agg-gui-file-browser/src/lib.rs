@@ -30,7 +30,8 @@
 //!   [`BrowserState::status`]) and its [`BrowserOptions`]. Every hook has a default ([`OwnPictures`],
 //!   [`NoActions`], [`DefaultPlaces`], [`NoMemory`], [`NoDialogs`]), so
 //!   `BrowserConfig::default()` is a working browser; the defaults never pretend: a browser
-//!   without dialogs leaves the actions needing one unavailable.
+//!   without dialogs leaves the actions needing one unavailable ([`SheetDialogs`] is a ready set
+//!   on agg-gui's `ModalSheet` an app can give instead).
 //! - **No hook is called while the browser's state is borrowed.** Hooks are handed owned
 //!   snapshots ([`Entry`], [`BrowserRef`]) or plain values, or are run from the UI queue, so a
 //!   hook that calls back into the browser never meets a held borrow; [`BrowserState`]'s public
@@ -46,7 +47,10 @@
 //! `fitted_text` (fitting names to their room), `link_label` (a text link), `icon_button` (a
 //! square icon button), `bread_crumb` (the breadcrumb trail and its builder); `config` (the
 //! config and its options), `entry` (what hooks are handed), `pictures`, `actions`, `drops`,
-//! `places`, `memory` and `dialogs` (the hooks and their defaults), `local_spawner` (the
+//! `places`, `memory` and `dialogs` (the hooks and their defaults), `builtins` (the browser's own
+//! menu actions, which run: Add, Create Folder..., Open File Location, Rename, Move, Remove, each
+//! recorded for Undo and asking through the dialogs), `sheet_dialogs` ([`SheetDialogs`] and the
+//! [`DialogSheet`] they show on), `local_spawner` (the
 //! spawner for apps without an executor), `trace` (the opt-in trace through the app's tracer);
 //! `drag` ([`DropManager`], the drag of the browser's items onto its folders: targets recorded
 //! as they paint, the highlight and label, the move or copy the drop runs with its history step,
@@ -56,8 +60,8 @@
 //! tiles of the showing folder, or its message, with their gestures and menus); `tree`
 //! ([`BrowserTree`], the folder tree over the same state, its rows as data in [`TreeModel`], each
 //! row known by its folder's location key or else its name, and its menu); `search` (the search
-//! box and its controller); `nav` (the view and sorting menus, Undo and Redo, the splitter, the
-//! provider message); `history`
+//! box and its controller); `nav` (the view and sorting menus, Undo and Redo, the overflow
+//! "File" button, the splitter, the provider message); `history`
 //! ([`BrowserHistory`], the undo history shared by an app's browser views, steps recorded at once
 //! or later through a [`HistoryRecorder`], an undo or redo finishing later holding the next one
 //! back, the keys, and the [`BrowserNotice`] announcing each change with its Undo or Redo).
@@ -67,6 +71,7 @@
 
 pub mod actions;
 pub mod bread_crumb;
+pub mod builtins;
 pub mod config;
 pub mod dialogs;
 pub mod drag;
@@ -85,20 +90,25 @@ pub mod own_pictures;
 pub mod pictures;
 pub mod places;
 pub mod search;
+pub mod sheet_dialogs;
 pub mod state;
 pub mod trace;
 pub mod tree;
 
 pub use actions::{
-    Activation, BrowserAction, BrowserActions, BrowserCommand, BuiltinAction, Builtins, NoActions,
-    SignInOffer,
+    ActionScope, Activation, BrowserAction, BrowserActions, BrowserCommand, BuiltinAction,
+    Builtins, ItemLocation, NoActions, SignInOffer,
 };
 pub use bread_crumb::{folder_bread_crumb_for, FolderBreadCrumbWidget, UP_ICON_SIZE};
+pub use builtins::run_builtin;
 pub use config::{
     BrowserConfig, BrowserConfigBuilder, BrowserLayout, BrowserOptions, DoubleClickTarget,
     ErrorReport, FolderFilter,
 };
-pub use dialogs::{BrowserDialogs, Confirmation, DialogKind, NameRequest, NoDialogs, PickedFiles};
+pub use dialogs::{
+    BrowserDialogs, Confirmation, DialogKind, MoveRequest, NameRequest, NoDialogs, PickedFiles,
+    PickedMoveTarget,
+};
 pub use drag::badge::{paint_plus_badge, painted_rect, register_painted};
 pub use drag::execute::{couldnt_copy_to, drop_into, drop_onto};
 pub use drag::gesture::{drag_end, drag_lost, drag_over};
@@ -119,7 +129,7 @@ pub use history::{BrowserHistory, HistoryRecorder, Notice, NoticeAction};
 pub use icon_button::BrowserIconButton;
 pub use link_label::LinkLabel;
 pub use list::icon_view::{BrowserTile, TileStack};
-pub use list::list_menu::MenuScope;
+pub use list::list_menu::{menu_actions, select_rows, MenuScope, MENU_ICON_SIZE};
 pub use list::menu_button::MenuButtonState;
 pub use list::message::FolderMessage;
 pub use list::overlay::OverlayRoute;
@@ -137,6 +147,7 @@ pub use nav::buttons::{
     history_key_text, sorting_button, view_options_button, HistoryButtons, NAV_BUTTON_SIDE,
 };
 pub use nav::menu_button::{NavMenuButton, NavMenuRow, NavMenuRows};
+pub use nav::overflow::OverflowButton;
 pub use nav::provider_message::{ProviderMessageBar, PROVIDER_MESSAGE_SIZE};
 pub use nav::splitter::{BrowserSplitter, DEFAULT_TREE_WIDTH, MIN_TREE_WIDTH, SPLITTER_WIDTH};
 pub use own_pictures::{OwnPictures, KEPT_PICTURES};
@@ -146,6 +157,7 @@ pub use places::{
     CopyTakeover, DefaultPlaces, PlaceRules,
 };
 pub use search::{SearchBox, SearchController, SearchEndedListener, SearchMaker, DEBOUNCE};
+pub use sheet_dialogs::{DialogSheet, SheetDialogs};
 pub use state::{
     entries_message, is_only_a_message, item_identity_key, search_listing, BrowserEntry,
     BrowserState, ContainerChangedListener, ItemEvent, ListSlot, ListingMessage, OpenFolder,
@@ -160,7 +172,9 @@ pub use tree::{
 /// Every English literal this crate hands to `agg_gui_files::tr`.
 pub const ENGLISH_TEXTS: &[&str] = &[
     "Add",
+    "Are you sure you want to remove the currently selected items?",
     "Ascending",
+    "Cancel",
     "Clear",
     "Click to go back",
     "Copy to {0}",
@@ -168,11 +182,17 @@ pub const ENGLISH_TEXTS: &[&str] = &[
     "Couldn't find the location of",
     "Couldn't move to",
     "Couldn't put back",
+    "Create",
     "Create Folder",
     "Date Created",
     "Date Modified",
     "Descending",
+    "Folder Name",
     "Move",
+    "Move to Recycle Bin",
+    "Move to Recycle Bin?",
+    "Move to Trash",
+    "Move to Trash?",
     "Move to {0}",
     "Moved",
     "Name",
@@ -181,11 +201,15 @@ pub const ENGLISH_TEXTS: &[&str] = &[
     "Redo",
     "Redone",
     "Remove",
+    "Remove Items?",
     "Rename",
+    "Rename Item",
     "Search",
     "Searching for '{0}'",
     "Show Folders",
     "Sorting",
+    "The selected items will go to the Recycle Bin, where you can restore them.",
+    "The selected items will go to the Trash, where you can restore them.",
     "This folder can't be changed",
     "This folder is busy. Open it again to see the change.",
     "Undo",

@@ -14,7 +14,7 @@ use agg_gui::text::Font;
 use agg_gui::{App, Modifiers, MouseButton, Point, Rect, Size, Widget};
 use agg_gui_file_browser::{
     BrowserAction, BrowserActions, BrowserCommand, BrowserConfig, BrowserRef, BrowserState,
-    BrowserTree, Builtins,
+    BrowserTree, Builtins, SheetDialogs,
 };
 use agg_gui_files::{Folder, MemoryFolder};
 
@@ -303,7 +303,10 @@ impl BrowserActions for Menus {
 fn a_right_press_opens_the_folders_menu_asked_with_it_as_the_selection() {
     let (home, _) = home();
     let actions = Rc::new(Menus::default());
-    let config = BrowserConfig::builder().actions(actions.clone()).build();
+    let config = BrowserConfig::builder()
+        .actions(actions.clone())
+        .dialogs(Rc::new(SheetDialogs::new()))
+        .build();
     let (mut app, state) = tree_app(Box::new(home), config);
     let projects = row_named(&app, "Projects Tree Node");
     press_row(&mut app, projects, ARROW_X, MouseButton::Left);
@@ -321,10 +324,13 @@ fn a_right_press_opens_the_folders_menu_asked_with_it_as_the_selection() {
     assert!(titles.contains(&"Show Info"), "{titles:?}");
     assert!(titles.contains(&"Remove"), "{titles:?}");
     assert!(!titles.contains(&"Create Folder..."), "{titles:?}");
-    for (title, enabled) in &menu {
-        // The built-ins are greyed until the browser runs them; the app's command runs.
-        assert_eq!(*enabled, title == "Show Info", "{title}");
-    }
+    // The menu holds what can run: Rename and Remove (the dialogs confirm and ask names), no
+    // Move (no Move dialog) and no Open File Location (nothing locates).
+    assert_eq!(titles, ["Rename", "Remove", "Show Info"]);
+    assert!(menu
+        .iter()
+        .filter(|(t, _)| !t.is_empty())
+        .all(|(_, enabled)| *enabled));
     // Asked for in the folder above, with the folder as the selection.
     assert_eq!(
         *actions.asked.borrow(),

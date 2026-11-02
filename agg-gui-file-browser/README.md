@@ -27,6 +27,9 @@ don't compile it. It builds for `wasm32-unknown-unknown`.
 | `Entry`, `BrowserRef` | The snapshots hooks are handed, so no hook runs while the browser's state is borrowed; a `BrowserRef` also reaches back to the live browser and its app slot |
 | `default_drop_copies`, `copy_modifier_held` | Move or copy: items move within a place, and are copied between places, out of folders that keep them, or with Option (Mac) or Ctrl held |
 | `LocalSpawner` | Background work for apps without an executor, run a step at a time from agg-gui's UI-queue drain |
+| `BrowserCommand`, `ActionScope`, `BuiltinAction`, `run_builtin` | Menu rows: an app's commands with icons (through the look), shortcuts, scopes, submenus and rows left out while they can't run, and the browser's own Add, Create Folder..., Open File Location, Rename, Move and Remove, which run, recorded for Undo, asking through the app's dialogs |
+| `SheetDialogs`, `DialogSheet` | Ready dialogs on agg-gui's `ModalSheet` for an app without its own: confirming a change and asking for a name |
+| `OverflowButton` | The navigation bar's "File" button with the folder's whole menu |
 
 ```rust
 use std::rc::Rc;

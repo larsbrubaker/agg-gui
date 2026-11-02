@@ -1,6 +1,10 @@
 //! The questions a browser asks the user, through the app's dialogs ([`BrowserDialogs`]):
 //! confirming a change ([`Confirmation`]: removing items), asking for a name ([`NameRequest`]:
-//! a new folder, a rename) and picking files to add.
+//! a new folder, a rename), picking files to add, and picking the folder a Move goes to
+//! ([`MoveRequest`]). [`SheetDialogs`](crate::SheetDialogs) (`sheet_dialogs/`) is a ready set
+//! on agg-gui's `ModalSheet` for an app without its own: it confirms and asks for names, and
+//! offers neither file picking (agg-gui has no file picker) nor the Move dialog (the composed
+//! browser's page).
 //!
 //! The browser asks only what [`BrowserDialogs::offers`] says the app can show, and leaves the
 //! action that needs a dialog it lacks unavailable (greyed in its menu), so nothing is ever done
@@ -13,7 +17,7 @@
 
 use std::rc::Rc;
 
-use agg_gui_files::Item;
+use agg_gui_files::{FolderLink, Item};
 
 /// A dialog a browser can ask for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -25,7 +29,47 @@ pub enum DialogKind {
     AskName,
     /// Pick files to add ([`BrowserDialogs::pick_files`]).
     PickFiles,
+    /// Pick the folder a Move goes to ([`BrowserDialogs::pick_move_target`]).
+    PickMoveTarget,
 }
+
+/// The Move dialog's question: the items moving, already gathered (the selection is cleared by
+/// the move), and the place of the folder they leave, so the dialog can say whether a folder it
+/// offers moves or copies them (`PlaceRules`).
+#[derive(Clone)]
+#[non_exhaustive]
+pub struct MoveRequest {
+    pub items: Vec<Rc<dyn Item>>,
+    pub source_place: Option<agg_gui_files::PlaceId>,
+}
+
+impl MoveRequest {
+    pub fn new(items: Vec<Rc<dyn Item>>, source_place: Option<agg_gui_files::PlaceId>) -> Self {
+        Self {
+            items,
+            source_place,
+        }
+    }
+}
+
+impl std::fmt::Debug for MoveRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MoveRequest")
+            .field(
+                "items",
+                &self
+                    .items
+                    .iter()
+                    .map(|i| i.name().to_string())
+                    .collect::<Vec<_>>(),
+            )
+            .field("source_place", &self.source_place)
+            .finish()
+    }
+}
+
+/// Hears the folder a Move goes to, or `None` when the user cancelled.
+pub type PickedMoveTarget = Box<dyn FnOnce(Option<Rc<dyn FolderLink>>)>;
 
 /// A change the user confirms: the dialog's title, what it says, and the confirming button's
 /// label, all already translated.
@@ -107,6 +151,14 @@ pub trait BrowserDialogs {
     /// cancelled). The default answers none.
     fn pick_files(&self, answer: PickedFiles) {
         answer(Vec::new());
+    }
+
+    /// Asks the user where `request`'s items go; `answer` hears the folder picked (the browser
+    /// then moves or copies them there as a drop onto it would), or `None` when they cancelled.
+    /// The default answers `None`.
+    fn pick_move_target(&self, request: MoveRequest, answer: PickedMoveTarget) {
+        let _ = request;
+        answer(None);
     }
 }
 

@@ -14,7 +14,7 @@ use agg_gui::text::Font;
 use agg_gui::{App, Framebuffer, GfxCtx, Modifiers, MouseButton, Point, Rect, Size, Widget};
 use agg_gui_file_browser::{
     Activation, BrowserActions, BrowserConfig, BrowserList, BrowserRef, BrowserState, Entry,
-    ItemPictures, PictureCx, PictureState, SignInOffer, ViewMode,
+    ItemPictures, PictureCx, PictureState, SheetDialogs, SignInOffer, ViewMode,
 };
 use agg_gui_files::{Folder, FolderLink, Item, ListingFailure, MemoryFolder, MessageItem};
 
@@ -275,23 +275,23 @@ fn a_double_click_activates_an_item_through_the_hook_and_opens_a_folder() {
 
 #[test]
 fn the_menu_button_opens_the_selections_menu_and_empty_space_the_folders() {
-    let (mut app, state) = list_app(Box::new(home()), BrowserConfig::default(), ViewMode::Rows);
+    // Dialogs that confirm and ask names, so Rename, Remove and Create Folder... can run.
+    let config = BrowserConfig::builder()
+        .dialogs(Rc::new(SheetDialogs::new()))
+        .build();
+    let (mut app, state) = list_app(Box::new(home()), config, ViewMode::Rows);
     let row = rect_of(&app, "Row Item a.txt");
     // The row's box is inset 6 each side; the button is centred on the glyph at its right end.
     let button = Point::new(row.x + row.width - 6.0 - 16.0, row.y + 50.0 - 3.0 - 16.0);
     click_at(&mut app, button, MouseButton::Left, Modifiers::default(), 1);
     assert_eq!(selected(&state), ["a.txt"]);
     assert!(list(&app).menu_is_open());
+    // The selection's menu holds what can run: no Move dialog and no way to locate an item
+    // here, so Move and Open File Location are left out.
     let titles: Vec<(String, bool)> = list(&app).menu_rows();
     assert_eq!(
         titles,
-        [
-            ("Open File Location".to_string(), false),
-            (String::new(), false),
-            ("Rename".to_string(), false),
-            ("Move".to_string(), false),
-            ("Remove".to_string(), false),
-        ]
+        [("Rename".to_string(), true), ("Remove".to_string(), true),]
     );
     // A press outside the menu closes it.
     click_at(
@@ -313,20 +313,23 @@ fn the_menu_button_opens_the_selections_menu_and_empty_space_the_folders() {
         list(&app).menu_rows(),
         [
             ("Add".to_string(), false),
-            ("Create Folder...".to_string(), false)
+            ("Create Folder...".to_string(), true)
         ]
     );
 }
 
 #[test]
 fn a_right_press_on_a_row_selects_it_and_opens_its_menu() {
-    let (mut app, state) = list_app(Box::new(home()), BrowserConfig::default(), ViewMode::Icons);
+    let config = BrowserConfig::builder()
+        .dialogs(Rc::new(SheetDialogs::new()))
+        .build();
+    let (mut app, state) = list_app(Box::new(home()), config, ViewMode::Icons);
     let at = centre(rect_of(&app, "Row Item c.txt"));
     click_at(&mut app, at, MouseButton::Right, Modifiers::default(), 1);
     assert_eq!(selected(&state), ["c.txt"]);
     assert_eq!(
         list(&app).menu_rows().first().map(|r| r.0.as_str()),
-        Some("Open File Location")
+        Some("Rename")
     );
 }
 

@@ -5,16 +5,24 @@
 //! their usual order, and activation left to the browser (a folder row opens).
 //!
 //! An app's menu is the whole ordered list ([`BrowserAction`]s), so it decides where the
-//! built-ins sit among its own commands. The browser turns each `Builtin` into its own action
-//! and each `Command` into a menu row. A folder refused for the sign-in shows the app's Sign In
-//! ([`BrowserActions::sign_in`], a [`SignInOffer`]) under its message.
+//! built-ins sit among its own commands. The browser turns each `Builtin` into its own action,
+//! which runs (`builtins/`), and each `Command` into a menu row with the command's icon,
+//! shortcut, scope and submenu (`command.rs`, built by `list/list_menu.rs`). A folder refused for
+//! the sign-in shows the app's Sign In ([`BrowserActions::sign_in`], a [`SignInOffer`]) under its
+//! message. Open File Location asks the app where an item lives ([`BrowserActions::can_locate`],
+//! [`BrowserActions::locate`], an [`ItemLocation`]): a search result's folder or a shortcut's
+//! real folder is found the app's own way.
 
 use std::fmt;
 use std::rc::Rc;
 
-use agg_gui_files::tr;
+use agg_gui_files::{tr, Folder, Item};
 
 use crate::entry::{BrowserRef, Entry};
+
+mod command;
+
+pub use command::{ActionScope, BrowserCommand};
 
 /// One of the browser's own actions, which an app places in its menu.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -61,6 +69,28 @@ impl BuiltinAction {
     /// folder (the list's menu on its empty space).
     pub fn acts_on_selection(self) -> bool {
         !matches!(self, BuiltinAction::Add | BuiltinAction::CreateFolder)
+    }
+
+    /// The menus its row is in.
+    pub fn scope(self) -> ActionScope {
+        match self.acts_on_selection() {
+            true => ActionScope::Selection,
+            false => ActionScope::Folder,
+        }
+    }
+
+    /// The icon key its row asks the look for (`BrowserLook::icon_for_key`): "add",
+    /// "create_folder", "open_file_location", "rename", "move" or "remove". The default look has
+    /// none, so the row shows no icon until the app's look gives one.
+    pub fn icon_key(self) -> &'static str {
+        match self {
+            BuiltinAction::Add => "add",
+            BuiltinAction::CreateFolder => "create_folder",
+            BuiltinAction::OpenFileLocation => "open_file_location",
+            BuiltinAction::Rename => "rename",
+            BuiltinAction::Move => "move",
+            BuiltinAction::Remove => "remove",
+        }
     }
 
     /// The default menu's group: adding to the folder, finding the item, changing it. Groups are
@@ -124,68 +154,41 @@ impl Builtins {
     }
 }
 
-/// An app's own menu command: a title (already translated), whether it can run now, and what it
-/// does. The closure captures what it acts on (the [`BrowserRef`] its menu was built from).
-#[derive(Clone)]
-pub struct BrowserCommand {
-    title: String,
-    enabled: bool,
-    run: Rc<dyn Fn()>,
-}
-
-impl BrowserCommand {
-    /// The command `title`, enabled, running `run`.
-    pub fn new(title: impl Into<String>, run: impl Fn() + 'static) -> Self {
-        Self {
-            title: title.into(),
-            enabled: true,
-            run: Rc::new(run),
-        }
-    }
-
-    /// The same command, enabled or not (shown greyed and doing nothing when not).
-    pub fn enabled(mut self, enabled: bool) -> Self {
-        self.enabled = enabled;
-        self
-    }
-
-    /// The title the menu row shows.
-    pub fn title(&self) -> &str {
-        &self.title
-    }
-
-    /// Whether the command can run.
-    pub fn is_enabled(&self) -> bool {
-        self.enabled
-    }
-
-    /// Runs the command when it is enabled; answers whether it ran.
-    pub fn run(&self) -> bool {
-        if self.enabled {
-            (self.run)();
-        }
-        self.enabled
-    }
-}
-
-impl fmt::Debug for BrowserCommand {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("BrowserCommand")
-            .field("title", &self.title)
-            .field("enabled", &self.enabled)
-            .finish()
-    }
-}
-
 /// One row of a browser's menu.
 #[derive(Clone, Debug)]
 pub enum BrowserAction {
-    /// One of the browser's own actions.
+    /// One of the browser's own actions, which the browser runs (`builtins/`); left out of a menu
+    /// that doesn't offer it ([`Builtins`]).
     Builtin(BuiltinAction),
-    /// The app's own command.
+    /// The app's own command, a submenu included.
     Command(BrowserCommand),
-    /// A line between groups.
+    /// A line between groups; a menu shows it only between two rows it keeps.
     Separator,
+}
+
+/// Where "Open File Location" takes the user: the folders `folders` opened below the path's
+/// folder at `base` (0 = the root), the last of them showing, or `None` when the item's folder
+/// is gone (said on the status line). See [`BrowserActions::locate`].
+pub struct ItemLocation {
+    /// The depth of the open path's folder the located folders open below.
+    pub base: usize,
+    /// The folders, outermost first; `None` when there is nowhere to go.
+    pub folders: Option<Vec<Box<dyn Folder>>>,
+}
+
+impl fmt::Debug for ItemLocation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ItemLocation")
+            .field("base", &self.base)
+            .field(
+                "folders",
+                &self
+                    .folders
+                    .as_ref()
+                    .map(|v| v.iter().map(|f| f.name().to_string()).collect::<Vec<_>>()),
+            )
+            .finish()
+    }
 }
 
 /// How a row was activated.
@@ -246,6 +249,24 @@ pub trait BrowserActions {
     /// cannot sign in.
     fn sign_in(&self, state: &BrowserRef, folder_text: &str) -> Option<SignInOffer> {
         let _ = (state, folder_text);
+        None
+    }
+
+    /// Whether "Open File Location" can find where `item`, the one selected row of `state`,
+    /// lives. Only the app knows: a search result's folder, a shortcut's real folder, a cloud
+    /// design's folder are each found its own way, so the browser asks rather than guesses. The
+    /// default finds nothing, leaving the action greyed.
+    fn can_locate(&self, state: &BrowserRef, item: &dyn Item) -> bool {
+        let _ = (state, item);
+        false
+    }
+
+    /// Where `item`, the one selected row of `state`, lives (see [`BrowserActions::can_locate`]);
+    /// the browser then shows it (`BrowserState::show_location`). Asked with the state not
+    /// borrowed: the hook may borrow it through `state.live()` to read the open path. The
+    /// default finds nothing.
+    fn locate(&self, state: &BrowserRef, item: &Rc<dyn Item>) -> Option<ItemLocation> {
+        let _ = (state, item);
         None
     }
 }

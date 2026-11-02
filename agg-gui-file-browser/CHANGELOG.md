@@ -51,8 +51,7 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   (`ItemPress`, `DRAG_THRESHOLD`; what a drag carries comes with the browser's drag and drop); the
   selection's menu from a right press or a hovered row's menu button (`MenuButtonState`), the
   folder's from a right press on empty space or the list's top-right corner, each the app's
-  `BrowserActions::menu` with the built-ins offered there (`MenuScope`; the built-ins show greyed
-  until the browser runs them); a row the app selects scrolled into view; and a folder whose
+  `BrowserActions::menu` with the built-ins offered there (`MenuScope`); a row the app selects scrolled into view; and a folder whose
   listing is only a message shows it in place of the rows (`FolderMessage`), under the look's
   warning for a refusal, with the app's Sign In (`BrowserActions::sign_in`, `SignInOffer`).
 - `BrowserState::menu_button`, `menu_button_mut`, `item_press` and `item_press_mut`: the rows'
@@ -82,8 +81,7 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   browser's folder is opened down to and drawn selected; after a write the tree lists itself again,
   and the showing folder's content changes list its row again; a right press shows the folder and
   opens the tree's menu, the app's `BrowserActions::menu` for the folder as the temporary
-  selection in the folder above it (the selection's built-ins greyed until the browser runs them),
-  each command run with that selection set again. The rows as data are `TreeModel` (`TreeNode`,
+  selection in the folder above it, each command run with that selection set again. The rows as data are `TreeModel` (`TreeNode`,
   `for_state`, `sync_to`, `toggle`, `relist`, `content_changed`, `expand_to`, `showing_row`,
   `selected_link`, `indented_names`); rows are known by their folders' location keys, else by
   name (`TreePlace`, `TreeKey`, `path_keys`, `PathLevel`, `BrowserState::path_levels`), so two
@@ -176,8 +174,40 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   `sign_in_button`, `search_status` ("Search Status") and `search_section` ("Search Section
   {name}").
 
+- The browser's own menu actions run (`builtins`): Create Folder... asks "Folder Name" and makes
+  the folder, Rename asks "Name" over the current name (from the tree, the folder renamed while
+  it shows is shown again by its new name), Remove confirms ("Move to Trash?" or "Move to Recycle
+  Bin?" for a folder on the computer, "Remove Items?" elsewhere) and removes, each recorded for
+  Undo through `BrowserState::write_recorded`; Move asks the app's Move dialog
+  (`BrowserDialogs::pick_move_target`, `MoveRequest`, `DialogKind::PickMoveTarget`) and moves as a
+  drop onto the folder picked does; Add adds the files the app's picker gives; Open File Location
+  shows where `BrowserActions::locate` says the item lives (`can_locate`, `ItemLocation`). Each
+  runs only when it can: a writable folder that allows the change, one row for Rename and Open
+  File Location, no protected rows, and the dialog it needs offered. `run_builtin` runs one.
+- `BrowserCommand` carries an icon key the look resolves (`with_icon`, through
+  `BrowserLook::icon_for_key`), a shortcut shown on its row (`with_shortcut`), a hover help
+  (`with_tooltip`), its menus (`with_scope`, `ActionScope::{Selection, Folder}`), `only_when_enabled`
+  (left out rather than greyed) and submenus (`BrowserCommand::submenu`); built-ins carry an icon
+  key of their own (`BuiltinAction::icon_key`) and a scope (`BuiltinAction::scope`).
+- `menu_actions` and `select_rows`: the rows a menu shows. The selection's menus (a row's, the
+  tree's) show the rows of their scope that can run now; the list's own menu the rows of its
+  scope, greyed when they can't run; the overflow menu (`MenuScope::Overflow`) every row; a
+  separator only between two rows kept. `BrowserList::menu_entries` and
+  `BrowserTree::menu_entries` give the open menu as built.
+- `OverflowButton`, the navigation bar's "File" button (`BrowserIcon::Overflow`, named
+  `BrowserNames::overflow_menu`), opening the open folder's whole ordered menu.
+- `SheetDialogs` and `DialogSheet`: dialogs on agg-gui's `ModalSheet` for an app without its own,
+  confirming a change and asking for a name (an empty name accepts nothing); they offer no file
+  picker and no Move dialog.
+- Delete and Backspace run Remove, with its question, in the list and in the tree (the tree's
+  selected folder).
+
 ### Changed
 
+- A selection's menu (a row's, the tree's) holds only the rows that can run now, as a
+  right-click menu should; the built-ins in it run rather than showing greyed. `MenuScope` has
+  `Overflow`. Migration: a test that read a greyed built-in in the selection's menu gives the
+  browser dialogs (`SheetDialogs`) or reads the overflow menu.
 - `BrowserConfig::report` is an `Option`: `None` (the default) shows errors on the browser's own
   status line (`BrowserState::status`), where the user sees them, rather than on standard error.
   The default spawner still reports its faults to standard error when no report is given.

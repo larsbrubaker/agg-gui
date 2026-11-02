@@ -26,7 +26,8 @@
 //!
 //! A press on a row gives the tree the keyboard (`BrowserState::tree_focus_id`), where the
 //! history's undo and redo keys take back and replay its steps (`history/run.rs`), as they do in
-//! the list, so they never reach an app's own undo while the tree has the keys.
+//! the list, so they never reach an app's own undo while the tree has the keys; Delete and
+//! Backspace remove the folder drawn selected, through its menu's Remove and its question.
 
 pub mod menu;
 pub mod model;
@@ -40,7 +41,7 @@ use std::sync::Arc;
 use agg_gui::focus::FocusId;
 use agg_gui::text::Font;
 use agg_gui::{
-    Color, DrawCtx, Event, EventResult, MouseButton, Point, Rect, Size, Widget, WidgetBase,
+    Color, DrawCtx, Event, EventResult, Key, MouseButton, Point, Rect, Size, Widget, WidgetBase,
 };
 
 use crate::list::list_menu::ListMenu;
@@ -125,6 +126,11 @@ impl BrowserTree {
     /// no menu is open.
     pub fn menu_rows(&self) -> Vec<(String, bool)> {
         self.menu.rows()
+    }
+
+    /// The open menu's entries as built (icons, shortcuts and submenus included).
+    pub fn menu_entries(&self) -> &[agg_gui::widgets::menu::MenuEntry] {
+        self.menu.entries()
     }
 
     /// Whether the tree's menu is open.
@@ -256,6 +262,10 @@ impl Widget for BrowserTree {
             return result;
         }
         if let Event::KeyDown { key, modifiers } = event {
+            if matches!(key, Key::Delete | Key::Backspace) && !(modifiers.ctrl || modifiers.meta) {
+                menu::remove_selected_folder(&self.state, &self.model);
+                return EventResult::Consumed;
+            }
             return crate::history::run::history_key_event(&self.state, key, *modifiers)
                 .unwrap_or(EventResult::Ignored);
         }
