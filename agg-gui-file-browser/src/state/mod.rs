@@ -133,6 +133,8 @@ pub struct BrowserState {
     menu_button: MenuButtonState,
     /// A press on a row or tile and whether it became a drag.
     item_press: ItemPress,
+    /// The drag of the browser's items onto its folders (`drag/`).
+    pub(crate) drop: crate::drag::DropManager,
     /// This state's own handle, which snapshots carry back to it.
     me: Weak<RefCell<BrowserState>>,
 }
@@ -190,6 +192,7 @@ impl BrowserState {
             finger_tap_opens_folders: options.finger_tap_opens_folders,
             menu_button: MenuButtonState::default(),
             item_press: ItemPress::default(),
+            drop: crate::drag::DropManager::default(),
             me: Weak::new(),
         }));
         {

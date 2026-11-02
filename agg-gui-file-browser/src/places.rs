@@ -14,12 +14,16 @@
 //!
 //! [`default_drop_copies`] is that rule before the drop, from the target row's place (what the
 //! drag shows: a "+" badge, "Copy to"); [`default_crosses_places`] is its final word once the
-//! target folder is open. The widgets that read them arrive with drag and drop.
+//! target folder is open. The drag (`drag/`) reads them.
 
 use std::rc::Rc;
 
 use agg_gui::Modifiers;
 use agg_gui_files::{ContainerActions, Folder, Item, PlaceId};
+
+use crate::config::ErrorReport;
+use crate::history::HistoryRecorder;
+use crate::state::OpenFolder;
 
 /// Whether `modifiers` hold the copy modifier: Option on the Mac, Ctrl on Windows and Linux.
 pub fn copy_modifier_held(modifiers: Modifiers) -> bool {
@@ -67,8 +71,9 @@ pub fn default_crosses_places(source: &dyn Folder, target: &dyn Folder) -> bool 
 }
 
 /// A copy the browser is about to run: the items, the opened folder they go into and its name
-/// (for the notice and any failure). Handed by value to [`PlaceRules::take_over_copy`], which
-/// keeps it when it runs the copy and hands it back when it does not.
+/// (for the notice and any failure), the folder they come from, where its history step goes and
+/// where its failures go. Handed by value to [`PlaceRules::take_over_copy`], which keeps it when
+/// it runs the copy and hands it back when it does not.
 pub struct CopyCx {
     /// What is copied, in the order the user picked it.
     pub items: Vec<Rc<dyn Item>>,
@@ -76,6 +81,13 @@ pub struct CopyCx {
     pub target: Box<dyn Folder>,
     /// The target folder's name, as the user reads it.
     pub target_name: String,
+    /// The open folder the items come from, `None` when the browser knows none (the browser
+    /// borrows it only for the length of its own calls).
+    pub source: Option<OpenFolder>,
+    /// Records the copy's history step when it lands, from the copy's own callback.
+    pub recorder: HistoryRecorder,
+    /// Shows the user a copy's failure (already translated).
+    pub report: ErrorReport,
 }
 
 /// What [`PlaceRules::take_over_copy`] did with a copy.

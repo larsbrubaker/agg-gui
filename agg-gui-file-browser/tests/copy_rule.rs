@@ -8,7 +8,8 @@ use std::rc::Rc;
 
 use agg_gui::Modifiers;
 use agg_gui_file_browser::{
-    copy_modifier_held, default_crosses_places, CopyCx, CopyTakeover, DefaultPlaces, PlaceRules,
+    copy_modifier_held, default_crosses_places, BrowserHistory, CopyCx, CopyTakeover,
+    DefaultPlaces, PlaceRules,
 };
 use agg_gui_files::{
     ContainerActions, Folder, FolderLink, Item, MemoryFolder, PlaceId, WritableFolder,
@@ -167,6 +168,9 @@ fn the_default_rules_hand_every_copy_back_whole() {
         items: vec![Rc::clone(&item)],
         target: Box::new(target),
         target_name: "Brackets".into(),
+        source: None,
+        recorder: Rc::new(BrowserHistory::new()).recorder(),
+        report: Rc::new(|_: &str| {}),
     };
     match DefaultPlaces.take_over_copy(cx) {
         CopyTakeover::Taken => panic!("the default runs no copy itself"),
@@ -197,6 +201,9 @@ fn an_app_can_take_copies_over() {
         items: Vec::new(),
         target: Box::new(folder),
         target_name: name.into(),
+        source: None,
+        recorder: Rc::new(BrowserHistory::new()).recorder(),
+        report: Rc::new(|_: &str| {}),
     };
     let shelf = MemoryFolder::new("Shelf").with_place(cloud());
     assert!(matches!(

@@ -203,6 +203,7 @@ impl Widget for BrowserTile {
         tile_size(self.thumb, &self.cx.font, style.tile_font_size, self.named)
     }
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
+        let lifted = crate::drag::picture::lift(ctx, &self.cx.state, &self.parts.entry.item());
         let style = &self.cx.style;
         let (w, h) = (self.bounds.width, self.bounds.height);
         // Everything inside the border is rounded by what is left of the tile's radius there,
@@ -215,6 +216,15 @@ impl Widget for BrowserTile {
             ctx.rounded_rect(0.0, 0.0, w, h, radius);
             ctx.fill();
         }
+        crate::drag::badge::paint_entry_target(
+            ctx,
+            &self.cx.state,
+            &self.parts.entry,
+            self.index,
+            (w, h),
+            Rect::new(0.0, 0.0, w, h),
+            style,
+        );
         let picture = self.picture_rect();
         ctx.set_fill_color(style.thumbnail_background);
         ctx.begin_path();
@@ -250,6 +260,7 @@ impl Widget for BrowserTile {
         if self.hovered && shows_menu_button(w) {
             paint_art(ctx, &self.cx.overflow, menu_glyph_rect(w, h));
         }
+        crate::drag::picture::finish_lift(ctx, &self.cx.state, lifted, &self.parts.art.art);
     }
     /// The tile takes every press over it, and hands the overlay its own (`list/overlay.rs`).
     fn claims_pointer_exclusively(&self, _local_pos: Point) -> bool {
@@ -289,7 +300,12 @@ impl Widget for BrowserTile {
         })
     }
     fn properties(&self) -> Vec<(&'static str, String)> {
-        vec![
+        let drag = crate::drag::badge::entry_drop_properties(
+            &self.cx.state,
+            &self.parts.entry,
+            self.index,
+        );
+        let mut properties = vec![
             ("name", self.name.clone()),
             ("shown_name", self.shown_name.clone()),
             ("selected", self.parts.selected.to_string()),
@@ -303,7 +319,9 @@ impl Widget for BrowserTile {
             ("thumbnail_center", self.parts.art.center_pixel_text()),
             ("thumb_size", self.thumb.to_string()),
             ("menu_glyph", self.hovered.to_string()),
-        ]
+        ];
+        properties.extend(drag);
+        properties
     }
 }
 

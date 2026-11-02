@@ -36,7 +36,7 @@
 //!   hook that calls back into the browser never meets a held borrow; [`BrowserState`]'s public
 //!   ways to activate a row take the shared state and run the hooks once its borrow has ended.
 //!   [`BrowserMemory::remember_location`] is handed the open path's shared folders, the state not
-//!   borrowed. The one exception: the memory's `view`/`set_view` and the error report may run
+//!   borrowed. A drop's `PlaceRules` and `OutsideDrops` calls run with the state let go too. The one exception: the memory's `view`/`set_view` and the error report may run
 //!   while the state is borrowed, since they are handed only names or a message and no way to
 //!   reach the browser.
 //! - **Tracing is the app's.** The browser's trace lines go through [`trace()`] to the tracer the
@@ -48,7 +48,9 @@
 //! config and its options), `entry` (what hooks are handed), `pictures`, `actions`, `drops`,
 //! `places`, `memory` and `dialogs` (the hooks and their defaults), `local_spawner` (the
 //! spawner for apps without an executor), `trace` (the opt-in trace through the app's tracer);
-//! `state` ([`BrowserState`], what a browser is looking at: the open path, the listing, view and
+//! `drag` ([`DropManager`], the drag of the browser's items onto its folders: targets recorded
+//! as they paint, the highlight and label, the move or copy the drop runs with its history step,
+//! copies offered to the app first); `state` ([`BrowserState`], what a browser is looking at: the open path, the listing, view and
 //! sort, the selection and its gestures, activation, the status line and the app slot);
 //! `own_pictures` (the default pictures: each item's own); `list` ([`BrowserList`], the rows or
 //! tiles of the showing folder, or its message, with their gestures and menus); `tree`
@@ -65,6 +67,7 @@ pub mod actions;
 pub mod bread_crumb;
 pub mod config;
 pub mod dialogs;
+pub mod drag;
 pub mod drops;
 pub mod entry;
 pub mod fitted_text;
@@ -92,6 +95,12 @@ pub use config::{
     ErrorReport, FolderFilter,
 };
 pub use dialogs::{BrowserDialogs, Confirmation, DialogKind, NameRequest, NoDialogs, PickedFiles};
+pub use drag::badge::{paint_plus_badge, painted_rect, register_painted};
+pub use drag::execute::{couldnt_copy_to, drop_into, drop_onto};
+pub use drag::gesture::{drag_end, drag_lost, drag_over};
+pub use drag::picture::{DragPicture, CARRIED_ALPHA, PICTURE_SIDE};
+pub use drag::spring::{SpringOpen, SPRING_DELAY};
+pub use drag::{DropKey, DropLabel, DropManager, DropTargetKind};
 pub use drops::{OutsideDrops, OutsideOver};
 pub use entry::{BrowserRef, Entry};
 pub use fitted_text::{
@@ -141,9 +150,14 @@ pub use tree::{
 pub const ENGLISH_TEXTS: &[&str] = &[
     "Add",
     "Click to go back",
+    "Copy to {0}",
+    "Couldn't copy to",
     "Couldn't find the location of",
+    "Couldn't move to",
     "Create Folder",
     "Move",
+    "Move to {0}",
+    "Moved",
     "No results",
     "Open File Location",
     "Remove",

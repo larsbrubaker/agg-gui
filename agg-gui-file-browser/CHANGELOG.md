@@ -110,6 +110,25 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 - `BrowserNotice`, the notice announcing each change with its Undo or Redo button
   (`NoticeButton`), held five seconds and faded over one (`notice_alpha`, `NOTICE_HOLD_MS`,
   `NOTICE_FADE_MS`) unless hovered or its button has the keyboard; `Notice` and `NoticeAction`.
+- Drag and drop (`drag`): a press in the list that moves past the threshold carries the
+  selection; folder rows, tiles and tree rows record themselves as targets as they paint
+  (`DropManager`, `register_painted`, `DropKey`, `DropTargetKind`), light up with the accent
+  under the drag and label the drop ("Move to {0}", "Copy to {0}", the "+" badge;
+  `DropLabel`, rows' and tiles' `drop_label`/`lifted`, tree rows' `drop_highlighted`/
+  `drop_label`); read-only folders and the dragged folders themselves take nothing. The drop
+  moves through `move_in_recorded` (its step on the history; a failure reported with what did
+  move) or copies when the drag asks (the copy modifier, a source that keeps its items) or the
+  folders are in two places: offered to `PlaceRules::take_over_copy` first, else through the
+  target's `copy_in` on the spawner (its step recorded on landing) or `add`
+  (`drop_onto`, `drop_into`). A drag held over a folder for `SPRING_DELAY` opens it, in the
+  tree in place and in the list as the showing folder, where a drop on the empty space lands
+  (`SpringOpen`). The drag's picture (`DragPicture`, 64 units, the count and copy badges)
+  follows the pointer in the list's global overlay (`drag_picture` properties); outside the
+  list and tree the app's `OutsideDrops` is asked (`over`, hiding the picture when it says so),
+  handed a release there, and told `cancel` when the drag comes back or is lost to another
+  window. Carried rows paint at half opacity.
+- `CopyCx` gains `source` (the open folder the items come from), `recorder` (for the copy's
+  history step) and `report`.
 - `BrowserNames::notice` ("Library Notice") and `notice_button` ("Library Notice Button");
   `BrowserStyle::notice_font_size` (10 pt).
 - `OwnPictures`: each item shows the picture its folder or the item itself makes of it, made on

@@ -11,6 +11,12 @@
 //! list shown anew goes back to the top; one keeping its place (a selection) keeps its scroll; a
 //! row the app selected for the user is scrolled into view (`reveal.rs`).
 //!
+//! Folder rows and tiles record themselves as drop targets as they paint, after the list forgets
+//! last frame's and records its own rectangle, and light up under a drag (`drag/`); a folder the
+//! drag waited over opens in the list as the list paints (`drag/spring.rs`), and the drag's
+//! picture is drawn in the list's global overlay (`drag/picture.rs`, the list's `drag_picture`
+//! properties).
+//!
 //! The list is also where its menus open (`list_menu.rs`) and its keys and rubber band are
 //! handled (`gestures.rs`): a row asks for the selection's menu (a right press, or its menu
 //! button, `menu_button.rs`) and the press bubbles here, which opens it where it was pressed or
@@ -52,7 +58,7 @@ use crate::state::BrowserState;
 use build::ListCx;
 use gestures::{band_pointer_event, list_key_event, paint_band};
 use icon_view::TileStack;
-use item_event::{press_lost, press_moved};
+use item_event::{press_lost, press_moved, release_rowless};
 use list_menu::{ListMenu, MenuScope};
 use menu_button::MENU_GLYPH_SIZE;
 use message::{warning_icon, FolderMessage};
@@ -270,12 +276,20 @@ impl Widget for BrowserList {
         }
         available
     }
-    /// Records where the list is in the window, for a drag that ends outside it.
+    /// Records where the list is in the window, for a drag that ends outside it and for drops,
+    /// and forgets last frame's folder targets before the rows record them again.
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
         let (mut x, mut y) = (0.0, 0.0);
         agg_gui::logical_root_transform(ctx).transform(&mut x, &mut y);
         let rect = Rect::new(x, y, self.bounds.width, self.bounds.height);
-        self.state.borrow_mut().item_press_mut().set_list_rect(rect);
+        // A folder in the list the drag has waited over opens, found among last frame's targets.
+        crate::drag::spring::spring_list(&self.state);
+        let mut s = self.state.borrow_mut();
+        s.item_press_mut().set_list_rect(rect);
+        // The folders record themselves as drop targets again as they paint, after this.
+        s.drop_manager_mut().set_list_rect(rect);
+        s.drop_manager_mut()
+            .clear_targets(crate::drag::DropTargetKind::Content);
     }
     /// The rubber band over the rows.
     fn paint_overlay(&mut self, ctx: &mut dyn DrawCtx) {
@@ -290,10 +304,16 @@ impl Widget for BrowserList {
             style.corner_radius,
         );
     }
-    /// The open menu, over everything.
+    /// The drag's picture, then the open menu, over everything.
     fn paint_global_overlay(&mut self, ctx: &mut dyn DrawCtx) {
-        let size = self.look.style().font_size;
-        self.menu.paint(ctx, Arc::clone(&self.font), size);
+        let style = self.look.style();
+        crate::drag::picture::paint_drag_picture(ctx, &self.state, &style, &self.font);
+        self.menu
+            .paint(ctx, Arc::clone(&self.font), style.font_size);
+    }
+    /// What the drag's picture showed in the last frame (`drag/picture.rs`).
+    fn properties(&self) -> Vec<(&'static str, String)> {
+        crate::drag::picture::picture_properties(&self.state.borrow()).to_vec()
     }
     /// While a menu is open it takes every event: a click outside closes it.
     fn has_active_modal(&self) -> bool {
@@ -325,6 +345,13 @@ impl Widget for BrowserList {
                 }
             }
             Event::MouseCaptureLost if press_lost(&self.state, None) => {
+                return EventResult::Consumed;
+            }
+            Event::MouseUp {
+                button: MouseButton::Left,
+                pos,
+                modifiers,
+            } if release_rowless(&self.state, *pos, *modifiers) => {
                 return EventResult::Consumed;
             }
             _ => {}

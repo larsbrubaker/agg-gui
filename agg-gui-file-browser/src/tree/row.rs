@@ -7,6 +7,10 @@
 //! (`menu.rs`), the press bubbling to the tree, which opens it. The "Loading..." row stands for no
 //! folder: presses and menus pass it by.
 //!
+//! The row records itself as a drop target over its whole width as it paints, and fills with the
+//! accent (the "+" badge for a copy) while a drag is over it (`drag/badge.rs`); a "Loading..." row
+//! is no target.
+//!
 //! The row of the folder the list shows is drawn selected, its highlight's corners rounded by the
 //! look's corner radius as the list's are. A name too long for its row is cut short with
 //! `fit_name`, keeping a file's extension (an archive's ".zip"), and shows whole as the row's
@@ -21,6 +25,8 @@ use agg_gui::icon_image::IconImage;
 use agg_gui::text::Font;
 use agg_gui::{Color, DrawCtx, Event, EventResult, MouseButton, Rect, Size, Widget};
 
+use crate::drag::badge::register_painted;
+use crate::drag::{DropKey, DropTargetKind};
 use crate::fitted_text::{centered_text_baseline, fill_text_within, fit_name};
 use crate::list::tile_art::{paint_art, Art};
 use crate::state::BrowserState;
@@ -47,6 +53,8 @@ pub(crate) struct TreeStyle {
     pub font_size: f64,
     pub text: Color,
     pub selected: Color,
+    /// The drop highlight's colour.
+    pub accent: Color,
     /// The corners of the selection highlight, as the list's items have.
     pub corner_radius: f64,
 }
@@ -111,6 +119,14 @@ impl TreeRow {
     /// row's edge.
     fn name_room(&self, width: f64) -> f64 {
         width - self.text_left() - 2.0
+    }
+
+    /// The row's key as a drop target.
+    fn drop_key(&self) -> DropKey {
+        DropKey {
+            kind: DropTargetKind::Tree,
+            index: self.spec.index,
+        }
     }
 
     /// The list shows this folder, opened from the root down.
@@ -184,6 +200,27 @@ impl Widget for TreeRow {
         let h = self.bounds.height;
         let left = self.chevron_left();
         let text_left = self.text_left();
+        // A drop onto the tree hit-tests the whole row, not just the name.
+        let link = self
+            .model
+            .borrow()
+            .rows()
+            .get(self.spec.index)
+            .filter(|row| !row.is_placeholder())
+            .and_then(|row| row.path().last().cloned());
+        if let Some(link) = link {
+            let width = self.bounds.width;
+            register_painted(
+                ctx,
+                &self.state,
+                link,
+                self.drop_key(),
+                (width, h),
+                Rect::new(0.0, 0.0, width, h),
+                self.style.corner_radius,
+                self.style.accent,
+            );
+        }
         if self.spec.selected {
             ctx.set_fill_color(self.style.selected);
             ctx.begin_path();
@@ -276,6 +313,9 @@ impl Widget for TreeRow {
         (self.shown_name != self.spec.name).then_some(self.spec.name.as_str())
     }
     fn properties(&self) -> Vec<(&'static str, String)> {
+        let key = self.drop_key();
+        let state = self.state.borrow();
+        let drop = state.drop_manager();
         vec![
             ("name", self.spec.name.clone()),
             ("shown_name", self.shown_name.clone()),
@@ -283,6 +323,11 @@ impl Widget for TreeRow {
             ("has_arrow", self.spec.has_arrow.to_string()),
             ("selected", self.spec.selected.to_string()),
             ("has_icon", self.spec.icon.is_some().to_string()),
+            (
+                "drop_highlighted",
+                (drop.highlighted() == Some(key)).to_string(),
+            ),
+            ("drop_label", drop.label_for(key)),
         ]
     }
 }

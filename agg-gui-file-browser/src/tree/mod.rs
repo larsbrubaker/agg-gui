@@ -20,6 +20,10 @@
 //! tree's and rows' names (`BrowserNames::tree`, `BrowserNames::tree_row`). The rows are built
 //! again when the model, the browser or the look's art changes.
 //!
+//! Each row records itself as a drop target as it paints (the tree forgets last frame's and
+//! records its own rectangle first, so a drag knows when it is outside the browser), lights up
+//! while a drag is over it, and a closed row the drag waits over opens (`drag/spring.rs`).
+//!
 //! A press on a row gives the tree the keyboard (`BrowserState::tree_focus_id`), where the
 //! history's undo and redo keys take back and replay its steps (`history/run.rs`), as they do in
 //! the list, so they never reach an app's own undo while the tree has the keys.
@@ -93,6 +97,7 @@ impl BrowserTree {
                 font_size: style.font_size,
                 text: style.text_color,
                 selected: style.selection_fill,
+                accent: style.accent,
                 corner_radius: style.corner_radius,
             },
             accent: style.accent,
@@ -215,7 +220,17 @@ impl Widget for BrowserTree {
         }
         available
     }
-    fn paint(&mut self, _ctx: &mut dyn DrawCtx) {}
+    /// The rows record themselves as drop targets as they paint, after this forgets last
+    /// frame's and records where the tree is, so a drag knows when it is outside the browser.
+    /// First, a row the drag has waited over opens (`drag/spring.rs`).
+    fn paint(&mut self, ctx: &mut dyn DrawCtx) {
+        crate::drag::spring::spring_tree(&self.state, &self.model);
+        let rect = crate::drag::badge::painted_rect(ctx, self.bounds.width, self.bounds.height);
+        let mut s = self.state.borrow_mut();
+        s.drop_manager_mut().set_tree_rect(rect);
+        s.drop_manager_mut()
+            .clear_targets(crate::drag::DropTargetKind::Tree);
+    }
     /// The open menu, over everything.
     fn paint_global_overlay(&mut self, ctx: &mut dyn DrawCtx) {
         self.menu

@@ -10,12 +10,16 @@
 //! row draws asks for the same menu hanging from the button (`list/menu_button.rs`). A press
 //! that loses the pointer without a release (a finger lifting, the window deactivating) ends
 //! without a click: no selection settled, no menu, no tap. A drag that ends outside the list
-//! gives the keys back (`drag_ended`), so the view it ended over has them.
+//! gives the keys back (`drag_ended`), so the view it ended over has them. A press that is a drag
+//! carries the selection onto the browser's folders or the app's views (`drag/gesture.rs`): each
+//! move updates it (the same move heard twice, by the row and by the list holding the press, is
+//! one), the release drops, and a release the list hears after the row was rebuilt away
+//! (`release_rowless`) drops the same way.
 
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use agg_gui::{Event, EventResult, MouseButton, Point, Size};
+use agg_gui::{Event, EventResult, Modifiers, MouseButton, Point, Size};
 
 use crate::state::BrowserState;
 
@@ -90,8 +94,8 @@ pub fn item_event(
         Event::MouseUp {
             button: MouseButton::Left,
             pos,
-            ..
-        } => release(state, index, *pos, local(pos), size),
+            modifiers,
+        } => release(state, index, *pos, local(pos), size, *modifiers),
         Event::MouseCaptureLost => match press_lost(state, Some(index)) {
             true => EventResult::Consumed,
             false => EventResult::Ignored,
@@ -109,6 +113,7 @@ fn release(
     pos: Point,
     here: Point,
     size: Size,
+    modifiers: Modifiers,
 ) -> EventResult {
     let dragged = {
         let mut s = state.borrow_mut();
@@ -117,6 +122,7 @@ fn release(
         dragged
     };
     if dragged {
+        crate::drag::gesture::drag_end(state, pointer(pos), modifiers);
         drag_ended(state, pointer(pos));
     }
     let on_button = in_menu_button(here, size.width, size.height);
@@ -147,8 +153,17 @@ pub fn press_moved(state: &Rc<RefCell<BrowserState>>, pos: Point) -> bool {
         press_lost(state, None);
         return false;
     }
-    let dragging = state.borrow_mut().item_press_mut().moved(pointer(pos));
-    if dragging {
+    let at = pointer(pos);
+    let (dragging, moved) = {
+        let mut s = state.borrow_mut();
+        let was_dragging = s.item_press().is_dragging();
+        let before = s.item_press().last_pointer();
+        let dragging = s.item_press_mut().moved(at);
+        (dragging, !was_dragging || before != Some(at))
+    };
+    // The same move heard twice (by its row and by the list holding the press) is one move.
+    if dragging && moved {
+        crate::drag::gesture::drag_over(state, at);
         agg_gui::animation::request_draw();
     }
     dragging
@@ -168,6 +183,9 @@ pub fn press_lost(state: &Rc<RefCell<BrowserState>>, index: Option<usize>) -> bo
         s.release_press(true);
         (dragged, at)
     };
+    if dragged {
+        crate::drag::gesture::drag_lost(state, at);
+    }
     if let (true, Some(at)) = (dragged, at) {
         drag_ended(state, at);
     }
@@ -178,6 +196,30 @@ pub fn press_lost(state: &Rc<RefCell<BrowserState>>, index: Option<usize>) -> bo
         }
         // The row the press began on is gone: no tap of it may activate later.
         None => state.borrow_mut().begin_tap(None),
+    }
+    true
+}
+
+/// A release of a left press whose row was rebuilt away, heard by the list: a drag drops where
+/// it was released; never a click. False with no press under way.
+pub fn release_rowless(
+    state: &Rc<RefCell<BrowserState>>,
+    pos: Point,
+    modifiers: Modifiers,
+) -> bool {
+    if !state.borrow().item_press().is_pressed() {
+        return false;
+    }
+    let dragged = {
+        let mut s = state.borrow_mut();
+        let dragged = s.item_press_mut().end();
+        s.release_press(true);
+        s.begin_tap(None);
+        dragged
+    };
+    if dragged {
+        crate::drag::gesture::drag_end(state, pointer(pos), modifiers);
+        drag_ended(state, pointer(pos));
     }
     true
 }

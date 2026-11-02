@@ -157,6 +157,7 @@ impl Widget for BrowserRow {
         Size::new(available.width, ROW_HEIGHT)
     }
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
+        let lifted = crate::drag::picture::lift(ctx, &self.cx.state, &self.parts.entry.item());
         let style = &self.cx.style;
         let thumb = f64::from(ROW_THUMB_SIZE);
         let item = self.item_size();
@@ -167,6 +168,15 @@ impl Widget for BrowserRow {
         ctx.begin_path();
         ctx.rounded_rect(ROW_MARGIN, 0.0, item.width, thumb, style.corner_radius);
         ctx.fill();
+        crate::drag::badge::paint_entry_target(
+            ctx,
+            &self.cx.state,
+            &self.parts.entry,
+            self.index,
+            (self.bounds.width, self.bounds.height),
+            Rect::new(ROW_MARGIN, 0.0, item.width, thumb),
+            style,
+        );
         self.parts
             .art
             .paint(ctx, Rect::new(ROW_MARGIN, 0.0, thumb, thumb));
@@ -196,6 +206,7 @@ impl Widget for BrowserRow {
             let glyph = Rect::new(ROW_MARGIN + r.x, r.y, r.width, r.height);
             paint_art(ctx, &self.cx.overflow, glyph);
         }
+        crate::drag::picture::finish_lift(ctx, &self.cx.state, lifted, &self.parts.art.art);
     }
     /// The row takes every press over it, and hands the overlay its own (`list/overlay.rs`).
     fn claims_pointer_exclusively(&self, _local_pos: Point) -> bool {
@@ -228,7 +239,12 @@ impl Widget for BrowserRow {
             .or_else(|| (self.shown_name != self.name).then_some(self.name.as_str()))
     }
     fn properties(&self) -> Vec<(&'static str, String)> {
-        vec![
+        let drag = crate::drag::badge::entry_drop_properties(
+            &self.cx.state,
+            &self.parts.entry,
+            self.index,
+        );
+        let mut properties = vec![
             ("name", self.name.clone()),
             ("shown_name", self.shown_name.clone()),
             ("detail", self.detail.clone().unwrap_or_default()),
@@ -239,7 +255,9 @@ impl Widget for BrowserRow {
             ("thumbnail", self.parts.art.name.clone()),
             ("thumbnail_center", self.parts.art.center_pixel_text()),
             ("menu_glyph", self.hovered.to_string()),
-        ]
+        ];
+        properties.extend(drag);
+        properties
     }
 }
 
