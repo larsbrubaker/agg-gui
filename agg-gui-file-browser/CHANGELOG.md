@@ -90,6 +90,28 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   folders of one name in different places stay two rows.
 - `BrowserNames::tree` ("Library TreeView") and `tree_row` ("{name} Tree Node", `tree_row_for`).
 - `BrowserState::snapshot_at`: the snapshot a hook is handed from a folder up the open path.
+- `BrowserHistory`, the undo history (`BrowserConfig::history`, set with the builder's
+  `history`; views given the same one share it): `record`, `record_with_note`,
+  `record_saying`, `announce`, `keep` (a `Recorded` write's step), `can_undo`, `can_redo`,
+  `undo_description`, `redo_description`, `depths`, `is_busy`, `generation` and `clear`;
+  `undo`/`redo` (also `BrowserState::undo`/`redo`) run the latest step, which may finish later:
+  until it does, no other undo or redo starts. When it finishes the step goes on the other list
+  with what came back, the notice says "Undone: ..." or "Redone: ..." and "Couldn't put back:
+  ..." for what failed, and the writable folders on the browser's path list themselves again.
+  `HistoryRecorder` (`BrowserHistory::recorder`) records a change whose outcome arrives later
+  (a server move) from a callback, on top of the history when it lands, and does nothing once
+  the history is gone.
+- `BrowserState::write_recorded`: runs a recorded write on a folder of the open path, records
+  its step, and lists the browser again with any failure on its status line; a folder that takes
+  no changes refuses with "This folder can't be changed".
+- The list and the folder tree take Control+Z or Command+Z to undo and Control+Shift+Z,
+  Command+Shift+Z, Control+Y or Command+Y to redo while they have the keyboard, even with
+  nothing to undo (`history_key_event`).
+- `BrowserNotice`, the notice announcing each change with its Undo or Redo button
+  (`NoticeButton`), held five seconds and faded over one (`notice_alpha`, `NOTICE_HOLD_MS`,
+  `NOTICE_FADE_MS`) unless hovered or its button has the keyboard; `Notice` and `NoticeAction`.
+- `BrowserNames::notice` ("Library Notice") and `notice_button` ("Library Notice Button");
+  `BrowserStyle::notice_font_size` (10 pt).
 - `OwnPictures`: each item shows the picture its folder or the item itself makes of it, made on
   the spawner and kept, the look's item icon until then; the default pictures hook. It keeps at
   most `KEPT_PICTURES` (1024) pictures, the least recently asked for leaving first and made again

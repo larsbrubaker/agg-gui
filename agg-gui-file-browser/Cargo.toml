@@ -16,7 +16,7 @@ edition = "2021"
 # Matches the rest of the agg-gui workspace.
 rust-version = "1.88"
 license = "MIT"
-description = "The widgets of agg-gui's file browser: its look, fitted names, the folder breadcrumb trail, the browser state (open path, listing, view, selection and its gestures), the list views (rows, tiles, a folder's message, their menus), the folder tree, and the config and hooks through which an app extends it, over agg-gui-files' folder model."
+description = "The widgets of agg-gui's file browser: its look, fitted names, the folder breadcrumb trail, the browser state (open path, listing, view, selection and its gestures), the list views (rows, tiles, a folder's message, their menus), the folder tree, the undo history and its notice, and the config and hooks through which an app extends it, over agg-gui-files' folder model."
 authors = ["Lars Brubaker <larsbrubaker@matterhackers.com>"]
 repository = "https://github.com/larsbrubaker/agg-gui"
 readme = "README.md"
@@ -40,3 +40,8 @@ reflect = ["agg-gui/reflect"]
 agg-gui = { path = "../agg-gui", version = "0.5.3", default-features = false }
 # A 0.0.x requirement is written as a range: plain "0.0.2" would pin that one version.
 agg-gui-files = { path = "../agg-gui-files", version = ">=0.0.2, <0.1.0" }
+
+[dev-dependencies]
+# The history's tests undo and redo real changes on a folder on disk (a scratch folder under the
+# system's temp directory), so the tests also build agg-gui-files' disk folders.
+agg-gui-files = { path = "../agg-gui-files", version = ">=0.0.2, <0.1.0", features = ["disk"] }

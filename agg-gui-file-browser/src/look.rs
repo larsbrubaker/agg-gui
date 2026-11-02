@@ -23,6 +23,8 @@ use agg_gui_files::FolderLink;
 const BUILTIN_FONT_SIZE: f64 = 14.0;
 /// The size of a tile's name: 9 pt at 96 pixels to the inch.
 const TILE_FONT_SIZE: f64 = 12.0;
+/// The size of the history notice's text: 10 pt at 96 pixels to the inch.
+const NOTICE_FONT_SIZE: f64 = 10.0 / 72.0 * 96.0;
 
 /// An icon a browser widget draws. Each has a Font Awesome glyph it falls back to
 /// ([`BrowserIcon::glyph`]) and a name the widgets report for inspection
@@ -108,6 +110,8 @@ pub struct BrowserStyle {
     pub font_size: f64,
     /// The size of the name under an icon view's tile (9 pt).
     pub tile_font_size: f64,
+    /// The size of the history notice's text and its button's word (10 pt).
+    pub notice_font_size: f64,
     /// Text, links, separators and tinted icons.
     pub text_color: Color,
     /// Secondary text: a row's detail line, hints.
@@ -140,6 +144,7 @@ impl BrowserStyle {
         Self {
             font_size: agg_gui::font_settings::default_font_size_or(BUILTIN_FONT_SIZE),
             tile_font_size: TILE_FONT_SIZE,
+            notice_font_size: NOTICE_FONT_SIZE,
             text_color: visuals.text_color,
             light_text_color: visuals.text_dim,
             background: visuals.window_fill,
@@ -211,6 +216,10 @@ pub struct BrowserNames {
     pub tree: String,
     /// One folder's row in the folder tree (template).
     pub tree_row: String,
+    /// The history's notice ("Moved 3 items to Brackets").
+    pub notice: String,
+    /// The notice's Undo or Redo button.
+    pub notice_button: String,
 }
 
 impl Default for BrowserNames {
@@ -238,6 +247,8 @@ impl Default for BrowserNames {
             search_section: "Search Section {name}".into(),
             tree: "Library TreeView".into(),
             tree_row: "{name} Tree Node".into(),
+            notice: "Library Notice".into(),
+            notice_button: "Library Notice Button".into(),
         }
     }
 }

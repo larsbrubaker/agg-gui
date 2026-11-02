@@ -2,8 +2,8 @@
 //! list's empty space starts a rubber band (`BrowserState::begin_band`), each move selects the
 //! rows and tiles the band touches, and the band is drawn over them in the accent, its corners
 //! rounded like theirs; and the keys the list takes while it has the keyboard (a press anywhere
-//! in the list asks for it): Control+A (Command+A on a Mac) selects every row, Escape empties the
-//! selection, and the arrow keys move it (Shift extends it from the anchor), Up and Down to the
+//! in the list asks for it): the history's undo and redo keys (`history/run.rs`), Control+A
+//! (Command+A on a Mac) selects every row, Escape empties the selection, and the arrow keys move it (Shift extends it from the anchor), Up and Down to the
 //! nearest row or tile in the line above or below. Row rectangles are read from the list's own
 //! widgets in the scrolled content's coordinates, which the band is kept in, so it stays on its
 //! rows as the list scrolls. A folder's message (`list/message.rs`) stands alone in the list's
@@ -165,6 +165,9 @@ pub fn list_key_event(
     key: &Key,
     modifiers: Modifiers,
 ) -> EventResult {
+    if let Some(result) = crate::history::run::history_key_event(state, key, modifiers) {
+        return result;
+    }
     let command = modifiers.ctrl || modifiers.meta;
     match key {
         Key::Char(c) if command && c.eq_ignore_ascii_case(&'a') => {

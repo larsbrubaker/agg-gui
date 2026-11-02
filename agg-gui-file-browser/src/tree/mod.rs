@@ -20,8 +20,9 @@
 //! tree's and rows' names (`BrowserNames::tree`, `BrowserNames::tree_row`). The rows are built
 //! again when the model, the browser or the look's art changes.
 //!
-//! A press on a row gives the tree the keyboard (`BrowserState::tree_focus_id`), so keys typed
-//! while the user works in the tree are the tree's.
+//! A press on a row gives the tree the keyboard (`BrowserState::tree_focus_id`), where the
+//! history's undo and redo keys take back and replay its steps (`history/run.rs`), as they do in
+//! the list, so they never reach an app's own undo while the tree has the keys.
 
 pub mod menu;
 pub mod model;
@@ -238,6 +239,10 @@ impl Widget for BrowserTree {
     fn on_event(&mut self, event: &Event) -> EventResult {
         if let Some(result) = self.menu.handle_event(event) {
             return result;
+        }
+        if let Event::KeyDown { key, modifiers } = event {
+            return crate::history::run::history_key_event(&self.state, key, *modifiers)
+                .unwrap_or(EventResult::Ignored);
         }
         // A right press on a row (which showed its folder and asked for the menu, `row.rs`)
         // opens the folder's menu where it was pressed.

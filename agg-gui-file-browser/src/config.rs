@@ -4,9 +4,10 @@
 //! `BrowserConfig::default()` is a working browser for an app with no hooks: agg-gui's look,
 //! the items' own pictures (`OwnPictures`), the built-in menu, no outside drops, the default
 //! places rule, nothing remembered, no dialogs (the actions needing one unavailable), errors on
-//! the browser's own status line (`BrowserState::status`) and work on a [`LocalSpawner`] (whose
+//! the browser's own status line (`BrowserState::status`), work on a [`LocalSpawner`] (whose
 //! faults, with no report given, go to standard error: it is made before any browser it could
-//! show them in).
+//! show them in) and an undo history of its own (an app shares one between its views by giving
+//! each the same [`BrowserHistory`]).
 //!
 //! [`BrowserConfig::builder`] sets only what the app has; its `build` fills the rest, the
 //! default spawner reporting through the report the builder was given, or to standard error
@@ -20,6 +21,7 @@ use agg_gui_files::{FolderLink, Spawner};
 use crate::actions::{BrowserActions, NoActions};
 use crate::dialogs::{BrowserDialogs, NoDialogs};
 use crate::drops::OutsideDrops;
+use crate::history::BrowserHistory;
 use crate::local_spawner::LocalSpawner;
 use crate::look::{BrowserLook, DefaultLook};
 use crate::memory::{BrowserMemory, NoMemory, ViewMode};
@@ -132,6 +134,9 @@ pub struct BrowserConfig {
     pub report: Option<ErrorReport>,
     /// How the view behaves.
     pub options: BrowserOptions,
+    /// The undo history; views given the same one share it, so a change made in one can be
+    /// taken back from another.
+    pub history: Rc<BrowserHistory>,
 }
 
 impl BrowserConfig {
@@ -160,6 +165,7 @@ pub struct BrowserConfigBuilder {
     dialogs: Option<Rc<dyn BrowserDialogs>>,
     report: Option<ErrorReport>,
     options: BrowserOptions,
+    history: Option<Rc<BrowserHistory>>,
 }
 
 impl BrowserConfigBuilder {
@@ -214,6 +220,12 @@ impl BrowserConfigBuilder {
         self
     }
 
+    /// The undo history, to share one between an app's browser views.
+    pub fn history(mut self, history: Rc<BrowserHistory>) -> Self {
+        self.history = Some(history);
+        self
+    }
+
     /// The config: what was set, and the module header's defaults for the rest.
     pub fn build(self) -> BrowserConfig {
         let report = self.report;
@@ -234,6 +246,7 @@ impl BrowserConfigBuilder {
             dialogs: self.dialogs.unwrap_or_else(|| Rc::new(NoDialogs)),
             report,
             options: self.options,
+            history: self.history.unwrap_or_default(),
         }
     }
 }

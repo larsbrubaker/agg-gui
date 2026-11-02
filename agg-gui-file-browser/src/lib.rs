@@ -53,7 +53,10 @@
 //! `own_pictures` (the default pictures: each item's own); `list` ([`BrowserList`], the rows or
 //! tiles of the showing folder, or its message, with their gestures and menus); `tree`
 //! ([`BrowserTree`], the folder tree over the same state, its rows as data in [`TreeModel`], each
-//! row known by its folder's location key or else its name, and its menu).
+//! row known by its folder's location key or else its name, and its menu); `history`
+//! ([`BrowserHistory`], the undo history shared by an app's browser views, steps recorded at once
+//! or later through a [`HistoryRecorder`], an undo or redo finishing later holding the next one
+//! back, the keys, and the [`BrowserNotice`] announcing each change with its Undo or Redo).
 //!
 //! The widgets come from MatterCAD's library (mattercad-rust's `mattercad-app`, same author),
 //! published here under agg-gui's MIT licence.
@@ -65,6 +68,7 @@ pub mod dialogs;
 pub mod drops;
 pub mod entry;
 pub mod fitted_text;
+pub mod history;
 pub mod icon_button;
 pub mod link_label;
 pub mod list;
@@ -94,6 +98,11 @@ pub use fitted_text::{
     centered_text_baseline, fill_text_within, fit_keeping_extension, fit_name, fit_name_with,
     fit_text, name_extension, MIN_STEM_CHARS,
 };
+pub use history::notice::{
+    notice_alpha, BrowserNotice, NoticeButton, NOTICE_FADE_MS, NOTICE_HOLD_MS,
+};
+pub use history::run::history_key_event;
+pub use history::{BrowserHistory, HistoryRecorder, Notice, NoticeAction};
 pub use icon_button::BrowserIconButton;
 pub use link_label::LinkLabel;
 pub use list::icon_view::{BrowserTile, TileStack};
@@ -139,6 +148,12 @@ pub const ENGLISH_TEXTS: &[&str] = &[
     "Open File Location",
     "Remove",
     "Rename",
+    "Couldn't put back",
+    "Redo",
+    "Redone",
     "Searching for '{0}'",
+    "This folder can't be changed",
     "This folder is busy. Open it again to see the change.",
+    "Undo",
+    "Undone",
 ];
