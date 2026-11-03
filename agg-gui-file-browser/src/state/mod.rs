@@ -49,6 +49,7 @@ mod browser_entry;
 mod gesture;
 mod listing_message;
 mod navigation;
+mod restore;
 mod search;
 mod selection;
 mod view;
@@ -138,6 +139,12 @@ pub struct BrowserState {
     item_press: ItemPress,
     /// The drag of the browser's items onto its folders (`drag/`).
     pub(crate) drop: crate::drag::DropManager,
+    /// A remembered location being found, while it is (`state/restore.rs`).
+    restore: Option<restore::Pending>,
+    /// The key of the last restore asked for, which `retry_restore` runs again.
+    restore_key: Option<String>,
+    /// Counts restores begun, so a late answer to an earlier one is told apart.
+    restore_serial: u64,
     /// This state's own handle, which snapshots carry back to it.
     me: Weak<RefCell<BrowserState>>,
 }
@@ -198,6 +205,9 @@ impl BrowserState {
             menu_button: MenuButtonState::default(),
             item_press: ItemPress::default(),
             drop: crate::drag::DropManager::default(),
+            restore: None,
+            restore_key: None,
+            restore_serial: 0,
             me: Weak::new(),
         }));
         {
@@ -267,6 +277,9 @@ impl BrowserState {
     /// options' folder filter keeps), then its items (those the item filter keeps), the visible
     /// ones only, each group sorted.
     pub fn entries(&self) -> Vec<BrowserEntry> {
+        if let Some(loading) = self.restoring_entries() {
+            return loading;
+        }
         if let Some(results) = self.showing_search_results() {
             return search::listing_kept(results, self.sort, &|i| self.keeps_item(i)).1;
         }

@@ -130,6 +130,15 @@ pub trait BrowserMemory {
         None
     }
 
+    /// The breadcrumbs of the folder remembered under `key`, the browser's root first, shown
+    /// while [`Self::last_location`] finds it (a remote folder waiting on the sign-in or the
+    /// server), in place of the root's rows (`state/restore.rs`). `None` (the default) shows
+    /// the root until the folder is found.
+    fn last_location_trail(&self, key: &str) -> Option<Vec<String>> {
+        let _ = key;
+        None
+    }
+
     /// Remembers `path` under `key`: the whole open path, the browser's root first and the open
     /// folder last ([`remember_open_location`]), so an app can store where the path starts (its
     /// root's name) as well as where it ends. The folders are the browser's own, shared, handed

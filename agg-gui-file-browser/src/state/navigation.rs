@@ -120,6 +120,8 @@ impl BrowserState {
 
     /// The showing folder changed: count it and tell the listeners.
     fn navigated(&mut self) {
+        // The user went somewhere of their own: a restore under way is over.
+        self.end_restore();
         self.navigation += 1;
         self.list_resets += 1;
         self.parked_selection.clear();
@@ -276,29 +278,43 @@ impl BrowserState {
     /// Opens the folder the config's memory remembers under `key`, once found (the search runs
     /// on the config's spawner): the folders below the root are opened down to it. Nothing
     /// happens when none is remembered, it can't be reached, or the user has moved the browser
-    /// meanwhile (their choice wins).
+    /// meanwhile (their choice wins). While it is found, a trail the memory names
+    /// (`BrowserMemory::last_location_trail`) shows as the breadcrumbs over a loading line
+    /// (`state/restore.rs`).
     pub fn restore_location(state: &Rc<RefCell<Self>>, key: &str) {
-        let (memory, spawner, navigation) = {
+        let (memory, spawner) = {
             let s = state.borrow();
             let c = &s.config;
-            (Rc::clone(&c.memory), Rc::clone(&c.spawner), s.navigation)
+            (Rc::clone(&c.memory), Rc::clone(&c.spawner))
         };
+        state.borrow_mut().restore_key = Some(key.to_string());
         let Some(finding) = memory.last_location(key) else {
+            state.borrow_mut().end_restore();
             return;
+        };
+        let trail = memory.last_location_trail(key);
+        let (serial, navigation) = {
+            let mut s = state.borrow_mut();
+            (s.begin_restore(trail), s.navigation)
         };
         let weak = Rc::downgrade(state);
         spawner.spawn_task(Box::pin(async move {
-            let Some(folders) = finding.await else {
-                return;
-            };
+            let found = finding.await;
             let Some(state) = weak.upgrade() else {
                 return;
             };
             let mut s = state.borrow_mut();
+            let Some(keep) = s.finish_restore(serial) else {
+                return;
+            };
+            let Some(folders) = found else {
+                return;
+            };
             if s.navigation != navigation || s.depth() != 1 {
                 return;
             }
-            for folder in folders {
+            let keep = keep.unwrap_or(folders.len());
+            for folder in folders.into_iter().take(keep) {
                 s.push_container(folder);
             }
         }));

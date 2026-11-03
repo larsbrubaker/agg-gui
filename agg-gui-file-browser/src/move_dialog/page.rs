@@ -12,7 +12,8 @@
 //! Open opens) takes them in its own layout, before laying the browser page out; the browser page
 //! drops any left (the Move page's). The mouse's back button goes up a folder. A page given a location key
 //! ([`BrowserPage::remembering`]) opens where the config's memory says it was last left under
-//! that key and remembers each folder the user moves to, until the page is accepted (its folder
+//! that key (its breadcrumbs over a loading line while it is found, `state/restore.rs`) and
+//! remembers each folder the user moves to, until the page is accepted (its folder
 //! then handed over, never remembered as the page's place).
 //!
 //! [`MovePage`] is the Move dialog's default page over a [`MoveController`] (`controller.rs`,
@@ -73,7 +74,8 @@ pub struct BrowserPage {
     location_key: Option<String>,
     /// Set once the page is accepted: from then on its moves are not remembered.
     accepted: Rc<Cell<bool>>,
-    built: Option<u64>,
+    /// The navigation count and trail the nav bar was built for.
+    built: Option<(u64, Vec<String>)>,
     bounds: Rect,
     /// The nav bar, then the list.
     children: Vec<Box<dyn Widget>>,
@@ -111,12 +113,12 @@ impl BrowserPage {
     fn nav_bar(&self) -> Box<dyn Widget> {
         let (names, look) = {
             let s = self.state.borrow();
-            (s.path_names(), Rc::clone(&s.config().look))
+            (s.shown_trail(), Rc::clone(&s.config().look))
         };
         let weak = Rc::downgrade(&self.state);
         let go_to: Rc<dyn Fn(usize)> = Rc::new(move |depth| {
             if let Some(state) = weak.upgrade() {
-                state.borrow_mut().go_to(depth);
+                state.borrow_mut().go_to_crumb(depth);
             }
         });
         let crumbs = folder_bread_crumb_for(&names, go_to, &look, &self.font);
@@ -150,16 +152,22 @@ impl Widget for BrowserPage {
     fn layout(&mut self, available: Size) -> Size {
         // Item clicks are the hosting page's; any it left do nothing here.
         let _ = self.state.borrow_mut().take_item_events();
-        let navigation = self.state.borrow().navigation();
-        if self.built != Some(navigation) {
+        let (navigation, trail) = {
+            let s = self.state.borrow();
+            (s.navigation(), s.shown_trail())
+        };
+        let built_on = self.built.as_ref().map(|(n, _)| *n);
+        if built_on != Some(navigation) {
             // A move by the user (not the first build): remember where the page is.
-            if let Some(key) = self.location_key.as_ref().filter(|_| self.built.is_some()) {
+            if let Some(key) = self.location_key.as_ref().filter(|_| built_on.is_some()) {
                 if !self.accepted.get() {
                     BrowserState::remember_location(&self.state, key);
                 }
             }
+        }
+        if self.built.as_ref() != Some(&(navigation, trail.clone())) {
             self.children[0] = self.nav_bar();
-            self.built = Some(navigation);
+            self.built = Some((navigation, trail));
         }
         let bar = self.children[0].layout(available);
         self.children[0].set_bounds(Rect::new(
@@ -181,10 +189,7 @@ impl Widget for BrowserPage {
             ..
         } = event
         {
-            let depth = self.state.borrow().depth();
-            if depth > 1 {
-                self.state.borrow_mut().go_to(depth - 2);
-            }
+            self.state.borrow_mut().go_back();
             return EventResult::Consumed;
         }
         EventResult::Ignored

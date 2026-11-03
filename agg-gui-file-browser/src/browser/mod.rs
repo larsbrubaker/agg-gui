@@ -25,6 +25,10 @@
 //! the list (and its scroll position) and the notice (and its fade) are kept, and the search
 //! box moves from the old header to the new one (`parts.rs`), keeping its text and focus.
 //!
+//! A browser given a location key ([`FileBrowser::remembering`]) opens where the config's
+//! memory says it was last left under that key, showing that place's breadcrumbs over a loading
+//! line while it is found (`state/restore.rs`), and remembers each folder the user moves to.
+//!
 //! The drag's picture is drawn once for the whole browser, in agg-gui's global overlay pass after
 //! everything else, rather than by the list: a drag from the tree, or one whose list rows a
 //! spring-opened folder rebuilt, still carries its picture. The mouse's back button goes up one
@@ -103,6 +107,10 @@ pub struct FileBrowser {
     /// The search box while no header holds it (before the first build).
     search_box: Option<Box<dyn Widget>>,
     built: Option<HeaderKey>,
+    /// The memory key the browser's place is remembered under, if any.
+    location_key: Option<String>,
+    /// The navigation count last remembered under `location_key`.
+    remembered: Option<u64>,
     bounds: Rect,
     children: Vec<Box<dyn Widget>>,
     roles: Vec<Role>,
@@ -143,9 +151,34 @@ impl FileBrowser {
             body_compact: None,
             search_box: Some(Box::new(search_box)),
             built: None,
+            location_key: None,
+            remembered: None,
             bounds: Rect::default(),
             children: Vec::new(),
             roles: Vec::new(),
+        }
+    }
+
+    /// The browser opening where it was last left under `key` and remembering each folder the
+    /// user moves to (see the module header). An app calls `BrowserState::retry_restore` to
+    /// look again (once the user signs in).
+    pub fn remembering(mut self, key: impl Into<String>) -> Self {
+        let key = key.into();
+        BrowserState::restore_location(&self.state, &key);
+        self.remembered = Some(self.state.borrow().navigation());
+        self.location_key = Some(key);
+        self
+    }
+
+    /// Remembers where the browser is when the user has moved since it last did.
+    fn remember_if_navigated(&mut self) {
+        let Some(key) = &self.location_key else {
+            return;
+        };
+        let navigation = self.state.borrow().navigation();
+        if self.remembered != Some(navigation) {
+            self.remembered = Some(navigation);
+            BrowserState::remember_location(&self.state, key);
         }
     }
 
@@ -185,7 +218,7 @@ impl FileBrowser {
         let s = self.state.borrow();
         HeaderKey {
             navigation: s.navigation(),
-            path: s.path_names(),
+            path: s.shown_trail(),
             header: s.header_markdown(),
             compact: self.is_compact(),
         }
@@ -267,11 +300,11 @@ impl FileBrowser {
     /// The breadcrumbs, then (the tree form's) the search box, Undo and Redo, the view and
     /// sorting buttons, then the overflow button; over the bar's rule.
     fn nav_bar(&self, search_box: Option<Box<dyn Widget>>) -> Box<dyn Widget> {
-        let names = self.state.borrow().path_names();
+        let names = self.state.borrow().shown_trail();
         let weak = Rc::downgrade(&self.state);
         let go_to: Rc<dyn Fn(usize)> = Rc::new(move |depth| {
             if let Some(state) = weak.upgrade() {
-                state.borrow_mut().go_to(depth);
+                state.borrow_mut().go_to_crumb(depth);
             }
         });
         let crumbs = folder_bread_crumb_for(&names, go_to, &self.look, &self.font);
@@ -336,6 +369,7 @@ impl Widget for FileBrowser {
     /// The bars down from the top, the message along the bottom, the body in between, and the
     /// notice centred near the bottom.
     fn layout(&mut self, available: Size) -> Size {
+        self.remember_if_navigated();
         let key = self.header_key();
         if self.built.as_ref().map(|b| b.compact) != Some(key.compact) {
             // One tap activates on the narrow panel; elsewhere the config says.
@@ -388,22 +422,21 @@ impl Widget for FileBrowser {
         let style = self.look.style();
         crate::drag::picture::paint_drag_picture(ctx, &self.state, &style, &self.font);
     }
-    /// The mouse's back button goes up one folder, as the up button does.
+    /// The mouse's back button goes up one folder, as the up button does (along the trail
+    /// being found, while restoring).
     fn on_event(&mut self, event: &Event) -> EventResult {
         if let Event::MouseDown {
             button: MouseButton::Other(BACK_MOUSE_BUTTON),
             ..
         } = event
         {
-            let depth = self.state.borrow().depth();
-            if depth > 1 {
-                self.state.borrow_mut().go_to(depth - 2);
-            }
+            self.state.borrow_mut().go_back();
             return EventResult::Consumed;
         }
         EventResult::Ignored
     }
-    /// What tests and automation read: the path and its trail, the selection, the showing
+    /// What tests and automation read: the path and its trail (the trail being found, while
+    /// restoring), whether a restore shows, the selection, the showing
     /// folder's counts, header and status, the view, the search, and the drag's picture.
     fn properties(&self) -> Vec<(&'static str, String)> {
         let state = self.state.borrow();
@@ -422,7 +455,8 @@ impl Widget for FileBrowser {
         });
         let mut properties = vec![
             ("path", state.path_names().join(" > ")),
-            ("bread_crumb_trail", state.path_names().join("/")),
+            ("bread_crumb_trail", state.shown_trail().join("/")),
+            ("restoring", state.is_restoring().to_string()),
             ("selected", selected.join(", ")),
             ("child_container_count", folders.to_string()),
             ("item_count", items.to_string()),
