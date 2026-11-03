@@ -7,6 +7,11 @@
 //! layout ends by having those within reach of the viewport ask (`visible_art.rs`), so a folder
 //! of hundreds of pictures makes a screenful, and scrolling makes the rest as they come in view.
 //!
+//! Each layout gives the showing folder its live-refresh turn (`Folder::pump_live_refresh`, a
+//! relist after an outside change); while one is still pending the list asks for one more frame
+//! [`LIVE_REFRESH_WAKE`] later, never a frame after every frame, so an idle browser waiting on a
+//! relist draws ten times a second rather than as fast as the screen refreshes.
+//!
 //! The list builds its rows again at its next layout whenever what they show changes: the
 //! state's generation (a selection, a navigation, new content), the look's art
 //! (`BrowserLook::icon_generation`) or the display's scale (pictures are made for it: a window
@@ -54,6 +59,7 @@ pub mod visible_art;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
+use std::time::Duration;
 
 use agg_gui::text::Font;
 use agg_gui::{
@@ -109,6 +115,10 @@ fn refresh_art(widgets: &mut [Box<dyn Widget>]) {
         refresh_art(widget.children_mut());
     }
 }
+
+/// How long after a layout a folder's pending live refresh gets its next turn (see the module
+/// header).
+pub const LIVE_REFRESH_WAKE: Duration = Duration::from_millis(100);
 
 /// The list of what the showing folder holds (see the module header).
 pub struct BrowserList {
@@ -369,7 +379,7 @@ impl Widget for BrowserList {
             pending
         };
         if pending {
-            agg_gui::animation::request_draw();
+            agg_gui::animation::request_draw_after(LIVE_REFRESH_WAKE);
         }
         let key = self.build_key();
         match self.built {

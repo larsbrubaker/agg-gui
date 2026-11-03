@@ -37,6 +37,13 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   being found while restoring.
 - `BrowserLook::page_nav_bar_padding` and `page_nav_bar_rule`: the dialog page bar's padding
   and whether it draws its rule (defaults `Insets::symmetric(3, 1)` and a rule, as before).
+- `BrowserState::add_restore_finished(listener)`: each restore's answer tells its listeners how
+  it went, as a `RestoreOutcome` (`Landed`, `Failed` when the memory could not reach the
+  location, `Abandoned` when the user went elsewhere meanwhile or a newer restore began), outside
+  any borrow of the state (`RestoreFinishedListener = Rc<dyn Fn(RestoreOutcome)>`).
+- `LIVE_REFRESH_WAKE` (100 ms): while the showing folder's live relist is pending, the list asks
+  for one more frame that long after each layout, rather than a frame after every frame, so an
+  idle browser waiting on a relist no longer draws continuously.
 - `ItemPictures::before_layout(state)`: the pictures hook's turn at the start of each list
   layout, the state lent unborrowed (default nothing).
 

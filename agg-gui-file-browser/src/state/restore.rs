@@ -15,12 +15,34 @@
 //! root without a word. [`BrowserState::retry_restore`] runs the last restore again from the
 //! root (an app calls it once the user signs in). Part of `state/mod.rs`, whose fields it reads;
 //! `state/navigation.rs` starts it (`restore_location`).
+//!
+//! When a restore's search answers, the listeners added with
+//! [`BrowserState::add_restore_finished`] hear how it went ([`RestoreOutcome`]): the folders
+//! opened, the location could not be reached, or the restore no longer stood (the user went
+//! elsewhere meanwhile, or a newer restore began). They are told outside any borrow of the
+//! state, so they may read it. A key the memory remembers nothing under starts no restore and
+//! tells nothing.
 
 use std::rc::Rc;
 
 use agg_gui_files::MessageItem;
 
 use super::{BrowserEntry, BrowserState};
+
+/// How a restore's answer went (see the module header).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RestoreOutcome {
+    /// The remembered folders opened (down to the folder crumb the user clicked meanwhile).
+    Landed,
+    /// The memory could not reach the location: the browser stays at its root.
+    Failed,
+    /// The answer came after the restore stopped standing (the user went elsewhere, or a newer
+    /// restore began); it opened nothing.
+    Abandoned,
+}
+
+/// Hears each restore's outcome.
+pub type RestoreFinishedListener = Rc<dyn Fn(RestoreOutcome)>;
 
 /// A restore still finding its folder.
 #[derive(Clone, Debug)]
@@ -109,6 +131,22 @@ impl BrowserState {
         };
         if let Some(key) = key {
             Self::restore_location(state, &key);
+        }
+    }
+
+    /// `listener` hears how each later restore's answer went (see the module header).
+    pub fn add_restore_finished(&mut self, listener: RestoreFinishedListener) {
+        self.restore_finished.push(listener);
+    }
+
+    /// Tells the restore-finished listeners `outcome`; `state` is not borrowed while they run.
+    pub(super) fn tell_restore_finished(
+        state: &Rc<std::cell::RefCell<Self>>,
+        outcome: RestoreOutcome,
+    ) {
+        let listeners = state.borrow().restore_finished.clone();
+        for listener in listeners {
+            listener(outcome);
         }
     }
 

@@ -3,6 +3,7 @@
 //! never the root's rows. Crumb clicks and Back move along the trail being found, the user's own
 //! navigation ends the restore, `retry_restore` runs it again, and a browser made `remembering`
 //! remembers each folder the user moves to; the root's header markdown stays hidden meanwhile.
+//! Each answer tells the restore-finished listeners whether it landed, failed or was abandoned.
 //! Driven through agg-gui's `App` with real clicks.
 
 use std::cell::RefCell;
@@ -16,7 +17,7 @@ use agg_gui::text::Font;
 use agg_gui::{App, Event, Modifiers, MouseButton, Point, Rect, Size, Widget};
 use agg_gui_file_browser::{
     run_ready_local_tasks, BrowserConfig, BrowserMemory, BrowserPage, BrowserState, FileBrowser,
-    LocationFuture, OpenFolder, ViewMode,
+    LocationFuture, OpenFolder, RestoreOutcome, ViewMode,
 };
 use agg_gui_files::{DynamicFolder, Folder, MemoryFolder};
 
@@ -80,8 +81,13 @@ impl Slow {
     fn answer(&self) {
         let [projects, brackets] = self.found.clone();
         let folders: Vec<Box<dyn Folder>> = vec![Box::new(projects), Box::new(brackets)];
+        self.give(Some(folders));
+    }
+
+    /// Answers the latest search with `folders` (`None`: unreachable), and runs the task.
+    fn give(&self, folders: Option<Vec<Box<dyn Folder>>>) {
         let answer = Rc::clone(self.answers.borrow().last().expect("a search ran"));
-        answer.borrow_mut().folders = Some(Some(folders));
+        answer.borrow_mut().folders = Some(folders);
         if let Some(waker) = answer.borrow_mut().waker.take() {
             waker.wake();
         }
@@ -281,5 +287,72 @@ fn no_header_markdown_shows_while_the_remembered_folder_is_found() {
     assert!(
         find(app.root(), &header, Point::default()).is_some(),
         "the root's header once the root is what shows"
+    );
+}
+
+/// The restore-finished listener's notes: each outcome, with the depth it read from inside.
+type Heard = Rc<RefCell<Vec<(RestoreOutcome, usize)>>>;
+
+/// A browser restoring under `memory` whose restore-finished listener takes notes.
+fn heard(memory: &Rc<Slow>) -> (App, Rc<RefCell<BrowserState>>, Heard) {
+    let state = state(memory);
+    let heard: Heard = Rc::default();
+    let (sink, weak) = (Rc::clone(&heard), Rc::downgrade(&state));
+    state
+        .borrow_mut()
+        .add_restore_finished(Rc::new(move |outcome| {
+            let depth = weak.upgrade().map_or(0, |s| s.borrow().depth());
+            sink.borrow_mut().push((outcome, depth));
+        }));
+    let mut app = App::new(Box::new(FileBrowser::new(&state, font()).remembering(KEY)));
+    layout(&mut app);
+    (app, state, heard)
+}
+
+#[test]
+fn the_restore_finished_listeners_hear_whether_it_landed_failed_or_was_abandoned() {
+    let memory = Slow::new();
+    let (mut app, _state, heard) = self::heard(&memory);
+    assert!(heard.borrow().is_empty(), "nothing while it is found");
+    memory.answer();
+    layout(&mut app);
+    assert_eq!(
+        *heard.borrow(),
+        [(RestoreOutcome::Landed, 3)],
+        "read from the listener"
+    );
+
+    let memory = Slow::new();
+    let (mut app, state, heard) = self::heard(&memory);
+    memory.give(None);
+    layout(&mut app);
+    assert_eq!(*heard.borrow(), [(RestoreOutcome::Failed, 1)]);
+    assert!(!state.borrow().is_restoring());
+
+    let memory = Slow::new();
+    let (mut app, state, heard) = self::heard(&memory);
+    click(&mut app, &crumb(&state, "Home"));
+    assert!(heard.borrow().is_empty(), "told when the answer comes");
+    memory.answer();
+    layout(&mut app);
+    assert_eq!(*heard.borrow(), [(RestoreOutcome::Abandoned, 1)]);
+
+    // A retry's answer is told too, and the earlier search answering late is abandoned.
+    let memory = Slow::new();
+    let (mut app, state, heard) = self::heard(&memory);
+    BrowserState::retry_restore(&state);
+    memory.answer();
+    layout(&mut app);
+    assert_eq!(*heard.borrow(), [(RestoreOutcome::Landed, 3)]);
+    let first = Rc::clone(&memory.answers.borrow()[0]);
+    first.borrow_mut().folders = Some(None);
+    let waker = first.borrow_mut().waker.take();
+    if let Some(waker) = waker {
+        waker.wake();
+    }
+    layout(&mut app);
+    assert_eq!(
+        *heard.borrow(),
+        [(RestoreOutcome::Landed, 3), (RestoreOutcome::Abandoned, 3)]
     );
 }

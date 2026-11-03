@@ -165,7 +165,7 @@ pub use list::press::{ItemPress, DRAG_THRESHOLD};
 pub use list::row::{BrowserRow, RowStack, ROW_HEIGHT, ROW_THUMB_SIZE};
 pub use list::section_header::SectionHeaderRow;
 pub use list::tile_art::TileArt;
-pub use list::BrowserList;
+pub use list::{BrowserList, LIVE_REFRESH_WAKE};
 pub use local_spawner::{run_ready_local_tasks, unfinished_local_tasks, ErrorLog, LocalSpawner};
 pub use look::{glyph_face, BrowserIcon, BrowserLook, BrowserNames, BrowserStyle, DefaultLook};
 pub use memory::{
@@ -201,7 +201,7 @@ pub use sheet_dialogs::{DialogSheet, SheetDialogs};
 pub use state::{
     entries_message, is_only_a_message, item_identity_key, search_listing, BrowserEntry,
     BrowserState, ContainerChangedListener, ItemEvent, ListSlot, ListingMessage, OpenFolder,
-    SearchSectionCollapseState, SectionHeader,
+    RestoreFinishedListener, RestoreOutcome, SearchSectionCollapseState, SectionHeader,
 };
 pub use trace::{set_tracer, trace, tracing};
 pub use tree::menu::tree_menu_rows;

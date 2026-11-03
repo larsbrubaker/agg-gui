@@ -57,6 +57,7 @@ mod view;
 use active_watch::ActiveWatch;
 pub use browser_entry::{item_identity_key, BrowserEntry};
 pub use listing_message::{entries_message, is_only_a_message, ListingMessage};
+pub use restore::{RestoreFinishedListener, RestoreOutcome};
 pub use search::{search_listing, ListSlot, SearchSectionCollapseState, SectionHeader};
 
 /// A folder on a browser's open path: shared, so a hook can be handed the path without the
@@ -145,6 +146,8 @@ pub struct BrowserState {
     restore_key: Option<String>,
     /// Counts restores begun, so a late answer to an earlier one is told apart.
     restore_serial: u64,
+    /// Told how each restore's answer went (`state/restore.rs`).
+    restore_finished: Vec<RestoreFinishedListener>,
     /// This state's own handle, which snapshots carry back to it.
     me: Weak<RefCell<BrowserState>>,
 }
@@ -208,6 +211,7 @@ impl BrowserState {
             restore: None,
             restore_key: None,
             restore_serial: 0,
+            restore_finished: Vec::new(),
             me: Weak::new(),
         }));
         {

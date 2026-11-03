@@ -3,8 +3,8 @@
 //! back up (`go_to`), showing where an item lives (`show_location`), handing the showing folder
 //! over to a dialog's work (`take_active_container`) or replacing it (`replace_active_container`),
 //! and remembering and restoring a dialog's place through the config's `BrowserMemory`
-//! (`remember_location`, `restore_location`; the memory is handed a copy of the path's handles
-//! with the state let go). Every change of the showing folder leaves the old one and listens to
+//! (`remember_location`, `restore_location`, which tells the restore's listeners how its answer
+//! went; the memory is handed a copy of the path's handles with the state let go). Every change of the showing folder leaves the old one and listens to
 //! the new (`state/active_watch.rs`), restores the folder's view (`state/view.rs`), bumps the
 //! navigation counter and tells the container-changed listeners (how a search learns the user
 //! walked away from its results). Part of `state/mod.rs`, whose fields it reads.
@@ -16,7 +16,7 @@ use agg_gui_files::{tr, Folder, FolderLink, Item};
 
 use crate::memory::remember_open_location;
 
-use super::{BrowserState, ContainerChangedListener, OpenFolder};
+use super::{BrowserState, ContainerChangedListener, OpenFolder, RestoreOutcome};
 
 impl BrowserState {
     /// The names of the folders from the root down (the breadcrumbs).
@@ -303,20 +303,24 @@ impl BrowserState {
             let Some(state) = weak.upgrade() else {
                 return;
             };
-            let mut s = state.borrow_mut();
-            let Some(keep) = s.finish_restore(serial) else {
-                return;
+            let outcome = {
+                let mut s = state.borrow_mut();
+                match (s.finish_restore(serial), found) {
+                    (None, _) => RestoreOutcome::Abandoned,
+                    (Some(_), None) => RestoreOutcome::Failed,
+                    (Some(_), Some(_)) if s.navigation != navigation || s.depth() != 1 => {
+                        RestoreOutcome::Abandoned
+                    }
+                    (Some(keep), Some(folders)) => {
+                        let keep = keep.unwrap_or(folders.len());
+                        for folder in folders.into_iter().take(keep) {
+                            s.push_container(folder);
+                        }
+                        RestoreOutcome::Landed
+                    }
+                }
             };
-            let Some(folders) = found else {
-                return;
-            };
-            if s.navigation != navigation || s.depth() != 1 {
-                return;
-            }
-            let keep = keep.unwrap_or(folders.len());
-            for folder in folders.into_iter().take(keep) {
-                s.push_container(folder);
-            }
+            Self::tell_restore_finished(&state, outcome);
         }));
     }
 }
