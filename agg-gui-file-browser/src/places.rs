@@ -22,7 +22,10 @@
 //! [`PlaceRules::open_folder_key`] (an open folder), defaulting to the folder's place and
 //! location key; an app whose folders have no location key (a remote place's folders, told by
 //! their server IDs) answers keys of its own, so "already in" and "can't go inside itself" hold
-//! for them too.
+//! for them too. Whether a folder is inside a moved folder is [`PlaceRules::folder_inside`]'s
+//! word: by default a folder is inside only itself (the dialog sees the rest on its path), and an
+//! app whose folders a root of their own can reach (a library folder on disk inside a moved
+//! folder) answers by their locations.
 
 use std::rc::Rc;
 
@@ -182,6 +185,13 @@ pub trait PlaceRules {
     /// place and location key ([`FolderKey::of_folder`]).
     fn open_folder_key(&self, folder: &dyn Folder) -> Option<FolderKey> {
         FolderKey::of_folder(folder)
+    }
+
+    /// Whether the folder keyed `inner` is `outer` or inside it, however the dialog reached it:
+    /// the Move dialog refuses a destination on or below a folder it is moving. The default
+    /// answers only `inner == outer`, the dialog's open folders standing for the rest.
+    fn folder_inside(&self, inner: &FolderKey, outer: &FolderKey) -> bool {
+        inner == outer
     }
 }
 

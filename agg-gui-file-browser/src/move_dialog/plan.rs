@@ -54,6 +54,16 @@ impl FolderKey {
             location: folder.location_key()?,
         })
     }
+
+    /// The place the folder is in.
+    pub fn place(&self) -> Option<&PlaceId> {
+        self.place.as_ref()
+    }
+
+    /// The text naming the folder within its place (a path on disk, a server ID).
+    pub fn location(&self) -> &str {
+        &self.location
+    }
 }
 
 /// What accepting the Move dialog would do, with the line saying so.
@@ -155,7 +165,8 @@ fn what(request: &MoveRequest, one: &str, many: &str, rest: &[&str]) -> String {
 }
 
 /// Why the folder at `key`, below the dialog's open folders `path`, can't take the items: it is
-/// their own folder, or one of them or inside one.
+/// their own folder, or one of them or inside one (an open folder or `key` itself, by the
+/// request's `PlaceRules::folder_inside`).
 fn refusal(request: &MoveRequest, key: Option<&FolderKey>, path: &[FolderKey]) -> Option<String> {
     if key.is_some() && key == request.source_key.as_ref() {
         let source = request.source_name.as_str();
@@ -169,7 +180,7 @@ fn refusal(request: &MoveRequest, key: Option<&FolderKey>, path: &[FolderKey]) -
         let folder = request.places.folder_key(item.as_container_link()?)?;
         path.iter()
             .chain(key)
-            .any(|k| *k == folder)
+            .any(|k| request.places.folder_inside(k, &folder))
             .then(|| item.name().to_string())
     });
     moved.map(|name| into_itself(&name))

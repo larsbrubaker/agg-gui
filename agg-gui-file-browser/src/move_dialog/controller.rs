@@ -7,7 +7,8 @@
 //! `move_verdict`), and accepting opens the destination (the selected folder row, or the folder
 //! showing, handed over) and answers with it ([`MovePick`]); the browser's Move does the move. A
 //! showing folder something else still holds is not handed over: the dialog stays in it and the
-//! browser's status says the folder was busy. Where the dialog opens and what it remembers of
+//! browser's status says the folder was busy, as does the app's report (`BrowserConfig::report`)
+//! when it gives one, since the app's own page may show no status line. Where the dialog opens and what it remembers of
 //! where the user goes is `place.rs`'s: the page calls [`MoveController::update`] at each layout.
 
 use std::cell::RefCell;
@@ -176,8 +177,13 @@ impl MoveController {
     }
 }
 
-/// Nothing moved because the folder was held: the dialog stays, saying so.
+/// Nothing moved because the folder was held: the dialog stays, saying so in its status and
+/// through the app's report.
 fn busy(state: &Rc<RefCell<BrowserState>>) {
     let text = agg_gui_files::tr("The folder was busy, so nothing moved. Try again.");
-    state.borrow_mut().after_write(text);
+    let report = state.borrow().config().report.clone();
+    state.borrow_mut().after_write(text.clone());
+    if let Some(report) = report {
+        report(&text);
+    }
 }

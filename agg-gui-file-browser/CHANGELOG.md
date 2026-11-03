@@ -8,6 +8,23 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ## [Unreleased]
 
+## [0.0.9] - 2026-11-03
+
+### Added
+
+- `PlaceRules::folder_inside`: whether one folder's key is inside another's, however the dialog
+  reached it. The Move dialog refuses a destination the rules place on or below a moved folder
+  ("can't go inside itself"), so an app whose roots reach folders inside one another (a library
+  folder on disk inside a moved folder) answers by their locations. The default answers only
+  equality, as before.
+- `FolderKey::place` and `FolderKey::location`: a key's parts, for an app's `folder_inside`.
+
+### Changed
+
+- A Move dialog's accept that finds the showing folder still held elsewhere also says so through
+  the app's report (`BrowserConfig::report`), not only in the browser's status, since an app's
+  own page may show no status line.
+
 ## [0.0.8] - 2026-11-03
 
 ### Added
