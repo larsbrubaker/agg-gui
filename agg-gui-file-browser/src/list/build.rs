@@ -98,8 +98,6 @@ impl ListCx {
         }
     }
 
-    /// The parts of listed row `index` with its picture `side` units square, an overlay framed
-    /// as `frame`; `None` past the listing's end.
     /// What listed row `index` shows where its `side`-wide picture goes, asked again (a picture
     /// that arrived); `None` past the listing's end.
     pub fn art(&self, index: usize, side: i32) -> Option<TileArt> {
@@ -128,6 +126,14 @@ impl ListCx {
         )
     }
 
+    /// Whether a press on a row leaves the focus where it was: in a list that takes no keys
+    /// (`BrowserOptions::list_takes_keys` off), a dialog's name field keeps typing.
+    pub fn leaves_focus(&self) -> bool {
+        !self.state.borrow().config().options.list_takes_keys
+    }
+
+    /// The parts of listed row `index` with its picture `side` units square, an overlay framed
+    /// as `frame`; `None` past the listing's end.
     pub fn parts(&self, index: usize, side: i32, frame: OverlayFrame) -> Option<RowParts> {
         let (entry, selected, hovered) = {
             let s = self.state.borrow();

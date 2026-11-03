@@ -27,9 +27,16 @@ use crate::state::BrowserState;
 use super::menu_button::{in_menu_button, menu_button_rect};
 use super::press::pointer;
 
-/// Gives the list the keys: a press in the list (on a row or its empty space) asks for them.
+/// Gives the list the keys: a press in the list (on a row or its empty space) asks for them,
+/// unless the list takes no keys (`BrowserOptions::list_takes_keys`).
 pub fn focus_list(state: &Rc<RefCell<BrowserState>>) {
-    let id = state.borrow().list_focus_id();
+    let id = {
+        let s = state.borrow();
+        if !s.config().options.list_takes_keys {
+            return;
+        }
+        s.list_focus_id()
+    };
     agg_gui::focus::request_focus(id);
 }
 

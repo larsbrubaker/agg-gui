@@ -12,6 +12,13 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- `BrowserOptions::list_takes_keys` (default `true`): `false` makes a list that never takes the
+  keyboard (a press leaves the focus where it was) and takes none of its keys (Delete and
+  Backspace for Remove, undo and redo, select all, the arrows, Escape), for a dialog whose name
+  field keeps typing while a click on a row fills it in. A list whose app menu gives no rows opens
+  no menu.
+- `CopyTakeover::Refused`: the app refused a copy and told the user why; the drop answers that it
+  copied nothing.
 - `PlaceRules::take_over_move`, handed a `MoveCx` (the items, the target and source folders, the
   target's name): an app runs a drop's or the Move dialog's move its own way (a move between two
   folders of a remote place, whose undo step can only be recorded once the server answers) and

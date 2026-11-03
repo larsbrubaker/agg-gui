@@ -173,7 +173,7 @@ fn the_default_rules_hand_every_copy_back_whole() {
         report: Rc::new(|_: &str| {}),
     };
     match DefaultPlaces.take_over_copy(cx) {
-        CopyTakeover::Taken => panic!("the default runs no copy itself"),
+        CopyTakeover::Taken | CopyTakeover::Refused => panic!("the default runs no copy itself"),
         CopyTakeover::Declined(back) => {
             assert_eq!(back.items.len(), 1);
             assert!(Rc::ptr_eq(&back.items[0], &item));

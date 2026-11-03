@@ -96,6 +96,9 @@ pub struct CopyCx {
 pub enum CopyTakeover {
     /// The app runs the copy: it reports the outcome and records any undo step itself.
     Taken,
+    /// The app refused the copy and has already told the user why: nothing is copied, and the
+    /// drop answers that it copied nothing.
+    Refused,
     /// The app leaves the copy, handed back whole, to the browser.
     Declined(CopyCx),
 }
@@ -146,7 +149,8 @@ pub trait PlaceRules {
     }
 
     /// Runs `cx`'s copy the app's own way (a copy into a remote place as a task the user can
-    /// watch), answering [`CopyTakeover::Taken`], or hands it back. The default hands every copy
+    /// watch), answering [`CopyTakeover::Taken`] (or [`CopyTakeover::Refused`] when it refuses
+    /// the copy), or hands it back. The default hands every copy
     /// back.
     fn take_over_copy(&self, cx: CopyCx) -> CopyTakeover {
         CopyTakeover::Declined(cx)

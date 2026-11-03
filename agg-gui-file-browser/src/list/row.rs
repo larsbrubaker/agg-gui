@@ -230,6 +230,10 @@ impl Widget for BrowserRow {
     fn claims_pointer_exclusively(&self, _local_pos: Point) -> bool {
         true
     }
+    /// A press on the row leaves the focus where it was when the list takes no keys.
+    fn keeps_focus_on_press(&self) -> bool {
+        self.cx.leaves_focus()
+    }
     fn on_event(&mut self, event: &Event) -> EventResult {
         match event {
             Event::MouseEnter => self.hovered = true,

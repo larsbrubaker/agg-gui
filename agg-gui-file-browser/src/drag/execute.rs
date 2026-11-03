@@ -215,6 +215,10 @@ fn copy_into(
             crate::trace(|| format!("copy to {target_name} taken over by the app"));
             return true;
         }
+        CopyTakeover::Refused => {
+            crate::trace(|| format!("copy to {target_name} refused by the app"));
+            return false;
+        }
         CopyTakeover::Declined(cx) => cx,
     };
     let CopyCx {

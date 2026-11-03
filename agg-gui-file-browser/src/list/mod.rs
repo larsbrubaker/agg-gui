@@ -24,7 +24,8 @@
 //! handled (`gestures.rs`): a row asks for the selection's menu (a right press, or its menu
 //! button, `menu_button.rs`) and the press bubbles here, which opens it where it was pressed or
 //! hanging from the button (or hands its rows to the app's menu host there, `menus.rs`); a right press on empty space, or a click in the list's own top-right
-//! corner, opens the list's menu. Rows hold no state of their own beyond a build: hover, the menu
+//! corner, opens the list's menu. A list made with `BrowserOptions::list_takes_keys` off (a
+//! dialog's, beside a name field) never takes the focus and takes no key. Rows hold no state of their own beyond a build: hover, the menu
 //! button's press and a press that may become a drag live in the state (`press.rs`), so they
 //! survive the rows being rebuilt under the pointer. `item_event.rs` is a row's pointer handling,
 //! `build.rs` what each row is built from, `tile_art.rs` what a row shows where its picture goes,
@@ -258,6 +259,11 @@ impl BrowserList {
         self.built = Some(key);
     }
 
+    /// Whether the list takes the keyboard (`BrowserOptions::list_takes_keys`).
+    fn takes_keys(&self) -> bool {
+        self.state.borrow().config().options.list_takes_keys
+    }
+
     /// Opens `scope`'s menu at `pos` (list-local); the selection's hangs from the menu button
     /// that asked for it, when one did. The rows are offered to the config's menu host first
     /// (`menus.rs`); when it doesn't show them, the list opens them in its own menu.
@@ -421,8 +427,8 @@ impl Widget for BrowserList {
         let mut properties = vec![
             ("dragging", drop.is_dragging().to_string()),
             ("drop_label", drop.label_for(crate::drag::LIST_DROP_KEY)),
-            // How many times a picture hook said a picture of these rows changed (each builds
-            // the rows again): tests see which changes reach which list.
+            // How many times a picture hook said a picture of these rows changed (each asks the
+            // rows for their art again): tests see which changes reach which list.
             ("picture_arrivals", self.arrivals.get().to_string()),
         ];
         properties.extend(crate::drag::picture::picture_properties(&state));
@@ -436,9 +442,15 @@ impl Widget for BrowserList {
     fn claims_pointer_exclusively(&self, _local_pos: Point) -> bool {
         self.menu.is_open()
     }
-    /// A press in the list asks for the keys.
+    /// A press in the list asks for the keys, when the list takes them
+    /// (`BrowserOptions::list_takes_keys`).
     fn is_focusable(&self) -> bool {
-        true
+        self.takes_keys()
+    }
+    /// A list that takes no keys leaves the focus where it is on a press (a dialog's name
+    /// field keeps typing while a click on a row fills it in).
+    fn keeps_focus_on_press(&self) -> bool {
+        !self.takes_keys()
     }
     fn focus_id(&self) -> Option<agg_gui::focus::FocusId> {
         Some(self.state.borrow().list_focus_id())
@@ -448,6 +460,9 @@ impl Widget for BrowserList {
             return result;
         }
         if let Event::KeyDown { key, modifiers } = event {
+            if !self.takes_keys() {
+                return EventResult::Ignored;
+            }
             return list_key_event(&self.state, &self.children, key, *modifiers);
         }
         // A press whose row was rebuilt away still ends here.

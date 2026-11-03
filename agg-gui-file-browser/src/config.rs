@@ -87,6 +87,11 @@ pub struct BrowserOptions {
     /// The picture side the list opens on when a folder has no remembered view (icons of 100;
     /// a dialog may ask for 75).
     pub thumb_size: i32,
+    /// Whether the list takes the keyboard: a press in it asks for the focus, and the focused
+    /// list takes its keys (Delete and Backspace for Remove, undo and redo, select all, the
+    /// arrows, Escape). Off, a press leaves the focus where it is (a dialog's name field keeps
+    /// its keys while a click on a row fills it in) and the list takes no key.
+    pub list_takes_keys: bool,
 }
 
 impl Default for BrowserOptions {
@@ -101,6 +106,7 @@ impl Default for BrowserOptions {
             item_filter: None,
             multi_select: true,
             thumb_size: ViewMode::Icons.thumb_size(),
+            list_takes_keys: true,
         }
     }
 }
@@ -117,6 +123,7 @@ impl fmt::Debug for BrowserOptions {
             .field("item_filter", &self.item_filter.is_some())
             .field("multi_select", &self.multi_select)
             .field("thumb_size", &self.thumb_size)
+            .field("list_takes_keys", &self.list_takes_keys)
             .finish()
     }
 }

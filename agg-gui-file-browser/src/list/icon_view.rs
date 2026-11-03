@@ -118,7 +118,6 @@ impl BrowserTile {
         })
     }
 
-    /// Whether the tile opens a folder.
     /// Asks for its art again (a picture arrived), keeping the tile itself.
     pub fn refresh_art(&mut self) {
         if let Some(art) = self.cx.art(self.index, self.thumb) {
@@ -126,6 +125,7 @@ impl BrowserTile {
         }
     }
 
+    /// Whether the tile opens a folder.
     pub fn is_container(&self) -> bool {
         self.parts.entry.is_container()
     }
@@ -283,6 +283,10 @@ impl Widget for BrowserTile {
     /// The tile takes every press over it, and hands the overlay its own (`list/overlay.rs`).
     fn claims_pointer_exclusively(&self, _local_pos: Point) -> bool {
         true
+    }
+    /// A press on the tile leaves the focus where it was when the list takes no keys.
+    fn keeps_focus_on_press(&self) -> bool {
+        self.cx.leaves_focus()
     }
     fn on_event(&mut self, event: &Event) -> EventResult {
         match event {

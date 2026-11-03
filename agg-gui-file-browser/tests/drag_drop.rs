@@ -1,209 +1,19 @@
 //! Dragging the browser's items onto its folders, through agg-gui's `App` with real pointer
-//! events over a folder tree beside the list: a row dropped on a folder row, a folder tile or a
-//! tree row moves on disk and the move can be undone; with the copy modifier the drop copies; a
-//! drop between two places copies; a read-only folder is never highlighted and takes nothing; and
-//! a copy is offered to the app first (`take_over_copy`), which may run it or hand it back, as is
-//! a move (`take_over_move`). A
-//! drag held over a folder opens it after the spring delay (on agg-gui's virtual clock): a tree
-//! row in place, a folder in the list in the list, where a drop on the empty space lands in it.
-//! The drag's picture follows the pointer (everywhere without a hook), hides outside the browser
-//! when the app says so whatever it answers, and a release over the app's view goes to its
-//! `OutsideDrops` hook (`cancel` when the drag comes back, or at the drag's end for a hook that
-//! keeps its view on the way back). An app's overlay on a carried row
-//! paints faded with it, and learns how its square sits in a row or a tile.
+//! events over a folder tree beside the list (`drag_support`): a row dropped on a folder row, a
+//! folder tile or a tree row moves on disk and the move can be undone; with the copy modifier the
+//! drop copies; a drop between two places copies; a read-only folder is never highlighted and
+//! takes nothing; and a copy is offered to the app first (`take_over_copy`), which may run it,
+//! refuse it or hand it back. A drag held over a folder opens it after the spring delay (on
+//! agg-gui's virtual clock): a tree row in place, a folder in the list in the list, where a drop
+//! on the empty space lands in it. The drag's picture follows the pointer (everywhere without a
+//! hook), hides outside the browser when the app says so whatever it answers, and a release over
+//! the app's view goes to its `OutsideDrops` hook (`cancel` when the drag comes back). An app's
+//! overlay on a carried row paints faded with it, and learns how its square sits in a row or a
+//! tile.
 
-use std::cell::RefCell;
-use std::path::{Path, PathBuf};
-use std::rc::Rc;
-use std::sync::Arc;
+mod drag_support;
 
-use agg_gui::text::Font;
-use agg_gui::{
-    App, DrawCtx, Event, EventResult, Framebuffer, GfxCtx, Modifiers, MouseButton, Point, Rect,
-    Size, Widget,
-};
-use agg_gui_file_browser::{
-    run_ready_local_tasks, BrowserConfig, BrowserList, BrowserState, BrowserTree, CopyCx,
-    CopyTakeover, DropKey, DropTargetKind, Entry, ItemPictures, MoveCx, MoveTakeover, OutsideDrops,
-    OutsideOver, OverlayFrame, PictureCx, PictureState, PlaceRules, ViewMode, SPRING_DELAY,
-};
-use agg_gui_files::disk::{AllFiles, DiskFolder};
-use agg_gui_files::Item;
-use agg_gui_files::{DynamicFolder, DynamicFolderLink, Folder, FolderLink, MemoryFolder, PlaceId};
-
-const WIDTH: f64 = 600.0;
-const HEIGHT: f64 = 400.0;
-/// The tree's width, left of the list.
-const TREE: f64 = 180.0;
-/// The room right of the list: the app's own view, outside the browser.
-const VIEW: f64 = 100.0;
-
-fn font() -> Arc<Font> {
-    Arc::new(Font::from_slice(agg_gui::fonts::NOTO_SANS_REGULAR).expect("bundled font loads"))
-}
-
-/// The tree left of the list, as an app places them.
-struct Split {
-    bounds: Rect,
-    children: Vec<Box<dyn Widget>>,
-}
-
-impl Widget for Split {
-    fn type_name(&self) -> &'static str {
-        "Split"
-    }
-    fn bounds(&self) -> Rect {
-        self.bounds
-    }
-    fn set_bounds(&mut self, bounds: Rect) {
-        self.bounds = bounds;
-    }
-    fn children(&self) -> &[Box<dyn Widget>] {
-        &self.children
-    }
-    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
-        &mut self.children
-    }
-    fn layout(&mut self, available: Size) -> Size {
-        let widths = [TREE, available.width - TREE - VIEW];
-        let mut x = 0.0;
-        for (child, width) in self.children.iter_mut().zip(widths) {
-            child.layout(Size::new(width, available.height));
-            child.set_bounds(Rect::new(x, 0.0, width, available.height));
-            x += width;
-        }
-        available
-    }
-    fn paint(&mut self, _ctx: &mut dyn DrawCtx) {}
-    fn on_event(&mut self, _event: &Event) -> EventResult {
-        EventResult::Ignored
-    }
-}
-
-/// An app showing the tree and the list of a browser at `root` with `config`, in `mode`.
-fn browser_app(
-    root: Box<dyn Folder>,
-    config: BrowserConfig,
-    mode: ViewMode,
-) -> (App, Rc<RefCell<BrowserState>>) {
-    agg_gui::set_device_scale(1.0);
-    let state = BrowserState::new(root, config);
-    state.borrow_mut().set_view_mode(mode);
-    let split = Split {
-        bounds: Rect::default(),
-        children: vec![
-            Box::new(BrowserTree::for_state(&state, font())),
-            Box::new(BrowserList::new(&state, font())),
-        ],
-    };
-    let mut app = App::new(Box::new(split));
-    frame(&mut app);
-    (app, state)
-}
-
-/// A layout and a paint, as a frame does: the folders record themselves as drop targets.
-fn frame(app: &mut App) {
-    app.layout(Size::new(WIDTH, HEIGHT));
-    let mut fb = Framebuffer::new(WIDTH as u32, HEIGHT as u32);
-    let mut ctx = GfxCtx::new(&mut fb);
-    app.paint(&mut ctx);
-}
-
-/// The widget named `id` and its rectangle in the root's coordinates (Y up).
-fn find<'a>(widget: &'a dyn Widget, id: &str, origin: Point) -> Option<(&'a dyn Widget, Rect)> {
-    let b = widget.bounds();
-    let here = Point::new(origin.x + b.x, origin.y + b.y);
-    if widget.id() == Some(id) {
-        return Some((widget, Rect::new(here.x, here.y, b.width, b.height)));
-    }
-    widget
-        .children()
-        .iter()
-        .find_map(|child| find(child.as_ref(), id, here))
-}
-
-fn found<'a>(app: &'a App, id: &str) -> (&'a dyn Widget, Rect) {
-    find(app.root(), id, Point::new(0.0, 0.0)).unwrap_or_else(|| panic!("no widget named {id}"))
-}
-
-fn centre(app: &App, id: &str) -> Point {
-    let r = found(app, id).1;
-    Point::new(r.x + r.width / 2.0, r.y + r.height / 2.0)
-}
-
-fn property(app: &App, id: &str, key: &str) -> String {
-    found(app, id)
-        .0
-        .properties()
-        .into_iter()
-        .find(|(k, _)| *k == key)
-        .unwrap_or_else(|| panic!("{id} has no {key}"))
-        .1
-}
-
-/// The modifiers holding the copy modifier: Option on the Mac, Ctrl elsewhere.
-fn copy_modifier() -> Modifiers {
-    Modifiers {
-        alt: cfg!(target_os = "macos"),
-        ctrl: !cfg!(target_os = "macos"),
-        ..Modifiers::default()
-    }
-}
-
-/// Moves the pointer to `at` (root coordinates, Y up), then a frame.
-fn move_to(app: &mut App, at: Point) {
-    app.on_mouse_move(at.x, HEIGHT - at.y);
-    frame(app);
-}
-
-/// Presses on the widget named `from`, drags in steps to the widget named `to`, and holds there
-/// (a second move once the targets have painted). The button stays down.
-fn drag_over(app: &mut App, from: &str, to: &str) -> Point {
-    let (start, end) = (centre(app, from), centre(app, to));
-    app.on_mouse_move(start.x, HEIGHT - start.y);
-    app.on_mouse_down(
-        start.x,
-        HEIGHT - start.y,
-        MouseButton::Left,
-        Modifiers::default(),
-    );
-    frame(app);
-    for step in 1..=4 {
-        let t = f64::from(step) / 4.0;
-        let at = Point::new(
-            start.x + (end.x - start.x) * t,
-            start.y + (end.y - start.y) * t,
-        );
-        move_to(app, at);
-    }
-    move_to(app, Point::new(end.x + 1.0, end.y));
-    Point::new(end.x + 1.0, end.y)
-}
-
-/// Releases at `at` with `modifiers`, then runs the copies started and a frame.
-fn release(app: &mut App, at: Point, modifiers: Modifiers) {
-    app.on_mouse_up(at.x, HEIGHT - at.y, MouseButton::Left, modifiers);
-    for _ in 0..20 {
-        run_ready_local_tasks();
-    }
-    frame(app);
-}
-
-/// A fresh scratch folder holding the folder Parts and the file gear.stl.
-fn workshop(label: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!(
-        "agg-gui-file-browser-drag-{label}-{}",
-        std::process::id()
-    ));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(dir.join("Parts")).expect("made");
-    std::fs::write(dir.join("gear.stl"), b"solid gear").expect("written");
-    dir
-}
-
-fn disk(dir: &Path) -> Box<dyn Folder> {
-    Box::new(DiskFolder::new(dir, Rc::new(AllFiles)))
-}
+use drag_support::*;
 
 /// Drags gear.stl's row onto `target` in `mode` and checks the move on disk and its undo.
 fn moves_onto(label: &str, mode: ViewMode, target: &str) {
@@ -239,27 +49,6 @@ fn a_row_dropped_on_a_folder_tile_moves_and_can_be_undone() {
 #[test]
 fn a_row_dropped_on_a_tree_row_moves_and_can_be_undone() {
     moves_onto("tree", ViewMode::Rows, "Parts Tree Node");
-}
-
-#[test]
-fn a_drop_on_a_tree_row_leaves_the_list_its_keys_and_one_outside_the_browser_gives_them_up() {
-    let dir = workshop("keys");
-    let (mut app, _state) = browser_app(disk(&dir), BrowserConfig::default(), ViewMode::Rows);
-    let at = drag_over(&mut app, "Row Item gear.stl", "Parts Tree Node");
-    release(&mut app, at, Modifiers::default());
-    assert_eq!(
-        app.focused_widget_type_name(),
-        Some("BrowserList"),
-        "a drop on the browser's own folder keeps the undo keys with the list"
-    );
-    std::fs::write(dir.join("bolt.stl"), b"solid bolt").expect("written");
-    let (mut app, _state) = browser_app(disk(&dir), BrowserConfig::default(), ViewMode::Rows);
-    drag_over(&mut app, "Row Item bolt.stl", "Parts Tree Node");
-    let outside = Point::new(WIDTH - VIEW / 2.0, HEIGHT / 2.0);
-    move_to(&mut app, outside);
-    release(&mut app, outside, Modifiers::default());
-    assert_ne!(app.focused_widget_type_name(), Some("BrowserList"));
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// A folder with no ID of its own (the app's disk folders may answer an empty one): only its
@@ -359,48 +148,6 @@ fn the_copy_modifier_copies() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// Home listing Desk (in place "desk", holding gear.stl) and Shelf (in place "shelf"), each a
-/// root row, and the browser showing Desk.
-fn two_places(
-    config: BrowserConfig,
-    shelf_read_only: bool,
-) -> (App, Rc<RefCell<BrowserState>>, MemoryFolder, MemoryFolder) {
-    let desk = MemoryFolder::new("Desk").with_place(PlaceId::new("desk"));
-    desk.add_file("gear.stl", b"solid".to_vec());
-    let shelf = MemoryFolder::new("Shelf").with_place(PlaceId::new("shelf"));
-    let shelf_link: Rc<dyn FolderLink> = match shelf_read_only {
-        false => shelf.link(),
-        true => {
-            let handle = shelf.clone();
-            Rc::new(
-                DynamicFolderLink::new(
-                    "Shelf",
-                    Rc::new(move || Box::new(handle.clone()) as Box<dyn Folder>),
-                )
-                .with_read_only(true)
-                .with_local_listing(),
-            )
-        }
-    };
-    let mut home = DynamicFolder::new("Home");
-    home.data.child_containers = vec![desk.link(), shelf_link];
-    let (mut app, state) = browser_app(Box::new(home), config, ViewMode::Rows);
-    let desk_link = state.borrow().root_child_containers()[0].clone();
-    state.borrow_mut().open(desk_link.as_ref());
-    frame(&mut app);
-    (app, state, desk, shelf)
-}
-
-fn names(folder: &MemoryFolder) -> Vec<String> {
-    let mut folder = folder.clone();
-    folder.load();
-    folder
-        .items()
-        .iter()
-        .map(|i| i.name().to_string())
-        .collect()
-}
-
 #[test]
 fn a_drop_between_two_places_copies() {
     let (mut app, _state, desk, shelf) = two_places(BrowserConfig::default(), false);
@@ -477,69 +224,30 @@ fn a_copy_taken_over_is_the_apps_and_one_handed_back_runs_here() {
     }
 }
 
-/// Rules that take every move (`take`, failing it with `answer`'s error when it has one) or hand
-/// it back, noting what they were handed.
-struct MovesOffered {
-    take: bool,
-    seen: RefCell<Vec<String>>,
-}
+/// Rules that refuse every copy, telling the user why as the app does.
+struct RefusesCopies;
 
-impl PlaceRules for MovesOffered {
-    fn take_over_move<'a>(&self, cx: MoveCx<'a>) -> MoveTakeover<'a> {
-        self.seen.borrow_mut().push(format!(
-            "{} item(s) to {}: {}",
-            cx.items.len(),
-            cx.target_name,
-            cx.items[0].name()
-        ));
-        match self.take {
-            true => MoveTakeover::Taken(Err("the app's own move failed".to_string())),
-            false => MoveTakeover::Declined(cx),
-        }
+impl PlaceRules for RefusesCopies {
+    fn take_over_copy(&self, cx: CopyCx) -> CopyTakeover {
+        (cx.report)("Items can't be copied into this folder.");
+        CopyTakeover::Refused
     }
 }
 
 #[test]
-fn a_move_taken_over_is_the_apps_and_one_handed_back_runs_here() {
-    for take in [true, false] {
-        let dir = workshop(&format!("move-takeover-{take}"));
-        let rules = Rc::new(MovesOffered {
-            take,
-            seen: RefCell::new(Vec::new()),
-        });
-        let reported = Rc::new(RefCell::new(Vec::<String>::new()));
-        let report = Rc::clone(&reported);
-        let config = BrowserConfig::builder()
-            .places(rules.clone())
-            .report(Rc::new(move |m: &str| {
-                report.borrow_mut().push(m.to_string())
-            }))
-            .build();
-        let (mut app, state) = browser_app(disk(&dir), config, ViewMode::Rows);
-        let at = drag_over(&mut app, "Row Item gear.stl", "Parts Tree Node");
-        release(&mut app, at, Modifiers::default());
-        assert_eq!(*rules.seen.borrow(), ["1 item(s) to Parts: gear.stl"]);
-        let undo = state.borrow().history().undo_description();
-        match take {
-            true => {
-                assert!(
-                    dir.join("gear.stl").exists(),
-                    "the app runs it, not the folder"
-                );
-                assert_eq!(undo, None, "the app records its own step");
-                assert_eq!(
-                    *reported.borrow(),
-                    ["Couldn't move to \"Parts\": the app's own move failed"]
-                );
-            }
-            false => {
-                assert!(dir.join("Parts/gear.stl").exists());
-                assert_eq!(undo.as_deref(), Some("Moved gear.stl to Parts"));
-                assert!(reported.borrow().is_empty());
-            }
-        }
-        let _ = std::fs::remove_dir_all(&dir);
-    }
+fn a_copy_the_app_refuses_is_no_drop_and_says_why() {
+    let config = BrowserConfig::builder()
+        .places(Rc::new(RefusesCopies))
+        .build();
+    let (_app, state, desk, shelf) = two_places(config, false);
+    let gear = desk.items();
+    let dropped = drop_into(&state, Box::new(shelf.clone()), "Shelf", &gear, 1, true);
+    assert!(!dropped, "a refused copy copied nothing");
+    assert!(names(&shelf).is_empty());
+    assert_eq!(
+        state.borrow().status(),
+        "Items can't be copied into this folder."
+    );
 }
 
 /// The workshop with a folder Inner inside Parts.
@@ -609,38 +317,6 @@ fn a_drag_held_over_a_folder_in_the_list_opens_it_there_and_drops_into_it() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// The app's view right of the browser: it takes the items and shows them itself.
-#[derive(Default)]
-struct View {
-    calls: RefCell<Vec<String>>,
-}
-
-impl OutsideDrops for View {
-    fn over(&self, items: &[Rc<dyn Item>], _window_at: Point) -> OutsideOver {
-        self.calls
-            .borrow_mut()
-            .push(format!("over {}", items.len()));
-        OutsideOver::Target {
-            hides_picture: true,
-        }
-    }
-    fn release(&self, items: &[Rc<dyn Item>], _window_at: Point) -> bool {
-        let names: Vec<&str> = items.iter().map(|i| i.name()).collect();
-        self.calls
-            .borrow_mut()
-            .push(format!("release {}", names.join(",")));
-        true
-    }
-    fn cancel(&self) {
-        self.calls.borrow_mut().push("cancel".to_string());
-    }
-}
-
-/// The list's property `key`.
-fn list_property(app: &App, key: &str) -> String {
-    property(app, "LibraryView", key)
-}
-
 #[test]
 fn the_picture_follows_hides_over_the_apps_view_and_a_release_there_is_the_apps() {
     let dir = workshop("outside");
@@ -675,62 +351,6 @@ fn the_picture_follows_hides_over_the_apps_view_and_a_release_there_is_the_apps(
     assert!(dir.join("gear.stl").exists(), "the browser moved nothing");
     assert_eq!(list_property(&app, "drag_picture"), "");
     let _ = std::fs::remove_dir_all(&dir);
-}
-
-/// The app's view under a browser panel: it keeps its preview while the drag crosses the panel.
-#[derive(Default)]
-struct ViewUnderPanel(View);
-
-impl OutsideDrops for ViewUnderPanel {
-    fn over(&self, items: &[Rc<dyn Item>], window_at: Point) -> OutsideOver {
-        self.0.over(items, window_at)
-    }
-    fn release(&self, items: &[Rc<dyn Item>], window_at: Point) -> bool {
-        self.0.release(items, window_at)
-    }
-    fn cancel(&self) {
-        self.0.cancel()
-    }
-    fn cancel_on_return(&self) -> bool {
-        false
-    }
-}
-
-#[test]
-fn a_view_kept_on_return_hears_at_the_drags_end_a_cancel_after_a_folder_drop_else_the_release() {
-    for onto_folder in [true, false] {
-        let dir = workshop(&format!("kept-view-{onto_folder}"));
-        let view = Rc::new(ViewUnderPanel::default());
-        let config = BrowserConfig::builder().drops(view.clone()).build();
-        let (mut app, _state) = browser_app(disk(&dir), config, ViewMode::Rows);
-        drag_over(&mut app, "Row Item gear.stl", "Parts Row Item Collection");
-        let outside = Point::new(WIDTH - VIEW / 2.0, HEIGHT / 2.0);
-        move_to(&mut app, outside);
-        // Back over the browser: the view keeps its preview.
-        let folder = centre(&app, "Parts Row Item Collection");
-        let at = match onto_folder {
-            true => folder,
-            false => Point::new(folder.x, 10.0),
-        };
-        move_to(&mut app, at);
-        assert_eq!(
-            *view.0.calls.borrow(),
-            ["over 1"],
-            "no cancel on the way back"
-        );
-        release(&mut app, at, Modifiers::default());
-        match onto_folder {
-            true => {
-                assert_eq!(*view.0.calls.borrow(), ["over 1", "cancel"]);
-                assert!(dir.join("Parts/gear.stl").exists(), "the folder took it");
-            }
-            false => {
-                assert_eq!(*view.0.calls.borrow(), ["over 1", "release gear.stl"]);
-                assert!(dir.join("gear.stl").exists(), "the browser moved nothing");
-            }
-        }
-        let _ = std::fs::remove_dir_all(&dir);
-    }
 }
 
 /// An app whose drag pictures show only over the browser: nothing outside takes the items.
