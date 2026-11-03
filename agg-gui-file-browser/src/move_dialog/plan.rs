@@ -189,9 +189,33 @@ fn refusal(request: &MoveRequest, key: Option<&FolderKey>, path: &[FolderKey]) -
     moved.map(|name| into_itself(&name))
 }
 
+/// What a Move needs of a folder row beyond its name: its place and its key. Asking may make
+/// the row's folder (a row whose folder is made when opened), so a caller asking often keeps
+/// them per row ([`verdict_with`]).
+#[derive(Clone)]
+pub(crate) struct RowFacts {
+    pub place: Option<PlaceId>,
+    pub key: Option<FolderKey>,
+}
+
+/// `link`'s place and key, asked of the request's rules (`PlaceRules::folder_place_and_key`).
+pub(crate) fn row_facts(request: &MoveRequest, link: &dyn FolderLink) -> RowFacts {
+    let (place, key) = request.places.folder_place_and_key(link);
+    RowFacts { place, key }
+}
+
 /// What accepting the dialog showing `dialog` would do with `request`'s items, its source read as
 /// it stands (`MoveRequest::current`): a source gone takes nothing.
 pub fn move_verdict(request: &MoveRequest, dialog: &BrowserState) -> MoveVerdict {
+    verdict_with(request, dialog, &|link| row_facts(request, link.as_ref()))
+}
+
+/// [`move_verdict`] with a selected row's place and key from `facts`.
+pub(crate) fn verdict_with(
+    request: &MoveRequest,
+    dialog: &BrowserState,
+    facts: &dyn Fn(&Rc<dyn FolderLink>) -> RowFacts,
+) -> MoveVerdict {
     let Some(request) = request.current() else {
         return cant_add();
     };
@@ -211,11 +235,10 @@ pub fn move_verdict(request: &MoveRequest, dialog: &BrowserState) -> MoveVerdict
             if let Some(item) = request.items.iter().find(|i| i.id() == link.id()) {
                 return MoveVerdict::Refused(into_itself(item.name()));
             }
-            let key = request.places.folder_key(link.as_ref());
+            let RowFacts { place, key } = facts(&link);
             if let Some(why) = refusal(request, key.as_ref(), &keyed(&path)) {
                 return MoveVerdict::Refused(why);
             }
-            let place = link.place();
             let copies = (request.copies_to)(place.as_ref());
             // A copy lands only in a folder some place holds.
             if copies && place.is_none() {

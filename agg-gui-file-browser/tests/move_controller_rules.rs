@@ -205,3 +205,40 @@ fn a_row_that_cant_open_at_accept_says_so_through_the_apps_report() {
         ["Couldn't move to \"Gone\": Could not be opened"]
     );
 }
+
+#[test]
+fn a_selected_row_whose_folder_is_made_when_asked_is_asked_once_over_many_verdicts() {
+    use std::cell::Cell;
+    let made = Rc::new(Cell::new(0));
+    let count = Rc::clone(&made);
+    let row = DynamicFolderLink::new(
+        "Counted",
+        Rc::new(move || {
+            count.set(count.get() + 1);
+            Box::new(DynamicFolder::new("Counted")) as Box<dyn Folder>
+        }),
+    );
+    let mut root = DynamicFolder::new("Top");
+    root.data.child_containers = vec![Rc::new(row) as Rc<dyn FolderLink>];
+    let state = BrowserState::new(
+        Box::new(root),
+        BrowserConfig::builder().options(dialog_options()).build(),
+    );
+    state.borrow_mut().ensure_selected(0, false);
+    let item = {
+        let folder = MemoryFolder::new("Elsewhere");
+        folder.add_file("gear.stl", b"g".to_vec());
+        folder.items()[0].clone()
+    };
+    let request =
+        MoveRequest::new(vec![item], None).with_source("Elsewhere", None, Rc::new(|_| false));
+    let picked: Rc<RefCell<Option<MovePick>>> = Rc::default();
+    let c = MoveController::new(&state, request, answers(&picked));
+    let verdict = MoveVerdict::Move("Move gear.stl to Counted.".into());
+    assert_eq!(c.verdict(), verdict);
+    let after_first = made.get();
+    for _ in 0..60 {
+        assert_eq!(c.verdict(), verdict);
+    }
+    assert_eq!(made.get(), after_first, "later verdicts make no folder");
+}

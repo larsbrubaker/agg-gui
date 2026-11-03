@@ -187,6 +187,18 @@ pub trait PlaceRules {
         FolderKey::of_folder(folder)
     }
 
+    /// The place and key of the folder `link` opens, asked together so a row whose folder is
+    /// made when asked is made once. The default is the key [`PlaceRules::folder_key`] answers
+    /// and that key's place (a key names its folder's place), else the row's own place.
+    fn folder_place_and_key(&self, link: &dyn FolderLink) -> (Option<PlaceId>, Option<FolderKey>) {
+        let key = self.folder_key(link);
+        let place = match &key {
+            Some(key) => key.place().cloned(),
+            None => link.place(),
+        };
+        (place, key)
+    }
+
     /// Whether the folder keyed `inner` is `outer` or inside it, however the dialog reached it:
     /// the Move dialog refuses a destination on or below a folder it is moving. The default
     /// answers only `inner == outer`, the dialog's open folders standing for the rest.

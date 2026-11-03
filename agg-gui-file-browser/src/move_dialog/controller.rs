@@ -5,21 +5,24 @@
 //! The controller holds the request, the dialog's browser and its answers. It says what accepting
 //! does as the user browses and selects ([`MoveController::verdict`]: `plan.rs`'s `move_verdict`),
 //! and accepting opens the destination (the selected folder row, or the folder showing, handed
-//! over) and answers with it ([`MovePick`]); the browser's Move does the move. A showing folder
-//! something else still holds is not handed over: the dialog stays in it and the browser's status
-//! says the folder was busy; a selected row that can't be opened moves nothing and says why. Either
-//! message also goes to the app's report (`BrowserConfig::report`) when it gives one, since the
-//! app's own page may show no status line. Where the dialog opens and what it remembers of where
-//! the user goes is `place.rs`'s: the page calls [`MoveController::update`] at each layout.
+//! over) and answers with it ([`MovePick`]); the browser's Move does the move. The selected row's
+//! place and key are asked once while it stays selected, as a page asks the verdict every frame and
+//! asking may make the row's folder. A showing folder something else still holds is not handed
+//! over: the dialog stays in it and the browser's status says the folder was busy; a selected row
+//! that can't be opened moves nothing and says why. Either message also goes to the app's report
+//! (`BrowserConfig::report`) when it gives one, since the app's own page may show no status line.
+//! Where the dialog opens and what it remembers of where the user goes is `place.rs`'s: the page
+//! calls [`MoveController::update`] at each layout.
 
 use std::cell::RefCell;
 use std::rc::Rc;
 
 use super::place::DialogPlace;
-use super::plan::{destination, move_verdict, Destination, MoveVerdict};
+use super::plan::{destination, row_facts, verdict_with, Destination, MoveVerdict, RowFacts};
 use crate::dialogs::{MovePick, MoveRequest};
 use crate::memory::LocationFuture;
 use crate::state::BrowserState;
+use agg_gui_files::FolderLink;
 
 /// What a Move dialog answers through: a pick, or a cancel.
 pub struct MoveAnswers {
@@ -32,6 +35,10 @@ struct Core {
     request: MoveRequest,
     answers: MoveAnswers,
     place: DialogPlace,
+    /// The selected row's place and key, kept while it stays selected: a row's place and key
+    /// don't change while it exists, and asking may make its folder, which every frame's
+    /// verdict would otherwise do.
+    row: RefCell<Option<(Rc<dyn FolderLink>, RowFacts)>>,
 }
 
 /// The Move dialog's logic (see the module header). Clones share one dialog.
@@ -53,6 +60,7 @@ impl MoveController {
                 request,
                 answers,
                 place: DialogPlace::default(),
+                row: RefCell::new(None),
             }),
         }
     }
@@ -88,7 +96,18 @@ impl MoveController {
 
     /// What accepting does now.
     pub fn verdict(&self) -> MoveVerdict {
-        move_verdict(&self.core.request, &self.core.state.borrow())
+        let core = &self.core;
+        let facts = |link: &Rc<dyn FolderLink>| {
+            if let Some((kept, facts)) = &*core.row.borrow() {
+                if Rc::ptr_eq(kept, link) {
+                    return facts.clone();
+                }
+            }
+            let facts = row_facts(&core.request, link.as_ref());
+            *core.row.borrow_mut() = Some((Rc::clone(link), facts.clone()));
+            facts
+        };
+        verdict_with(&core.request, &core.state.borrow(), &facts)
     }
 
     /// Whether accepting does anything now.
