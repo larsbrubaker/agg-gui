@@ -313,6 +313,9 @@ impl BrowserState {
         }
         let weak = Rc::downgrade(state);
         spawner.spawn_task(Box::pin(async move {
+            // The answer went as far as its first wait in the poll above; a spawner that polls
+            // what it is given at once must still not run the rest inside this call.
+            YieldOnce(false).await;
             let found = finding.await;
             if let Some(state) = weak.upgrade() {
                 Self::land_restore(&state, serial, navigation, found);
@@ -351,5 +354,23 @@ impl BrowserState {
             }
         };
         Self::tell_restore_finished(state, outcome);
+    }
+}
+
+/// Waits once, waking itself, so the rest of a task runs at the spawner's next turn.
+struct YieldOnce(bool);
+
+impl std::future::Future for YieldOnce {
+    type Output = ();
+    fn poll(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<()> {
+        if self.0 {
+            return std::task::Poll::Ready(());
+        }
+        self.0 = true;
+        cx.waker().wake_by_ref();
+        std::task::Poll::Pending
     }
 }
