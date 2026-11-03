@@ -44,6 +44,8 @@ fn home() -> DynamicFolder {
 struct AppLook {
     base: DefaultLook,
     banners: Rc<RefCell<Vec<bool>>>,
+    /// The banner hides itself (it has nothing to say), as an app's hint can.
+    banner_hidden: std::cell::Cell<bool>,
 }
 
 impl BrowserLook for AppLook {
@@ -60,6 +62,9 @@ impl BrowserLook for AppLook {
         font: &Arc<Font>,
     ) -> Option<Box<dyn Widget>> {
         self.banners.borrow_mut().push(shown_anew);
+        if self.banner_hidden.get() {
+            return Some(Box::new(Hidden));
+        }
         Some(Box::new(Named(
             "App Banner",
             Label::new("Waiting", Arc::clone(font)),
@@ -133,6 +138,7 @@ fn app_look() -> (Rc<AppLook>, Rc<RefCell<Vec<bool>>>) {
     let look = Rc::new(AppLook {
         base: DefaultLook::default(),
         banners: Rc::clone(&banners),
+        banner_hidden: std::cell::Cell::new(false),
     });
     (look, banners)
 }
@@ -324,4 +330,53 @@ fn the_default_look_keeps_the_page_bar_as_it_was() {
     assert!(look.page_nav_bar_rule());
     assert_eq!(look.view_mode_name(ViewMode::Icons70), "Icons70");
     assert!(look.header_markdown("x", &font()).is_none());
+}
+
+/// A banner with nothing to say: it reports itself hidden.
+struct Hidden;
+
+impl Widget for Hidden {
+    fn type_name(&self) -> &'static str {
+        "Hidden"
+    }
+    fn bounds(&self) -> Rect {
+        Rect::default()
+    }
+    fn set_bounds(&mut self, _bounds: Rect) {}
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &[]
+    }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+        unreachable!("a hidden banner has no children to change")
+    }
+    fn is_visible(&self) -> bool {
+        false
+    }
+    fn layout(&mut self, _available: Size) -> Size {
+        Size::new(0.0, 0.0)
+    }
+    fn paint(&mut self, _ctx: &mut dyn DrawCtx) {}
+    fn on_event(&mut self, _event: &agg_gui::Event) -> agg_gui::EventResult {
+        agg_gui::EventResult::Ignored
+    }
+}
+
+#[test]
+fn a_hidden_banner_takes_no_room_and_no_gap() {
+    let (look, _) = app_look();
+    look.banner_hidden.set(true);
+    let config = BrowserConfig::builder().look(look).build();
+    let state = state_with(config);
+    let mut app = App::new(Box::new(FileBrowser::new(&state, font())));
+    frame(&mut app);
+    let header = rect(&app, "App Markdown");
+    let list = rect(
+        &app,
+        &state.borrow().config().look.names().list_area.clone(),
+    );
+    assert_eq!(
+        header.y - (list.y + list.height),
+        agg_gui::widgets::DEFAULT_COLUMN_GAP,
+        "one gap between the header and the list"
+    );
 }

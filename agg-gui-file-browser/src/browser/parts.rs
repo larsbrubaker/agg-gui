@@ -331,8 +331,15 @@ impl Widget for ListColumn {
         for (i, child) in self.children.iter_mut().enumerate() {
             if i + 1 < count {
                 let size = child.layout(Size::new(available.width, top));
+                // A banner with nothing to say hides itself: no room and no gap, as a column
+                // leaves out a hidden child.
+                if !child.is_visible() {
+                    child.set_bounds(Rect::new(0.0, top, 0.0, 0.0));
+                    continue;
+                }
                 top -= size.height;
                 child.set_bounds(Rect::new(0.0, top, available.width, size.height));
+                top -= super::PIECE_GAP;
             } else {
                 let room = Size::new(available.width, top.max(0.0));
                 child.layout(room);

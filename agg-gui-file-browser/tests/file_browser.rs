@@ -504,3 +504,24 @@ fn the_list_only_forms_message_line_is_in_the_looks_light_text_colour() {
         .map(|(_, v)| v);
     assert_eq!(color, Some(format!("{:?}", style.light_text_color)));
 }
+
+#[test]
+fn the_browsers_pieces_stand_a_gap_apart_as_the_librarys_columns_do() {
+    agg_gui::set_device_scale(1.0);
+    let root = DynamicFolder::new("Home").with_header_markdown("Parts you made");
+    let state = BrowserState::new(Box::new(root), list_only());
+    let mut app = App::new(Box::new(FileBrowser::new(&state, font())));
+    frame(&mut app);
+    let toolbar = rect(&app, "Folders Toolbar");
+    let header = rect(&app, "Library Header Markdown");
+    let list = rect(&app, "LibraryView");
+    let message = rect(&app, "Provider Message");
+    let gap = agg_gui::widgets::DEFAULT_COLUMN_GAP;
+    assert_eq!(toolbar.y - (header.y + header.height), gap, "bar to header");
+    assert_eq!(header.y - (list.y + list.height), gap, "header to list");
+    assert_eq!(
+        list.y - (message.y + message.height),
+        gap,
+        "list to message"
+    );
+}

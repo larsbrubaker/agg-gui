@@ -24,7 +24,7 @@
 //! cell ([`FileBrowser::with_painted_rect`]), for hooks placing menus and drops in window terms.
 //!
 //! In both the undo notice sits centred [`NOTICE_BOTTOM_GAP`] above the bottom, over the rest.
-//! Gaps, paddings and names are the ones MatterCAD's Library uses, so its tests and help
+//! The pieces stand [`PIECE_GAP`] apart, top to bottom. Gaps, paddings and names are the ones MatterCAD's Library uses, so its tests and help
 //! articles find the same widgets.
 //!
 //! The header is built again whenever the showing folder or its header text changes; the tree,
@@ -71,6 +71,10 @@ use parts::{holds_search_slot, keep_search_bar, BottomBorder, ListColumn, Search
 
 /// The tab form's search box width, in logical units.
 pub const SEARCH_BOX_WIDTH: f64 = 200.0;
+/// The room between the browser's stacked pieces (bar and bar, the bars and the body, the body
+/// and the message along the bottom) and between the header, banner and list: agg-gui's column
+/// gap, as MatterCAD's Library stood them apart.
+pub const PIECE_GAP: f64 = agg_gui::widgets::DEFAULT_COLUMN_GAP;
 /// How far above the browser's bottom the undo notice sits.
 pub const NOTICE_BOTTOM_GAP: f64 = 16.0;
 /// The view the compact form's list shows: tiles of 70, two across a phone's panel.
@@ -451,6 +455,9 @@ impl Widget for FileBrowser {
         for (child, role) in self.children.iter_mut().zip(&self.roles) {
             match role {
                 Role::Bar => {
+                    if top < height {
+                        top -= PIECE_GAP;
+                    }
                     let size = child.layout(Size::new(width, top));
                     top -= size.height;
                     child.set_bounds(Rect::new(0.0, top, width, size.height));
@@ -458,7 +465,7 @@ impl Widget for FileBrowser {
                 Role::Message => {
                     let size = child.layout(Size::new(width, top));
                     child.set_bounds(Rect::new(0.0, 0.0, width, size.height));
-                    bottom = size.height;
+                    bottom = size.height + PIECE_GAP;
                 }
                 Role::Body | Role::Notice | Role::Overlay => {}
             }
@@ -466,7 +473,8 @@ impl Widget for FileBrowser {
         for (child, role) in self.children.iter_mut().zip(&self.roles) {
             match role {
                 Role::Body => {
-                    let room = Size::new(width, (top - bottom).max(0.0));
+                    let below_bars = if top < height { top - PIECE_GAP } else { top };
+                    let room = Size::new(width, (below_bars - bottom).max(0.0));
                     child.layout(room);
                     child.set_bounds(Rect::new(0.0, bottom, room.width, room.height));
                 }
