@@ -285,7 +285,8 @@ impl BrowserState {
     /// happens when none is remembered, it can't be reached, or the user has moved the browser
     /// meanwhile (their choice wins). While it is found, a trail the memory names
     /// (`BrowserMemory::last_location_trail`) shows as the breadcrumbs over a loading line
-    /// (`state/restore.rs`).
+    /// (`state/restore.rs`). A memory whose answer is ready at once opens it inside this call
+    /// (its listeners told then too); any other answer lands from the spawner.
     pub fn restore_location(state: &Rc<RefCell<Self>>, key: &str) {
         let (memory, spawner) = {
             let s = state.borrow();
@@ -302,34 +303,53 @@ impl BrowserState {
             let mut s = state.borrow_mut();
             (s.begin_restore(trail), s.navigation)
         };
+        // A memory that answers at once (a folder it found there and then) lands now, inside
+        // this call, so the browser shows it as it opens however busy the spawner is.
+        let mut finding = finding;
+        let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
+        if let std::task::Poll::Ready(found) = finding.as_mut().poll(&mut cx) {
+            Self::land_restore(state, serial, navigation, found);
+            return;
+        }
         let weak = Rc::downgrade(state);
         spawner.spawn_task(Box::pin(async move {
             let found = finding.await;
-            let Some(state) = weak.upgrade() else {
-                return;
-            };
-            let outcome = {
-                let mut s = state.borrow_mut();
-                match (s.finish_restore(serial), found) {
-                    (None, _) if s.superseded(serial) => RestoreOutcome::Superseded,
-                    (None, _) => RestoreOutcome::Abandoned,
-                    (Some(_), None) => RestoreOutcome::Failed,
-                    (Some(_), Some(_)) if s.navigation != navigation || s.depth() != 1 => {
-                        RestoreOutcome::Abandoned
+            if let Some(state) = weak.upgrade() {
+                Self::land_restore(&state, serial, navigation, found);
+            }
+        }));
+    }
+
+    /// The answer `found` to restore `serial`, begun at navigation count `navigation`: opens the
+    /// folders unless the user moved meanwhile or a newer restore began, then tells the
+    /// listeners how it went.
+    fn land_restore(
+        state: &Rc<RefCell<Self>>,
+        serial: u64,
+        navigation: u64,
+        found: Option<Vec<Box<dyn Folder>>>,
+    ) {
+        let outcome = {
+            let mut s = state.borrow_mut();
+            match (s.finish_restore(serial), found) {
+                (None, _) if s.superseded(serial) => RestoreOutcome::Superseded,
+                (None, _) => RestoreOutcome::Abandoned,
+                (Some(_), None) => RestoreOutcome::Failed,
+                (Some(_), Some(_)) if s.navigation != navigation || s.depth() != 1 => {
+                    RestoreOutcome::Abandoned
+                }
+                (Some(shortened), Some(folders)) => {
+                    let keep = shortened.unwrap_or(folders.len());
+                    for folder in folders.into_iter().take(keep) {
+                        s.push_container(folder);
                     }
-                    (Some(shortened), Some(folders)) => {
-                        let keep = shortened.unwrap_or(folders.len());
-                        for folder in folders.into_iter().take(keep) {
-                            s.push_container(folder);
-                        }
-                        match shortened {
-                            Some(_) => RestoreOutcome::LandedShortened,
-                            None => RestoreOutcome::Landed,
-                        }
+                    match shortened {
+                        Some(_) => RestoreOutcome::LandedShortened,
+                        None => RestoreOutcome::Landed,
                     }
                 }
-            };
-            Self::tell_restore_finished(&state, outcome);
-        }));
+            }
+        };
+        Self::tell_restore_finished(state, outcome);
     }
 }

@@ -36,7 +36,7 @@ use agg_gui_files::FolderLink;
 use crate::memory::ViewMode;
 use crate::nav::menu_button::NavMenuRows;
 use crate::nav::overflow::OverflowRows;
-use crate::state::BrowserState;
+use crate::state::{BrowserState, ListingMessage};
 
 /// The font size the browser's text takes when agg-gui has no default set.
 const BUILTIN_FONT_SIZE: f64 = 14.0;
@@ -498,6 +498,19 @@ pub trait BrowserLook {
         font: &Arc<Font>,
     ) -> Option<Box<dyn Widget>> {
         let _ = (name, tooltip, clear, font);
+        None
+    }
+
+    /// The app's own widget for a folder whose listing is only `message` (loading, or why it
+    /// could not be listed), shown in the list's place in `font`; the list has already numbered
+    /// its rows as none. `None` (the default) shows the browser's own `FolderMessage`.
+    fn folder_message(
+        &self,
+        state: &Rc<RefCell<BrowserState>>,
+        message: &ListingMessage,
+        font: &Arc<Font>,
+    ) -> Option<Box<dyn Widget>> {
+        let _ = (state, message, font);
         None
     }
 

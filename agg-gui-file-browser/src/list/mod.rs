@@ -257,14 +257,23 @@ impl BrowserList {
             }
         };
         let child: Box<dyn Widget> = match message {
-            Some(message) => {
-                let icon = warning_icon(self.look.as_ref(), &cx.style);
-                let names = self.look.names().clone();
-                let font = Arc::clone(&self.font);
-                let view =
-                    FolderMessage::new(&self.state, &message, cx.style.clone(), names, font, icon);
-                Box::new(view)
-            }
+            Some(message) => match self.look.folder_message(&self.state, &message, &self.font) {
+                Some(own) => own,
+                None => {
+                    let icon = warning_icon(self.look.as_ref(), &cx.style);
+                    let names = self.look.names().clone();
+                    let font = Arc::clone(&self.font);
+                    let view = FolderMessage::new(
+                        &self.state,
+                        &message,
+                        cx.style.clone(),
+                        names,
+                        font,
+                        icon,
+                    );
+                    Box::new(view)
+                }
+            },
             None => {
                 let content: Box<dyn Widget> = match mode {
                     ViewMode::Rows => Box::new(RowStack::for_state(&cx)),

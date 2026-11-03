@@ -105,6 +105,14 @@ impl BrowserPage {
         self
     }
 
+    /// The page's list scrolled by `offset`, which its host keeps (and resets) itself, so a
+    /// host that builds the page again keeps the user's place in the list.
+    pub fn with_offset_cell(mut self, offset: Rc<Cell<f64>>) -> Self {
+        let list = BrowserList::new(&self.state, Arc::clone(&self.font)).with_offset_cell(offset);
+        self.children[1] = Box::new(list);
+        self
+    }
+
     /// Set to stop remembering the page's place (the page's accept, which hands its folder
     /// over).
     pub fn accepted_flag(&self) -> Rc<Cell<bool>> {
@@ -141,6 +149,10 @@ impl BrowserPage {
 impl Widget for BrowserPage {
     fn type_name(&self) -> &'static str {
         "BrowserPage"
+    }
+    /// The page itself, so a host rebuilding its own widgets can find it and take it back.
+    fn as_any(&self) -> Option<&dyn std::any::Any> {
+        Some(self)
     }
     fn bounds(&self) -> Rect {
         self.bounds

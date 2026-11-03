@@ -8,6 +8,24 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ## [Unreleased]
 
+## [0.0.10] - 2026-11-03
+
+### Added
+
+- `BrowserLook::folder_message`: the app's own widget for a folder whose listing is only a
+  message (loading, or why it could not be listed), shown by `BrowserList` in the list's place;
+  the default `None` shows the browser's own `FolderMessage`, as before.
+- `BrowserPage::with_offset_cell`: the page's list scrolled by a cell its host keeps, and
+  `BrowserPage` answers `as_any`, so a host that rebuilds its own widgets finds the page again
+  and keeps the user's place in the list.
+
+### Changed
+
+- `BrowserState::restore_location` polls the memory's answer once straight away: an answer
+  ready at once (a folder found there and then) opens inside the call, its listeners told then,
+  so the browser shows it as it opens however busy the spawner is. Other answers land from the
+  spawner as before.
+
 ## [0.0.9] - 2026-11-03
 
 ### Added

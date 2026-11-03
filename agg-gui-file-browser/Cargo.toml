@@ -11,7 +11,7 @@
 # author), published here under agg-gui's MIT licence.
 [package]
 name = "agg-gui-file-browser"
-version = "0.0.9"
+version = "0.0.10"
 edition = "2021"
 # Matches the rest of the agg-gui workspace.
 rust-version = "1.88"
