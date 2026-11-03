@@ -27,9 +27,13 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   spawner as before; one that woke itself during that poll (a yield, asking to be polled at the
   next turn) gets that turn before it is polled again, so a spawner that polls each new task at
   once never runs it on inside the call.
-- `FileBrowser::remembering` starts its restore at the browser's first layout rather than as it
-  is made, so restore-finished listeners the app adds after making it hear even an answer that
-  lands at once.
+- A restore's listeners are never told inside `restore_location`: an answer ready at once opens
+  its folders there and tells them at the spawner's next turn, so listeners an app adds just
+  after starting a restore (after `FileBrowser::remembering` or `BrowserPage::remembering`) hear
+  it.
+- A browser already off its root when a restore starts shows where it is, never the remembered
+  trail over it.
+- The picking dialogs' place no longer holds its key borrowed while a restore runs.
 
 ## [0.0.9] - 2026-11-03
 

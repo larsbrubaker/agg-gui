@@ -37,8 +37,9 @@
 //! memory says it was last left under that key, showing that place's breadcrumbs over a loading
 //! line while it is found (`state/restore.rs`), and remembers each folder the user moves to (and,
 //! when the user ended the restore without moving, the place they stayed, once its answer comes).
-//! The restore starts at its first layout, after the app has added its restore-finished
-//! listeners, so they hear even an answer the memory had ready at once.
+//! The restore starts as the browser is made, so a browser not shown yet (a tab behind another)
+//! is ready when it is; its outcome is told at the spawner's next turn, so restore-finished
+//! listeners the app adds after making it hear it too.
 //! Where a restore lands is never written back: it is the remembered place, or the nearest one
 //! the memory could reach, and the remembered place stays for when it can be reached again. A
 //! restore the user shortened with a crumb lands where they chose, which is remembered.
@@ -129,8 +130,6 @@ pub struct FileBrowser {
     built: Option<HeaderKey>,
     /// The memory key the browser's place is remembered under, if any.
     location_key: Option<String>,
-    /// Whether the restore `remembering` asked for still waits for the first layout.
-    restore_pending: bool,
     /// The navigation count last remembered under `location_key` (or a restore landed at),
     /// shared with the restore-finished listener `remembering` adds.
     remembered: Rc<Cell<Option<u64>>>,
@@ -179,7 +178,6 @@ impl FileBrowser {
             search_box: Some(Box::new(search_box)),
             built: None,
             location_key: None,
-            restore_pending: false,
             remembered: Rc::new(Cell::new(None)),
             overlays: Vec::new(),
             painted_rect: None,
@@ -222,23 +220,10 @@ impl FileBrowser {
                     | RestoreOutcome::Superseded => {}
                 }
             }));
-        self.location_key = Some(key);
-        self.restore_pending = true;
-        self
-    }
-
-    /// Starts the restore `remembering` asked for, at the first layout: by then the app has
-    /// added its own restore-finished listeners, which hear even an answer that lands inside
-    /// the call (one the memory had ready at once).
-    fn start_restore(&mut self) {
-        if !std::mem::take(&mut self.restore_pending) {
-            return;
-        }
-        let Some(key) = self.location_key.clone() else {
-            return;
-        };
         BrowserState::restore_location(&self.state, &key);
         self.remembered.set(Some(self.state.borrow().navigation()));
+        self.location_key = Some(key);
+        self
     }
 
     /// Keeps `child` among the browser's children across every rebuild, at zero size at its
@@ -475,7 +460,6 @@ impl Widget for FileBrowser {
     /// The bars down from the top, the message along the bottom, the body in between, and the
     /// notice centred near the bottom.
     fn layout(&mut self, available: Size) -> Size {
-        self.start_restore();
         self.remember_if_navigated();
         let key = self.header_key();
         if self.built.as_ref().map(|b| b.compact) != Some(key.compact) {

@@ -1,7 +1,9 @@
 //! What an app's own dialog page builds on: a restore whose memory answers at once opens the
-//! folder inside `restore_location` even while the spawner is busy and runs nothing, and a
-//! `FileBrowser` made `remembering` starts its restore at its first layout, so restore-finished
-//! listeners the app adds after making it hear even an answer that lands at once; an answer that
+//! folder inside `restore_location` even while the spawner is busy and runs nothing; a
+//! `FileBrowser` made `remembering` restores as it is made, and restore-finished listeners the
+//! app adds after making it hear even an answer that landed then (outcomes are told at the
+//! spawner's next turn, never inside the call); a browser already off its root shows no
+//! remembered trail; an answer that
 //! yields (wakes itself to be polled at the next turn) still gets that turn from a spawner that
 //! polls each new task at once, never landing inside the call; the look's
 //! `folder_message` stands in the list's place for a folder whose listing is only a message; and
@@ -54,7 +56,7 @@ impl BrowserMemory for AtOnce {
 }
 
 #[test]
-fn a_ready_answer_lands_inside_the_call_while_the_spawner_is_busy() {
+fn a_ready_answer_opens_inside_the_call_while_the_spawner_is_busy() {
     let home = MemoryFolder::new("Home");
     let projects = home.add_folder("Projects").expect("free");
     let busy = Rc::new(Busy::default());
@@ -63,40 +65,64 @@ fn a_ready_answer_lands_inside_the_call_while_the_spawner_is_busy() {
         .memory(Rc::new(AtOnce(projects)) as Rc<dyn BrowserMemory>)
         .build();
     let state = BrowserState::new(Box::new(home), config);
+    BrowserState::restore_location(&state, "key");
+    assert_eq!(state.borrow().path_names(), ["Home", "Projects"]);
+    assert!(!state.borrow().is_restoring());
+}
+
+#[test]
+fn a_remembering_browser_restores_as_it_is_made_and_late_listeners_hear_it() {
+    agg_gui::set_device_scale(1.0);
+    let home = MemoryFolder::new("Home");
+    let projects = home.add_folder("Projects").expect("free");
+    let inline = Rc::new(Inline::default());
+    let config = BrowserConfig::builder()
+        .spawner(Rc::clone(&inline) as Rc<dyn Spawner>)
+        .memory(Rc::new(AtOnce(projects)) as Rc<dyn BrowserMemory>)
+        .build();
+    let state = BrowserState::new(Box::new(home), config);
+    let _browser = FileBrowser::new(&state, font()).remembering("key");
+    assert_eq!(
+        state.borrow().path_names(),
+        ["Home", "Projects"],
+        "the restore never waits for the browser to be shown"
+    );
     let heard = Rc::new(RefCell::new(Vec::new()));
     let sink = Rc::clone(&heard);
     state
         .borrow_mut()
         .add_restore_finished(Rc::new(move |outcome| sink.borrow_mut().push(outcome)));
-    BrowserState::restore_location(&state, "key");
-    assert_eq!(state.borrow().path_names(), ["Home", "Projects"]);
-    assert!(!state.borrow().is_restoring());
+    assert!(heard.borrow().is_empty(), "never told inside the call");
+    inline.turn();
     assert_eq!(*heard.borrow(), [RestoreOutcome::Landed]);
-    assert!(
-        busy.0.borrow().is_empty(),
-        "nothing was left for the spawner"
-    );
+}
+
+/// A memory naming a trail whose answer never comes.
+struct Never;
+
+impl BrowserMemory for Never {
+    fn last_location(&self, _key: &str) -> Option<LocationFuture> {
+        Some(Box::pin(std::future::pending()))
+    }
+    fn last_location_trail(&self, _key: &str) -> Option<Vec<String>> {
+        Some(vec!["Home".into(), "Old".into()])
+    }
+    fn remember_location(&self, _key: &str, _path: &[OpenFolder]) {}
 }
 
 #[test]
-fn a_listener_added_after_remembering_hears_an_answer_that_lands_at_once() {
-    agg_gui::set_device_scale(1.0);
+fn a_browser_already_off_its_root_shows_no_remembered_trail() {
     let home = MemoryFolder::new("Home");
     let projects = home.add_folder("Projects").expect("free");
     let config = BrowserConfig::builder()
         .spawner(Rc::new(Busy::default()) as Rc<dyn Spawner>)
-        .memory(Rc::new(AtOnce(projects)) as Rc<dyn BrowserMemory>)
+        .memory(Rc::new(Never) as Rc<dyn BrowserMemory>)
         .build();
     let state = BrowserState::new(Box::new(home), config);
-    let mut browser = FileBrowser::new(&state, font()).remembering("key");
-    let heard = Rc::new(RefCell::new(Vec::new()));
-    let sink = Rc::clone(&heard);
-    state
-        .borrow_mut()
-        .add_restore_finished(Rc::new(move |outcome| sink.borrow_mut().push(outcome)));
-    browser.layout(Size::new(600.0, 400.0));
-    assert_eq!(*heard.borrow(), [RestoreOutcome::Landed]);
-    assert_eq!(state.borrow().path_names(), ["Home", "Projects"]);
+    state.borrow_mut().push_container(Box::new(projects));
+    BrowserState::restore_location(&state, "key");
+    assert!(!state.borrow().is_restoring());
+    assert_eq!(state.borrow().shown_trail(), ["Home", "Projects"]);
 }
 
 /// A spawner that polls each task as it is given it, and again at each `turn`.

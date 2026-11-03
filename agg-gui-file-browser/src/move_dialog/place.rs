@@ -42,15 +42,18 @@ impl DialogPlace {
         match self.seen.get() {
             None => {
                 let start = self.start.borrow_mut().take();
-                match (start, self.key.borrow().as_deref()) {
+                // The key is copied out: a restore's listeners may set it again.
+                let key = self.key.borrow().clone();
+                match (start, key) {
                     (Some(start), _) => open_found(state, start),
-                    (None, Some(key)) => BrowserState::restore_location(state, key),
+                    (None, Some(key)) => BrowserState::restore_location(state, &key),
                     (None, None) => {}
                 }
             }
             Some(seen) if seen != navigation && !self.accepted.get() => {
-                if let Some(key) = self.key.borrow().as_deref() {
-                    BrowserState::remember_location(state, key);
+                let key = self.key.borrow().clone();
+                if let Some(key) = key {
+                    BrowserState::remember_location(state, &key);
                 }
             }
             Some(_) => {}

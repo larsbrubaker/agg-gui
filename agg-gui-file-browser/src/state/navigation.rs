@@ -287,8 +287,9 @@ impl BrowserState {
     /// happens when none is remembered, it can't be reached, or the user has moved the browser
     /// meanwhile (their choice wins). While it is found, a trail the memory names
     /// (`BrowserMemory::last_location_trail`) shows as the breadcrumbs over a loading line
-    /// (`state/restore.rs`). A memory whose answer is ready at once opens it inside this call
-    /// (its listeners told then too); any other answer lands from the spawner.
+    /// (`state/restore.rs`). A memory whose answer is ready at once opens it inside this call,
+    /// its listeners told at the spawner's next turn; any other answer lands from the spawner.
+    /// A browser already off its root shows no remembered trail.
     pub fn restore_location(state: &Rc<RefCell<Self>>, key: &str) {
         let (memory, spawner) = {
             let s = state.borrow();
@@ -300,7 +301,10 @@ impl BrowserState {
             state.borrow_mut().end_restore();
             return;
         };
-        let trail = memory.last_location_trail(key);
+        // A browser already off its root shows where it is, never the remembered trail over it
+        // (the answer then opens nothing: `land_restore`).
+        let at_root = state.borrow().depth() == 1;
+        let trail = memory.last_location_trail(key).filter(|_| at_root);
         let (serial, navigation) = {
             let mut s = state.borrow_mut();
             (s.begin_restore(trail), s.navigation)
@@ -312,7 +316,16 @@ impl BrowserState {
         let waker = std::task::Waker::from(Arc::clone(&woken));
         let mut cx = std::task::Context::from_waker(&waker);
         if let std::task::Poll::Ready(found) = finding.as_mut().poll(&mut cx) {
-            Self::land_restore(state, serial, navigation, found);
+            let outcome = Self::open_restored(state, serial, navigation, found);
+            // The folders show now; the listeners hear it at the spawner's next turn, never
+            // inside this call, so those the app adds just after starting the restore hear it.
+            let weak = Rc::downgrade(state);
+            spawner.spawn_task(Box::pin(async move {
+                NextTurn(false).await;
+                if let Some(state) = weak.upgrade() {
+                    Self::tell_restore_finished(&state, outcome);
+                }
+            }));
             return;
         }
         // An answer that woke itself as it waited (a yield: "poll me again at the next turn")
@@ -340,7 +353,19 @@ impl BrowserState {
         navigation: u64,
         found: Option<Vec<Box<dyn Folder>>>,
     ) {
-        let outcome = {
+        let outcome = Self::open_restored(state, serial, navigation, found);
+        Self::tell_restore_finished(state, outcome);
+    }
+
+    /// The folders `found` opened for restore `serial` unless the user moved meanwhile or a
+    /// newer restore began, answering how it went (told by the caller).
+    fn open_restored(
+        state: &Rc<RefCell<Self>>,
+        serial: u64,
+        navigation: u64,
+        found: Option<Vec<Box<dyn Folder>>>,
+    ) -> RestoreOutcome {
+        {
             let mut s = state.borrow_mut();
             match (s.finish_restore(serial), found) {
                 (None, _) if s.superseded(serial) => RestoreOutcome::Superseded,
@@ -360,8 +385,7 @@ impl BrowserState {
                     }
                 }
             }
-        };
-        Self::tell_restore_finished(state, outcome);
+        }
     }
 }
 

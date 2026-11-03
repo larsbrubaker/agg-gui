@@ -97,7 +97,10 @@ impl Default for ViewState {
 
 /// A remembered folder being found again: the folders from just below the browser's root down
 /// to the remembered one, or `None` when it can no longer be reached (the browser then stays at
-/// its root). Run on the config's spawner.
+/// its root). `BrowserState::restore_location` polls it once inside the call, so the work before
+/// its first wait runs there, and an answer ready then opens at once; the rest runs on the
+/// config's spawner (an answer that wakes itself as it waits is polled again at the spawner's
+/// next turn, never inside the call).
 pub type LocationFuture = Pin<Box<dyn Future<Output = Option<Vec<Box<dyn Folder>>>>>>;
 
 /// What a browser remembers, in the app's store. Every method defaults to remembering nothing.
