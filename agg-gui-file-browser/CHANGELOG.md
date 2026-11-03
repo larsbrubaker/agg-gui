@@ -16,7 +16,8 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   keyboard (a press leaves the focus where it was) and takes none of its keys (Delete and
   Backspace for Remove, undo and redo, select all, the arrows, Escape), for a dialog whose name
   field keeps typing while a click on a row fills it in. A list whose app menu gives no rows opens
-  no menu.
+  no menu. `dialog_options()` turns it off, so the built-in Save, Move and Open dialogs' lists
+  leave the keyboard to the dialog.
 - `CopyTakeover::Refused`: the app refused a copy and told the user why; the drop answers that it
   copied nothing.
 - `PlaceRules::take_over_move`, handed a `MoveCx` (the items, the target and source folders, the
@@ -52,6 +53,14 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 - A drag dropped on a folder tree row kept no keys: the list gave them up for any drop outside
   itself. Only a drag ending outside the browser (list and tree) gives them up now, so the undo
   keys take back a drop on the tree.
+- In the Save dialog, Backspace or Delete after a click on a file asked to remove that file (the
+  list had taken the keyboard); they now edit the name. The Save dialog of `SheetDialogs` gives
+  its name field the keyboard as it opens (the request's focus id, or the sheet's own), so typing
+  names the file at once.
+- F5 in the Save dialog lists the folder again whatever has the keyboard: `SavePage` hears it as
+  a key nothing focused took (`on_unconsumed_key`), which a showing `ModalSheet` offers its
+  content from agg-gui 0.5.5 on (the floor this crate now needs).
+
 ## [0.0.4] - 2026-11-02
 
 ### Added

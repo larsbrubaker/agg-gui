@@ -3,8 +3,10 @@
 //! app's extension added); a name already there asks to replace it, and Cancel keeps the dialog
 //! open; Create Folder makes a folder and opens it; read-only folders are not offered; the
 //! dialog opens where it was last left; a click on a file fills in its name and a double click
-//! saves over it; the app's own question is asked before a save; F5 lists a folder changed behind
-//! the dialog's back; and a folder something still holds saves nothing and says so.
+//! saves over it, while the name field keeps the keys (Backspace edits the name, never removes the
+//! file); the name field has the keyboard as the dialog opens; the app's own question is asked
+//! before a save; F5 lists a folder changed behind the dialog's back, whatever has the keyboard;
+//! and a folder something still holds saves nothing and says so.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -207,8 +209,16 @@ fn click(f: &mut Fixture, id: &str, clicks: u32) {
     }
 }
 
+/// Replaces the text of the field `id` with `text`, as a user does: a click in the field, select
+/// all, then typing. The click alone selects nothing in a field that already has the keyboard (the
+/// Save name field has it from the start), so typing after it would add to the name.
 fn type_into(f: &mut Fixture, id: &str, text: &str) {
     click(f, id, 1);
+    let ctrl = Modifiers {
+        ctrl: true,
+        ..Modifiers::default()
+    };
+    f.app.on_key_down(Key::Char('a'), ctrl);
     f.app.on_text_input(text);
     layout(&mut f.app);
 }
@@ -350,6 +360,49 @@ fn a_click_on_a_file_fills_in_its_name_and_a_double_click_saves_over_it() {
 }
 
 #[test]
+fn backspace_after_a_click_on_a_file_edits_the_name_and_never_removes_the_file() {
+    let sample = Sample::new();
+    let mut f = fixture(&sample, None);
+    open_request(&mut f, SaveRequest::new("notes").with_extension(".txt"));
+    click(&mut f, "Designs Row Item Collection", 2);
+    click(&mut f, "Row Item report.txt", 1);
+    assert_eq!(dialog_property(&f.app, "name"), "report");
+    for key in [Key::Backspace, Key::Delete] {
+        f.app.on_key_down(key, Modifiers::default());
+        layout(&mut f.app);
+        for _ in 0..20 {
+            run_ready_local_tasks();
+        }
+        layout(&mut f.app);
+    }
+    assert_eq!(dialog_property(&f.app, "question"), "normal");
+    assert!(f.picked.borrow().is_none(), "the save is still being asked");
+    assert!(
+        in_dialog(&f.app, "Save Name Field").is_some(),
+        "the Save dialog still shows"
+    );
+    assert_ne!(
+        dialog_property(&f.app, "name"),
+        "report",
+        "the name field took the keys"
+    );
+    let mut designs = sample.designs.clone();
+    designs.load();
+    assert_eq!(designs.items().len(), 1, "report.txt stays");
+}
+
+#[test]
+fn the_name_field_has_the_keyboard_as_the_dialog_opens_and_typing_replaces_the_name() {
+    let sample = Sample::new();
+    let mut f = fixture(&sample, None);
+    open_save(&mut f, "notes");
+    assert!(f.app.focused_is_text_input(), "the name field has the keys");
+    f.app.on_text_input("plan");
+    layout(&mut f.app);
+    assert_eq!(dialog_property(&f.app, "name"), "plan");
+}
+
+#[test]
 fn the_apps_question_is_asked_before_a_save_and_a_refusal_only_goes_back() {
     let sample = Sample::new();
     let mut f = fixture(&sample, None);
@@ -450,9 +503,11 @@ impl Folder for Snapshot {
     }
 }
 
-#[test]
-fn f5_lists_a_folder_changed_behind_the_dialogs_back() {
+/// The Save dialog open in "Shared", a folder that says nothing when "drawing.txt" is written into
+/// it behind the dialog's back (as it now is), and "old.txt" already there.
+fn shared_folder_changed_behind_the_dialog() -> Fixture {
     let source = MemoryFolder::new("Shared");
+    source.add_file("old.txt", b"o".to_vec());
     let behind = source.clone();
     let mut f = fixture_over(
         move || {
@@ -479,12 +534,53 @@ fn f5_lists_a_folder_changed_behind_the_dialogs_back() {
         in_dialog(&f.app, "Row Item drawing.txt").is_none(),
         "not said"
     );
+    f
+}
+
+/// F5 lists "drawing.txt".
+fn f5_lists_the_new_file(f: &mut Fixture) {
     f.app.on_key_down(Key::F(5), Modifiers::default());
     layout(&mut f.app);
     assert!(
         in_dialog(&f.app, "Row Item drawing.txt").is_some(),
         "listed"
     );
+}
+
+#[test]
+fn f5_lists_a_folder_changed_behind_the_dialogs_back() {
+    let mut f = shared_folder_changed_behind_the_dialog();
+    assert!(f.app.focused_is_text_input(), "the name field has the keys");
+    f5_lists_the_new_file(&mut f);
+}
+
+#[test]
+fn f5_lists_the_folder_after_a_click_on_a_file() {
+    let mut f = shared_folder_changed_behind_the_dialog();
+    click(&mut f, "Row Item old.txt", 1);
+    assert!(
+        f.app.focused_is_text_input(),
+        "the click left the keys with the name field"
+    );
+    f5_lists_the_new_file(&mut f);
+}
+
+#[test]
+fn f5_lists_the_folder_with_nothing_focused() {
+    let mut f = shared_folder_changed_behind_the_dialog();
+    // A click on the dialog's blank margin leaves nothing with the keyboard.
+    let (_, r) = in_dialog(&f.app, DIALOG).expect("the dialog");
+    let at = Point::new(r.x + 2.0, HEIGHT - (r.y + r.height - 2.0));
+    f.app
+        .on_mouse_down_clicks(at.x, at.y, MouseButton::Left, Modifiers::default(), 1);
+    f.app
+        .on_mouse_up(at.x, at.y, MouseButton::Left, Modifiers::default());
+    layout(&mut f.app);
+    assert!(
+        f.app.focused_widget_type_name().is_none(),
+        "nothing focused"
+    );
+    f5_lists_the_new_file(&mut f);
 }
 
 /// Remembers nothing, but holds on to every folder it is handed: something else holding the

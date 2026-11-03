@@ -5,8 +5,10 @@
 //! and the sorting button) over a list of a browser of its own, built again when the folder
 //! changes (the list, and its scroll, kept). [`dialog_options`] are such a browser's options:
 //! the list alone, 75-unit pictures, read-only folders hidden (nothing can go in them), item
-//! clicks and double clicks kept for the page hosting it, and a folder opened by a double click
-//! or one tap of a finger. A hosting page that acts on the item clicks (Save fills its name,
+//! clicks and double clicks kept for the page hosting it, a folder opened by a double click
+//! or one tap of a finger, and a list that never takes the keyboard (`list_takes_keys` off: a
+//! click on a row leaves the keys with Save's name field, so Backspace edits the name and never
+//! asks to remove the file the click named). A hosting page that acts on the item clicks (Save fills its name,
 //! Open opens) takes them in its own layout, before laying the browser page out; the browser page
 //! drops any left (the Move page's). The mouse's back button goes up a folder. A page given a location key
 //! ([`BrowserPage::remembering`]) opens where the config's memory says it was last left under
@@ -58,6 +60,7 @@ pub fn dialog_options() -> BrowserOptions {
         finger_tap_opens_folders: true,
         folder_filter: Some(Rc::new(|link| !link.is_read_only())),
         thumb_size: DIALOG_THUMB_SIZE,
+        list_takes_keys: false,
         ..BrowserOptions::default()
     }
 }

@@ -208,6 +208,12 @@ impl DialogSheet {
             accept: Rc::new(move |pick| answer_save(accepting.take(), pick)),
             cancel: Rc::new(move || cancelling.cancel()),
         };
+        // The name field has the keyboard from the start, so the user can type a name at once; a
+        // request's own focus id is kept.
+        let request = match request.focus_id {
+            Some(_) => request,
+            None => request.with_focus_id(self.focus_id),
+        };
         let font = Arc::clone(&self.font);
         Box::new(SavePage::new(
             &state,

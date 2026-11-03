@@ -18,7 +18,9 @@
 //!
 //! F5 lists the folder again (`BrowserState::relist`), for a file written there behind the
 //! dialog's back, and leaves the key unconsumed; natively only, since in a web page F5 is the
-//! browser's own reload.
+//! browser's own reload. The page hears it as a key nothing focused took (`on_unconsumed_key`),
+//! whatever has the keyboard: the name field, nothing (the dialog's list never takes it), or
+//! something else; agg-gui's `ModalSheet` offers such keys to its content before swallowing them.
 //!
 //! The page is built once; the note and the buttons are built again when the folder or the
 //! controller's mode or note changes, so the name field keeps its text, caret and keyboard.
@@ -29,7 +31,8 @@ use std::sync::Arc;
 
 use agg_gui::text::Font;
 use agg_gui::{
-    Button, DrawCtx, Event, EventResult, FlexRow, Label, Rect, Size, SizedBox, TextField, Widget,
+    Button, DrawCtx, Event, EventResult, FlexRow, Label, Modifiers, Rect, Size, SizedBox,
+    TextField, Widget,
 };
 use agg_gui_files::tr;
 
@@ -272,17 +275,16 @@ impl Widget for SavePage {
         available
     }
     fn paint(&mut self, _ctx: &mut dyn DrawCtx) {}
+    fn on_event(&mut self, _event: &Event) -> EventResult {
+        EventResult::Ignored
+    }
     /// F5 lists the folder again, natively (see the module header); the key goes on.
-    fn on_event(&mut self, event: &Event) -> EventResult {
+    fn on_unconsumed_key(&mut self, key: &agg_gui::Key, _modifiers: Modifiers) -> EventResult {
         #[cfg(not(target_arch = "wasm32"))]
-        if let Event::KeyDown {
-            key: agg_gui::Key::F(5),
-            ..
-        } = event
-        {
+        if *key == agg_gui::Key::F(5) {
             self.controller.state().borrow_mut().relist();
         }
-        let _ = event;
+        let _ = key;
         EventResult::Ignored
     }
     fn properties(&self) -> Vec<(&'static str, String)> {

@@ -18,7 +18,9 @@
 //!   root Move is left unoffered.
 //! - The Save dialog (`save_dialog.rs`'s `SavePage`) over the same root and config, opening
 //!   where it was last left under its own key ([`SheetDialogs::with_save_location_key`]),
-//!   answering with the folder and file name; the app writes the file.
+//!   answering with the folder and file name; the app writes the file. Its name field has the
+//!   keyboard as it opens (the request's focus id, or the sheet's own), all of the starting name
+//!   selected, so typing names the file at once.
 //! - The Open dialog (`open_dialog.rs`'s `OpenPage`) over the same root and config, listing every
 //!   folder (read-only ones too: opening takes nothing in) and the files its request's filter
 //!   keeps, one selectable at a time unless the request allows several; opening where it was last

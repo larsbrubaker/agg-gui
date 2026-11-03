@@ -41,7 +41,7 @@ disk = ["agg-gui-files/disk"]
 
 [dependencies]
 # Default features off so they stay the consumer's choice (see `reflect`).
-agg-gui = { path = "../agg-gui", version = "0.5.3", default-features = false }
+agg-gui = { path = "../agg-gui", version = "0.5.5", default-features = false }
 # A 0.0.x requirement is written as a range: plain "0.0.2" would pin that one version.
 agg-gui-files = { path = "../agg-gui-files", version = ">=0.0.4, <0.1.0" }
 # The UI clock's instants (std's own Instant natively; the browser's clock on wasm32), as agg-gui
