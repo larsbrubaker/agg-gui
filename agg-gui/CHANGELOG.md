@@ -201,6 +201,13 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Changed
 
+- A showing `ModalSheet` offers a key nothing focused took to its own content's
+  `on_unconsumed_key` (topmost first) before its default / cancel actions, and swallows only what
+  the content leaves, so a dialog page hears its accelerators (F5) whether its field, nothing, or
+  another widget has the keyboard. Nothing behind the sheet hears the key, as before. A
+  `with_key_passthrough` sheet makes no offer of its own: the app's tree-wide pass that follows
+  reaches its content, once (0.5.5).
+
 - A long press in a `TextField` or `TextArea` selects text (see Added) instead of opening the
   right-click menu; a right click still opens it.
 

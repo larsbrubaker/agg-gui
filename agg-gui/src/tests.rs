@@ -122,6 +122,7 @@ mod menu_rows_by_press;
 mod menu_submenu_tap_close;
 mod menu_system_paste;
 mod modal_hover_outside;
+mod modal_sheet_keys;
 mod modal_sheet_move;
 mod modal_sheet_resize;
 mod modal_sheet_room;

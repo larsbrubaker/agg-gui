@@ -16,6 +16,19 @@
 //! the sheet subtree (the scrim swallows what the panel doesn't use) and
 //! `Escape` closes it.
 //!
+//! # Keys nothing focused took
+//!
+//! A key the focused path left alone (or any key, with nothing focused in
+//! the sheet) is first offered to the sheet's own content as an unconsumed
+//! key (`on_unconsumed_key`, topmost first, as the [`App`](crate::App) does
+//! for the whole tree when no modal shows), so a dialog page hears its own
+//! accelerators (F5 to list a folder again) whatever has the keyboard.
+//! Then come the default / cancel actions below, and then the sheet
+//! swallows what is left: nothing behind the sheet hears it. A
+//! [`with_key_passthrough`](ModalSheet::with_key_passthrough) sheet skips
+//! its own pass, because the app's tree-wide pass that follows reaches its
+//! content anyway, and a key is offered to each widget once.
+//!
 //! # Default / cancel actions
 //!
 //! Return / Enter that reaches the sheet unconsumed (focus is not on a
@@ -55,7 +68,9 @@ use crate::event::{Event, EventResult, Key};
 use crate::geometry::{Point, Rect, Size};
 use crate::layout_props::WidgetBase;
 use crate::theme::current_visuals;
-use crate::widget::{activate_action_at, cancel_action_path, default_action_path, Widget};
+use crate::widget::{
+    activate_action_at, cancel_action_path, default_action_path, dispatch_unconsumed_key, Widget,
+};
 use crate::widgets::window::chrome::{paint_chrome_shadow, ChromeStyle};
 
 mod drag;
@@ -299,6 +314,21 @@ impl ModalSheet {
         activate_action_at(child.as_mut(), rest).is_consumed()
     }
 
+    /// A key reached the sheet unconsumed: offer it to the content's own
+    /// unconsumed-key handlers (see the module docs). A passthrough sheet
+    /// leaves that to the app's tree-wide pass.
+    fn offer_key_to_content(&mut self, event: &Event) -> bool {
+        let Event::KeyDown { key, modifiers } = event else {
+            return false;
+        };
+        if self.key_passthrough {
+            return false;
+        }
+        self.children
+            .iter_mut()
+            .any(|child| dispatch_unconsumed_key(child.as_mut(), key, *modifiers).is_consumed())
+    }
+
     /// Enter reached the sheet: fire the default action if there is one.
     fn handle_enter(&mut self) -> bool {
         if let Some(path) = default_action_path(self, false) {
@@ -483,6 +513,7 @@ impl Widget for ModalSheet {
             Event::MouseDown { .. } | Event::MouseUp { .. } | Event::MouseWheel { .. } => {
                 EventResult::Consumed
             }
+            Event::KeyDown { .. } if self.offer_key_to_content(event) => EventResult::Consumed,
             Event::KeyDown {
                 key: Key::Escape, ..
             } if self.handle_escape() => EventResult::Consumed,
