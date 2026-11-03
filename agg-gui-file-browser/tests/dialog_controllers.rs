@@ -424,6 +424,70 @@ fn create_folder_asks_through_the_apps_input_box_and_opens_the_folder() {
 }
 
 #[test]
+fn create_folder_can_keep_the_dialog_in_the_folder_showing_the_new_one_listed() {
+    let sample = Sample::new();
+    let (answers, picked) = save_answers();
+    let input = Rc::new(InputBox {
+        answer: Some("Brackets".into()),
+        asked: RefCell::default(),
+    });
+    let c = SaveController::new(&sample.browser(), SaveRequest::new("notes"), answers)
+        .asking_names_through(Rc::clone(&input) as Rc<dyn BrowserDialogs>)
+        .keeping_folder_on_create();
+    let mut app = app_over(save_page(&c));
+    click(&mut app, "Designs Row Item Collection", 2);
+    click(&mut app, CREATE, 1);
+    let made: Vec<String> = sample
+        .designs
+        .child_containers()
+        .iter()
+        .map(|l| l.name().to_string())
+        .collect();
+    assert_eq!(made, ["Brackets"]);
+    assert_eq!(trail(&c), "Top/Designs", "the dialog stays where it was");
+    let listed = c
+        .state()
+        .borrow()
+        .entries()
+        .iter()
+        .any(|e| e.name() == "Brackets");
+    assert!(listed, "the new folder is listed in the folder showing");
+    click(&mut app, ACCEPT, 1);
+    assert_eq!(pick_of(&picked), ("Designs".into(), "notes".into(), false));
+}
+
+#[test]
+fn a_dialog_typing_into_a_kept_cell_starts_with_its_text_and_fills_it() {
+    let sample = Sample::new();
+    let kept = Rc::new(RefCell::new("typed before".to_string()));
+    let (answers, picked) = save_answers();
+    let c = SaveController::new(&sample.browser(), SaveRequest::new("ignored"), answers)
+        .typing_into(Rc::clone(&kept));
+    let mut app = app_over(save_page(&c));
+    assert_eq!(property(&app, "design_name"), "typed before");
+    click(&mut app, "Designs Row Item Collection", 2);
+    click(&mut app, "Row Item gear.stl", 1);
+    assert_eq!(
+        *kept.borrow(),
+        "gear.stl",
+        "a row's click fills the kept cell"
+    );
+    // A page built again over a new controller sharing the cell shows the same name.
+    let (again, _) = save_answers();
+    let rebuilt = SaveController::new(&sample.browser(), SaveRequest::new(""), again)
+        .typing_into(Rc::clone(&kept));
+    assert_eq!(rebuilt.name(), "gear.stl");
+    // Saving takes the kept cell's name: over gear.stl, once the user agrees to replace it.
+    click(&mut app, ACCEPT, 1);
+    assert!(matches!(c.mode(), SaveMode::Asking { file_name, .. } if file_name == "gear.stl"));
+    c.confirm();
+    assert_eq!(
+        pick_of(&picked),
+        ("Designs".into(), "gear.stl".into(), true)
+    );
+}
+
+#[test]
 fn a_starting_folder_opens_the_dialog_there_with_the_field_focused_and_hinted() {
     let sample = Sample::new();
     let (answers, picked) = save_answers();

@@ -33,7 +33,12 @@
 //! Create Folder ([`SaveController::create_folder`]) asks the new folder's name through the app's
 //! dialogs when given them ([`SaveController::asking_names_through`]: its input box), else in the
 //! page ([`SaveMode::NamingFolder`]); the folder is made in the showing folder, recorded for Undo,
-//! then opened.
+//! then opened, unless the app keeps the dialog where it is
+//! ([`SaveController::keeping_folder_on_create`]: the new folder listed among the rest).
+//!
+//! The name lives in a cell the page's field shares; an app that builds its page again (a theme
+//! change) over a new controller hands each one the same cell
+//! ([`SaveController::typing_into`]), so the name the user typed survives the rebuild.
 //!
 //! Whenever what a page shows changes (the note, the question), [`SaveController::changes`]
 //! moves on and a layout is asked for; a page rebuilds its parts when it or the browser's
@@ -84,7 +89,10 @@ struct Core {
     state: Rc<RefCell<BrowserState>>,
     request: SaveRequest,
     answers: SaveAnswers,
-    name: Rc<RefCell<String>>,
+    /// The name cell, swapped only by [`SaveController::typing_into`] as the dialog is built.
+    name: RefCell<Rc<RefCell<String>>>,
+    /// Whether a folder Create Folder makes is opened (see the module header).
+    open_created: Cell<bool>,
     folder_name: Rc<RefCell<String>>,
     mode: RefCell<SaveMode>,
     note: RefCell<String>,
@@ -115,7 +123,8 @@ impl SaveController {
         Self {
             core: Rc::new(Core {
                 state: Rc::clone(state),
-                name: Rc::new(RefCell::new(request.initial_name.clone())),
+                name: RefCell::new(Rc::new(RefCell::new(request.initial_name.clone()))),
+                open_created: Cell::new(true),
                 folder_name: Rc::new(RefCell::new(String::new())),
                 mode: RefCell::new(SaveMode::Normal),
                 note: RefCell::new(String::new()),
@@ -164,6 +173,20 @@ impl SaveController {
         self
     }
 
+    /// The dialog typing its name into `cell`, whose text it starts with in place of the
+    /// request's `initial_name` (see the module header).
+    pub fn typing_into(self, cell: Rc<RefCell<String>>) -> Self {
+        *self.core.name.borrow_mut() = cell;
+        self
+    }
+
+    /// Create Folder leaving the dialog in the showing folder, the new folder listed there,
+    /// rather than opening it.
+    pub fn keeping_folder_on_create(self) -> Self {
+        self.core.open_created.set(false);
+        self
+    }
+
     /// The dialog's browser.
     pub fn state(&self) -> &Rc<RefCell<BrowserState>> {
         &self.core.state
@@ -176,12 +199,12 @@ impl SaveController {
 
     /// The name typed so far, shared with the page's field (`TextField::with_text_cell`).
     pub fn name_cell(&self) -> Rc<RefCell<String>> {
-        Rc::clone(&self.core.name)
+        Rc::clone(&self.core.name.borrow())
     }
 
     /// The name typed so far.
     pub fn name(&self) -> String {
-        self.core.name.borrow().clone()
+        self.name_cell().borrow().clone()
     }
 
     /// The new folder's name typed so far, for a page asking it itself ([`SaveMode::NamingFolder`]).
@@ -236,9 +259,7 @@ impl SaveController {
     /// Whether Save can run now: the folder takes the save, a name is typed and the dialog has
     /// not answered.
     pub fn accept_enabled(&self) -> bool {
-        !self.core.place.accepted.get()
-            && !self.core.name.borrow().trim().is_empty()
-            && self.can_save()
+        !self.core.place.accepted.get() && !self.name().trim().is_empty() && self.can_save()
     }
 
     fn changed(&self) {
@@ -262,7 +283,7 @@ impl SaveController {
 
     /// Puts `name` in the field (the page's field shows it at its next layout).
     pub fn set_name(&self, name: impl Into<String>) {
-        *self.core.name.borrow_mut() = name.into();
+        *self.name_cell().borrow_mut() = name.into();
         self.core.note.borrow_mut().clear();
         *self.core.mode.borrow_mut() = SaveMode::Normal;
         self.changed();
@@ -308,7 +329,7 @@ impl SaveController {
             *core.note.borrow_mut() = why;
             return self.changed();
         }
-        let typed = core.name.borrow().trim().to_string();
+        let typed = self.name().trim().to_string();
         if typed.is_empty() {
             return;
         }
@@ -489,7 +510,7 @@ impl SaveController {
         let made = BrowserState::write_recorded(state, depth, |w| w.create_folder_recorded(&name));
         *self.core.mode.borrow_mut() = SaveMode::Normal;
         self.core.folder_name.borrow_mut().clear();
-        if made.is_ok() {
+        if made.is_ok() && self.core.open_created.get() {
             let link = {
                 let s = state.borrow();
                 s.active_container()

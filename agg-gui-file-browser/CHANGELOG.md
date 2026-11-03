@@ -8,6 +8,16 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ## [Unreleased]
 
+## [0.0.11] - 2026-11-03
+
+### Added
+
+- `SaveController::typing_into`: the dialog's name lives in a cell the app keeps, so an app that
+  builds its page again over a new controller (a theme change) keeps the name the user typed.
+- `SaveController::keeping_folder_on_create`: Create Folder leaves the dialog in the folder
+  showing, the new folder listed there, rather than opening it; without it the new folder opens,
+  as before.
+
 ## [0.0.10] - 2026-11-03
 
 ### Added
