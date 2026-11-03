@@ -39,8 +39,8 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   and whether it draws its rule (defaults `Insets::symmetric(3, 1)` and a rule, as before).
 - `BrowserState::add_restore_finished(listener)`: each restore's answer tells its listeners how
   it went, as a `RestoreOutcome` (`Landed`, `Failed` when the memory could not reach the
-  location, `Abandoned` when the user went elsewhere meanwhile or a newer restore began), outside
-  any borrow of the state (`RestoreFinishedListener = Rc<dyn Fn(RestoreOutcome)>`).
+  location, `Abandoned` when the user went elsewhere meanwhile, `Superseded` when a newer restore
+  began), outside any borrow of the state (`RestoreFinishedListener = Rc<dyn Fn(RestoreOutcome)>`).
 - `LIVE_REFRESH_WAKE` (100 ms): while the showing folder's live relist is pending, the list asks
   for one more frame that long after each layout, rather than a frame after every frame, so an
   idle browser waiting on a relist no longer draws continuously.
@@ -59,6 +59,10 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Fixed
 
+- A `FileBrowser` made `remembering` no longer writes where a restore landed back to the memory
+  (the nearest folder a memory could reach, with the remembered one on a drive not mounted, used
+  to replace it), and a restore a retry superseded no longer writes the root when its late
+  answer comes; the user's own moves, and Home clicked while a restore is found, still are.
 - `FileBrowser` keeps the bar holding its search box when the header is built again (a folder
   opened, a search's results showing): the bar, its row and the search slot stay the same
   widgets and only what stands beside the box is new, so the box and its clear button keep

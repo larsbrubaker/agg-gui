@@ -3,7 +3,9 @@
 //! never the root's rows. Crumb clicks and Back move along the trail being found, the user's own
 //! navigation ends the restore, `retry_restore` runs it again, and a browser made `remembering`
 //! remembers each folder the user moves to; the root's header markdown stays hidden meanwhile.
-//! Each answer tells the restore-finished listeners whether it landed, failed or was abandoned.
+//! Each answer tells the restore-finished listeners whether it landed, failed, was abandoned by
+//! the user or superseded by a retry; a landed restore is not written back to the memory, nor is
+//! a superseded one's root.
 //! Driven through agg-gui's `App` with real clicks.
 
 use std::cell::RefCell;
@@ -310,7 +312,7 @@ fn heard(memory: &Rc<Slow>) -> (App, Rc<RefCell<BrowserState>>, Heard) {
 }
 
 #[test]
-fn the_restore_finished_listeners_hear_whether_it_landed_failed_or_was_abandoned() {
+fn the_restore_finished_listeners_hear_whether_it_landed_failed_was_abandoned_or_superseded() {
     let memory = Slow::new();
     let (mut app, _state, heard) = self::heard(&memory);
     assert!(heard.borrow().is_empty(), "nothing while it is found");
@@ -337,7 +339,7 @@ fn the_restore_finished_listeners_hear_whether_it_landed_failed_or_was_abandoned
     layout(&mut app);
     assert_eq!(*heard.borrow(), [(RestoreOutcome::Abandoned, 1)]);
 
-    // A retry's answer is told too, and the earlier search answering late is abandoned.
+    // A retry's answer is told too, and the earlier search answering late is superseded.
     let memory = Slow::new();
     let (mut app, state, heard) = self::heard(&memory);
     BrowserState::retry_restore(&state);
@@ -353,7 +355,7 @@ fn the_restore_finished_listeners_hear_whether_it_landed_failed_or_was_abandoned
     layout(&mut app);
     assert_eq!(
         *heard.borrow(),
-        [(RestoreOutcome::Landed, 3), (RestoreOutcome::Abandoned, 3)]
+        [(RestoreOutcome::Landed, 3), (RestoreOutcome::Superseded, 3)]
     );
 }
 
@@ -371,4 +373,60 @@ fn home_clicked_while_finding_is_remembered_once_the_late_answer_comes() {
         Some(vec!["Home".to_string()]),
         "where the user went is where the browser reopens"
     );
+}
+
+#[test]
+fn a_restore_that_lands_is_not_written_back_and_the_users_next_move_is() {
+    // The memory finds the nearest folder that is there (Projects, Brackets being gone): the
+    // browser opens it, but the memory keeps Brackets for when it is back.
+    let memory = Slow::new();
+    let state = state(&memory);
+    let mut app = App::new(Box::new(FileBrowser::new(&state, font()).remembering(KEY)));
+    layout(&mut app);
+    let [projects, _] = memory.found.clone();
+    memory.give(Some(vec![Box::new(projects) as Box<dyn Folder>]));
+    layout(&mut app);
+    layout(&mut app);
+    assert_eq!(state.borrow().path_names(), ["Home", "Projects"]);
+    assert!(
+        memory.remembered.borrow().is_empty(),
+        "the place a restore landed is not written back: {:?}",
+        memory.remembered.borrow()
+    );
+
+    // Where the user goes from there is remembered.
+    click(&mut app, &crumb(&state, "Home"));
+    layout(&mut app);
+    assert_eq!(
+        memory.remembered.borrow().last().cloned(),
+        Some(vec!["Home".to_string()])
+    );
+}
+
+#[test]
+fn a_restore_a_retry_superseded_writes_nothing_when_its_late_answer_comes() {
+    let memory = Slow::new();
+    let (mut app, state, heard) = self::heard(&memory);
+    BrowserState::retry_restore(&state);
+    // The first search answers while the retry's is still finding.
+    let first = Rc::clone(&memory.answers.borrow()[0]);
+    first.borrow_mut().folders = Some(None);
+    let waker = first.borrow_mut().waker.take();
+    if let Some(waker) = waker {
+        waker.wake();
+    }
+    layout(&mut app);
+    assert!(state.borrow().is_restoring(), "the retry still finds");
+    assert!(
+        memory.remembered.borrow().is_empty(),
+        "the root is not written over the remembered folder: {:?}",
+        memory.remembered.borrow()
+    );
+    memory.answer();
+    layout(&mut app);
+    assert_eq!(
+        *heard.borrow(),
+        [(RestoreOutcome::Superseded, 1), (RestoreOutcome::Landed, 3)]
+    );
+    assert!(memory.remembered.borrow().is_empty());
 }

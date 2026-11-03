@@ -311,6 +311,7 @@ impl BrowserState {
             let outcome = {
                 let mut s = state.borrow_mut();
                 match (s.finish_restore(serial), found) {
+                    (None, _) if s.superseded(serial) => RestoreOutcome::Superseded,
                     (None, _) => RestoreOutcome::Abandoned,
                     (Some(_), None) => RestoreOutcome::Failed,
                     (Some(_), Some(_)) if s.navigation != navigation || s.depth() != 1 => {

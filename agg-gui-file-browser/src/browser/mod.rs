@@ -37,6 +37,8 @@
 //! memory says it was last left under that key, showing that place's breadcrumbs over a loading
 //! line while it is found (`state/restore.rs`), and remembers each folder the user moves to (and,
 //! when the user ended the restore without moving, the place they stayed, once its answer comes).
+//! Where a restore lands is never written back: it is the remembered place, or the nearest one
+//! the memory could reach, and the remembered place stays for when it can be reached again.
 //!
 //! The drag's picture is drawn once for the whole browser, in agg-gui's global overlay pass after
 //! everything else, rather than by the list: a drag from the tree, or one whose list rows a
@@ -65,7 +67,7 @@ use crate::nav::provider_message::ProviderMessageBar;
 use crate::nav::splitter::BrowserSplitter;
 use crate::search::controller::SearchController;
 use crate::search::search_box::SearchBox;
-use crate::state::BrowserState;
+use crate::state::{BrowserState, RestoreOutcome};
 use crate::tree::{BrowserTree, TreeModel};
 use parts::{holds_search_slot, keep_search_bar, BottomBorder, ListColumn, SearchSlot};
 
@@ -124,8 +126,9 @@ pub struct FileBrowser {
     built: Option<HeaderKey>,
     /// The memory key the browser's place is remembered under, if any.
     location_key: Option<String>,
-    /// The navigation count last remembered under `location_key`.
-    remembered: Option<u64>,
+    /// The navigation count last remembered under `location_key` (or a restore landed at),
+    /// shared with the restore-finished listener `remembering` adds.
+    remembered: Rc<Cell<Option<u64>>>,
     /// The app's kept children while no build holds them (before the first).
     overlays: Vec<Box<dyn Widget>>,
     /// Where the browser's window rectangle from its last paint goes.
@@ -171,7 +174,7 @@ impl FileBrowser {
             search_box: Some(Box::new(search_box)),
             built: None,
             location_key: None,
-            remembered: None,
+            remembered: Rc::new(Cell::new(None)),
             overlays: Vec::new(),
             painted_rect: None,
             bounds: Rect::default(),
@@ -185,20 +188,33 @@ impl FileBrowser {
     /// look again (once the user signs in).
     pub fn remembering(mut self, key: impl Into<String>) -> Self {
         let key = key.into();
-        // A restore the user ended without moving (Home clicked while it was found) leaves the
-        // browser where they chose: that is remembered once the late answer comes.
-        let (weak, remembered) = (Rc::downgrade(&self.state), key.clone());
+        // A restore that lands is where the memory already says, or the nearest place it could
+        // reach (a drive not mounted this time): never written back, so the remembered place
+        // stays for when it can be reached again; the user's own moves from there are. A restore
+        // the user ended without moving (Home clicked while it was found) leaves the browser
+        // where they chose: that is remembered once the late answer comes. One a newer restore
+        // superseded says nothing about where the user is.
+        let (weak, remembered, seen) = (
+            Rc::downgrade(&self.state),
+            key.clone(),
+            Rc::clone(&self.remembered),
+        );
         self.state
             .borrow_mut()
             .add_restore_finished(Rc::new(move |outcome| {
-                if outcome == crate::state::RestoreOutcome::Abandoned {
-                    if let Some(state) = weak.upgrade() {
-                        BrowserState::remember_location(&state, &remembered);
+                let Some(state) = weak.upgrade() else {
+                    return;
+                };
+                match outcome {
+                    RestoreOutcome::Landed => seen.set(Some(state.borrow().navigation())),
+                    RestoreOutcome::Abandoned => {
+                        BrowserState::remember_location(&state, &remembered)
                     }
+                    RestoreOutcome::Failed | RestoreOutcome::Superseded => {}
                 }
             }));
         BrowserState::restore_location(&self.state, &key);
-        self.remembered = Some(self.state.borrow().navigation());
+        self.remembered.set(Some(self.state.borrow().navigation()));
         self.location_key = Some(key);
         self
     }
@@ -223,8 +239,8 @@ impl FileBrowser {
             return;
         };
         let navigation = self.state.borrow().navigation();
-        if self.remembered != Some(navigation) {
-            self.remembered = Some(navigation);
+        if self.remembered.get() != Some(navigation) {
+            self.remembered.set(Some(navigation));
             BrowserState::remember_location(&self.state, key);
         }
     }

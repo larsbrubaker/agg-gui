@@ -18,8 +18,8 @@
 //!
 //! When a restore's search answers, the listeners added with
 //! [`BrowserState::add_restore_finished`] hear how it went ([`RestoreOutcome`]): the folders
-//! opened, the location could not be reached, or the restore no longer stood (the user went
-//! elsewhere meanwhile, or a newer restore began). They are told outside any borrow of the
+//! opened, the location could not be reached, the user ended the restore (went elsewhere
+//! meanwhile), or a newer restore began. They are told outside any borrow of the
 //! state, so they may read it. A key the memory remembers nothing under starts no restore and
 //! tells nothing.
 
@@ -36,9 +36,12 @@ pub enum RestoreOutcome {
     Landed,
     /// The memory could not reach the location: the browser stays at its root.
     Failed,
-    /// The answer came after the restore stopped standing (the user went elsewhere, or a newer
-    /// restore began); it opened nothing.
+    /// The answer came after the user ended the restore (went elsewhere meanwhile); it opened
+    /// nothing.
     Abandoned,
+    /// The answer came after a newer restore began (a retry); it opened nothing, and the newer
+    /// one's answer is told in its turn.
+    Superseded,
 }
 
 /// Hears each restore's outcome.
@@ -175,6 +178,11 @@ impl BrowserState {
         let keep = self.restore.as_ref().filter(|p| p.serial == serial)?.keep;
         self.end_restore();
         Some(keep)
+    }
+
+    /// Whether a restore newer than the one numbered `serial` has begun.
+    pub(super) fn superseded(&self, serial: u64) -> bool {
+        self.restore_serial != serial
     }
 
     /// The restore is over (found, ended by the user, or replaced): the open path shows again.
