@@ -3,7 +3,8 @@
 //! `FileBrowser` made `remembering` restores as it is made, and restore-finished listeners the
 //! app adds after making it hear even an answer that landed then (outcomes are told at the
 //! spawner's next turn, never inside the call); a browser already off its root shows no
-//! remembered trail; an answer that
+//! remembered trail; a crumb the user clicks between a ready restore landing and its outcome
+//! being told is still written to memory; an answer that
 //! yields (wakes itself to be polled at the next turn) still gets that turn from a spawner that
 //! polls each new task at once, never landing inside the call; the look's
 //! `folder_message` stands in the list's place for a folder whose listing is only a message; and
@@ -95,6 +96,45 @@ fn a_remembering_browser_restores_as_it_is_made_and_late_listeners_hear_it() {
     assert!(heard.borrow().is_empty(), "never told inside the call");
     inline.turn();
     assert_eq!(*heard.borrow(), [RestoreOutcome::Landed]);
+}
+
+/// A memory that finds Projects there and then, noting each place it is told to remember.
+struct AtOnceNoting(MemoryFolder, RefCell<Vec<Vec<String>>>);
+
+impl BrowserMemory for AtOnceNoting {
+    fn last_location(&self, _key: &str) -> Option<LocationFuture> {
+        let found: Vec<Box<dyn Folder>> = vec![Box::new(self.0.clone())];
+        Some(Box::pin(std::future::ready(Some(found))))
+    }
+    fn remember_location(&self, _key: &str, path: &[OpenFolder]) {
+        let names = path.iter().map(|f| f.borrow().name().to_string()).collect();
+        self.1.borrow_mut().push(names);
+    }
+}
+
+#[test]
+fn a_crumb_clicked_before_a_ready_restore_is_told_is_remembered() {
+    agg_gui::set_device_scale(1.0);
+    let home = MemoryFolder::new("Home");
+    let projects = home.add_folder("Projects").expect("free");
+    let memory = Rc::new(AtOnceNoting(projects, RefCell::default()));
+    let inline = Rc::new(Inline::default());
+    let config = BrowserConfig::builder()
+        .spawner(Rc::clone(&inline) as Rc<dyn Spawner>)
+        .memory(Rc::clone(&memory) as Rc<dyn BrowserMemory>)
+        .build();
+    let state = BrowserState::new(Box::new(home), config);
+    let mut browser = FileBrowser::new(&state, font()).remembering("key");
+    browser.layout(Size::new(600.0, 400.0));
+    assert!(
+        memory.1.borrow().is_empty(),
+        "the landing is not written back"
+    );
+    // The user clicks Home before the spawner's next turn tells the landing.
+    state.borrow_mut().go_to_crumb(0);
+    inline.turn();
+    browser.layout(Size::new(600.0, 400.0));
+    assert_eq!(*memory.1.borrow(), [vec!["Home".to_string()]]);
 }
 
 /// A memory naming a trail whose answer never comes.

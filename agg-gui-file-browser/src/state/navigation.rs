@@ -379,6 +379,9 @@ impl BrowserState {
                     for folder in folders.into_iter().take(keep) {
                         s.push_container(folder);
                     }
+                    // Read by listeners told later (a ready answer's, at the spawner's next
+                    // turn), when the user may have moved on from where it landed.
+                    s.restore_landed_at = Some(s.navigation);
                     match shortened {
                         Some(_) => RestoreOutcome::LandedShortened,
                         None => RestoreOutcome::Landed,

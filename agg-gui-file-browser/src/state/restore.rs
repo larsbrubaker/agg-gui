@@ -77,6 +77,13 @@ impl BrowserState {
         self.shown_restore().map(|p| p.trail.as_slice())
     }
 
+    /// The navigation count the last restore's folders opened at: where a `Landed` outcome put
+    /// the browser, however far the user has moved since (its listeners may be told a turn
+    /// later). `None` until a restore lands.
+    pub fn restore_landed_at(&self) -> Option<u64> {
+        self.restore_landed_at
+    }
+
     /// Whether a remembered location's trail shows over a loading line now.
     pub fn is_restoring(&self) -> bool {
         self.shown_restore().is_some()

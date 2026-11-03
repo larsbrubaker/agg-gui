@@ -146,6 +146,8 @@ pub struct BrowserState {
     restore_key: Option<String>,
     /// Counts restores begun, so a late answer to an earlier one is told apart.
     restore_serial: u64,
+    /// The navigation count the last restore's folders opened at (`restore_landed_at`).
+    restore_landed_at: Option<u64>,
     /// Told how each restore's answer went (`state/restore.rs`).
     restore_finished: Vec<RestoreFinishedListener>,
     /// This state's own handle, which snapshots carry back to it.
@@ -211,6 +213,7 @@ impl BrowserState {
             restore: None,
             restore_key: None,
             restore_serial: 0,
+            restore_landed_at: None,
             restore_finished: Vec::new(),
             me: Weak::new(),
         }));

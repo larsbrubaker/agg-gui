@@ -34,6 +34,9 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 - A browser already off its root when a restore starts shows where it is, never the remembered
   trail over it.
 - The picking dialogs' place no longer holds its key borrowed while a restore runs.
+- `BrowserState::restore_landed_at`: the navigation count the last restore's folders opened at.
+  `FileBrowser::remembering` marks that count as remembered when it hears `Landed`, so a move the
+  user made before the outcome was told is still written to memory.
 
 ## [0.0.9] - 2026-11-03
 

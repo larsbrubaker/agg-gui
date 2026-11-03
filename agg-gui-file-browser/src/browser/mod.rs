@@ -211,7 +211,9 @@ impl FileBrowser {
                     return;
                 };
                 match outcome {
-                    RestoreOutcome::Landed => seen.set(Some(state.borrow().navigation())),
+                    // Where it landed, not where the browser is now: a move the user made
+                    // before hearing it is theirs, still to be remembered.
+                    RestoreOutcome::Landed => seen.set(state.borrow().restore_landed_at()),
                     RestoreOutcome::Abandoned => {
                         BrowserState::remember_location(&state, &remembered)
                     }
