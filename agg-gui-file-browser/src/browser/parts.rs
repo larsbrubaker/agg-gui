@@ -3,7 +3,9 @@
 //! with a one-pixel rule along its bottom (the nav bar and the list-only form's toolbar); and
 //! [`ListColumn`], the list under the showing folder's header markdown (a folder's own words
 //! about what it holds, through agg-gui's `MarkdownView` or the look's own markdown widget,
-//! `BrowserLook::header_markdown`, left out when the folder has none) and the look's banner
+//! `BrowserLook::header_markdown`, left out when the folder has none, and while a remembered
+//! folder is still being found, whose loading line stands under the trail being found rather than
+//! under the root's words) and the look's banner
 //! (`BrowserLook::list_banner`), built again only when that text changes or the list shows its
 //! content anew (`BrowserState::list_resets`).
 //!
@@ -225,7 +227,12 @@ impl Widget for ListColumn {
     fn layout(&mut self, available: Size) -> Size {
         let (text, resets) = {
             let s = self.state.borrow();
-            (s.header_markdown(), s.list_resets())
+            // The header showing is the root's while a remembered folder is found: none then.
+            let text = match s.is_restoring() {
+                true => String::new(),
+                false => s.header_markdown(),
+            };
+            (text, s.list_resets())
         };
         let built = self.built.as_ref().map(|(t, r)| (t.as_str(), *r));
         if built != Some((text.as_str(), resets)) {

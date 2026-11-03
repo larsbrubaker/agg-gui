@@ -2,7 +2,8 @@
 //! `BrowserPage` show its breadcrumbs (`BrowserMemory::last_location_trail`) over a loading line,
 //! never the root's rows. Crumb clicks and Back move along the trail being found, the user's own
 //! navigation ends the restore, `retry_restore` runs it again, and a browser made `remembering`
-//! remembers each folder the user moves to. Driven through agg-gui's `App` with real clicks.
+//! remembers each folder the user moves to; the root's header markdown stays hidden meanwhile.
+//! Driven through agg-gui's `App` with real clicks.
 
 use std::cell::RefCell;
 use std::future::Future;
@@ -17,7 +18,7 @@ use agg_gui_file_browser::{
     run_ready_local_tasks, BrowserConfig, BrowserMemory, BrowserPage, BrowserState, FileBrowser,
     LocationFuture, OpenFolder, ViewMode,
 };
-use agg_gui_files::{Folder, MemoryFolder};
+use agg_gui_files::{DynamicFolder, Folder, MemoryFolder};
 
 const WIDTH: f64 = 700.0;
 const HEIGHT: f64 = 400.0;
@@ -254,5 +255,31 @@ fn back_walks_up_the_trail_and_a_retry_looks_again() {
     assert_eq!(
         state.borrow().path_names(),
         ["Home", "Projects", "Brackets"]
+    );
+}
+
+#[test]
+fn no_header_markdown_shows_while_the_remembered_folder_is_found() {
+    let memory = Slow::new();
+    agg_gui::set_device_scale(1.0);
+    let config = BrowserConfig::builder()
+        .memory(Rc::clone(&memory) as Rc<dyn BrowserMemory>)
+        .build();
+    let root = DynamicFolder::new("Home").with_header_markdown("Home's own words");
+    let state = BrowserState::new(Box::new(root), config);
+    state.borrow_mut().set_view_mode(ViewMode::Rows);
+    let mut app = App::new(Box::new(FileBrowser::new(&state, font()).remembering(KEY)));
+    layout(&mut app);
+    assert_eq!(property(&app, "restoring"), "true");
+    let header = state.borrow().config().look.names().header_markdown.clone();
+    assert!(
+        find(app.root(), &header, Point::default()).is_none(),
+        "no root header over the loading line"
+    );
+    click(&mut app, &crumb(&state, "Home"));
+    assert_eq!(property(&app, "restoring"), "false");
+    assert!(
+        find(app.root(), &header, Point::default()).is_some(),
+        "the root's header once the root is what shows"
     );
 }

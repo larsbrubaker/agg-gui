@@ -247,7 +247,12 @@ impl FileBrowser {
         HeaderKey {
             navigation: s.navigation(),
             path: s.shown_trail(),
-            header: s.header_markdown(),
+            // No header (nor the list-only form's message bar) while a remembered folder is
+            // found: the showing folder is the root, not the one being found.
+            header: match s.is_restoring() {
+                true => String::new(),
+                false => s.header_markdown(),
+            },
             compact: self.is_compact(),
         }
     }

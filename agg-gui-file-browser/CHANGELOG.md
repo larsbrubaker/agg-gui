@@ -20,7 +20,7 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 - A remembered folder still being found shows its trail: `BrowserMemory::last_location_trail`
   names the remembered folders (root first), and while `last_location` finds them `FileBrowser`
   and `BrowserPage` show that trail as the breadcrumbs over the "Loading..." line, never the
-  root's rows. Crumb clicks (`BrowserState::go_to_crumb`) and Back (`go_back`) move along the
+  root's rows nor its header markdown. Crumb clicks (`BrowserState::go_to_crumb`) and Back (`go_back`) move along the
   trail, the user's own navigation ends the restore, and `BrowserState::retry_restore` runs it
   again (call it once the user signs in). `restoring_trail`, `is_restoring` and `shown_trail`
   read it. The default memory names no trail, so nothing changes for an app that adds none.
