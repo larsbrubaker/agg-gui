@@ -131,9 +131,9 @@ pub use config::{
 };
 pub use dialogs::{
     append_extension, extension_filter, without_extension, BrowserDialogs, Confirmation, CopiesTo,
-    DialogKind, FileNamer, MovePick, MoveRequest, NameRequest, NoDialogs, OpenPick, OpenRequest,
-    PickedFiles, PickedMoveTarget, PickedOpenTarget, PickedSaveTarget, ReplaceQuestion,
-    ReplaceQuestionHook, SavePick, SaveRequest, SaveTarget, ShownName,
+    DialogKind, FileNamer, LiveSource, MovePick, MoveRequest, MoveSource, NameRequest, NoDialogs,
+    OpenPick, OpenRequest, PickedFiles, PickedMoveTarget, PickedOpenTarget, PickedSaveTarget,
+    ReplaceQuestion, ReplaceQuestionHook, SavePick, SaveRequest, SaveTarget, ShownName,
 };
 #[cfg(feature = "disk")]
 pub use disk_monitor::{register_directory_monitor, WakingDirectoryMonitor};

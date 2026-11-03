@@ -3,13 +3,14 @@
 //! default page over it.
 //!
 //! The controller holds the request, the dialog's browser and its answers. It says what accepting
-//! does as the user browses and selects ([`MoveController::verdict`]: `plan.rs`'s
-//! `move_verdict`), and accepting opens the destination (the selected folder row, or the folder
-//! showing, handed over) and answers with it ([`MovePick`]); the browser's Move does the move. A
-//! showing folder something else still holds is not handed over: the dialog stays in it and the
-//! browser's status says the folder was busy, as does the app's report (`BrowserConfig::report`)
-//! when it gives one, since the app's own page may show no status line. Where the dialog opens and what it remembers of
-//! where the user goes is `place.rs`'s: the page calls [`MoveController::update`] at each layout.
+//! does as the user browses and selects ([`MoveController::verdict`]: `plan.rs`'s `move_verdict`),
+//! and accepting opens the destination (the selected folder row, or the folder showing, handed
+//! over) and answers with it ([`MovePick`]); the browser's Move does the move. A showing folder
+//! something else still holds is not handed over: the dialog stays in it and the browser's status
+//! says the folder was busy; a selected row that can't be opened moves nothing and says why. Either
+//! message also goes to the app's report (`BrowserConfig::report`) when it gives one, since the
+//! app's own page may show no status line. Where the dialog opens and what it remembers of where
+//! the user goes is `place.rs`'s: the page calls [`MoveController::update`] at each layout.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -125,8 +126,8 @@ impl MoveController {
             Destination::Row(link) => match link.get_container() {
                 Ok(target) => target,
                 Err(why) => {
-                    state.borrow_mut().after_write(why);
-                    return;
+                    let text = crate::drag::execute::couldnt_move_to(link.name(), &why);
+                    return tell(state, text);
                 }
             },
             Destination::Showing => {
@@ -177,10 +178,16 @@ impl MoveController {
     }
 }
 
-/// Nothing moved because the folder was held: the dialog stays, saying so in its status and
-/// through the app's report.
+/// Nothing moved because the folder was held: the dialog stays, saying so.
 fn busy(state: &Rc<RefCell<BrowserState>>) {
-    let text = agg_gui_files::tr("The folder was busy, so nothing moved. Try again.");
+    tell(
+        state,
+        agg_gui_files::tr("The folder was busy, so nothing moved. Try again."),
+    );
+}
+
+/// Nothing moved: `text` says why, in the dialog's status and through the app's report.
+fn tell(state: &Rc<RefCell<BrowserState>>, text: String) {
     let report = state.borrow().config().report.clone();
     state.borrow_mut().after_write(text.clone());
     if let Some(report) = report {

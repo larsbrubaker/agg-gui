@@ -7,7 +7,8 @@
 //! round-trip UTC form, so the ID changes when the file is written. An entry inside a zip archive
 //! hashes the archive's path and the entry's path the same way ([`utf16_hash`]).
 
-use std::path::{Path, PathBuf};
+use std::ffi::{OsStr, OsString};
+use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
 
 use crate::sort::system_time_ticks;
@@ -122,32 +123,124 @@ pub fn round_trip_utc(since_epoch: Duration) -> String {
 
 /// A folder on disk's location key: its path, spelled one way however it was written. A doubled
 /// or trailing separator and an inner "." are left out, as comparing the paths themselves leaves
-/// them out, so a folder and its row agree. The key is the path's escaped, quoted text, which
-/// keeps every byte apart: two folders whose names differ only in bytes that are not text
-/// (possible on Linux) get different keys, where lossy text would make both the same. The
-/// escaping never writes a raw NUL, so a key built from it and a NUL never equals a folder's. The
-/// key is opaque and never saved.
+/// them out, so a folder and its row agree; a drive letter is upper case, as Windows reads either
+/// case as one drive. The key is the path's parts in order, each followed by "/": the root is an
+/// empty part, a drive or share prefix its text, a name its text with "%", "/" and NUL written
+/// "%25", "%2F" and "%00" (so a key never holds a raw NUL) and every byte that is not text
+/// "%XX", so every byte stays apart (two folders whose names differ only in bytes that are not
+/// text, possible on Linux, get different keys). `/a/b` is `/a/b/`, `C:\x` is `C://x/`. The key
+/// lives only in memory and is never saved; [`disk_key_path`] reads it back and
+/// [`disk_key_within`] compares two.
 pub fn disk_location_key(path: &Path) -> String {
-    format!("{:?}", path.components().collect::<PathBuf>())
+    let mut key = String::new();
+    for part in path.components() {
+        match part {
+            Component::RootDir => {}
+            Component::Prefix(prefix) => key.push_str(&drive_upper(&escape(prefix.as_os_str()))),
+            other => key.push_str(&escape(other.as_os_str())),
+        }
+        key.push('/');
+    }
+    key
+}
+
+/// `part`'s bytes as key text (see [`disk_location_key`]).
+fn escape(part: &OsStr) -> String {
+    let mut out = String::new();
+    for chunk in part.as_encoded_bytes().utf8_chunks() {
+        for c in chunk.valid().chars() {
+            match c {
+                '%' => out.push_str("%25"),
+                '/' => out.push_str("%2F"),
+                '\0' => out.push_str("%00"),
+                c => out.push(c),
+            }
+        }
+        for byte in chunk.invalid() {
+            out.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    out
+}
+
+/// A drive part ("c:", or "\\?\c:") with its letter upper case; any other part as it is.
+fn drive_upper(part: &str) -> String {
+    let bytes = part.as_bytes();
+    let letter_at = match bytes {
+        [_, b':'] => Some(0),
+        [b'\\', b'\\', b'?', b'\\', _, b':'] => Some(4),
+        _ => None,
+    };
+    match letter_at.filter(|&i| bytes[i].is_ascii_alphabetic()) {
+        Some(i) => {
+            let mut out = part.to_string();
+            out.replace_range(i..=i, &part[i..=i].to_ascii_uppercase());
+            out
+        }
+        None => part.to_string(),
+    }
+}
+
+/// A key's parts, the first (a drive) upper case; `None` for a text no folder keys.
+fn key_parts(key: &str) -> Option<Vec<String>> {
+    if !key.is_empty() && !key.ends_with('/') {
+        return None;
+    }
+    let mut parts: Vec<String> = key.split_terminator('/').map(str::to_string).collect();
+    if let Some(first) = parts.first_mut() {
+        *first = drive_upper(first);
+    }
+    Some(parts)
+}
+
+/// A part's bytes from its key text; `None` for a malformed escape.
+fn unescape(part: &str) -> Option<Vec<u8>> {
+    let (bytes, mut out, mut i) = (part.as_bytes(), Vec::new(), 0);
+    while i < bytes.len() {
+        if bytes[i] == b'%' {
+            let hex = part.get(i + 1..i + 3)?;
+            out.push(u8::from_str_radix(hex, 16).ok()?);
+            i += 3;
+        } else {
+            out.push(bytes[i]);
+            i += 1;
+        }
+    }
+    Some(out)
+}
+
+/// The path a folder's location key ([`disk_location_key`]) names; `None` for a text no folder
+/// keys, or a name whose bytes this computer can't hold as a path.
+pub fn disk_key_path(key: &str) -> Option<PathBuf> {
+    let mut path = PathBuf::new();
+    for part in key_parts(key)? {
+        if part.is_empty() {
+            path.push(std::path::MAIN_SEPARATOR_STR);
+            continue;
+        }
+        path.push(os_string(unescape(&part)?)?);
+    }
+    Some(path)
+}
+
+/// `bytes` as a name: text anywhere, other bytes as they are where a name holds any bytes.
+fn os_string(bytes: Vec<u8>) -> Option<OsString> {
+    match String::from_utf8(bytes) {
+        Ok(text) => Some(OsString::from(text)),
+        #[cfg(unix)]
+        Err(e) => Some(std::os::unix::ffi::OsStringExt::from_vec(e.into_bytes())),
+        #[cfg(not(unix))]
+        Err(_) => None,
+    }
 }
 
 /// Whether the folder keyed `inner` ([`disk_location_key`]) is the one keyed `outer` or inside
-/// it, read from the keys alone: `inner`'s text is `outer`'s without its closing quote, then a
-/// separator. Every character is escaped on its own, so a path below another starts with the
-/// other's escaped text; a name that only starts the same ("Designs2" beside "Designs") goes on
-/// with no separator, and a separator inside a name can't occur.
+/// it: `outer`'s parts start `inner`'s, compared part by part as paths are (so "Designs2" is
+/// beside "Designs"), a drive letter in either case naming one drive. The parts are read from the
+/// keys' own text, so the rule is the same on every computer.
 pub fn disk_key_within(inner: &str, outer: &str) -> bool {
-    if inner == outer {
-        return true;
+    match (key_parts(inner), key_parts(outer)) {
+        (Some(inner), Some(outer)) => inner.starts_with(&outer),
+        _ => false,
     }
-    let separator = format!("{:?}", std::path::MAIN_SEPARATOR_STR);
-    let separator = separator.trim_matches('"');
-    let Some(body) = outer.strip_suffix('"') else {
-        return false;
-    };
-    let Some(rest) = inner.strip_prefix(body) else {
-        return false;
-    };
-    // A root's key already ends in its separator.
-    rest.starts_with(separator) || (body.ends_with(separator) && rest != "\"")
 }

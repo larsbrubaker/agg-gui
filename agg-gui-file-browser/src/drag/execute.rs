@@ -35,7 +35,7 @@ use crate::places::{CopyCx, CopyTakeover, MoveCx, MoveTakeover};
 use crate::state::{BrowserState, OpenFolder};
 
 /// "Couldn't move to "Brackets": why", one translated line.
-fn couldnt_move_to(name: &str, why: &str) -> String {
+pub(crate) fn couldnt_move_to(name: &str, why: &str) -> String {
     fill(&tr("Couldn't move to \"{0}\": {1}"), &[name, why])
 }
 

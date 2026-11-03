@@ -13,8 +13,16 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 ### Added
 
 - `disk::disk_key_within`: whether a folder on disk, by its location key, is another or inside
-  it, read from the keys alone (a name that only starts the same, "Designs2" beside "Designs", is
-  not inside), for an app's Move rules.
+  it, compared part by part (a name that only starts the same, "Designs2" beside "Designs", is
+  beside it; a drive letter in either case names one drive), for an app's Move rules.
+- `disk::disk_key_path`: the path a disk location key names.
+
+### Changed
+
+- A folder on disk's location key (`disk_location_key`, and the archive half of
+  `zip_location_key`) is the crate's own text: the path's parts each followed by "/", names
+  escaped ("%25", "%2F", "%00", "%XX" for bytes that are not text) and a drive letter upper case,
+  so `c:\x` and `C:\x` are one folder. Keys live only in memory; nothing saved changes.
 
 ## [0.0.4] - 2026-11-02
 

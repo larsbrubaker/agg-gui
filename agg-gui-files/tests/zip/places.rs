@@ -21,7 +21,7 @@ fn a_zip_directory_and_its_row_are_keyed_by_the_archive_and_directory_in_no_plac
     if cfg!(unix) {
         assert_eq!(
             zip_location_key(archive, "Blades"),
-            "\"/designs/Knife.zip\"\0Blades"
+            "/designs/Knife.zip/\0Blades"
         );
     }
     assert_eq!(link.place(), None);

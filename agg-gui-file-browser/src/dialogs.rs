@@ -58,10 +58,43 @@ pub enum DialogKind {
 /// Whether items copy rather than move into a folder in the given place.
 pub type CopiesTo = Rc<dyn Fn(Option<&PlaceId>) -> bool>;
 
+/// The folder a Move's items leave, as it stands: its place, name, identity and copy rule.
+#[derive(Clone)]
+#[non_exhaustive]
+pub struct MoveSource {
+    pub place: Option<PlaceId>,
+    pub name: String,
+    pub key: Option<FolderKey>,
+    pub copies_to: CopiesTo,
+}
+
+impl MoveSource {
+    /// The folder in `place` named `name`, told apart by `key`, copying by `copies_to`.
+    pub fn new(
+        place: Option<PlaceId>,
+        name: impl Into<String>,
+        key: Option<FolderKey>,
+        copies_to: CopiesTo,
+    ) -> Self {
+        Self {
+            place,
+            name: name.into(),
+            key,
+            copies_to,
+        }
+    }
+}
+
+/// Reads the folder the items leave now; `None` once the app no longer shows it.
+pub type LiveSource = Rc<dyn Fn() -> Option<MoveSource>>;
+
 /// The Move dialog's question: the items moving, already gathered (the selection is cleared by
 /// the move), and the folder they leave: its place, name and identity (`FolderKey`), and the
 /// copy rule, so the dialog can say whether a folder it offers moves or copies them and refuse
-/// one that can't take them (`move_dialog/plan.rs`).
+/// one that can't take them (`move_dialog/plan.rs`). An app whose source can change while the
+/// dialog is open (the user signs out, the folder is deleted, a share's role changes) gives it
+/// live ([`MoveRequest::with_live_source`]): each verdict reads it, and a source gone takes
+/// nothing.
 #[derive(Clone)]
 #[non_exhaustive]
 pub struct MoveRequest {
@@ -76,6 +109,8 @@ pub struct MoveRequest {
     pub copies_to: CopiesTo,
     /// How the dialog tells folders apart (`PlaceRules::folder_key`): the browser's rules.
     pub places: Rc<dyn PlaceRules>,
+    /// The source read at each verdict in place of the fields above, when given.
+    pub live_source: Option<LiveSource>,
 }
 
 impl MoveRequest {
@@ -90,6 +125,7 @@ impl MoveRequest {
             source_key: None,
             copies_to: Rc::new(move |target| target != place.as_ref()),
             places: Rc::new(DefaultPlaces),
+            live_source: None,
         }
     }
 
@@ -111,6 +147,27 @@ impl MoveRequest {
         self.copies_to = copies_to;
         self
     }
+
+    /// The request reading the folder the items leave from `source` at each verdict.
+    pub fn with_live_source(mut self, source: LiveSource) -> Self {
+        self.live_source = Some(source);
+        self
+    }
+
+    /// The request as it stands: the live source read into it, or `None` once that is gone.
+    pub fn current(&self) -> Option<std::borrow::Cow<'_, MoveRequest>> {
+        let Some(live) = &self.live_source else {
+            return Some(std::borrow::Cow::Borrowed(self));
+        };
+        let source = live()?;
+        let mut now = self.clone();
+        now.source_place = source.place;
+        now.source_name = source.name;
+        now.source_key = source.key;
+        now.copies_to = source.copies_to;
+        now.live_source = None;
+        Some(std::borrow::Cow::Owned(now))
+    }
 }
 
 impl std::fmt::Debug for MoveRequest {
@@ -127,6 +184,7 @@ impl std::fmt::Debug for MoveRequest {
             .field("source_place", &self.source_place)
             .field("source_name", &self.source_name)
             .field("source_key", &self.source_key)
+            .field("live_source", &self.live_source.is_some())
             .finish()
     }
 }

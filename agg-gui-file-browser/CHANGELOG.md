@@ -18,12 +18,18 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   folder on disk inside a moved folder) answers by their locations. The default answers only
   equality, as before.
 - `FolderKey::place` and `FolderKey::location`: a key's parts, for an app's `folder_inside`.
+- `MoveSource`, `LiveSource` and `MoveRequest::with_live_source`: a Move request whose source
+  folder is read at each verdict (`MoveRequest::current`), so a source that changes while the
+  dialog is open (a sign-out, a deleted folder, a share's role changing) is said as it stands,
+  and one gone takes nothing ("Choose a folder you can add to.").
 
 ### Changed
 
 - A Move dialog's accept that finds the showing folder still held elsewhere also says so through
   the app's report (`BrowserConfig::report`), not only in the browser's status, since an app's
   own page may show no status line.
+- A selected row the Move dialog can't open at accept says `Couldn't move to "X": why` in the
+  status and through the app's report.
 
 ## [0.0.8] - 2026-11-03
 

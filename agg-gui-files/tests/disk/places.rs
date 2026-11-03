@@ -91,3 +91,33 @@ fn a_folder_key_is_within_its_own_and_every_folder_above_it_and_no_other() {
         &path(&["Designs\""])
     ));
 }
+
+#[test]
+fn a_key_reads_back_as_its_folders_path() {
+    use agg_gui_files::disk::disk_key_path;
+    let mut path = std::path::PathBuf::from(std::path::MAIN_SEPARATOR_STR);
+    path.extend(["Designs 100%", "Parts"]);
+    assert_eq!(disk_key_path(&disk_location_key(&path)), Some(path));
+    assert_eq!(
+        disk_key_path(&disk_location_key(std::path::Path::new(
+            std::path::MAIN_SEPARATOR_STR
+        ))),
+        Some(std::path::PathBuf::from(std::path::MAIN_SEPARATOR_STR))
+    );
+    assert_eq!(
+        disk_key_path("not a key"),
+        None,
+        "a text no folder keys reads as none"
+    );
+}
+
+#[test]
+fn a_drive_letter_names_one_drive_in_either_case() {
+    use agg_gui_files::disk::disk_key_within;
+    // The keys of C:\x\Designs and of c:\x\Designs\Parts as Windows writes them; the text is
+    // the key's own, so the rule holds on every computer.
+    let (designs, parts) = ("C://x/Designs/", "c://x/Designs/Parts/");
+    assert!(disk_key_within(parts, designs));
+    assert!(disk_key_within("c://x/Designs/", designs));
+    assert!(!disk_key_within("D://x/Designs/Parts/", designs));
+}

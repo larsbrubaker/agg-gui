@@ -4,16 +4,19 @@
 //!
 //! The destination is the one folder selected in the dialog's list when exactly one is, otherwise
 //! the folder the dialog shows. Whether the items move or copy is the drop's rule, which the
-//! request carries (`MoveRequest::copies_to`): within one place they move; between places, or
-//! out of a folder that keeps its items, they copy and the originals stay. A folder that can't
-//! take them is refused with the reason in plain words: a read-only folder or the browser's top
-//! ("Choose a folder you can add to."), the items' own folder ("... is already in ..."), and one
-//! of the folders being moved or a folder inside one ("... can't go inside itself."). Folders are
-//! told apart by the request's `PlaceRules::folder_key` and `open_folder_key` (by default their
-//! place and location key, [`FolderKey`]); a folder is inside a moved one
-//! when the moved folder is on the dialog's open path, since the dialog reaches every folder from
-//! its root down. A copy lands only in a folder some place holds. Names are filled into the
-//! translated lines in one pass ([`fill`]), so a name holding "{1}" reads as it is.
+//! request carries (`MoveRequest::copies_to`): within one place they move; between places, or out
+//! of a folder that keeps its items, they copy and the originals stay. A folder that can't take
+//! them is refused with the reason in plain words: a read-only folder or the browser's top ("Choose
+//! a folder you can add to."), the items' own folder ("... is already in ..."), and one of the
+//! folders being moved or a folder inside one ("... can't go inside itself."). Folders are told
+//! apart by the request's `PlaceRules::folder_key` and `open_folder_key` (by default their place
+//! and location key, [`FolderKey`]); a folder is inside a moved one when
+//! `PlaceRules::folder_inside` places it or an open folder above it inside the moved folder (by
+//! default only the moved folder itself, met on the dialog's open path as the dialog reaches every
+//! folder from its root down). A request with a live source is read as it stands at each verdict,
+//! and a source gone takes nothing ("Choose a folder you can add to."). A copy lands only in a
+//! folder some place holds. Names are filled into the translated lines in one pass ([`fill`]), so a
+//! name holding "{1}" reads as it is.
 
 use std::rc::Rc;
 
@@ -186,8 +189,13 @@ fn refusal(request: &MoveRequest, key: Option<&FolderKey>, path: &[FolderKey]) -
     moved.map(|name| into_itself(&name))
 }
 
-/// What accepting the dialog showing `dialog` would do with `request`'s items.
+/// What accepting the dialog showing `dialog` would do with `request`'s items, its source read as
+/// it stands (`MoveRequest::current`): a source gone takes nothing.
 pub fn move_verdict(request: &MoveRequest, dialog: &BrowserState) -> MoveVerdict {
+    let Some(request) = request.current() else {
+        return cant_add();
+    };
+    let request = &*request;
     let path: Vec<Option<FolderKey>> = dialog
         .path_containers()
         .map(|c| request.places.open_folder_key(&*c))

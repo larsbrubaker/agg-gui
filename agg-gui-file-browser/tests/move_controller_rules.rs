@@ -8,7 +8,7 @@ use std::rc::Rc;
 
 use agg_gui_file_browser::{
     dialog_options, BrowserConfig, BrowserEntry, BrowserState, FolderKey, MoveAnswers,
-    MoveController, MovePick, MoveRequest, MoveVerdict, PlaceRules,
+    MoveController, MovePick, MoveRequest, MoveSource, MoveVerdict, PlaceRules,
 };
 use agg_gui_files::{DynamicFolder, DynamicFolderLink, Folder, FolderLink, MemoryFolder};
 
@@ -123,4 +123,85 @@ fn a_held_folder_at_accept_moves_nothing_and_says_so_through_the_apps_report() {
         ["The folder was busy, so nothing moved. Try again."]
     );
     drop(held);
+}
+
+#[test]
+fn a_live_source_is_read_at_each_verdict_and_a_gone_one_takes_nothing() {
+    use std::cell::Cell;
+    let state = browser(None);
+    let gear = {
+        let designs = link(&state, "Designs");
+        let folder = designs.get_container().expect("Designs opens");
+        folder.items()[0].clone()
+    };
+    // The folder the items leave: there or gone, keeping its items or not.
+    let (there, keeps) = (Rc::new(Cell::new(true)), Rc::new(Cell::new(false)));
+    let (t, k) = (Rc::clone(&there), Rc::clone(&keeps));
+    let request = MoveRequest::new(vec![gear], None).with_live_source(Rc::new(move || {
+        let keeps = k.get();
+        t.get()
+            .then(|| MoveSource::new(None, "Elsewhere", None, Rc::new(move |_: Option<&_>| keeps)))
+    }));
+    let drafts = link(&state, "Drafts");
+    state.borrow_mut().open(drafts.as_ref());
+    let picked: Rc<RefCell<Option<MovePick>>> = Rc::default();
+    let c = MoveController::new(&state, request, answers(&picked));
+    assert_eq!(
+        c.verdict(),
+        MoveVerdict::Move("Move gear.stl to Drafts.".into())
+    );
+    keeps.set(true);
+    assert_eq!(
+        c.verdict(),
+        MoveVerdict::Copy("Copy gear.stl to Drafts. The original stays in Elsewhere.".into())
+    );
+    there.set(false);
+    assert_eq!(
+        c.verdict(),
+        MoveVerdict::Refused("Choose a folder you can add to.".into())
+    );
+    assert!(!c.accept_enabled());
+    c.accept();
+    assert!(picked.borrow().is_none(), "a gone source moves nothing");
+    there.set(true);
+    c.accept();
+    assert!(
+        picked.borrow().as_ref().is_some_and(|p| p.copy),
+        "the pick copies as the line said"
+    );
+}
+
+#[test]
+fn a_row_that_cant_open_at_accept_says_so_through_the_apps_report() {
+    let heard = Rc::new(RefCell::new(Vec::<String>::new()));
+    let gone = DynamicFolderLink::new_optional("Gone", Rc::new(|| None));
+    let mut root = DynamicFolder::new("Top");
+    root.data.child_containers = vec![Rc::new(gone) as Rc<dyn FolderLink>];
+    let heard_too = Rc::clone(&heard);
+    let state = BrowserState::new(
+        Box::new(root),
+        BrowserConfig::builder()
+            .options(dialog_options())
+            .report(Rc::new(move |m: &str| {
+                heard_too.borrow_mut().push(m.into())
+            }))
+            .build(),
+    );
+    let item = {
+        let folder = MemoryFolder::new("Elsewhere");
+        folder.add_file("gear.stl", b"g".to_vec());
+        folder.items()[0].clone()
+    };
+    state.borrow_mut().ensure_selected(0, false);
+    let request =
+        MoveRequest::new(vec![item], None).with_source("Elsewhere", None, Rc::new(|_| false));
+    let picked: Rc<RefCell<Option<MovePick>>> = Rc::default();
+    let c = MoveController::new(&state, request, answers(&picked));
+    assert!(c.accept_enabled(), "{}", c.summary());
+    c.accept();
+    assert!(picked.borrow().is_none(), "nothing moved");
+    assert_eq!(
+        *heard.borrow(),
+        ["Couldn't move to \"Gone\": Could not be opened"]
+    );
 }
