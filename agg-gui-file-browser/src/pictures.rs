@@ -6,7 +6,9 @@
 //!
 //! A picture that takes time is started on the first ask and answered `Generating` (or
 //! `Default`) until it lands; the hook then calls [`PictureCx::picture_arrived`] and the browser
-//! asks again. The hook keeps its own cache: the browser asks on every build of a row.
+//! asks again. The hook keeps its own cache: a row or tile asks only once it comes near the
+//! list's visible part (`list/visible_art.rs`), then again on each build of the list and each
+//! arrival while it has asked.
 
 use std::rc::Rc;
 

@@ -15,10 +15,10 @@
 //! a few hundred items shown at two sides (rows and an icon size) with the one walked back to.
 //! A picture that left is made again at its next ask, the item icon showing meanwhile. The
 //! pictures one build of the list asks for never leave before the next build begins: every build
-//! asks again for the picture of every row that has asked before (those that came near the
-//! visible part), so a list showing more items than the capacity would otherwise evict its first
-//! rows' pictures to make its last ones, each arrival would build the list again and the list
-//! would never settle. While one build asks for more than the capacity, the kept
+//! asks for the pictures of the rows near its visible part (`list/visible_art.rs`), and each
+//! arrival has the rows that asked ask again, so a list showing more items than the capacity
+//! would otherwise evict its first rows' pictures to make its last ones, each arrival would build
+//! the list again and the list would never settle. While one build asks for more than the capacity, the kept
 //! pictures grow to hold them all. A build is the asks made with one `arrived` callback
 //! ([`PictureCx::arrived_callback`]): the browser's list hands each build a new one.
 

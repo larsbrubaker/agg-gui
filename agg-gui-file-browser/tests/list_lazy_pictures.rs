@@ -1,6 +1,7 @@
 //! A list over a folder of hundreds of items asks the pictures hook only for the rows and tiles
 //! near its visible part, in rows and in tiles, and scrolling asks for the rest as they come into
-//! view: opening a big photo folder makes a screenful of pictures, not the whole folder's.
+//! view: opening a big photo folder makes a screenful of pictures, not the whole folder's. A jump
+//! to a row the app selects asks at the place the view jumps to, in the same layout.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -60,6 +61,20 @@ impl ItemPictures for AskedPictures {
 
 /// The list of the photos in `mode`, on a host-kept scroll offset, laid out once.
 fn photo_list(mode: ViewMode) -> (App, Rc<AskedPictures>, Rc<Cell<f64>>) {
+    let (app, pictures, offset, _) = photo_list_with_state(mode);
+    (app, pictures, offset)
+}
+
+/// A laid-out photo list: the app, its pictures, its host-kept offset and the browser's state.
+type PhotoList = (
+    App,
+    Rc<AskedPictures>,
+    Rc<Cell<f64>>,
+    Rc<RefCell<BrowserState>>,
+);
+
+/// [`photo_list`], with the browser's state.
+fn photo_list_with_state(mode: ViewMode) -> PhotoList {
     agg_gui::set_device_scale(1.0);
     let pictures = Rc::new(AskedPictures::default());
     let config = BrowserConfig::builder().pictures(pictures.clone()).build();
@@ -69,7 +84,7 @@ fn photo_list(mode: ViewMode) -> (App, Rc<AskedPictures>, Rc<Cell<f64>>) {
     let list = BrowserList::new(&state, font()).with_offset_cell(Rc::clone(&offset));
     let mut app = App::new(Box::new(list));
     app.layout(Size::new(WIDTH, HEIGHT));
-    (app, pictures, offset)
+    (app, pictures, offset, state)
 }
 
 #[test]
@@ -116,4 +131,26 @@ fn opening_a_big_folder_in_tiles_asks_only_for_the_tiles_near_view() {
     app.layout(Size::new(WIDTH, HEIGHT));
     assert!(pictures.asked_about("photo 399.jpg"), "the last tile asked");
     assert!(pictures.distinct() <= 36, "two screenfuls asked in all");
+}
+
+#[test]
+fn a_jump_to_a_selected_row_asks_at_the_place_jumped_to_in_the_same_layout() {
+    let (mut app, pictures, _offset, state) = photo_list_with_state(ViewMode::Rows);
+    assert!(!pictures.asked_about("photo 399.jpg"));
+    let last = state
+        .borrow()
+        .entries()
+        .last()
+        .map(|entry| entry.identity_key())
+        .expect("the folder lists its photos");
+    state.borrow_mut().select_when_listed(vec![last]);
+    app.layout(Size::new(WIDTH, HEIGHT));
+    assert!(
+        pictures.asked_about("photo 399.jpg"),
+        "the selected row asked in the layout that scrolled to it"
+    );
+    assert!(
+        !pictures.asked_about("photo 200.jpg"),
+        "the rows jumped over never asked"
+    );
 }

@@ -272,7 +272,8 @@ impl BrowserList {
     }
 
     /// Has the rows and tiles near the visible part ask for their pictures (`visible_art.rs`),
-    /// at the offset as it is now (a revealed row's included).
+    /// at the offset as it is now: after a reveal, the offset the view draws at next, so a long
+    /// jump to the selection shows the rows there with their pictures asked for.
     fn ask_visible_art(&mut self) {
         let Some(scroll) = self.children.first_mut() else {
             return;

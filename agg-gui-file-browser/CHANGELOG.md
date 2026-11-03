@@ -8,6 +8,25 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ## [Unreleased]
 
+## [0.0.6] - 2026-11-03
+
+### Changed
+
+- Rows and tiles ask the pictures hook for their pictures only near the visible part of the
+  list, so opening a folder of hundreds of pictures makes a screenful of them, and scrolling makes
+  the rest as they come into view. `BrowserRow::new` and `TileStack::for_state` now build each row
+  and tile with placeholder art (the look's folder or item icon), asking the hook nothing; after
+  each layout `BrowserList` has the rows and tiles within `list::visible_art::READ_AHEAD` (120
+  units) of its viewport ask, once. `refresh_art` (a picture arrived) skips rows and tiles that
+  have not asked. A consumer that builds rows or tiles itself, outside a `BrowserList`, must call
+  `ask_art` on them to get their pictures.
+
+### Added
+
+- `BrowserRow::ask_art` / `BrowserTile::ask_art` (ask for the picture once; later calls do
+  nothing) and `BrowserRow::asked_art` / `BrowserTile::asked_art` (whether it has asked).
+- `list::visible_art::{ask_visible_art, READ_AHEAD}`: the pass `BrowserList` runs after layout.
+
 ## [0.0.5] - 2026-11-02
 
 ### Added
