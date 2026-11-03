@@ -5,6 +5,10 @@
 //! ([`HistoryButtons`]). Their names are the look's (`BrowserNames`), their art the look's
 //! (`BrowserIcon::ViewOptions`, `Sort`, `Undo`, `Redo`; the Font Awesome glyph without it).
 //!
+//! What a bar places are [`view_options_control`] and [`sorting_control`]: the look's own menu
+//! button when it draws one (`BrowserLook::menu_button`, handed the same rows), else the
+//! [`NavMenuButton`].
+//!
 //! The Undo and Redo buttons are greyed while their list is empty (or an undo is still
 //! finishing); each one's tooltip names the step it would take and its key ("Undo - Moved 3 items
 //! to Brackets (⌘Z)"), and the key alone is its hint (`BrowserLook::show_hint`, an app's status
@@ -29,6 +33,9 @@ use crate::state::BrowserState;
 
 /// The side of a navigation bar button, and of the art in it.
 pub const NAV_BUTTON_SIDE: f64 = 32.0;
+/// The room between Undo and Redo: the nav bar's gap between its pieces, so the pair stands as
+/// two of the bar's buttons would.
+pub const HISTORY_GAP: f64 = 4.0;
 
 /// The face of a menu button showing `which`.
 fn face(state: &Rc<RefCell<BrowserState>>, which: BrowserIcon) -> BrowserIconButton {
@@ -62,24 +69,12 @@ fn view_choices() -> [(String, ViewMode); 3] {
     ]
 }
 
-/// The view options button: "Show Folders" and a separator when `show_folders` (a browser whose
-/// folders are its only way to a destination, a Save or Move dialog, leaves it out), then the
-/// view choices.
-pub fn view_options_button(
-    state: &Rc<RefCell<BrowserState>>,
-    font: &Arc<Font>,
-    show_folders: bool,
-) -> NavMenuButton {
-    let (name, size) = {
-        let s = state.borrow();
-        let look = &s.config().look;
-        (
-            look.names().view_options_button.clone(),
-            look.style().font_size,
-        )
-    };
+/// The view options menu's rows: "Show Folders" and a separator when `show_folders` (a browser
+/// whose folders are its only way to a destination, a Save or Move dialog, leaves it out), then
+/// the view choices.
+fn view_options_rows(state: &Rc<RefCell<BrowserState>>, show_folders: bool) -> NavMenuRows {
     let menu_state = Rc::clone(state);
-    let rows: NavMenuRows = Rc::new(move || {
+    Rc::new(move || {
         let state = &menu_state;
         let (shown, mode) = {
             let s = state.borrow();
@@ -104,22 +99,14 @@ pub fn view_options_button(
             }));
         }
         rows
-    });
-    let face = face(state, BrowserIcon::ViewOptions);
-    let font = (Arc::clone(font), size);
-    NavMenuButton::new(face, &name, &tr("View Settings"), rows, font)
+    })
 }
 
-/// The sorting button: the keys, a separator, then the directions; a pick is remembered for the
-/// folder.
-pub fn sorting_button(state: &Rc<RefCell<BrowserState>>, font: &Arc<Font>) -> NavMenuButton {
-    let (name, size) = {
-        let s = state.borrow();
-        let look = &s.config().look;
-        (look.names().sort_button.clone(), look.style().font_size)
-    };
+/// The sorting menu's rows: the keys, a separator, then the directions; a pick is remembered
+/// for the folder.
+fn sorting_rows(state: &Rc<RefCell<BrowserState>>) -> NavMenuRows {
     let menu_state = Rc::clone(state);
-    let rows: NavMenuRows = Rc::new(move || {
+    Rc::new(move || {
         let state = &menu_state;
         let sort = state.borrow().sort();
         let keys = [
@@ -142,10 +129,78 @@ pub fn sorting_button(state: &Rc<RefCell<BrowserState>>, font: &Arc<Font>) -> Na
             }));
         }
         rows
-    });
+    })
+}
+
+/// The look's name for a nav button and the look's font size.
+fn name_and_size(
+    state: &Rc<RefCell<BrowserState>>,
+    name: impl Fn(&crate::look::BrowserNames) -> String,
+) -> (String, f64) {
+    let s = state.borrow();
+    let look = &s.config().look;
+    (name(look.names()), look.style().font_size)
+}
+
+/// The view options button (its rows: `view_options_rows`).
+pub fn view_options_button(
+    state: &Rc<RefCell<BrowserState>>,
+    font: &Arc<Font>,
+    show_folders: bool,
+) -> NavMenuButton {
+    let (name, size) = name_and_size(state, |n| n.view_options_button.clone());
+    let rows = view_options_rows(state, show_folders);
+    let face = face(state, BrowserIcon::ViewOptions);
+    NavMenuButton::new(
+        face,
+        &name,
+        &tr("View Settings"),
+        rows,
+        (Arc::clone(font), size),
+    )
+}
+
+/// The sorting button (its rows: `sorting_rows`).
+pub fn sorting_button(state: &Rc<RefCell<BrowserState>>, font: &Arc<Font>) -> NavMenuButton {
+    let (name, size) = name_and_size(state, |n| n.sort_button.clone());
+    let rows = sorting_rows(state);
     let face = face(state, BrowserIcon::Sort);
-    let font = (Arc::clone(font), size);
-    NavMenuButton::new(face, &name, &tr("Sorting"), rows, font)
+    NavMenuButton::new(face, &name, &tr("Sorting"), rows, (Arc::clone(font), size))
+}
+
+/// The view options button as a bar places it: the look's own (`BrowserLook::menu_button`)
+/// when it draws one, else [`view_options_button`].
+pub fn view_options_control(
+    state: &Rc<RefCell<BrowserState>>,
+    font: &Arc<Font>,
+    show_folders: bool,
+) -> Box<dyn Widget> {
+    let look = Rc::clone(&state.borrow().config().look);
+    let name = look.names().view_options_button.clone();
+    let rows = view_options_rows(state, show_folders);
+    let tooltip = tr("View Settings");
+    match look.menu_button(BrowserIcon::ViewOptions, &name, &tooltip, rows, font) {
+        Some(own) => own,
+        None => Box::new(view_options_button(state, font, show_folders)),
+    }
+}
+
+/// The sorting button as a bar places it: the look's own (`BrowserLook::menu_button`) when it
+/// draws one, else [`sorting_button`].
+pub fn sorting_control(state: &Rc<RefCell<BrowserState>>, font: &Arc<Font>) -> Box<dyn Widget> {
+    let look = Rc::clone(&state.borrow().config().look);
+    let name = look.names().sort_button.clone();
+    let tooltip = tr("Sorting");
+    match look.menu_button(
+        BrowserIcon::Sort,
+        &name,
+        &tooltip,
+        sorting_rows(state),
+        font,
+    ) {
+        Some(own) => own,
+        None => Box::new(sorting_button(state, font)),
+    }
 }
 
 /// The key that undoes (`redo`: redoes), as the platform writes it: ⌘Z and ⇧⌘Z on a Mac,
@@ -163,7 +218,8 @@ pub fn history_key_text(redo: bool, font: &Arc<Font>) -> String {
     }
 }
 
-/// The Undo and Redo buttons over a browser's history (see the module header), side by side.
+/// The Undo and Redo buttons over a browser's history (see the module header), side by side
+/// [`HISTORY_GAP`] apart.
 pub struct HistoryButtons {
     state: Rc<RefCell<BrowserState>>,
     font: Arc<Font>,
@@ -259,12 +315,12 @@ impl Widget for HistoryButtons {
             self.children = vec![Box::new(self.button(false)), Box::new(self.button(true))];
             self.built = Some(generation);
         }
+        let side = NAV_BUTTON_SIDE;
         for (i, child) in self.children.iter_mut().enumerate() {
-            let side = NAV_BUTTON_SIDE;
             child.layout(Size::new(side, side));
-            child.set_bounds(Rect::new(i as f64 * side, 0.0, side, side));
+            child.set_bounds(Rect::new(i as f64 * (side + HISTORY_GAP), 0.0, side, side));
         }
-        Size::new(2.0 * NAV_BUTTON_SIDE, NAV_BUTTON_SIDE)
+        Size::new(2.0 * side + HISTORY_GAP, side)
     }
     fn paint(&mut self, _ctx: &mut dyn DrawCtx) {}
     fn on_event(&mut self, _event: &Event) -> EventResult {

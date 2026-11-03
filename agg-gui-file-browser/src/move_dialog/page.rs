@@ -42,7 +42,7 @@ use crate::browser::BACK_MOUSE_BUTTON;
 use crate::config::{BrowserLayout, BrowserOptions, DoubleClickTarget};
 use crate::dialogs::MoveRequest;
 use crate::list::BrowserList;
-use crate::nav::buttons::{sorting_button, view_options_button};
+use crate::nav::buttons::{sorting_control, view_options_control};
 use crate::state::BrowserState;
 
 /// The Move page's widget name.
@@ -124,12 +124,8 @@ impl BrowserPage {
             .with_gap(4.0)
             .with_inner_padding(Insets::symmetric(3.0, 1.0))
             .add_flex(Box::new(crumbs), 1.0)
-            .add(Box::new(view_options_button(
-                &self.state,
-                &self.font,
-                false,
-            )))
-            .add(Box::new(sorting_button(&self.state, &self.font)));
+            .add(view_options_control(&self.state, &self.font, false))
+            .add(sorting_control(&self.state, &self.font));
         let bar = BottomBorder::new(Box::new(row), look.style().border_color);
         Box::new(bar.with_name(look.names().page_nav_bar.clone()))
     }

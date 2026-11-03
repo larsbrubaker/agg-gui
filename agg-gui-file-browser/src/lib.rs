@@ -8,8 +8,11 @@
 //!   [`BrowserLook::icon`] for artwork (else the icon's Font Awesome glyph, [`BrowserIcon`]; tinted
 //!   through `tinted_icon`, an item's icon keys through `icon_for_key`, and asked for again when
 //!   `icon_generation` changes) and
-//!   [`BrowserNames`] for the names automation, tests and help articles find widgets by.
-//!   [`DefaultLook`] is agg-gui's theme with Font Awesome glyphs.
+//!   [`BrowserNames`] for the names automation, tests and help articles find widgets by. A look
+//!   may also hand over its app's own widgets for a few pieces (the bars' menu, overflow and
+//!   search pieces, a search section's toggle, a message's button), which the browser places and
+//!   feeds in its own widgets' stead. [`DefaultLook`] is agg-gui's theme with Font Awesome
+//!   glyphs.
 //! - **Text the user reads** goes through `agg_gui_files::tr`, the translation hook an app points
 //!   at its own translations once; every English literal this crate hands to `tr` is in
 //!   [`ENGLISH_TEXTS`], so the app can check its translations cover them (a test keeps the list
@@ -174,10 +177,11 @@ pub use move_dialog::{
     MoveVerdict, MOVE_ITEM_SUMMARY, MOVE_ITEM_WINDOW,
 };
 pub use nav::buttons::{
-    history_key_text, sorting_button, view_options_button, HistoryButtons, NAV_BUTTON_SIDE,
+    history_key_text, sorting_button, sorting_control, view_options_button, view_options_control,
+    HistoryButtons, HISTORY_GAP, NAV_BUTTON_SIDE,
 };
 pub use nav::menu_button::{NavMenuButton, NavMenuRow, NavMenuRows};
-pub use nav::overflow::OverflowButton;
+pub use nav::overflow::{overflow_control, overflow_rows, OverflowButton, OverflowRows};
 pub use nav::provider_message::{ProviderMessageBar, PROVIDER_MESSAGE_SIZE};
 pub use nav::splitter::{BrowserSplitter, DEFAULT_TREE_WIDTH, MIN_TREE_WIDTH, SPLITTER_WIDTH};
 pub use open_dialog::{OpenAnswers, OpenController, OpenPage, OPEN_SUMMARY, OPEN_WINDOW};

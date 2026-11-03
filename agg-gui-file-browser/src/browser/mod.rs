@@ -46,8 +46,8 @@ use crate::history::notice::BrowserNotice;
 use crate::list::BrowserList;
 use crate::look::BrowserLook;
 use crate::memory::ViewMode;
-use crate::nav::buttons::{sorting_button, view_options_button, HistoryButtons};
-use crate::nav::overflow::OverflowButton;
+use crate::nav::buttons::{sorting_control, view_options_control, HistoryButtons};
+use crate::nav::overflow::overflow_control;
 use crate::nav::provider_message::ProviderMessageBar;
 use crate::nav::splitter::BrowserSplitter;
 use crate::search::controller::SearchController;
@@ -287,11 +287,10 @@ impl FileBrowser {
             let font = Arc::clone(&self.font);
             row = row
                 .add(Box::new(HistoryButtons::new(&self.state, font)))
-                .add(Box::new(view_options_button(&self.state, &self.font, true)))
-                .add(Box::new(sorting_button(&self.state, &self.font)));
+                .add(view_options_control(&self.state, &self.font, true))
+                .add(sorting_control(&self.state, &self.font));
         }
-        let overflow = OverflowButton::new(&self.state, Arc::clone(&self.font));
-        let row = row.add(Box::new(overflow));
+        let row = row.add(overflow_control(&self.state, &self.font));
         Box::new(BottomBorder::new(
             Box::new(row),
             self.look.style().border_color,
@@ -306,9 +305,9 @@ impl FileBrowser {
             .with_padding(2.0)
             .add_flex(Box::new(SearchSlot::new(search_box)), 1.0);
         if !compact {
-            row = row.add(Box::new(view_options_button(&self.state, &self.font, true)));
+            row = row.add(view_options_control(&self.state, &self.font, true));
         }
-        let row = row.add(Box::new(sorting_button(&self.state, &self.font)));
+        let row = row.add(sorting_control(&self.state, &self.font));
         let name = self.look.names().folders_toolbar.clone();
         let bar = BottomBorder::new(Box::new(row), self.look.style().border_color);
         Box::new(bar.with_name(name))

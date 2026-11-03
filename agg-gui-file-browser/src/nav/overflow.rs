@@ -6,6 +6,10 @@
 //! `BrowserNames::overflow_menu`. While the menu is open it takes every event, a click outside
 //! closing it, and it is drawn over everything in the global overlay pass. A picked row runs once
 //! the menu has closed, with the browser's state let go.
+//!
+//! What a bar places is [`overflow_control`]: the look's own button when it draws one
+//! (`BrowserLook::overflow_button`, handed [`OverflowRows`] that give the same rows this menu
+//! shows), else the [`OverflowButton`].
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -16,10 +20,35 @@ use agg_gui::widgets::menu::MenuEntry;
 use agg_gui::{DrawCtx, Event, EventResult, Point, Rect, Size, Widget, WidgetBase};
 
 use super::buttons::NAV_BUTTON_SIDE;
+use crate::actions::BrowserAction;
 use crate::icon_button::BrowserIconButton;
-use crate::list::list_menu::{ListMenu, MenuScope};
+use crate::list::list_menu::{menu_actions, ListMenu, MenuScope};
 use crate::look::BrowserIcon;
 use crate::state::BrowserState;
+
+/// The overflow menu's rows as they are when asked: the open folder's whole menu, built-ins
+/// resolved and greyed when they can't run.
+pub type OverflowRows = Rc<dyn Fn() -> Vec<BrowserAction>>;
+
+/// The overflow menu's rows for the browser `state` (none once the browser is gone).
+pub fn overflow_rows(state: &Rc<RefCell<BrowserState>>) -> OverflowRows {
+    let weak = Rc::downgrade(state);
+    Rc::new(move || match weak.upgrade() {
+        Some(state) => menu_actions(&state, MenuScope::Overflow),
+        None => Vec::new(),
+    })
+}
+
+/// The overflow button as a bar places it: the look's own (`BrowserLook::overflow_button`) when
+/// it draws one, else an [`OverflowButton`].
+pub fn overflow_control(state: &Rc<RefCell<BrowserState>>, font: &Arc<Font>) -> Box<dyn Widget> {
+    let look = Rc::clone(&state.borrow().config().look);
+    let name = look.names().overflow_menu.clone();
+    match look.overflow_button(&name, overflow_rows(state), font) {
+        Some(own) => own,
+        None => Box::new(OverflowButton::new(state, Arc::clone(font))),
+    }
+}
 
 /// The overflow ("File") button (see the module header).
 pub struct OverflowButton {

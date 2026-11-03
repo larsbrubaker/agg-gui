@@ -15,7 +15,7 @@ use agg_gui::{App, DrawCtx, Event, EventResult, Key, Modifiers, MouseButton, Poi
 use agg_gui_file_browser::{
     folder_bread_crumb_for, history_key_text, sorting_button, view_options_button, BrowserConfig,
     BrowserLook, BrowserMemory, BrowserNames, BrowserSplitter, BrowserState, BrowserStyle,
-    DefaultLook, HistoryButtons, ViewMode, ViewState, SPLITTER_WIDTH,
+    DefaultLook, HistoryButtons, ViewMode, ViewState, HISTORY_GAP, NAV_BUTTON_SIDE, SPLITTER_WIDTH,
 };
 use agg_gui_files::{HistoryStep, MemoryFolder, SortKey, StepDone, StepOutcome};
 
@@ -299,6 +299,17 @@ impl BrowserLook for Hinting {
     fn show_hint(&self, hint: Option<&str>) {
         self.hints.borrow_mut().push(hint.map(str::to_string));
     }
+}
+
+#[test]
+fn undo_and_redo_stand_the_bars_gap_apart() {
+    let config = BrowserConfig::builder().build();
+    let state = BrowserState::new(Box::new(home()), config);
+    let app = app_of(vec![Box::new(HistoryButtons::new(&state, font()))]);
+    let undo = found(&app, "Library Undo Button").1;
+    let redo = found(&app, "Library Redo Button").1;
+    assert_eq!((undo.width, redo.width), (NAV_BUTTON_SIDE, NAV_BUTTON_SIDE));
+    assert_eq!(redo.x - (undo.x + undo.width), HISTORY_GAP);
 }
 
 #[test]

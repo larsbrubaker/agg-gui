@@ -7,7 +7,9 @@
 //! the rest of the window.
 //!
 //! Its names are the look's (`BrowserNames::search_panel`, `search_input`, `close_search`), so
-//! two browsers' boxes on screen at once are told apart.
+//! two browsers' boxes on screen at once are told apart. The look may style the field and draw
+//! the clear button its app's way (`BrowserLook::search_field`, `clear_search_button`); the box
+//! still owns the text, the handlers and the layout.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -57,21 +59,31 @@ impl SearchBox {
         let text = Rc::new(RefCell::new(String::new()));
         let typing = Rc::clone(controller);
         let entering = Rc::clone(controller);
-        let field = TextField::new(Arc::clone(&font))
-            .with_font_size(look.style().font_size)
+        let field = look.search_field(&font).unwrap_or_else(|| {
+            TextField::new(Arc::clone(&font)).with_font_size(look.style().font_size)
+        });
+        let field = field
             .with_placeholder(tr("Search"))
             .with_text_cell(Rc::clone(&text))
             .on_change(move |t| typing.set_query(t))
             .on_enter(move |_| entering.flush());
         let clearing = Rc::clone(controller);
         let clear_text = Rc::clone(&text);
-        let clear = BrowserIconButton::new(look, BrowserIcon::ClearSearch, CLEAR_SIDE)
-            .with_name(names.close_search.clone())
-            .with_tooltip_text(&tr("Clear"))
-            .on_click(move || {
-                // Blanking the cell raises no change, so it starts no search.
-                clear_text.borrow_mut().clear();
-                clearing.clear();
+        let clear_search: Rc<dyn Fn()> = Rc::new(move || {
+            // Blanking the cell raises no change, so it starts no search.
+            clear_text.borrow_mut().clear();
+            clearing.clear();
+        });
+        let tooltip = tr("Clear");
+        let looks_clear = Rc::clone(&clear_search);
+        let clear = look
+            .clear_search_button(&names.close_search, &tooltip, looks_clear, &font)
+            .unwrap_or_else(|| {
+                let button = BrowserIconButton::new(look, BrowserIcon::ClearSearch, CLEAR_SIDE)
+                    .with_name(names.close_search.clone())
+                    .with_tooltip_text(&tooltip)
+                    .on_click(move || clear_search());
+                Box::new(button)
             });
         let ended_text = Rc::clone(&text);
         controller.subscribe_search_ended(Rc::new(move || {
@@ -86,7 +98,7 @@ impl SearchBox {
             bounds: Rect::default(),
             children: vec![
                 Box::new(Named::new(names.search_input.clone(), Box::new(field))),
-                Box::new(clear),
+                clear,
             ],
         }
     }

@@ -8,7 +8,11 @@
 //! through [`BrowserStyle`], its artwork through [`BrowserLook::icon`], which the widgets draw
 //! centred on whole device pixels at the size they ask for. A look may also build two of the
 //! search's pieces as its app's own widgets ([`BrowserLook::section_toggle`],
-//! [`BrowserLook::working_indicator`]), so a search shows as the app's other sections do.
+//! [`BrowserLook::working_indicator`]), so a search shows as the app's other sections do, and
+//! the navigation bar's menu buttons, overflow button and search field as its own widgets
+//! ([`BrowserLook::menu_button`], [`BrowserLook::overflow_button`],
+//! [`BrowserLook::search_field`], [`BrowserLook::clear_search_button`]), so a browser's bar looks
+//! and opens its menus as the app's other bars do while the browser keeps what they show and do.
 //!
 //! The widget names default to the long-standing names automation scripts, tests and help
 //! articles find the browser's buttons by ("Library Up Button", "Bread Crumb Button {name}"),
@@ -20,8 +24,11 @@ use std::sync::Arc;
 use agg_gui::icon_image::IconImage;
 use agg_gui::text::Font;
 use agg_gui::theme::{current_visuals, Visuals};
-use agg_gui::{Color, Size, Widget};
+use agg_gui::{Color, Size, TextField, Widget};
 use agg_gui_files::FolderLink;
+
+use crate::nav::menu_button::NavMenuRows;
+use crate::nav::overflow::OverflowRows;
 
 /// The font size the browser's text takes when agg-gui has no default set.
 const BUILTIN_FONT_SIZE: f64 = 14.0;
@@ -431,6 +438,58 @@ pub trait BrowserLook {
     /// section still searching); `None` (the default) draws agg-gui's small spinner in the
     /// style's accent.
     fn working_indicator(&self) -> Option<Box<dyn Widget>> {
+        None
+    }
+
+    /// A navigation bar menu button drawn the app's way: `which` is `BrowserIcon::ViewOptions`
+    /// or `BrowserIcon::Sort`, the widget carries `name` and `tooltip`, and its menu shows `rows`,
+    /// asked for each time it opens (picking a row runs the row's `run`). `None` (the default) is
+    /// the browser's own `NavMenuButton`.
+    fn menu_button(
+        &self,
+        which: BrowserIcon,
+        name: &str,
+        tooltip: &str,
+        rows: NavMenuRows,
+        font: &Arc<Font>,
+    ) -> Option<Box<dyn Widget>> {
+        let _ = (which, name, tooltip, rows, font);
+        None
+    }
+
+    /// The navigation bar's overflow button drawn the app's way, carrying `name`; its menu shows
+    /// `rows`, the open folder's whole menu as the browser's own overflow menu shows it (built-ins
+    /// resolved, greyed when they can't run), asked for each time it opens. `None` (the default)
+    /// is the browser's own `OverflowButton`.
+    fn overflow_button(
+        &self,
+        name: &str,
+        rows: OverflowRows,
+        font: &Arc<Font>,
+    ) -> Option<Box<dyn Widget>> {
+        let _ = (name, rows, font);
+        None
+    }
+
+    /// The search box's text field as the app styles its fields, before the box gives it its
+    /// placeholder, text and handlers. `None` (the default) is agg-gui's `TextField` in `font`
+    /// at the style's font size.
+    fn search_field(&self, font: &Arc<Font>) -> Option<TextField> {
+        let _ = font;
+        None
+    }
+
+    /// The search box's clear button drawn the app's way, carrying `name` and `tooltip` and
+    /// running `clear` when clicked. `None` (the default) is a `BrowserIconButton` showing
+    /// `BrowserIcon::ClearSearch`.
+    fn clear_search_button(
+        &self,
+        name: &str,
+        tooltip: &str,
+        clear: Rc<dyn Fn()>,
+        font: &Arc<Font>,
+    ) -> Option<Box<dyn Widget>> {
+        let _ = (name, tooltip, clear, font);
         None
     }
 

@@ -8,6 +8,25 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ## [Unreleased]
 
+## [0.0.7] - 2026-11-03
+
+### Added
+
+- Look hooks for the navigation bars' pieces: `BrowserLook::menu_button` (the view options and
+  sorting buttons, handed the rows their menus show as `NavMenuRows`), `overflow_button` (handed
+  `OverflowRows`, the overflow menu's rows as the browser's own `OverflowButton` shows them),
+  `search_field` (the search box's text field before the box gives it its text and handlers) and
+  `clear_search_button`. An app draws them as its other bars' widgets while the browser keeps
+  what they show and do; each defaults to the browser's own widget.
+- `view_options_control`, `sorting_control` and `overflow_control`: the button a bar places,
+  the look's own when it draws one. `FileBrowser` and `BrowserPage` place them.
+- `overflow_rows`: the overflow menu's rows for a browser, asked for when needed.
+
+### Fixed
+
+- Undo and Redo stood flush together, 4 units narrower than the bar's other buttons placed side
+  by side; they now stand the bar's gap apart (`HISTORY_GAP`), as MatterCAD's Library has them.
+
 ## [0.0.6] - 2026-11-03
 
 ### Changed
