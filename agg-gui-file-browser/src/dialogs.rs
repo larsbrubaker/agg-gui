@@ -34,6 +34,7 @@ use agg_gui_files::{tr, Folder, Item, PlaceId};
 
 use crate::config::ItemFilter;
 use crate::move_dialog::plan::FolderKey;
+use crate::places::{DefaultPlaces, PlaceRules};
 use crate::state::OpenFolder;
 
 /// A dialog a browser can ask for.
@@ -73,6 +74,8 @@ pub struct MoveRequest {
     /// Whether the items copy rather than move into a folder in the given place: the browser's
     /// `PlaceRules` over the folder they leave, and always when that folder keeps its items.
     pub copies_to: CopiesTo,
+    /// How the dialog tells folders apart (`PlaceRules::folder_key`): the browser's rules.
+    pub places: Rc<dyn PlaceRules>,
 }
 
 impl MoveRequest {
@@ -86,7 +89,14 @@ impl MoveRequest {
             source_name: String::new(),
             source_key: None,
             copies_to: Rc::new(move |target| target != place.as_ref()),
+            places: Rc::new(DefaultPlaces),
         }
+    }
+
+    /// The request with the rules telling its folders apart (`PlaceRules::folder_key`).
+    pub fn with_places(mut self, places: Rc<dyn PlaceRules>) -> Self {
+        self.places = places;
+        self
     }
 
     /// The request with the folder the items leave: its name, identity and copy rule.

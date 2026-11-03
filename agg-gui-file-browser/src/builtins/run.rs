@@ -29,7 +29,6 @@ use super::{can_move, Target};
 use crate::actions::BuiltinAction;
 use crate::dialogs::{Confirmation, CopiesTo, MoveRequest, NameRequest};
 use crate::drag::execute::drop_into;
-use crate::move_dialog::plan::FolderKey;
 use crate::state::BrowserState;
 
 /// Runs `action` in `state` (whether it can is the caller's check).
@@ -198,16 +197,19 @@ fn move_items(state: &Rc<RefCell<BrowserState>>) {
         let keeps = !folder
             .as_writable()
             .is_some_and(|w| w.allow_action(ContainerActions::RemoveItems));
-        let key = FolderKey::of_folder(&**folder);
+        let key = places.open_folder_key(&**folder);
         (folder.place(), folder.name().to_string(), key, keeps)
     };
+    let rules = Rc::clone(&places);
     // A folder that keeps its items copies them wherever they go.
     let copies_to: CopiesTo = Rc::new(move |target| {
         keeps || places.drop_copies(Some(&**source.borrow()), target.cloned(), false)
     });
     let (depth, from_tree) = (target.depth, target.from_tree);
     let (dialogs, weak) = dialogs_of(state);
-    let request = MoveRequest::new(items.clone(), place).with_source(name, key, copies_to);
+    let request = MoveRequest::new(items.clone(), place)
+        .with_source(name, key, copies_to)
+        .with_places(rules);
     dialogs.pick_move_target(
         request,
         Box::new(move |picked| {

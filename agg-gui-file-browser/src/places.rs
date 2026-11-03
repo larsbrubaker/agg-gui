@@ -17,14 +17,21 @@
 //! [`default_drop_copies`] is that rule before the drop, from the target row's place (what the
 //! drag shows: a "+" badge, "Copy to"); [`default_crosses_places`] is its final word once the
 //! target folder is open. The drag (`drag/`) reads them.
+//!
+//! The Move dialog tells folders apart by [`PlaceRules::folder_key`] (a folder row) and
+//! [`PlaceRules::open_folder_key`] (an open folder), defaulting to the folder's place and
+//! location key; an app whose folders have no location key (a remote place's folders, told by
+//! their server IDs) answers keys of its own, so "already in" and "can't go inside itself" hold
+//! for them too.
 
 use std::rc::Rc;
 
 use agg_gui::Modifiers;
-use agg_gui_files::{ContainerActions, Folder, Item, PlaceId, WritableFolder};
+use agg_gui_files::{ContainerActions, Folder, FolderLink, Item, PlaceId, WritableFolder};
 
 use crate::config::ErrorReport;
 use crate::history::HistoryRecorder;
+use crate::move_dialog::FolderKey;
 use crate::state::OpenFolder;
 
 /// Whether `modifiers` hold the copy modifier: Option on the Mac, Ctrl on Windows and Linux.
@@ -161,6 +168,20 @@ pub trait PlaceRules {
     /// (`WritableFolder::move_in_recorded`).
     fn take_over_move<'a>(&self, cx: MoveCx<'a>) -> MoveTakeover<'a> {
         MoveTakeover::Declined(cx)
+    }
+
+    /// How the Move dialog tells apart the folder `link` opens (`None`: it can't tell, so the
+    /// row is never "the items' own folder"). The default is its place and location key
+    /// ([`FolderKey::of_link`]).
+    fn folder_key(&self, link: &dyn FolderLink) -> Option<FolderKey> {
+        FolderKey::of_link(link)
+    }
+
+    /// How the Move dialog tells apart the open `folder`; it must answer the key
+    /// [`PlaceRules::folder_key`] answers for a row opening the same folder. The default is its
+    /// place and location key ([`FolderKey::of_folder`]).
+    fn open_folder_key(&self, folder: &dyn Folder) -> Option<FolderKey> {
+        FolderKey::of_folder(folder)
     }
 }
 

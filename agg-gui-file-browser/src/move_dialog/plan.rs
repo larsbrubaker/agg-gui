@@ -9,7 +9,8 @@
 //! take them is refused with the reason in plain words: a read-only folder or the browser's top
 //! ("Choose a folder you can add to."), the items' own folder ("... is already in ..."), and one
 //! of the folders being moved or a folder inside one ("... can't go inside itself."). Folders are
-//! told apart by their place and location key ([`FolderKey`]); a folder is inside a moved one
+//! told apart by the request's `PlaceRules::folder_key` and `open_folder_key` (by default their
+//! place and location key, [`FolderKey`]); a folder is inside a moved one
 //! when the moved folder is on the dialog's open path, since the dialog reaches every folder from
 //! its root down. A copy lands only in a folder some place holds. Names are filled into the
 //! translated lines in one pass ([`fill`]), so a name holding "{1}" reads as it is.
@@ -21,7 +22,8 @@ use agg_gui_files::{tr, Folder, FolderLink, PlaceId};
 use crate::dialogs::MoveRequest;
 use crate::state::{BrowserEntry, BrowserState};
 
-/// A folder as Move tells folders apart: its place and its location key (a path on disk).
+/// A folder as Move tells folders apart: its place and its location key (a path on disk), or
+/// any text an app's `PlaceRules::folder_key` names it by (a server ID).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FolderKey {
     place: Option<PlaceId>,
@@ -29,6 +31,14 @@ pub struct FolderKey {
 }
 
 impl FolderKey {
+    /// The key of a folder in `place` that `location` names, unique within the place.
+    pub fn new(place: Option<PlaceId>, location: impl Into<String>) -> Self {
+        Self {
+            place,
+            location: location.into(),
+        }
+    }
+
     /// The key of the folder `link` opens, when it has a location key.
     pub fn of_link(link: &dyn FolderLink) -> Option<Self> {
         Some(Self {
@@ -156,7 +166,7 @@ fn refusal(request: &MoveRequest, key: Option<&FolderKey>, path: &[FolderKey]) -
         return Some(text);
     }
     let moved = request.items.iter().find_map(|item| {
-        let folder = FolderKey::of_link(item.as_container_link()?)?;
+        let folder = request.places.folder_key(item.as_container_link()?)?;
         path.iter()
             .chain(key)
             .any(|k| *k == folder)
@@ -169,7 +179,7 @@ fn refusal(request: &MoveRequest, key: Option<&FolderKey>, path: &[FolderKey]) -
 pub fn move_verdict(request: &MoveRequest, dialog: &BrowserState) -> MoveVerdict {
     let path: Vec<Option<FolderKey>> = dialog
         .path_containers()
-        .map(|c| FolderKey::of_folder(&*c))
+        .map(|c| request.places.open_folder_key(&*c))
         .collect();
     let keyed = |folders: &[Option<FolderKey>]| -> Vec<FolderKey> {
         folders.iter().flatten().cloned().collect()
@@ -182,7 +192,7 @@ pub fn move_verdict(request: &MoveRequest, dialog: &BrowserState) -> MoveVerdict
             if let Some(item) = request.items.iter().find(|i| i.id() == link.id()) {
                 return MoveVerdict::Refused(into_itself(item.name()));
             }
-            let key = FolderKey::of_link(link.as_ref());
+            let key = request.places.folder_key(link.as_ref());
             if let Some(why) = refusal(request, key.as_ref(), &keyed(&path)) {
                 return MoveVerdict::Refused(why);
             }
@@ -202,7 +212,7 @@ pub fn move_verdict(request: &MoveRequest, dialog: &BrowserState) -> MoveVerdict
             else {
                 return cant_add();
             };
-            let key = FolderKey::of_folder(&*showing);
+            let key = request.places.open_folder_key(&*showing);
             let above = keyed(&path[..path.len().saturating_sub(1)]);
             if let Some(why) = refusal(request, key.as_ref(), &above) {
                 return MoveVerdict::Refused(why);
