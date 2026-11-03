@@ -24,7 +24,12 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 - `BrowserState::restore_location` polls the memory's answer once straight away: an answer
   ready at once (a folder found there and then) opens inside the call, its listeners told then,
   so the browser shows it as it opens however busy the spawner is. Other answers land from the
-  spawner as before.
+  spawner as before; one that woke itself during that poll (a yield, asking to be polled at the
+  next turn) gets that turn before it is polled again, so a spawner that polls each new task at
+  once never runs it on inside the call.
+- `FileBrowser::remembering` starts its restore at the browser's first layout rather than as it
+  is made, so restore-finished listeners the app adds after making it hear even an answer that
+  lands at once.
 
 ## [0.0.9] - 2026-11-03
 

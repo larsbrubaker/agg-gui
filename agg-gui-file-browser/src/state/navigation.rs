@@ -11,6 +11,8 @@
 
 use std::cell::{Ref, RefCell, RefMut};
 use std::rc::Rc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use agg_gui_files::{tr, Folder, FolderLink, Item};
 
@@ -306,16 +308,22 @@ impl BrowserState {
         // A memory that answers at once (a folder it found there and then) lands now, inside
         // this call, so the browser shows it as it opens however busy the spawner is.
         let mut finding = finding;
-        let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
+        let woken = Arc::new(WakeSeen::default());
+        let waker = std::task::Waker::from(Arc::clone(&woken));
+        let mut cx = std::task::Context::from_waker(&waker);
         if let std::task::Poll::Ready(found) = finding.as_mut().poll(&mut cx) {
             Self::land_restore(state, serial, navigation, found);
             return;
         }
+        // An answer that woke itself as it waited (a yield: "poll me again at the next turn")
+        // gets that turn, as the spawner would have given it, before it is polled again: a
+        // spawner that polls a new task at once would otherwise run it on inside this call.
+        let owed_turn = woken.0.load(Ordering::Relaxed);
         let weak = Rc::downgrade(state);
         spawner.spawn_task(Box::pin(async move {
-            // The answer went as far as its first wait in the poll above; a spawner that polls
-            // what it is given at once must still not run the rest inside this call.
-            YieldOnce(false).await;
+            if owed_turn {
+                NextTurn(false).await;
+            }
             let found = finding.await;
             if let Some(state) = weak.upgrade() {
                 Self::land_restore(&state, serial, navigation, found);
@@ -357,10 +365,24 @@ impl BrowserState {
     }
 }
 
-/// Waits once, waking itself, so the rest of a task runs at the spawner's next turn.
-struct YieldOnce(bool);
+/// Notes whether the first poll of a restore's answer woke its task.
+#[derive(Default)]
+struct WakeSeen(AtomicBool);
 
-impl std::future::Future for YieldOnce {
+impl std::task::Wake for WakeSeen {
+    fn wake(self: Arc<Self>) {
+        self.0.store(true, Ordering::Relaxed);
+    }
+    fn wake_by_ref(self: &Arc<Self>) {
+        self.0.store(true, Ordering::Relaxed);
+    }
+}
+
+/// The turn an answer's own wake asked for: waits once, waking its task to be polled at the
+/// spawner's next turn.
+struct NextTurn(bool);
+
+impl std::future::Future for NextTurn {
     type Output = ();
     fn poll(
         mut self: std::pin::Pin<&mut Self>,
