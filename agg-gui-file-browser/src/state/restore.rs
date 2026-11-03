@@ -18,7 +18,7 @@
 //!
 //! When a restore's search answers, the listeners added with
 //! [`BrowserState::add_restore_finished`] hear how it went ([`RestoreOutcome`]): the folders
-//! opened, the location could not be reached, the user ended the restore (went elsewhere
+//! opened (all of them, or down to the crumb the user clicked meanwhile), the location could not be reached, the user ended the restore (went elsewhere
 //! meanwhile), or a newer restore began. They are told outside any borrow of the
 //! state, so they may read it. A key the memory remembers nothing under starts no restore and
 //! tells nothing.
@@ -32,8 +32,11 @@ use super::{BrowserEntry, BrowserState};
 /// How a restore's answer went (see the module header).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RestoreOutcome {
-    /// The remembered folders opened (down to the folder crumb the user clicked meanwhile).
+    /// The remembered folders opened, all of them.
     Landed,
+    /// The remembered folders opened down to the folder crumb the user clicked meanwhile: a
+    /// place the user chose.
+    LandedShortened,
     /// The memory could not reach the location: the browser stays at its root.
     Failed,
     /// The answer came after the user ended the restore (went elsewhere meanwhile); it opened

@@ -5,7 +5,7 @@
 //! remembers each folder the user moves to; the root's header markdown stays hidden meanwhile.
 //! Each answer tells the restore-finished listeners whether it landed, failed, was abandoned by
 //! the user or superseded by a retry; a landed restore is not written back to the memory, nor is
-//! a superseded one's root.
+//! a superseded one's root, but one the user shortened with a crumb is.
 //! Driven through agg-gui's `App` with real clicks.
 
 use std::cell::RefCell;
@@ -204,16 +204,29 @@ fn the_browser_shows_the_remembered_trail_over_a_loading_line_until_found() {
 }
 
 #[test]
-fn a_folder_crumb_clicked_meanwhile_shortens_the_restore_and_home_ends_it() {
+fn a_folder_crumb_clicked_meanwhile_shortens_the_restore_is_remembered_and_home_ends_it() {
     let memory = Slow::new();
     let state = state(&memory);
     let mut app = App::new(Box::new(FileBrowser::new(&state, font()).remembering(KEY)));
     layout(&mut app);
+    let heard: Heard = Rc::default();
+    let sink = Rc::clone(&heard);
+    state
+        .borrow_mut()
+        .add_restore_finished(Rc::new(move |outcome| sink.borrow_mut().push((outcome, 0))));
     click(&mut app, &crumb(&state, "Projects"));
     assert_eq!(property(&app, "bread_crumb_trail"), "Home/Projects");
     memory.answer();
     layout(&mut app);
+    layout(&mut app);
     assert_eq!(state.borrow().path_names(), ["Home", "Projects"]);
+    assert_eq!(*heard.borrow(), [(RestoreOutcome::LandedShortened, 0)]);
+    // The folder the user chose on the way is where they left the browser.
+    assert_eq!(
+        memory.remembered.borrow().last().cloned(),
+        Some(vec!["Home".to_string(), "Projects".to_string()]),
+        "the shortened landing is remembered"
+    );
 
     let memory = Slow::new();
     let state = self::state(&memory);

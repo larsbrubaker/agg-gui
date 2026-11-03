@@ -317,12 +317,15 @@ impl BrowserState {
                     (Some(_), Some(_)) if s.navigation != navigation || s.depth() != 1 => {
                         RestoreOutcome::Abandoned
                     }
-                    (Some(keep), Some(folders)) => {
-                        let keep = keep.unwrap_or(folders.len());
+                    (Some(shortened), Some(folders)) => {
+                        let keep = shortened.unwrap_or(folders.len());
                         for folder in folders.into_iter().take(keep) {
                             s.push_container(folder);
                         }
-                        RestoreOutcome::Landed
+                        match shortened {
+                            Some(_) => RestoreOutcome::LandedShortened,
+                            None => RestoreOutcome::Landed,
+                        }
                     }
                 }
             };

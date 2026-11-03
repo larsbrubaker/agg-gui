@@ -38,7 +38,8 @@
 //! line while it is found (`state/restore.rs`), and remembers each folder the user moves to (and,
 //! when the user ended the restore without moving, the place they stayed, once its answer comes).
 //! Where a restore lands is never written back: it is the remembered place, or the nearest one
-//! the memory could reach, and the remembered place stays for when it can be reached again.
+//! the memory could reach, and the remembered place stays for when it can be reached again. A
+//! restore the user shortened with a crumb lands where they chose, which is remembered.
 //!
 //! The drag's picture is drawn once for the whole browser, in agg-gui's global overlay pass after
 //! everything else, rather than by the list: a drag from the tree, or one whose list rows a
@@ -190,8 +191,9 @@ impl FileBrowser {
         let key = key.into();
         // A restore that lands is where the memory already says, or the nearest place it could
         // reach (a drive not mounted this time): never written back, so the remembered place
-        // stays for when it can be reached again; the user's own moves from there are. A restore
-        // the user ended without moving (Home clicked while it was found) leaves the browser
+        // stays for when it can be reached again; the user's own moves from there are, and so is
+        // a landing the user shortened with a crumb (the next layout writes it, as for any
+        // navigation). A restore the user ended without moving (Home clicked while it was found) leaves the browser
         // where they chose: that is remembered once the late answer comes. One a newer restore
         // superseded says nothing about where the user is.
         let (weak, remembered, seen) = (
@@ -210,7 +212,9 @@ impl FileBrowser {
                     RestoreOutcome::Abandoned => {
                         BrowserState::remember_location(&state, &remembered)
                     }
-                    RestoreOutcome::Failed | RestoreOutcome::Superseded => {}
+                    RestoreOutcome::LandedShortened
+                    | RestoreOutcome::Failed
+                    | RestoreOutcome::Superseded => {}
                 }
             }));
         BrowserState::restore_location(&self.state, &key);
