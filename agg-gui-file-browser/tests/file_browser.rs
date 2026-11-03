@@ -1,7 +1,8 @@
 //! The composed `FileBrowser` over a `MemoryFolder`, through agg-gui's `App` with real pointer
 //! and key events: the tree form lays out its bar, tree, splitter and list under the names
 //! MatterCAD's Library uses, in its order; a tree row moves the list and the breadcrumbs; the
-//! search box keeps its text and the keys when a search's results rebuild the header; the drag's
+//! search box keeps its text and the keys when a search's results rebuild the header, and stays the
+//! same widget in the same bar; the drag's
 //! picture is drawn by the browser, from the global overlay, while a row is dragged from the list
 //! onto the tree; the list-only form has its toolbar and no tree, and its rows open; and an app's
 //! dressed built-in keeps its tooltip in the menu.
@@ -230,6 +231,52 @@ fn the_search_box_keeps_its_text_and_the_keys_when_the_results_rebuild_the_heade
         .and_then(|any| any.downcast_ref::<agg_gui_file_browser::search::search_box::SearchBox>())
         .map(|s| s.text());
     assert_eq!(text.as_deref(), Some("gear"));
+}
+
+/// The index path from `widget` to the widget named `id`, if any.
+fn path_to(widget: &dyn Widget, id: &str) -> Option<Vec<usize>> {
+    if widget.id() == Some(id) {
+        return Some(Vec::new());
+    }
+    widget.children().iter().enumerate().find_map(|(i, child)| {
+        let mut path = path_to(child.as_ref(), id)?;
+        path.insert(0, i);
+        Some(path)
+    })
+}
+
+/// The header a search's results rebuild keeps its bar around the same search box: the clear
+/// button anchored before the search starts is still found through its anchor after (as agg-gui's
+/// hover and capture, and GUI automation's widget handles, follow a widget), so a pointer on its
+/// way to the button when the results show still reaches it.
+#[test]
+fn the_search_box_stays_in_the_same_bar_when_a_searchs_results_rebuild_the_header() {
+    let mut b = browser(BrowserConfig::default());
+    click(&mut b.app, "Library Search Input");
+    for c in "gea".chars() {
+        b.app.on_text_input(&c.to_string());
+    }
+    frame(&mut b.app);
+    let path = path_to(b.app.root(), "Close Search").expect("the clear button");
+    let anchor = agg_gui::WidgetAnchor::new(b.app.root(), &path).expect("an anchor");
+    b.app.on_key_down(Key::Enter, Modifiers::default());
+    for _ in 0..1000 {
+        run_ready_local_tasks();
+    }
+    frame(&mut b.app);
+    assert_eq!(b.state.borrow().depth(), 2, "the results show below Home");
+    assert_eq!(
+        browser_property(&b.app, "bread_crumb_trail")
+            .split('/')
+            .count(),
+        2,
+        "the header was built again for the results' folder"
+    );
+    assert_eq!(
+        anchor.resolve(b.app.root()),
+        path_to(b.app.root(), "Close Search"),
+        "the clear button is the same widget, in the same bar"
+    );
 }
 
 #[test]

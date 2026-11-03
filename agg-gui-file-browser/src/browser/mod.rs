@@ -28,8 +28,10 @@
 //! articles find the same widgets.
 //!
 //! The header is built again whenever the showing folder or its header text changes; the tree,
-//! the list (and its scroll position) and the notice (and its fade) are kept, and the search
-//! box moves from the old header to the new one (`parts.rs`), keeping its text and focus.
+//! the list (and its scroll position) and the notice (and its fade) are kept, and so is the bar
+//! holding the search box, around the same box: only what stands beside the box is new
+//! (`parts.rs`), so the box keeps its text and focus and stays the widget a pointer is on its
+//! way to.
 //!
 //! A browser given a location key ([`FileBrowser::remembering`]) opens where the config's
 //! memory says it was last left under that key, showing that place's breadcrumbs over a loading
@@ -65,7 +67,7 @@ use crate::search::controller::SearchController;
 use crate::search::search_box::SearchBox;
 use crate::state::BrowserState;
 use crate::tree::{BrowserTree, TreeModel};
-use parts::{take_search_box, BottomBorder, ListColumn, SearchSlot};
+use parts::{holds_search_slot, keep_search_bar, BottomBorder, ListColumn, SearchSlot};
 
 /// The tab form's search box width, in logical units.
 pub const SEARCH_BOX_WIDTH: f64 = 200.0;
@@ -272,7 +274,7 @@ impl FileBrowser {
 
     /// Builds the bars again, keeping the body, the notice and the search box.
     fn rebuild(&mut self, key: &HeaderKey) {
-        let mut bars = Vec::new();
+        let mut old_bars = Vec::new();
         let (mut body, mut notice) = (None, None);
         let mut overlays = std::mem::take(&mut self.overlays);
         let old = std::mem::take(&mut self.children);
@@ -281,13 +283,12 @@ impl FileBrowser {
                 Role::Body => body = Some(child),
                 Role::Notice => notice = Some(child),
                 Role::Overlay => overlays.push(child),
-                Role::Bar | Role::Message => bars.push(child),
+                Role::Bar => old_bars.push(child),
+                Role::Message => {}
             }
         }
-        let search_box = self
-            .search_box
-            .take()
-            .or_else(|| take_search_box(&mut bars));
+        // The first build stands the box in the new slot; later ones keep the bar holding it.
+        let mut search_box = self.search_box.take();
         // The narrow panel's list differs from the wide one's: built again when that changes.
         let body = body
             .filter(|_| self.body_compact == Some(key.compact))
@@ -295,11 +296,22 @@ impl FileBrowser {
         self.body_compact = Some(key.compact);
         let notice = notice
             .unwrap_or_else(|| Box::new(BrowserNotice::new(&self.state, Arc::clone(&self.font))));
-        if self.list_only {
-            self.place(self.nav_bar(None), Role::Bar);
-            if let Some(search_box) = search_box {
-                self.place(self.toolbar(search_box, key.compact), Role::Bar);
+        let mut kept = old_bars
+            .into_iter()
+            .find(|bar| holds_search_slot(bar.as_ref()));
+        let mut keep = |bar: Box<dyn Widget>| match kept.take() {
+            Some(old) if holds_search_slot(bar.as_ref()) => keep_search_bar(old, bar),
+            old => {
+                kept = old;
+                bar
             }
+        };
+        if self.list_only {
+            let nav_bar = keep(self.nav_bar(None));
+            let toolbar =
+                keep(self.toolbar(SearchSlot::new_or_empty(search_box.take()), key.compact));
+            self.place(nav_bar, Role::Bar);
+            self.place(toolbar, Role::Bar);
             self.place(body, Role::Body);
             let style = self.look.style();
             let name = &self.look.names().provider_message;
@@ -310,7 +322,8 @@ impl FileBrowser {
                 self.place(Box::new(bar), Role::Message);
             }
         } else {
-            self.place(self.nav_bar(search_box), Role::Bar);
+            let nav_bar = keep(self.nav_bar(Some(SearchSlot::new_or_empty(search_box.take()))));
+            self.place(nav_bar, Role::Bar);
             self.place(body, Role::Body);
         }
         self.place(notice, Role::Notice);
@@ -350,7 +363,7 @@ impl FileBrowser {
 
     /// The breadcrumbs, then (the tree form's) the search box, Undo and Redo, the view and
     /// sorting buttons, then the overflow button; over the bar's rule.
-    fn nav_bar(&self, search_box: Option<Box<dyn Widget>>) -> Box<dyn Widget> {
+    fn nav_bar(&self, search_slot: Option<SearchSlot>) -> Box<dyn Widget> {
         let names = self.state.borrow().shown_trail();
         let weak = Rc::downgrade(&self.state);
         let go_to: Rc<dyn Fn(usize)> = Rc::new(move |depth| {
@@ -364,8 +377,8 @@ impl FileBrowser {
             .with_gap(4.0)
             .with_inner_padding(Insets::symmetric(3.0, 1.0))
             .add_flex(Box::new(crumbs), 1.0);
-        if let Some(search_box) = search_box {
-            row = row.add(Box::new(SearchSlot::new(search_box)));
+        if let Some(search_slot) = search_slot {
+            row = row.add(Box::new(search_slot));
         }
         if !self.list_only {
             let font = Arc::clone(&self.font);
@@ -383,11 +396,11 @@ impl FileBrowser {
 
     /// The list-only form's toolbar: the search box taking the room, the view (not on the narrow
     /// panel, whose view is its own) and sorting buttons, over the bar's rule.
-    fn toolbar(&self, search_box: Box<dyn Widget>, compact: bool) -> Box<dyn Widget> {
+    fn toolbar(&self, search_slot: SearchSlot, compact: bool) -> Box<dyn Widget> {
         let mut row = FlexRow::new()
             .with_gap(4.0)
             .with_padding(2.0)
-            .add_flex(Box::new(SearchSlot::new(search_box)), 1.0);
+            .add_flex(Box::new(search_slot), 1.0);
         if !compact {
             row = row.add(view_options_control(&self.state, &self.font, true));
         }

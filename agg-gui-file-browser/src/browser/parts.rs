@@ -10,9 +10,14 @@
 //! content anew (`BrowserState::list_resets`).
 //!
 //! The header is built again whenever the showing folder changes (its breadcrumbs are the path),
-//! but the search box is not: [`take_search_box`] lifts the same box out of the old header's slot
-//! so the new header stands it in its own, and the box keeps its text, focus and cursor while the
-//! user types (a search that runs shows its results as a folder, which rebuilds the header).
+//! but the search box is not, nor the bar around it: [`keep_search_bar`] keeps the old bar, the
+//! row in it and the slot holding the box, and takes everything else from the new build, so the
+//! box keeps its text, focus and cursor while the user types (a search that runs shows its
+//! results as a folder, which rebuilds the header), and it and its clear button stay the same
+//! widgets under the same parents, which agg-gui's identity anchors (the pointer's hover and
+//! capture, GUI automation's widget handles) follow. A bar whose shape changed (the list-only
+//! form's toolbar losing its view button on a phone's panel) is the new build's, the box moved
+//! into it ([`take_search_box`]).
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -39,6 +44,15 @@ impl SearchSlot {
         Self {
             bounds: Rect::default(),
             children: vec![search_box],
+        }
+    }
+
+    /// The slot holding `search_box`, or an empty one a kept bar's slot stands for
+    /// ([`keep_search_bar`]).
+    pub fn new_or_empty(search_box: Option<Box<dyn Widget>>) -> Self {
+        Self {
+            bounds: Rect::default(),
+            children: search_box.into_iter().collect(),
         }
     }
 }
@@ -86,6 +100,78 @@ pub fn take_search_box(widgets: &mut [Box<dyn Widget>]) -> Option<Box<dyn Widget
         }
     }
     None
+}
+
+/// Whether a [`SearchSlot`] stands somewhere in `widget` (or is it).
+pub fn holds_search_slot(widget: &dyn Widget) -> bool {
+    widget.type_name() == SEARCH_SLOT
+        || widget
+            .children()
+            .iter()
+            .any(|c| holds_search_slot(c.as_ref()))
+}
+
+/// The header bar `new` (just built, its search slot empty) with the search box of `old` (the
+/// bar it replaces): `old` itself when the two have the same shape along the way to the slot,
+/// with every child off that way taken from `new`; otherwise `new`, the box moved into its slot.
+pub fn keep_search_bar(mut old: Box<dyn Widget>, mut new: Box<dyn Widget>) -> Box<dyn Widget> {
+    if same_way_to_slot(old.as_ref(), new.as_ref()) {
+        graft(old.as_mut(), new.as_mut());
+        return old;
+    }
+    if let Some(search_box) = take_search_box(std::slice::from_mut(&mut old)) {
+        put_search_box(new.as_mut(), search_box);
+    }
+    new
+}
+
+/// Whether `old` and `new` are the same kind of widget with as many children, down the way to
+/// the slot in `old`, and `new`'s slot is at the end of the same way.
+fn same_way_to_slot(old: &dyn Widget, new: &dyn Widget) -> bool {
+    if old.type_name() != new.type_name() {
+        return false;
+    }
+    if old.type_name() == SEARCH_SLOT {
+        return true;
+    }
+    let (olds, news) = (old.children(), new.children());
+    if olds.len() != news.len() {
+        return false;
+    }
+    olds.iter()
+        .zip(news)
+        .find(|(o, _)| holds_search_slot(o.as_ref()))
+        .is_some_and(|(o, n)| same_way_to_slot(o.as_ref(), n.as_ref()))
+}
+
+/// Swaps every child of `old` off the way to its slot for `new`'s at the same place (the shapes
+/// match, [`same_way_to_slot`]); the slot and everything over it stay `old`'s.
+fn graft(old: &mut dyn Widget, new: &mut dyn Widget) {
+    if old.type_name() == SEARCH_SLOT {
+        return;
+    }
+    let news = new.children_mut();
+    for (i, child) in old.children_mut().iter_mut().enumerate() {
+        match holds_search_slot(child.as_ref()) {
+            true => graft(child.as_mut(), news[i].as_mut()),
+            false => std::mem::swap(child, &mut news[i]),
+        }
+    }
+}
+
+/// Stands `search_box` in the (empty) [`SearchSlot`] somewhere in `widget`.
+fn put_search_box(widget: &mut dyn Widget, search_box: Box<dyn Widget>) {
+    if widget.type_name() == SEARCH_SLOT {
+        widget.children_mut().push(search_box);
+        return;
+    }
+    if let Some(child) = widget
+        .children_mut()
+        .iter_mut()
+        .find(|c| holds_search_slot(c.as_ref()))
+    {
+        put_search_box(child.as_mut(), search_box);
+    }
 }
 
 /// A child with a one-pixel rule along its bottom, in `color`.

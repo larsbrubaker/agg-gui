@@ -54,6 +54,15 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 - `ItemPictures::before_layout(state)`: the pictures hook's turn at the start of each list
   layout, the state lent unborrowed (default nothing).
 
+### Fixed
+
+- `FileBrowser` keeps the bar holding its search box when the header is built again (a folder
+  opened, a search's results showing): the bar, its row and the search slot stay the same
+  widgets and only what stands beside the box is new, so the box and its clear button keep
+  their parents, and a pointer (or a GUI automation handle) on its way to them still finds them.
+  `SearchSlot::new_or_empty`, `holds_search_slot` and `keep_search_bar` (in `browser::parts`)
+  are how.
+
 ## [0.0.7] - 2026-11-03
 
 ### Added
