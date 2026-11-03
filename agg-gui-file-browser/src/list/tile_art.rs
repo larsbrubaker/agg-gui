@@ -1,5 +1,6 @@
-//! What a row or tile shows where its picture goes ([`TileArt`]), worked out once when the row is
-//! built: a folder row shows the look's folder tile (`BrowserLook::folder_tile`, which sees the
+//! What a row or tile shows where its picture goes ([`TileArt`]), worked out when the row is
+//! built (without the app's pictures, `ListCx::placeholder_art`) and again once it comes near the
+//! visible part (`list/visible_art.rs`): a folder row shows the look's folder tile (`BrowserLook::folder_tile`, which sees the
 //! link and so may draw its own tile image its own way), else the link's own tile image
 //! (`FolderLink::tile_icon`, resolved by `BrowserLook::icon_for_key`), else the folder icon in the accent with the link's micro icon (`FolderLink::micro_icon`) over it;
 //! an item shows what the app's `ItemPictures` answers: its picture, the generating icon while it

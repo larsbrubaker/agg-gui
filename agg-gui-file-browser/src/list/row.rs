@@ -54,6 +54,8 @@ pub struct BrowserRow {
     route: OverlayRoute,
     /// The drag's rank of this row while it paints lifted, from `paint` to `finish_paint`.
     lifted: Option<usize>,
+    /// Whether it has asked the pictures hook for its picture ([`Self::ask_art`]).
+    asked: bool,
     bounds: Rect,
     children: Vec<Box<dyn Widget>>,
 }
@@ -73,6 +75,7 @@ impl BrowserRow {
             hovered: parts.hovered,
             route: OverlayRoute::default(),
             lifted: None,
+            asked: false,
             index,
             shown_name: name.clone(),
             name,
@@ -84,11 +87,32 @@ impl BrowserRow {
         })
     }
 
-    /// Asks for its art again (a picture arrived), keeping the row itself.
+    /// Asks for its art again (a picture arrived), keeping the row itself; a row that has
+    /// not asked for its picture yet (never near the visible part) keeps its placeholder.
     pub fn refresh_art(&mut self) {
+        if !self.asked {
+            return;
+        }
         if let Some(art) = self.cx.art(self.index, ROW_THUMB_SIZE) {
             self.parts.art = art;
         }
+    }
+
+    /// Asks the pictures hook for its picture the first time it comes near the visible part of
+    /// the list (`list/visible_art.rs`); later calls do nothing.
+    pub fn ask_art(&mut self) {
+        if self.asked {
+            return;
+        }
+        self.asked = true;
+        if let Some(art) = self.cx.art(self.index, ROW_THUMB_SIZE) {
+            self.parts.art = art;
+        }
+    }
+
+    /// Whether it has asked the pictures hook for its picture.
+    pub fn asked_art(&self) -> bool {
+        self.asked
     }
 
     /// The row's index in the listing it was built from.

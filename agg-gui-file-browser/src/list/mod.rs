@@ -3,6 +3,10 @@
 //! folder's message when its listing is only one (`message.rs`), all over the shared
 //! [`BrowserState`] and drawn through the config's look and pictures.
 //!
+//! Rows and tiles ask the pictures hook for their pictures only near the visible part: each
+//! layout ends by having those within reach of the viewport ask (`visible_art.rs`), so a folder
+//! of hundreds of pictures makes a screenful, and scrolling makes the rest as they come in view.
+//!
 //! The list builds its rows again at its next layout whenever what they show changes: the
 //! state's generation (a selection, a navigation, new content), the look's art
 //! (`BrowserLook::icon_generation`) or the display's scale (pictures are made for it: a window
@@ -45,6 +49,7 @@ pub mod reveal;
 pub mod row;
 pub mod section_header;
 pub mod tile_art;
+pub mod visible_art;
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -124,6 +129,8 @@ pub struct BrowserList {
     resets_seen: u64,
     /// The host keeps the offset and resets it (`with_offset_cell`).
     host_offset: bool,
+    /// The scroll view's visible part, its height read after each layout (`visible_art.rs`).
+    viewport: Rc<Cell<Rect>>,
     menu: ListMenu,
     id: String,
     bounds: Rect,
@@ -149,6 +156,7 @@ impl BrowserList {
             offset: Rc::new(Cell::new(0.0)),
             resets_seen: 0,
             host_offset: false,
+            viewport: Rc::new(Cell::new(Rect::default())),
             menu: ListMenu::default(),
             id,
             bounds: Rect::default(),
@@ -252,11 +260,31 @@ impl BrowserList {
                     ViewMode::Rows => Box::new(RowStack::for_state(&cx)),
                     _ => Box::new(TileStack::for_state(&cx, thumb, self.tile_names)),
                 };
-                Box::new(ScrollView::new(content).with_offset_cell(Rc::clone(&self.offset)))
+                Box::new(
+                    ScrollView::new(content)
+                        .with_offset_cell(Rc::clone(&self.offset))
+                        .with_viewport_cell(Rc::clone(&self.viewport)),
+                )
             }
         };
         self.children = vec![child];
         self.built = Some(key);
+    }
+
+    /// Has the rows and tiles near the visible part ask for their pictures (`visible_art.rs`),
+    /// at the offset as it is now (a revealed row's included).
+    fn ask_visible_art(&mut self) {
+        let Some(scroll) = self.children.first_mut() else {
+            return;
+        };
+        if scroll.type_name() != "ScrollView" {
+            return;
+        }
+        let Some(content) = scroll.children_mut().first_mut() else {
+            return;
+        };
+        let height = self.viewport.get().height;
+        visible_art::ask_visible_art(content.as_mut(), self.offset.get(), height);
     }
 
     /// Whether the list takes the keyboard (`BrowserOptions::list_takes_keys`).
@@ -376,6 +404,7 @@ impl Widget for BrowserList {
         if let Some(row) = reveal {
             reveal::reveal_row(&self.children, &row, &self.offset);
         }
+        self.ask_visible_art();
         available
     }
     /// Records where the list is in the window, for a drag that ends outside it and for drops,

@@ -1,6 +1,7 @@
 //! A list whose folder holds more items than its pictures hook keeps still settles: every build
-//! asks for every row's picture, and none asked for by one build leaves before the next, so each
-//! picture is made once and every tile shows it. A picture that lands while the rows are being
+//! asks for the picture of every row in view (here the list is tall enough to show them all),
+//! and none asked for by one build leaves before the next, so each picture is made once and
+//! every tile shows it. A picture that lands while the rows are being
 //! built (an inline spawner) is shown by the next layout, not lost.
 
 use std::cell::Cell;
@@ -131,11 +132,13 @@ fn a_folder_with_more_items_than_pictures_kept_settles_with_each_picture_made_on
     let state = BrowserState::new(Box::new(folder), config);
     state.borrow_mut().set_view_mode(ViewMode::Icons);
     let mut app = App::new(Box::new(BrowserList::new(&state, font())));
+    // Tall enough for all 30 tiles (ten rows of three), so every one is in view and asks.
+    let tall = Size::new(400.0, 2000.0);
     for _ in 0..10 {
-        app.layout(Size::new(400.0, 300.0));
+        app.layout(tall);
         run_ready_local_tasks();
     }
-    app.layout(Size::new(400.0, 300.0));
+    app.layout(tall);
     let tiles = shown(&app);
     assert_eq!(tiles.len(), 30, "every tile is built");
     assert!(
@@ -145,7 +148,7 @@ fn a_folder_with_more_items_than_pictures_kept_settles_with_each_picture_made_on
     assert_eq!(made.get(), 30, "each picture is made once");
     let before = made.get();
     for _ in 0..3 {
-        app.layout(Size::new(400.0, 300.0));
+        app.layout(tall);
         run_ready_local_tasks();
     }
     assert_eq!(

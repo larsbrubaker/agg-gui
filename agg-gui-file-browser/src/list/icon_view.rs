@@ -74,6 +74,8 @@ pub struct BrowserTile {
     route: OverlayRoute,
     /// The drag's rank of this tile while it paints lifted, from `paint` to `finish_paint`.
     lifted: Option<usize>,
+    /// Whether it has asked the pictures hook for its picture ([`Self::ask_art`]).
+    asked: bool,
     bounds: Rect,
     children: Vec<Box<dyn Widget>>,
 }
@@ -106,6 +108,7 @@ impl BrowserTile {
             hovered: parts.hovered,
             route: OverlayRoute::default(),
             lifted: None,
+            asked: false,
             parts,
             index,
             name,
@@ -118,11 +121,32 @@ impl BrowserTile {
         })
     }
 
-    /// Asks for its art again (a picture arrived), keeping the tile itself.
+    /// Asks for its art again (a picture arrived), keeping the tile itself; a tile that has
+    /// not asked for its picture yet (never near the visible part) keeps its placeholder.
     pub fn refresh_art(&mut self) {
+        if !self.asked {
+            return;
+        }
         if let Some(art) = self.cx.art(self.index, self.thumb) {
             self.parts.art = art;
         }
+    }
+
+    /// Asks the pictures hook for its picture the first time it comes near the visible part of
+    /// the list (`list/visible_art.rs`); later calls do nothing.
+    pub fn ask_art(&mut self) {
+        if self.asked {
+            return;
+        }
+        self.asked = true;
+        if let Some(art) = self.cx.art(self.index, self.thumb) {
+            self.parts.art = art;
+        }
+    }
+
+    /// Whether it has asked the pictures hook for its picture.
+    pub fn asked_art(&self) -> bool {
+        self.asked
     }
 
     /// Whether the tile opens a folder.

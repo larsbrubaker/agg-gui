@@ -2,6 +2,12 @@
 //! font, its pictures hook and what the hook is handed, gathered once per build of the list
 //! (`list/mod.rs`); and the parts of one row ([`RowParts`]), read from the state and then from
 //! the hooks with the state let go (the crate header's rule).
+//!
+//! A row is built with its placeholder art ([`ListCx::placeholder_art`]: what the entry shows
+//! with no picture, worked out without asking the pictures hook); the hook is asked for its
+//! picture ([`ListCx::art`]) only once the row comes near the list's visible part
+//! (`list/visible_art.rs`), so opening a folder of hundreds of pictures makes only the ones on
+//! screen.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -12,7 +18,7 @@ use agg_gui::{Size, Widget};
 use agg_gui_files::{Item, Spawner};
 
 use crate::look::{BrowserIcon, BrowserLook, BrowserStyle};
-use crate::pictures::{ItemPictures, OverlayFrame, PictureCx};
+use crate::pictures::{ItemPictures, NoPictures, OverlayFrame, PictureCx};
 use crate::state::{BrowserEntry, BrowserState};
 
 use super::menu_button::MENU_GLYPH_SIZE;
@@ -98,8 +104,9 @@ impl ListCx {
         }
     }
 
-    /// What listed row `index` shows where its `side`-wide picture goes, asked again (a picture
-    /// that arrived); `None` past the listing's end.
+    /// What listed row `index` shows where its `side`-wide picture goes, asked of the pictures
+    /// hook (the row came into view, or a picture it showed arrived); `None` past the listing's
+    /// end.
     pub fn art(&self, index: usize, side: i32) -> Option<TileArt> {
         let entry = self.state.borrow().listed_entry(index)?;
         let hook_entry = entry.to_entry(Rc::clone(&self.path));
@@ -126,6 +133,21 @@ impl ListCx {
         )
     }
 
+    /// What `hook_entry` shows at `side` before its picture is asked for: the look's folder or
+    /// item art, the pictures hook left unasked (it may start making the picture).
+    fn placeholder_art(&self, hook_entry: &crate::entry::Entry, side: i32) -> TileArt {
+        let arrived: Rc<dyn Fn()> = Rc::new(|| {});
+        let cx = PictureCx::new(&self.spawner, &arrived);
+        tile_art(
+            self.look.as_ref(),
+            &self.style,
+            &NoPictures,
+            &cx,
+            hook_entry,
+            side,
+        )
+    }
+
     /// Whether a press on a row leaves the focus where it was: in a list that takes no keys
     /// (`BrowserOptions::list_takes_keys` off), a dialog's name field keeps typing.
     pub fn leaves_focus(&self) -> bool {
@@ -133,7 +155,8 @@ impl ListCx {
     }
 
     /// The parts of listed row `index` with its picture `side` units square, an overlay framed
-    /// as `frame`; `None` past the listing's end.
+    /// as `frame`, its art the placeholder until the row asks for its picture; `None` past the
+    /// listing's end.
     pub fn parts(&self, index: usize, side: i32, frame: OverlayFrame) -> Option<RowParts> {
         let (entry, selected, hovered) = {
             let s = self.state.borrow();
@@ -146,7 +169,7 @@ impl ListCx {
         };
         let id = entry.row_name(self.look.names());
         let hook_entry = entry.to_entry(Rc::clone(&self.path));
-        let art = self.art_of(&hook_entry, side);
+        let art = self.placeholder_art(&hook_entry, side);
         let overlay = self.pictures.tile_overlay(&hook_entry, frame);
         Some(RowParts {
             entry,
