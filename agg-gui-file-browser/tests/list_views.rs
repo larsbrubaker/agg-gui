@@ -386,6 +386,38 @@ fn a_list_on_its_hosts_offset_keeps_it_and_never_resets_it() {
     assert_eq!(offset.get(), 10.0);
 }
 
+/// Pictures that count how often they are asked for.
+#[derive(Default)]
+struct CountingPictures {
+    asked: Cell<u32>,
+}
+
+impl ItemPictures for CountingPictures {
+    fn picture(&self, _cx: &PictureCx<'_>, _entry: &Entry, _side: i32) -> PictureState {
+        self.asked.set(self.asked.get() + 1);
+        PictureState::Default
+    }
+}
+
+#[test]
+fn a_new_display_scale_has_the_rows_ask_for_their_pictures_again() {
+    let pictures = Rc::new(CountingPictures::default());
+    let config = BrowserConfig::builder().pictures(pictures.clone()).build();
+    let (mut app, _) = list_app(Box::new(home()), config, ViewMode::Icons);
+    let before = pictures.asked.get();
+    assert!(before > 0);
+    app.layout(Size::new(WIDTH, HEIGHT));
+    assert_eq!(pictures.asked.get(), before, "nothing new to ask for");
+    // Pictures are made for the display's scale: a window moved to a sharper screen asks again.
+    agg_gui::set_device_scale(2.0);
+    app.layout(Size::new(WIDTH, HEIGHT));
+    agg_gui::set_device_scale(1.0);
+    assert!(
+        pictures.asked.get() > before,
+        "the rows asked for pictures at the new scale"
+    );
+}
+
 /// The address of the widget named `id`: the same widget keeps it.
 fn address_of(app: &App, id: &str) -> usize {
     let (widget, _) = find(app.root(), id, Point::new(0.0, 0.0)).expect("the widget");

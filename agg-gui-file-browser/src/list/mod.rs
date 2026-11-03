@@ -4,8 +4,9 @@
 //! [`BrowserState`] and drawn through the config's look and pictures.
 //!
 //! The list builds its rows again at its next layout whenever what they show changes: the
-//! state's generation (a selection, a navigation, new content) or the look's art
-//! (`BrowserLook::icon_generation`). A picture arriving (the `ItemPictures` hook calls
+//! state's generation (a selection, a navigation, new content), the look's art
+//! (`BrowserLook::icon_generation`) or the display's scale (pictures are made for it: a window
+//! moved to a sharper screen asks for them again). A picture arriving (the `ItemPictures` hook calls
 //! `PictureCx::picture_arrived`) only has the rows and tiles ask for their art again, in place,
 //! so the one under the pointer stays the widget a press on it started on. Each build marks the listing the rows were built from
 //! (`BrowserState::mark_listed`), so a row's index always means the row under the pointer. A
@@ -73,6 +74,8 @@ struct BuildKey {
     generation: u64,
     arrivals: u64,
     icons: u64,
+    /// The display's scale (its bits): pictures are made for it, so a new one asks again.
+    scale: u64,
 }
 
 /// Whether `pos` (list-local) is in the list's own top-right corner, a glyph's square, where a
@@ -205,6 +208,7 @@ impl BrowserList {
             generation: self.state.borrow().generation(),
             arrivals: self.arrivals.get(),
             icons: self.look.icon_generation(),
+            scale: agg_gui::device_scale().to_bits(),
         }
     }
 
@@ -334,7 +338,11 @@ impl Widget for BrowserList {
         match self.built {
             // Only pictures arrived: the rows and tiles ask for their art again in place, so the
             // one under the pointer stays the widget a press started on.
-            Some(built) if built.generation == key.generation && built.icons == key.icons => {
+            Some(built)
+                if built.generation == key.generation
+                    && built.icons == key.icons
+                    && built.scale == key.scale =>
+            {
                 if built.arrivals != key.arrivals {
                     self.built = Some(key);
                     refresh_art(&mut self.children);

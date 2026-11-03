@@ -32,6 +32,8 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Fixed
 
+- A new display scale left the list's pictures at the old one (a window moved to a sharper
+  screen); the list builds its rows again, asking for its pictures at the new scale.
 - The folder message's Sign In button carries `BrowserNames::sign_in_button` itself, so what
   finds it by name reads whether it takes a press (it was a wrapper that always read enabled).
 - A picture arriving built every row and tile of the list again, so the one under the pointer was
