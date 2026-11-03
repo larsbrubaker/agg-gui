@@ -435,3 +435,25 @@ fn the_compact_form_shows_named_tiles_without_a_view_button_and_a_tap_opens() {
     assert_eq!(browser_property(&app, "path"), "Home");
     assert_eq!(browser_property(&app, "selected"), "Projects");
 }
+
+#[test]
+fn the_list_only_forms_message_line_is_in_the_looks_light_text_colour() {
+    agg_gui::set_device_scale(1.0);
+    let root = DynamicFolder::new("Home").with_header_markdown("Parts you made");
+    let state = BrowserState::new(Box::new(root), list_only());
+    let mut app = App::new(Box::new(FileBrowser::new(&state, font())));
+    frame(&mut app);
+    let style = state.borrow().config().look.style();
+    assert_ne!(
+        style.light_text_color, style.text_color,
+        "the test tells them apart"
+    );
+    let color = find(app.root(), "Provider Message", Point::new(0.0, 0.0))
+        .expect("the message line shows")
+        .0
+        .properties()
+        .into_iter()
+        .find(|(k, _)| *k == "color")
+        .map(|(_, v)| v);
+    assert_eq!(color, Some(format!("{:?}", style.light_text_color)));
+}

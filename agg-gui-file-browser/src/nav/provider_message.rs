@@ -17,6 +17,8 @@ const MARGIN: f64 = 6.0;
 /// The bar holding the message.
 pub struct ProviderMessageBar {
     name: String,
+    /// The line's colour, reported as the `color` property.
+    color: Color,
     bounds: Rect,
     children: Vec<Box<dyn Widget>>,
 }
@@ -32,6 +34,7 @@ impl ProviderMessageBar {
             .with_color(color);
         Some(Self {
             name: name.to_string(),
+            color,
             bounds: Rect::default(),
             children: vec![Box::new(label)],
         })
@@ -77,5 +80,9 @@ impl Widget for ProviderMessageBar {
     fn paint(&mut self, _ctx: &mut dyn DrawCtx) {}
     fn on_event(&mut self, _event: &Event) -> EventResult {
         EventResult::Ignored
+    }
+    /// What tests read: the line's colour.
+    fn properties(&self) -> Vec<(&'static str, String)> {
+        vec![("color", format!("{:?}", self.color))]
     }
 }

@@ -44,6 +44,11 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 - `LIVE_REFRESH_WAKE` (100 ms): while the showing folder's live relist is pending, the list asks
   for one more frame that long after each layout, rather than a frame after every frame, so an
   idle browser waiting on a relist no longer draws continuously.
+- `ProviderMessageBar` reports its line's colour as its `color` property. `FileBrowser`'s
+  list-only form draws that line in the look's light text colour, as the bar is documented to
+  (it took the plain text colour).
+- `BrowserState::remember_location` remembers nothing while search results show: they are a
+  view of a query, not a place, so the last real place stays remembered.
 - `ItemPictures::before_layout(state)`: the pictures hook's turn at the start of each list
   layout, the state lent unborrowed (default nothing).
 

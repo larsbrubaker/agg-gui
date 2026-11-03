@@ -270,6 +270,11 @@ impl BrowserState {
     pub fn remember_location(state: &Rc<RefCell<Self>>, key: &str) {
         let (memory, path) = {
             let s = state.borrow();
+            // Search results are a view of a query, not a place: reopening in them would rerun a
+            // search the user has long forgotten typing, so the last real place stays remembered.
+            if s.showing_search_results().is_some() {
+                return;
+            }
             (Rc::clone(&s.config.memory), s.open_path())
         };
         remember_open_location(memory.as_ref(), key, &path);

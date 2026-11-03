@@ -1,14 +1,14 @@
 //! `BrowserState` showing a search's results over a `MemoryFolder` tree: the results stand below
 //! the folder searched, list in sections with their headers, keep their selection when shown
 //! again, carry a rolled-up section's selected results until it opens, and leave the path when
-//! the user walks back up.
+//! the user walks back up. Search results are never remembered as the browser's place.
 
 use std::rc::Rc;
 
 use agg_gui::Modifiers;
 use agg_gui_file_browser::{
-    run_ready_local_tasks, BrowserConfig, BrowserState, ListSlot, LocalSpawner,
-    SearchSectionCollapseState,
+    run_ready_local_tasks, BrowserConfig, BrowserMemory, BrowserState, ListSlot, LocalSpawner,
+    OpenFolder, SearchSectionCollapseState,
 };
 use agg_gui_files::{Folder, MemoryFolder, SearchResultsFolder, SortKey};
 
@@ -133,4 +133,36 @@ fn a_sort_key_picked_while_searching_sorts_the_results() {
         .push_search_results(finished_search(&root, "gear"));
     state.borrow_mut().set_user_sort_key(SortKey::Name);
     assert_eq!(names(&state.borrow()), ["gear a.stl", "gear b.stl"]);
+}
+
+/// A memory noting the open folder's name each time it is handed a place.
+#[derive(Default)]
+struct Places(std::cell::RefCell<Vec<String>>);
+
+impl BrowserMemory for Places {
+    fn remember_location(&self, _key: &str, path: &[OpenFolder]) {
+        let last = path.last().map(|f| f.borrow().name().to_string());
+        self.0.borrow_mut().extend(last);
+    }
+}
+
+#[test]
+fn search_results_are_no_place_to_remember() {
+    let root = home();
+    let memory = Rc::new(Places::default());
+    let config = BrowserConfig::builder()
+        .memory(Rc::clone(&memory) as Rc<dyn BrowserMemory>)
+        .build();
+    let state = BrowserState::new(Box::new(root.clone()), config);
+    state
+        .borrow_mut()
+        .push_search_results(finished_search(&root, "gear"));
+    BrowserState::remember_location(&state, "main");
+    assert!(
+        memory.0.borrow().is_empty(),
+        "the results are a query, not a place"
+    );
+    state.borrow_mut().go_to(0);
+    BrowserState::remember_location(&state, "main");
+    assert_eq!(*memory.0.borrow(), ["Home"]);
 }

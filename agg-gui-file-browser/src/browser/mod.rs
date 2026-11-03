@@ -292,7 +292,7 @@ impl FileBrowser {
             let name = &self.look.names().provider_message;
             let font = Arc::clone(&self.font);
             let message =
-                ProviderMessageBar::for_message(&key.header, name, style.text_color, font);
+                ProviderMessageBar::for_message(&key.header, name, style.light_text_color, font);
             if let Some(bar) = message {
                 self.place(Box::new(bar), Role::Message);
             }
