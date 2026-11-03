@@ -1,7 +1,8 @@
 //! The pictures a browser's tiles and rows show: the [`ItemPictures`] hook, asked for each listed
 //! entry's picture ([`PictureState`]) with a [`PictureCx`] (where work runs, how to say a picture
 //! arrived, and the open folder's own reading of an item), and for a widget laid over a tile
-//! (an app's favourite marker). [`NoPictures`] is the hook of an app that wants no pictures: every
+//! (an app's favourite marker), and given a turn at the start of each list layout
+//! ([`ItemPictures::before_layout`]: an app forgetting pictures a save replaced). [`NoPictures`] is the hook of an app that wants no pictures: every
 //! entry draws the look's item or folder icon (`BrowserIcon::Item`, `BrowserIcon::Folder`).
 //!
 //! A picture that takes time is started on the first ask and answered `Generating` (or
@@ -10,6 +11,7 @@
 //! list's visible part (`list/visible_art.rs`), then again on each build of the list and each
 //! arrival while it has asked.
 
+use std::cell::RefCell;
 use std::rc::Rc;
 
 use agg_gui::icon_image::IconImage;
@@ -17,6 +19,7 @@ use agg_gui::Widget;
 use agg_gui_files::{Item, PictureFuture, Spawner};
 
 use crate::entry::Entry;
+use crate::state::BrowserState;
 
 /// What an entry shows where its picture goes.
 #[derive(Clone)]
@@ -130,6 +133,13 @@ pub trait ItemPictures {
     fn tile_overlay(&self, entry: &Entry, frame: OverlayFrame) -> Option<Box<dyn Widget>> {
         let _ = (entry, frame);
         None
+    }
+
+    /// The hook's turn at the start of each layout of a list over `state` (not borrowed), before
+    /// the list relists its folder: an app drops pictures its saves have replaced, so the rows
+    /// built next ask again. The default does nothing.
+    fn before_layout(&self, state: &Rc<RefCell<BrowserState>>) {
+        let _ = state;
     }
 }
 

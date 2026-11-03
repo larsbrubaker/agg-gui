@@ -17,6 +17,12 @@
 //! view button, and one tap activates a row (a folder opens; an item is the app's), since a
 //! finger has no double click.
 //!
+//! An app's own widgets kept across rebuilds ([`FileBrowser::with_overlay_child`]: a host for
+//! its context menus) are laid out with the browser's room but placed at zero size at its
+//! origin, after everything else, so they are never under the pointer and paint (their overlay
+//! passes) over the rest. The browser's window rectangle from its last paint goes to the app's
+//! cell ([`FileBrowser::with_painted_rect`]), for hooks placing menus and drops in window terms.
+//!
 //! In both the undo notice sits centred [`NOTICE_BOTTOM_GAP`] above the bottom, over the rest.
 //! Gaps, paddings and names are the ones MatterCAD's Library uses, so its tests and help
 //! articles find the same widgets.
@@ -80,6 +86,8 @@ enum Role {
     Message,
     /// The undo notice, centred near the bottom over the rest.
     Notice,
+    /// An app's own kept child, at zero size at the origin.
+    Overlay,
 }
 
 /// What a header was built for: when it changes, the header is built again.
@@ -111,6 +119,10 @@ pub struct FileBrowser {
     location_key: Option<String>,
     /// The navigation count last remembered under `location_key`.
     remembered: Option<u64>,
+    /// The app's kept children while no build holds them (before the first).
+    overlays: Vec<Box<dyn Widget>>,
+    /// Where the browser's window rectangle from its last paint goes.
+    painted_rect: Option<Rc<Cell<Rect>>>,
     bounds: Rect,
     children: Vec<Box<dyn Widget>>,
     roles: Vec<Role>,
@@ -153,6 +165,8 @@ impl FileBrowser {
             built: None,
             location_key: None,
             remembered: None,
+            overlays: Vec::new(),
+            painted_rect: None,
             bounds: Rect::default(),
             children: Vec::new(),
             roles: Vec::new(),
@@ -167,6 +181,20 @@ impl FileBrowser {
         BrowserState::restore_location(&self.state, &key);
         self.remembered = Some(self.state.borrow().navigation());
         self.location_key = Some(key);
+        self
+    }
+
+    /// Keeps `child` among the browser's children across every rebuild, at zero size at its
+    /// origin over the rest (see the module header): a host for the app's context menus.
+    pub fn with_overlay_child(mut self, child: Box<dyn Widget>) -> Self {
+        self.overlays.push(child);
+        self
+    }
+
+    /// Sets `rect` to the browser's rectangle in window (root, logical) coordinates at each
+    /// paint.
+    pub fn with_painted_rect(mut self, rect: Rc<Cell<Rect>>) -> Self {
+        self.painted_rect = Some(rect);
         self
     }
 
@@ -228,11 +256,13 @@ impl FileBrowser {
     fn rebuild(&mut self, key: &HeaderKey) {
         let mut bars = Vec::new();
         let (mut body, mut notice) = (None, None);
+        let mut overlays = std::mem::take(&mut self.overlays);
         let old = std::mem::take(&mut self.children);
         for (child, role) in old.into_iter().zip(std::mem::take(&mut self.roles)) {
             match role {
                 Role::Body => body = Some(child),
                 Role::Notice => notice = Some(child),
+                Role::Overlay => overlays.push(child),
                 Role::Bar | Role::Message => bars.push(child),
             }
         }
@@ -266,6 +296,9 @@ impl FileBrowser {
             self.place(body, Role::Body);
         }
         self.place(notice, Role::Notice);
+        for overlay in overlays {
+            self.place(overlay, Role::Overlay);
+        }
     }
 
     fn place(&mut self, child: Box<dyn Widget>, role: Role) {
@@ -396,7 +429,7 @@ impl Widget for FileBrowser {
                     child.set_bounds(Rect::new(0.0, 0.0, width, size.height));
                     bottom = size.height;
                 }
-                Role::Body | Role::Notice => {}
+                Role::Body | Role::Notice | Role::Overlay => {}
             }
         }
         for (child, role) in self.children.iter_mut().zip(&self.roles) {
@@ -411,12 +444,22 @@ impl Widget for FileBrowser {
                     let x = ((width - size.width) / 2.0).max(0.0);
                     child.set_bounds(Rect::new(x, NOTICE_BOTTOM_GAP, size.width, size.height));
                 }
+                Role::Overlay => {
+                    child.layout(available);
+                    child.set_bounds(Rect::new(0.0, 0.0, 0.0, 0.0));
+                }
                 Role::Bar | Role::Message => {}
             }
         }
         available
     }
-    fn paint(&mut self, _ctx: &mut dyn DrawCtx) {}
+    fn paint(&mut self, ctx: &mut dyn DrawCtx) {
+        if let Some(rect) = &self.painted_rect {
+            let (mut x, mut y) = (0.0, 0.0);
+            agg_gui::widget::logical_root_transform(ctx).transform(&mut x, &mut y);
+            rect.set(Rect::new(x, y, self.bounds.width, self.bounds.height));
+        }
+    }
     /// The drag's picture by the pointer, over everything (`drag/picture.rs`).
     fn paint_global_overlay(&mut self, ctx: &mut dyn DrawCtx) {
         let style = self.look.style();
@@ -462,7 +505,7 @@ impl Widget for FileBrowser {
             ("item_count", items.to_string()),
             ("status", state.status()),
             ("header", state.header_markdown()),
-            ("view_mode", format!("{:?}", state.view_mode())),
+            ("view_mode", self.look.view_mode_name(state.view_mode())),
             ("search_active", self.search.is_search_active().to_string()),
             (
                 "search_searching",

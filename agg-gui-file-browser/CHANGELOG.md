@@ -8,6 +8,38 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ## [Unreleased]
 
+## [0.0.8] - 2026-11-03
+
+### Added
+
+- `PlaceRules::folder_key` and `open_folder_key`: how the Move dialog tells a folder row and an
+  open folder apart, defaulting to their place and location key. An app whose folders have no
+  location key (remote folders told by server IDs) answers keys of its own (`FolderKey::new`),
+  so "already in" and "can't go inside itself" hold for them. `MoveRequest` carries the rules
+  (`places`, `with_places`); the browser's own Move hands it the config's.
+- A remembered folder still being found shows its trail: `BrowserMemory::last_location_trail`
+  names the remembered folders (root first), and while `last_location` finds them `FileBrowser`
+  and `BrowserPage` show that trail as the breadcrumbs over the "Loading..." line, never the
+  root's rows. Crumb clicks (`BrowserState::go_to_crumb`) and Back (`go_back`) move along the
+  trail, the user's own navigation ends the restore, and `BrowserState::retry_restore` runs it
+  again (call it once the user signs in). `restoring_trail`, `is_restoring` and `shown_trail`
+  read it. The default memory names no trail, so nothing changes for an app that adds none.
+- `FileBrowser::remembering(key)`: restores the place remembered under `key` and remembers each
+  folder the user moves to, as `BrowserPage::remembering` does.
+- `FileBrowser::with_overlay_child`: an app's widget (a context menu host) kept across rebuilds
+  at zero size at the browser's origin, over the rest; `with_painted_rect`: the browser's window
+  rectangle from its last paint, for menu and drop hooks.
+- `BrowserLook::list_banner` (a banner over the list, asked again whenever the list shows its
+  content anew) and `BrowserLook::header_markdown` (the folder's header drawn with the app's
+  markdown widget).
+- `BrowserLook::view_mode_name`, the name `FileBrowser` reports as `view_mode` (default the
+  mode's Rust name, as before), and a `restoring` property; `bread_crumb_trail` reads the trail
+  being found while restoring.
+- `BrowserLook::page_nav_bar_padding` and `page_nav_bar_rule`: the dialog page bar's padding
+  and whether it draws its rule (defaults `Insets::symmetric(3, 1)` and a rule, as before).
+- `ItemPictures::before_layout(state)`: the pictures hook's turn at the start of each list
+  layout, the state lent unborrowed (default nothing).
+
 ## [0.0.7] - 2026-11-03
 
 ### Added

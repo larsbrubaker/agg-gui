@@ -13,22 +13,30 @@
 //! ([`BrowserLook::menu_button`], [`BrowserLook::overflow_button`],
 //! [`BrowserLook::search_field`], [`BrowserLook::clear_search_button`]), so a browser's bar looks
 //! and opens its menus as the app's other bars do while the browser keeps what they show and do.
+//! Over the list a look may put a banner of its own ([`BrowserLook::list_banner`]) and draw the
+//! folder's header markdown with the app's markdown widget ([`BrowserLook::header_markdown`]);
+//! it names the view modes the browser reports ([`BrowserLook::view_mode_name`]) and sets the
+//! dialog page bar's padding and rule ([`BrowserLook::page_nav_bar_padding`],
+//! [`BrowserLook::page_nav_bar_rule`]).
 //!
 //! The widget names default to the long-standing names automation scripts, tests and help
 //! articles find the browser's buttons by ("Library Up Button", "Bread Crumb Button {name}"),
 //! so a browser keeps them unless its app chooses others.
 
+use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
 use agg_gui::icon_image::IconImage;
 use agg_gui::text::Font;
 use agg_gui::theme::{current_visuals, Visuals};
-use agg_gui::{Color, Size, TextField, Widget};
+use agg_gui::{Color, Insets, Size, TextField, Widget};
 use agg_gui_files::FolderLink;
 
+use crate::memory::ViewMode;
 use crate::nav::menu_button::NavMenuRows;
 use crate::nav::overflow::OverflowRows;
+use crate::state::BrowserState;
 
 /// The font size the browser's text takes when agg-gui has no default set.
 const BUILTIN_FONT_SIZE: f64 = 14.0;
@@ -491,6 +499,45 @@ pub trait BrowserLook {
     ) -> Option<Box<dyn Widget>> {
         let _ = (name, tooltip, clear, font);
         None
+    }
+
+    /// A banner over the list of what `state` shows (a hint about the folder showing), asked
+    /// for again each time the list shows its content anew (`shown_anew`: a folder opened, a
+    /// search run) and when the folder's header text changes (`shown_anew` false). It reads
+    /// what it shows at its own layouts, taking no room when it has nothing to say. `None` (the
+    /// default) puts nothing there.
+    fn list_banner(
+        &self,
+        state: &Rc<RefCell<BrowserState>>,
+        shown_anew: bool,
+        font: &Arc<Font>,
+    ) -> Option<Box<dyn Widget>> {
+        let _ = (state, shown_anew, font);
+        None
+    }
+
+    /// The showing folder's header markdown `text` (never empty) drawn the app's way, over the
+    /// list. `None` (the default) is agg-gui's `MarkdownView` in `font`.
+    fn header_markdown(&self, text: &str, font: &Arc<Font>) -> Option<Box<dyn Widget>> {
+        let _ = (text, font);
+        None
+    }
+
+    /// The name the browser reports for `mode` (its `view_mode` property). The default is the
+    /// mode's Rust name (`Rows`, `Icons70`).
+    fn view_mode_name(&self, mode: ViewMode) -> String {
+        format!("{mode:?}")
+    }
+
+    /// The padding inside a dialog page's nav bar (`BrowserPage`). The default is 3 left and
+    /// right, 1 top and bottom.
+    fn page_nav_bar_padding(&self) -> Insets {
+        Insets::symmetric(3.0, 1.0)
+    }
+
+    /// Whether a dialog page's nav bar draws its one-pixel rule along its bottom (the default).
+    fn page_nav_bar_rule(&self) -> bool {
+        true
     }
 
     /// The names the browser's widgets carry.

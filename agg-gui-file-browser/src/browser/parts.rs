@@ -2,8 +2,10 @@
 //! place in a rebuilt header where the browser's one search box stands; [`BottomBorder`], a bar
 //! with a one-pixel rule along its bottom (the nav bar and the list-only form's toolbar); and
 //! [`ListColumn`], the list under the showing folder's header markdown (a folder's own words
-//! about what it holds, through agg-gui's `MarkdownView`, left out when the folder has none),
-//! built again only when that text changes.
+//! about what it holds, through agg-gui's `MarkdownView` or the look's own markdown widget,
+//! `BrowserLook::header_markdown`, left out when the folder has none) and the look's banner
+//! (`BrowserLook::list_banner`), built again only when that text changes or the list shows its
+//! content anew (`BrowserState::list_resets`).
 //!
 //! The header is built again whenever the showing folder changes (its breadcrumbs are the path),
 //! but the search box is not: [`take_search_box`] lifts the same box out of the old header's slot
@@ -156,10 +158,11 @@ pub struct ListColumn {
     state: Rc<RefCell<BrowserState>>,
     font: Arc<Font>,
     name: String,
-    /// The header text the children were built for.
-    header: Option<String>,
+    /// The header text and list reset count the children were built for.
+    built: Option<(String, u64)>,
     bounds: Rect,
-    /// The header (when the folder has one), then the list.
+    /// The header (when the folder has one), the look's banner (when it gives one), then the
+    /// list.
     children: Vec<Box<dyn Widget>>,
 }
 
@@ -176,23 +179,29 @@ impl ListColumn {
             state: Rc::clone(state),
             font,
             name: name.into(),
-            header: None,
+            built: None,
             bounds: Rect::default(),
             children: vec![list],
         }
     }
 
-    /// Puts the header for `text` above the list, or takes it away for an empty one.
-    fn set_header(&mut self, text: &str) {
-        if self.children.len() > 1 {
-            self.children.remove(0);
-        }
+    /// Puts the header for `text` and the look's banner above the list (the header left out for
+    /// an empty text); `shown_anew` says the list shows its content anew.
+    fn set_header(&mut self, text: &str, shown_anew: bool) {
+        let list = self.children.pop();
+        self.children.clear();
+        let look = Rc::clone(&self.state.borrow().config().look);
         if !text.is_empty() {
-            let view = MarkdownView::new(text, Arc::clone(&self.font));
-            let named = Named::new(self.name.clone(), Box::new(view));
-            self.children.insert(0, Box::new(named));
+            let view = look
+                .header_markdown(text, &self.font)
+                .unwrap_or_else(|| Box::new(MarkdownView::new(text, Arc::clone(&self.font))));
+            self.children
+                .push(Box::new(Named::new(self.name.clone(), view)));
         }
-        self.header = Some(text.to_string());
+        if let Some(banner) = look.list_banner(&self.state, shown_anew, &self.font) {
+            self.children.push(banner);
+        }
+        self.children.extend(list);
     }
 }
 
@@ -214,9 +223,15 @@ impl Widget for ListColumn {
     }
     /// The header as tall as its text at the top, the list in the rest.
     fn layout(&mut self, available: Size) -> Size {
-        let text = self.state.borrow().header_markdown();
-        if self.header.as_deref() != Some(text.as_str()) {
-            self.set_header(&text);
+        let (text, resets) = {
+            let s = self.state.borrow();
+            (s.header_markdown(), s.list_resets())
+        };
+        let built = self.built.as_ref().map(|(t, r)| (t.as_str(), *r));
+        if built != Some((text.as_str(), resets)) {
+            let anew = built.is_none_or(|(_, r)| r != resets);
+            self.set_header(&text, anew);
+            self.built = Some((text, resets));
         }
         let mut top = available.height;
         let count = self.children.len();

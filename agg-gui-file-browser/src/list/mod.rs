@@ -360,6 +360,8 @@ impl Widget for BrowserList {
         &mut self.children
     }
     fn layout(&mut self, available: Size) -> Size {
+        let pictures = Rc::clone(&self.state.borrow().config().pictures);
+        pictures.before_layout(&self.state);
         let pending = {
             let mut s = self.state.borrow_mut();
             let pending = s.pump_live_refresh();

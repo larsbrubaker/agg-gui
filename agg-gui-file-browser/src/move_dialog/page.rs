@@ -2,7 +2,8 @@
 //!
 //! [`BrowserPage`] is the body a dialog that picks a place browses with: a nav bar (named
 //! `BrowserNames::page_nav_bar`: the breadcrumbs, then the view button without "Show Folders"
-//! and the sorting button) over a list of a browser of its own, built again when the folder
+//! and the sorting button, padded and ruled as the look says, `BrowserLook::page_nav_bar_padding`
+//! and `page_nav_bar_rule`) over a list of a browser of its own, built again when the folder
 //! changes (the list, and its scroll, kept). [`dialog_options`] are such a browser's options:
 //! the list alone, 75-unit pictures, read-only folders hidden (nothing can go in them), item
 //! clicks and double clicks kept for the page hosting it, a folder opened by a double click
@@ -29,9 +30,9 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use agg_gui::text::Font;
+use agg_gui::widgets::Named;
 use agg_gui::{
-    Button, DrawCtx, Event, EventResult, FlexRow, Insets, Label, MouseButton, Rect, Size, SizedBox,
-    Widget,
+    Button, DrawCtx, Event, EventResult, FlexRow, Label, MouseButton, Rect, Size, SizedBox, Widget,
 };
 use agg_gui_files::tr;
 
@@ -124,12 +125,16 @@ impl BrowserPage {
         let crumbs = folder_bread_crumb_for(&names, go_to, &look, &self.font);
         let row = FlexRow::new()
             .with_gap(4.0)
-            .with_inner_padding(Insets::symmetric(3.0, 1.0))
+            .with_inner_padding(look.page_nav_bar_padding())
             .add_flex(Box::new(crumbs), 1.0)
             .add(view_options_control(&self.state, &self.font, false))
             .add(sorting_control(&self.state, &self.font));
+        let name = look.names().page_nav_bar.clone();
+        if !look.page_nav_bar_rule() {
+            return Box::new(Named::new(name, Box::new(row)));
+        }
         let bar = BottomBorder::new(Box::new(row), look.style().border_color);
-        Box::new(bar.with_name(look.names().page_nav_bar.clone()))
+        Box::new(bar.with_name(name))
     }
 }
 
