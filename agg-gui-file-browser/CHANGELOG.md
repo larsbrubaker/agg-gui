@@ -47,6 +47,8 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 - `ProviderMessageBar` reports its line's colour as its `color` property. `FileBrowser`'s
   list-only form draws that line in the look's light text colour, as the bar is documented to
   (it took the plain text colour).
+- A `FileBrowser` made `remembering` remembers where the user stayed when they ended its restore
+  without moving (Home clicked while it was found), once the late answer comes.
 - `BrowserState::remember_location` remembers nothing while search results show: they are a
   view of a query, not a place, so the last real place stays remembered.
 - `ItemPictures::before_layout(state)`: the pictures hook's turn at the start of each list

@@ -356,3 +356,19 @@ fn the_restore_finished_listeners_hear_whether_it_landed_failed_or_was_abandoned
         [(RestoreOutcome::Landed, 3), (RestoreOutcome::Abandoned, 3)]
     );
 }
+
+#[test]
+fn home_clicked_while_finding_is_remembered_once_the_late_answer_comes() {
+    let memory = Slow::new();
+    let state = state(&memory);
+    let mut app = App::new(Box::new(FileBrowser::new(&state, font()).remembering(KEY)));
+    layout(&mut app);
+    click(&mut app, &crumb(&state, "Home"));
+    memory.answer();
+    layout(&mut app);
+    assert_eq!(
+        memory.remembered.borrow().last().cloned(),
+        Some(vec!["Home".to_string()]),
+        "where the user went is where the browser reopens"
+    );
+}

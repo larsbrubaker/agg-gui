@@ -33,7 +33,8 @@
 //!
 //! A browser given a location key ([`FileBrowser::remembering`]) opens where the config's
 //! memory says it was last left under that key, showing that place's breadcrumbs over a loading
-//! line while it is found (`state/restore.rs`), and remembers each folder the user moves to.
+//! line while it is found (`state/restore.rs`), and remembers each folder the user moves to (and,
+//! when the user ended the restore without moving, the place they stayed, once its answer comes).
 //!
 //! The drag's picture is drawn once for the whole browser, in agg-gui's global overlay pass after
 //! everything else, rather than by the list: a drag from the tree, or one whose list rows a
@@ -178,6 +179,18 @@ impl FileBrowser {
     /// look again (once the user signs in).
     pub fn remembering(mut self, key: impl Into<String>) -> Self {
         let key = key.into();
+        // A restore the user ended without moving (Home clicked while it was found) leaves the
+        // browser where they chose: that is remembered once the late answer comes.
+        let (weak, remembered) = (Rc::downgrade(&self.state), key.clone());
+        self.state
+            .borrow_mut()
+            .add_restore_finished(Rc::new(move |outcome| {
+                if outcome == crate::state::RestoreOutcome::Abandoned {
+                    if let Some(state) = weak.upgrade() {
+                        BrowserState::remember_location(&state, &remembered);
+                    }
+                }
+            }));
         BrowserState::restore_location(&self.state, &key);
         self.remembered = Some(self.state.borrow().navigation());
         self.location_key = Some(key);
