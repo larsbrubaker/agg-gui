@@ -51,3 +51,43 @@ fn a_listed_row_answers_its_folders_key() {
     assert_eq!(link.location_key(), opened.location_key());
     assert_eq!(opened.location_key(), Some(disk_location_key(&inner)));
 }
+
+#[test]
+fn a_folder_key_is_within_its_own_and_every_folder_above_it_and_no_other() {
+    use agg_gui_files::disk::disk_key_within;
+    let key = |p: &str| disk_location_key(std::path::Path::new(p));
+    let root = std::path::MAIN_SEPARATOR_STR;
+    let path = |parts: &[&str]| {
+        let mut p = std::path::PathBuf::from(root);
+        p.extend(parts);
+        disk_location_key(&p)
+    };
+    let designs = path(&["Designs"]);
+    let parts = path(&["Designs", "Parts"]);
+    assert!(disk_key_within(&designs, &designs));
+    assert!(disk_key_within(&parts, &designs));
+    assert!(disk_key_within(
+        &path(&["Designs", "Parts", "Gears"]),
+        &designs
+    ));
+    assert!(
+        disk_key_within(&parts, &key(root)),
+        "everything is within the root"
+    );
+    assert!(
+        !disk_key_within(&designs, &parts),
+        "a folder is not within one below it"
+    );
+    assert!(
+        !disk_key_within(&path(&["Designs2"]), &designs),
+        "a name that only starts the same is beside it"
+    );
+    assert!(
+        !disk_key_within(&path(&["Designs\"", "Parts"]), &designs),
+        "a quote in a name is part of the name"
+    );
+    assert!(disk_key_within(
+        &path(&["Designs\"", "Parts"]),
+        &path(&["Designs\""])
+    ));
+}

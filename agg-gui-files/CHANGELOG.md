@@ -8,6 +8,14 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ## [Unreleased]
 
+## [0.0.5] - 2026-11-03
+
+### Added
+
+- `disk::disk_key_within`: whether a folder on disk, by its location key, is another or inside
+  it, read from the keys alone (a name that only starts the same, "Designs2" beside "Designs", is
+  not inside), for an app's Move rules.
+
 ## [0.0.4] - 2026-11-02
 
 ### Added

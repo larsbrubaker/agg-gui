@@ -38,7 +38,9 @@ mod rules;
 mod search;
 mod trash;
 
-pub use crate::disk_paths::{disk_item_id, disk_item_id_at, disk_location_key, round_trip_utc};
+pub use crate::disk_paths::{
+    disk_item_id, disk_item_id_at, disk_key_within, disk_location_key, round_trip_utc,
+};
 pub use computer::{drive_roots, ComputerFolder, ComputerFolders};
 pub use copy_tree::{gather, gather_item, read_dir_node, sanitize_file_name, write_node, CopyNode};
 pub use file::{subscribe_file_renamed, DiskFile, FileRenamedListener};

@@ -130,3 +130,24 @@ pub fn round_trip_utc(since_epoch: Duration) -> String {
 pub fn disk_location_key(path: &Path) -> String {
     format!("{:?}", path.components().collect::<PathBuf>())
 }
+
+/// Whether the folder keyed `inner` ([`disk_location_key`]) is the one keyed `outer` or inside
+/// it, read from the keys alone: `inner`'s text is `outer`'s without its closing quote, then a
+/// separator. Every character is escaped on its own, so a path below another starts with the
+/// other's escaped text; a name that only starts the same ("Designs2" beside "Designs") goes on
+/// with no separator, and a separator inside a name can't occur.
+pub fn disk_key_within(inner: &str, outer: &str) -> bool {
+    if inner == outer {
+        return true;
+    }
+    let separator = format!("{:?}", std::path::MAIN_SEPARATOR_STR);
+    let separator = separator.trim_matches('"');
+    let Some(body) = outer.strip_suffix('"') else {
+        return false;
+    };
+    let Some(rest) = inner.strip_prefix(body) else {
+        return false;
+    };
+    // A root's key already ends in its separator.
+    rest.starts_with(separator) || (body.ends_with(separator) && rest != "\"")
+}
