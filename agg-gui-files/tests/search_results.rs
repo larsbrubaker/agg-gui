@@ -350,33 +350,38 @@ fn the_walk_takes_its_listener_off_the_folder_it_waited_for() {
 }
 
 /// The native timer that bounds the wait for a late listing to 20 s ends as soon as the listing
-/// arrives, rather than sleeping out the timeout. Native only: the browser starts no thread.
+/// arrives, rather than sleeping out the timeout. The search's own count is read, so the other
+/// tests' waits, starting and ending at the same time in this process, do not move it. Native
+/// only: the browser starts no thread.
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn the_walk_leaves_no_timer_thread_behind_once_the_listing_arrives() {
     use agg_gui_files::live_load_wait_timer_threads;
 
-    let before = live_load_wait_timer_threads();
     let async_source = StubFolder::async_load("Async");
     let source = async_source.clone();
     let search_root =
         StubFolder::sectioned(vec![link_to("Async", move || Box::new(source.clone()))]);
     let executor = TestSpawner::new();
     let results = started(&search_root, "gear", &executor);
+    assert_eq!(results.load_wait_timer_threads(), 0, "nothing waits yet");
     executor.pump();
-    assert!(
-        live_load_wait_timer_threads() > before,
+    assert_eq!(
+        results.load_wait_timer_threads(),
+        1,
         "the wait is bounded by a timer"
     );
+    // The process-wide count includes this search's timer, whatever else is running.
+    assert!(live_load_wait_timer_threads() >= 1);
     async_source.finish_load(&["async gear"]);
     run_to_end(&executor, &results);
 
     // The timer ends right away, far inside the 20 s it would otherwise sleep.
     let started = std::time::Instant::now();
-    while live_load_wait_timer_threads() > before && started.elapsed() < Duration::from_secs(5) {
+    while results.load_wait_timer_threads() > 0 && started.elapsed() < Duration::from_secs(5) {
         std::thread::sleep(Duration::from_millis(5));
     }
-    assert!(live_load_wait_timer_threads() <= before);
+    assert_eq!(results.load_wait_timer_threads(), 0);
 }
 
 #[test]

@@ -13,6 +13,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::rc::{Rc, Weak};
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::task::{Context, Poll, Waker};
 use std::time::Duration;
 
@@ -168,7 +169,7 @@ fn search_container<'a>(
         // Waited on even when this walk did not start the load: reading straight after it finds
         // only the "Loading..." placeholder.
         if folder.is_load_pending() {
-            WaitForLoad::new(folder.as_ref(), &shared.cancel).await;
+            WaitForLoad::new(folder.as_ref(), shared).await;
         }
         shared.add_results(section, &origin, matching(&folder.items(), shared));
         // Snapshotted before the walk: resolving a child can reload the folder that listed it.
@@ -215,27 +216,32 @@ struct WaitForLoad<'a> {
     listener: Option<ContentChangedListener>,
     /// Started with the listener; dropped with the wait, which ends its thread.
     timer: Option<WakeTimer>,
+    /// This search's count of running wait timers, which the timer is also counted in.
+    search_timers: Arc<AtomicUsize>,
 }
 
 /// How many async-load wait timer threads are running (native): each lives only while its wait
 /// does.
 static LIVE_LOAD_WAIT_TIMERS: AtomicUsize = AtomicUsize::new(0);
 
-/// The number of async-load wait timer threads still running (always 0 in the browser, which
-/// has none).
+/// The number of async-load wait timer threads still running in the whole process, every
+/// search's together (always 0 in the browser, which has none). One search's own are
+/// [`crate::SearchResultsFolder::load_wait_timer_threads`], which other searches running at the
+/// same time do not move.
 pub fn live_load_wait_timer_threads() -> usize {
     LIVE_LOAD_WAIT_TIMERS.load(Ordering::SeqCst)
 }
 
 impl<'a> WaitForLoad<'a> {
-    fn new(folder: &'a dyn Folder, cancel: &'a SearchCancel) -> Self {
+    fn new(folder: &'a dyn Folder, shared: &'a SearchShared) -> Self {
         Self {
             folder,
-            cancel,
+            cancel: &shared.cancel,
             deadline: Instant::now() + ASYNC_LOAD_TIMEOUT,
             slot: Rc::default(),
             listener: None,
             timer: None,
+            search_timers: Arc::clone(&shared.load_wait_timers),
         }
     }
 }
@@ -270,10 +276,12 @@ impl Future for WaitForLoad<'_> {
             });
             self.folder.subscribe_content_changed(Rc::clone(&listener));
             self.listener = Some(listener);
-            self.timer = Some(WakeTimer::start(
+            let search_timers = Arc::clone(&self.search_timers);
+            self.timer = Some(WakeTimer::start_counted(
                 cx.waker().clone(),
                 ASYNC_LOAD_TIMEOUT,
                 &LIVE_LOAD_WAIT_TIMERS,
+                Some(search_timers),
             ));
         }
         Poll::Pending

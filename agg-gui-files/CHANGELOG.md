@@ -8,6 +8,13 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ## [Unreleased]
 
+### Added
+
+- `SearchResultsFolder::load_wait_timer_threads`: how many timer threads bounding this search's
+  waits for a late listing are running. Other searches in the process do not move it, so a test
+  can watch one search's timer start and end while other tests run beside it; the process-wide
+  `live_load_wait_timer_threads` is unchanged.
+
 ## [0.0.5] - 2026-11-03
 
 ### Added

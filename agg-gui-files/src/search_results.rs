@@ -26,6 +26,8 @@
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 
 use crate::folder::{ContentChangedEvent, ContentChangedListener, Folder};
 use crate::item::{FolderLink, Item, PictureFuture};
@@ -142,6 +144,9 @@ pub(crate) struct SearchShared {
     /// Set once disposed: no more content-changed once the view has let go.
     disposed: Cell<bool>,
     content_changed: ContentChangedEvent,
+    /// How many of this search's wait timer threads are running (`search_walk`'s `WaitForLoad`);
+    /// shared with the threads, which count themselves out as they end.
+    pub(crate) load_wait_timers: Arc<AtomicUsize>,
 }
 
 impl SearchShared {
@@ -214,6 +219,7 @@ impl SearchResultsFolder {
                 cancel: SearchCancel::new(),
                 disposed: Cell::new(false),
                 content_changed: ContentChangedEvent::default(),
+                load_wait_timers: Arc::default(),
             }),
         }
     }
@@ -238,6 +244,14 @@ impl SearchResultsFolder {
     /// The query searched for.
     pub fn query(&self) -> &str {
         &self.shared.query
+    }
+
+    /// How many timer threads bounding this search's waits for a late listing are running
+    /// (always 0 in the browser, which has none). Each ends with its wait, so a search that has
+    /// run to its end soon has none. Only this search's: other searches do not move it, unlike
+    /// [`crate::live_load_wait_timer_threads`], which counts the whole process.
+    pub fn load_wait_timer_threads(&self) -> usize {
+        self.shared.load_wait_timers.load(Ordering::SeqCst)
     }
 
     /// From the start until the last section finishes.
