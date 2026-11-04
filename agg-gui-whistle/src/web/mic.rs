@@ -631,8 +631,9 @@ fn noise_floor(len: usize, seed: &mut u32) -> Vec<f32> {
         .collect()
 }
 
-/// The `ScriptProcessor` fallback. After a stop, the first event
-/// [`Mic::drain_processor`] waits for ends the drain, once fed.
+/// The `ScriptProcessor` fallback, made just before `connect` wires it.
+/// After a stop, the first event [`Mic::drain_processor`] waits for ends
+/// the drain, once fed.
 fn processor_node(
     ctx: &AudioContext,
     chunker: &Rc<RefCell<Chunker>>,
@@ -643,9 +644,16 @@ fn processor_node(
         )?;
     let chunker = chunker.clone();
     let period_ms = f64::from(PROCESSOR_FRAMES) / f64::from(ctx.sample_rate()) * 1000.0;
-    let mut clock = ProcessorClock::new(period_ms);
-    let mut seed: u32 = 0x9e37_79b9;
     let performance = web_sys::window().and_then(|w| w.performance());
+    // `connect` wires the node as soon as this returns, nothing awaited in
+    // between: now is when it joins a running context's graph, and its first
+    // event is due no earlier than a buffer later (`processor_clock.rs`).
+    let wired_at = performance
+        .as_ref()
+        .filter(|_| ctx.state() == AudioContextState::Running)
+        .map(|p| p.now());
+    let mut clock = ProcessorClock::new(period_ms, wired_at);
+    let mut seed: u32 = 0x9e37_79b9;
     let ctx = ctx.clone();
     let handler =
         Closure::<dyn FnMut(AudioProcessingEvent)>::new(move |e: AudioProcessingEvent| {

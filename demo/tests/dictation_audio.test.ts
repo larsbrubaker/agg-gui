@@ -409,7 +409,11 @@ const READINGS: Record<string, string[]> = {
 /**
  * The clip's words in a dictation, as whistle read them, that are out of
  * the clip's order: none when the words that survived come in order. Other
- * words are whistle's guesses where audio was missing, which this skips.
+ * words are whistle's guesses where audio was missing, which this skips,
+ * and so is "the": the clip says it twice, so a "the" whistle guesses in a
+ * gap ("cube 20s, the meters wide" on CI, with in-order audio) matched the
+ * clip's second one and put every word after it out of order. The clip's
+ * other words, each said once, place the audio.
  */
 function outOfOrder(text: string | null): string[] {
   const said = (text ?? "")
@@ -421,7 +425,7 @@ function outOfOrder(text: string | null): string[] {
   let at = 0;
   for (const word of said) {
     const meant = READINGS[word] ?? (CLIP_WORDS.includes(word) ? [word] : []);
-    for (const m of meant) {
+    for (const m of meant.filter((m) => m !== "the")) {
       const next = CLIP_WORDS.indexOf(m, at);
       if (next < 0) wrong.push(word);
       else at = next + 1;

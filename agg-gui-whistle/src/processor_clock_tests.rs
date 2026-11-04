@@ -6,7 +6,7 @@ use super::*;
 const PERIOD: f64 = 1024.0;
 
 fn verdicts(times: &[f64]) -> Vec<bool> {
-    let mut clock = ProcessorClock::new(PERIOD);
+    let mut clock = ProcessorClock::new(PERIOD, None);
     times.iter().map(|t| clock.fresh(*t)).collect()
 }
 
@@ -49,4 +49,18 @@ fn the_baseline_is_the_earliest_cadence_seen() {
     // Event 0 ran 600 ms late, event 1 on time: event 2, 1 100 ms late by
     // the real cadence, is stale.
     assert_eq!(verdicts(&[2600.0, 3024.0, 5148.0]), vec![true, true, false]);
+}
+
+/// What Chrome did on a main thread that ran every event of a dictation's
+/// start late (times recorded in the demo, the node wired at 2097 ms):
+/// events 0 and 1 ran 1181 and 158 ms late, so by the cadence alone event
+/// 2, 1023 ms late, looked 865 ms late and its buffer, whose head already
+/// held event 4's speech, was pushed ahead of the speech before it. When
+/// the processor was wired bounds when event 0 was due, so it is stale.
+#[test]
+fn events_are_due_no_later_than_a_buffer_after_the_wiring() {
+    let times = [4302.0, 4303.0, 6192.0, 6193.0, 8467.0, 8468.0];
+    let mut clock = ProcessorClock::new(PERIOD, Some(2097.0));
+    let verdicts: Vec<bool> = times.iter().map(|t| clock.fresh(*t)).collect();
+    assert_eq!(verdicts, vec![false, true, false, true, false, true]);
 }
