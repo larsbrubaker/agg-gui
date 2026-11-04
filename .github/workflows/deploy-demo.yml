@@ -114,10 +114,13 @@ jobs:
   # typing and the Ctrl+C system-clipboard chord work (keyboard), and that
   # the on-screen keyboard's microphone dictates a whistle-rust test clip
   # into a field, downloads the model with progress, retries a failed
-  # download and reports a denied microphone (dictation*).  Deploy is
+  # download and reports a denied microphone (dictation*), and that a
+  # double-click on a File Browser folder opens it and Shift+click extends
+  # the selection (file_browser).  Deploy is
   # gated on this so a broken WASM build (panic on init, blank canvas,
   # font-load failure, shader regression) or an input regression (dead editors,
-  # broken clipboard chords) cannot ship to GitHub Pages.
+  # broken clipboard chords, lost double clicks or modifier keys) cannot ship
+  # to GitHub Pages.
   test:
     needs: build
     runs-on: ubuntu-26.04
@@ -162,7 +165,7 @@ jobs:
       - name: Run browser tests
         env:
           DICTATION_CLIP: ${{ github.workspace }}/whistle-rust/test-data/clips/en_samantha.wav
-        run: cd demo && bunx playwright test screenshot keyboard dictation
+        run: cd demo && bunx playwright test screenshot keyboard dictation file_browser
 
       - name: Upload screenshot artifact on failure
         if: failure()

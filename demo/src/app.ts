@@ -7,8 +7,10 @@
 import { setupScreenShare, tickScreenShare } from "./screen_share";
 
 type RenderFn      = (width: number, height: number, frame_ms: number) => void;
-type MouseXYFn     = (x: number, y: number) => void;
-type MouseXYBFn    = (x: number, y: number, button: number) => void;
+// Mouse events carry the DOM event's modifier keys (shift, ctrl, alt, meta):
+// demo-wasm hands them to agg-gui with each move, press and release.
+type MouseXYFn     = (x: number, y: number, shift: boolean, ctrl: boolean, alt: boolean, meta: boolean) => void;
+type MouseXYBFn    = (x: number, y: number, button: number, shift: boolean, ctrl: boolean, alt: boolean, meta: boolean) => void;
 type WheelFn       = (x: number, y: number, delta_y: number) => void;
 type KeyFn         = (key: string, shift: boolean, ctrl: boolean, alt: boolean, meta: boolean) => void;
 type VoidFn        = () => void;
@@ -179,7 +181,7 @@ function canvasPos(e: MouseEvent): [number, number] {
 canvas.addEventListener("mousemove", (e) => {
   if (!wasmModule) return;
   const [x, y] = canvasPos(e);
-  (wasmModule["on_mouse_move"] as MouseXYFn)(x, y);
+  (wasmModule["on_mouse_move"] as MouseXYFn)(x, y, e.shiftKey, e.ctrlKey, e.altKey, e.metaKey);
   // render() will fire on the next rAF tick; no extra call needed.
 });
 
@@ -188,14 +190,14 @@ canvas.addEventListener("mousedown", (e) => {
   e.preventDefault();
   canvas.focus();
   const [x, y] = canvasPos(e);
-  (wasmModule["on_mouse_down"] as MouseXYBFn)(x, y, e.button);
+  (wasmModule["on_mouse_down"] as MouseXYBFn)(x, y, e.button, e.shiftKey, e.ctrlKey, e.altKey, e.metaKey);
   syncMobileKeyboard();
 });
 
 canvas.addEventListener("mouseup", (e) => {
   if (!wasmModule) return;
   const [x, y] = canvasPos(e);
-  (wasmModule["on_mouse_up"] as MouseXYBFn)(x, y, e.button);
+  (wasmModule["on_mouse_up"] as MouseXYBFn)(x, y, e.button, e.shiftKey, e.ctrlKey, e.altKey, e.metaKey);
 });
 
 canvas.addEventListener("mouseleave", () => {
@@ -477,7 +479,7 @@ const ro = new ResizeObserver(() => {
   if (wasmModule) {
     // on_mouse_move with an out-of-bounds position marks the frame dirty
     // via the shared NEEDS_DRAW flag without side-effects on focus.
-    (wasmModule["on_mouse_move"] as MouseXYFn)(-1, -1);
+    (wasmModule["on_mouse_move"] as MouseXYFn)(-1, -1, false, false, false, false);
   }
 });
 ro.observe(canvas.parentElement!);

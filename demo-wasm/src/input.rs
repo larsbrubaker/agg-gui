@@ -7,9 +7,17 @@
 //! agg-gui input vocabulary and forward them to the singleton
 //! [`DEMO_APP`].  As a submodule of the crate root, this file accesses
 //! the thread-local state directly via `use crate::*`.
+//!
+//! Mouse moves, presses, releases, leaves and key presses go through one
+//! `agg_gui::shell_input::InputForwarder` ([`FORWARDER`]), as in the other
+//! shells: it counts each press's clicks (`ClickCount::Auto`, so a second
+//! press soon after and near the first is a double click that
+//! `agg_gui::event::is_double_click` sees) and carries the DOM event's own
+//! modifier keys, which `demo/src/app.ts` passes with every mouse event.
 
 use std::cell::{Cell, RefCell};
 
+use agg_gui::shell_input::{ClickCount, ForwarderEvent, InputForwarder};
 use agg_gui::{App, Key, Modifiers, MouseButton};
 use wasm_bindgen::prelude::*;
 
@@ -25,6 +33,10 @@ thread_local! {
     /// panic is logged earlier in the same console session — we just
     /// stop the cascade so the user sees it.
     static APP_POISONED_LOGGED: Cell<bool> = const { Cell::new(false) };
+
+    /// The canvas's input bookkeeping: click sequences, held buttons and
+    /// modifiers, the tracked cursor. One per page, like `DEMO_APP`.
+    static FORWARDER: RefCell<InputForwarder> = RefCell::new(InputForwarder::new());
 }
 
 /// Run `f` with a mutable borrow of `DEMO_APP`'s `App`, but skip the
@@ -53,6 +65,36 @@ fn with_app_mut(f: impl FnOnce(&mut App)) {
             }
         }
     });
+}
+
+/// Hand `event` to the app through [`FORWARDER`], under the same
+/// poisoned-borrow guard as every other event.
+fn forward(event: ForwarderEvent) {
+    with_app_mut(|app| {
+        FORWARDER.with(|f| {
+            if let Ok(mut forwarder) = f.try_borrow_mut() {
+                forwarder.platform(app, event);
+            }
+        });
+    });
+}
+
+fn dom_modifiers(shift: bool, ctrl: bool, alt: bool, meta: bool) -> Modifiers {
+    Modifiers {
+        shift,
+        ctrl,
+        alt,
+        meta,
+    }
+}
+
+fn dom_button(button: u8) -> MouseButton {
+    match button {
+        0 => MouseButton::Left,
+        1 => MouseButton::Middle,
+        2 => MouseButton::Right,
+        n => MouseButton::Other(n),
+    }
 }
 
 #[wasm_bindgen]
@@ -106,9 +148,15 @@ pub fn software_keyboard_enabled() -> bool {
     agg_gui::widgets::on_screen_keyboard::is_enabled()
 }
 
+/// The cursor moved, with the DOM event's modifier keys (they keep
+/// `current_modifiers()` exact during a drag and deliver a mid-drag Shift).
 #[wasm_bindgen]
-pub fn on_mouse_move(x: f64, y: f64) {
-    with_app_mut(|app| app.on_mouse_move(x, y));
+pub fn on_mouse_move(x: f64, y: f64, shift: bool, ctrl: bool, alt: bool, meta: bool) {
+    forward(ForwarderEvent::MouseMove {
+        x,
+        y,
+        modifiers: Some(dom_modifiers(shift, ctrl, alt, meta)),
+    });
     apply_canvas_cursor();
 }
 
@@ -126,29 +174,29 @@ fn apply_canvas_cursor() {
     }
 }
 
+/// A button went down. The forwarder counts the click (a quick second
+/// press near the first is a double click) and the press carries the DOM
+/// event's modifier keys (Shift/Ctrl/Cmd-click selection).
 #[wasm_bindgen]
-pub fn on_mouse_down(x: f64, y: f64, button: u8) {
+pub fn on_mouse_down(x: f64, y: f64, button: u8, shift: bool, ctrl: bool, alt: bool, meta: bool) {
     MOUSE_BUTTONS_DOWN.set(MOUSE_BUTTONS_DOWN.get().saturating_add(1));
-    let btn = match button {
-        0 => MouseButton::Left,
-        1 => MouseButton::Middle,
-        2 => MouseButton::Right,
-        n => MouseButton::Other(n),
-    };
-    with_app_mut(|app| app.on_mouse_down(x, y, btn, Modifiers::default()));
+    forward(ForwarderEvent::MouseDown {
+        at: Some((x, y)),
+        button: dom_button(button),
+        modifiers: Some(dom_modifiers(shift, ctrl, alt, meta)),
+        clicks: ClickCount::Auto,
+    });
     apply_canvas_cursor();
 }
 
 #[wasm_bindgen]
-pub fn on_mouse_up(x: f64, y: f64, button: u8) {
+pub fn on_mouse_up(x: f64, y: f64, button: u8, shift: bool, ctrl: bool, alt: bool, meta: bool) {
     MOUSE_BUTTONS_DOWN.set(MOUSE_BUTTONS_DOWN.get().saturating_sub(1));
-    let btn = match button {
-        0 => MouseButton::Left,
-        1 => MouseButton::Middle,
-        2 => MouseButton::Right,
-        n => MouseButton::Other(n),
-    };
-    with_app_mut(|app| app.on_mouse_up(x, y, btn, Modifiers::default()));
+    forward(ForwarderEvent::MouseUp {
+        at: Some((x, y)),
+        button: dom_button(button),
+        modifiers: Some(dom_modifiers(shift, ctrl, alt, meta)),
+    });
     apply_canvas_cursor();
 }
 
@@ -159,7 +207,7 @@ pub fn on_mouse_wheel(x: f64, y: f64, delta_y: f64) {
 
 #[wasm_bindgen]
 pub fn on_mouse_leave() {
-    with_app_mut(|app| app.on_mouse_leave());
+    forward(ForwarderEvent::MouseLeave);
 }
 
 #[wasm_bindgen]
@@ -219,13 +267,10 @@ pub fn on_touch_cancel(id: u32) {
 #[wasm_bindgen]
 pub fn on_key_down(key_str: &str, shift: bool, ctrl: bool, alt: bool, meta: bool) {
     if let Some(key) = parse_js_key(key_str) {
-        let mods = Modifiers {
-            shift,
-            ctrl,
-            alt,
-            meta,
-        };
-        with_app_mut(|app| app.on_key_down(key, mods));
+        forward(ForwarderEvent::KeyDown {
+            key,
+            modifiers: Some(dom_modifiers(shift, ctrl, alt, meta)),
+        });
     }
 }
 

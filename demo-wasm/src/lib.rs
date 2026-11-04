@@ -19,12 +19,17 @@
 //!
 //! WASM exports:
 //! - `render(width, height, frame_ms)` — full-frame render
-//! - `on_mouse_move/down/up/wheel/leave` — mouse events
+//! - `on_mouse_move/down/up(.., shift, ctrl, alt, meta)` — mouse events with
+//!   the DOM event's modifier keys, through an `InputForwarder` that counts
+//!   double clicks (`input.rs`); `on_mouse_wheel/leave`
 //! - `on_touch_start/move/end/cancel` — multi-touch events
 //! - `on_key_down` — keyboard events
 //! - `set_device_pixel_ratio` — DPR sync from the browser
 //! - `needs_draw` — JS animation loop polls this to skip idle frames
+//! - `widget_nodes(type_name)` — widgets' rects and properties, for page
+//!   automation (`automation_exports.rs`)
 
+mod automation_exports;
 mod clipboard_exports;
 mod fonts;
 mod input;
