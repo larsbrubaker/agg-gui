@@ -14,8 +14,8 @@ use agg_gui::{
 };
 use agg_gui_file_browser::{
     dialog_options, run_ready_local_tasks, BrowserConfig, BrowserDialogs, BrowserPage,
-    BrowserState, MoveAnswers, MoveController, MovePick, MoveRequest, NameRequest, ReplaceQuestion,
-    SaveAnswers, SaveController, SaveMode, SavePick, SaveRequest,
+    BrowserState, MoveAnswers, MoveController, MovePick, MoveRequest, NameRequest, ReplaceAnswer,
+    ReplaceQuestion, SaveAnswers, SaveController, SaveMode, SavePick, SaveRequest,
 };
 use agg_gui_files::{DynamicFolder, DynamicFolderLink, Folder, MemoryFolder};
 
@@ -560,6 +560,56 @@ fn move_accept_from_an_apps_page_answers_the_picked_folder() {
     let pick = picked.borrow_mut().take().expect("answered");
     assert_eq!((pick.target.name(), pick.copy), ("Drafts", false));
     assert!(c.is_accepted());
+}
+
+#[test]
+fn an_app_answering_save_beside_a_name_in_another_case_saves_without_asking() {
+    let sample = Sample::new();
+    let (answers, picked) = save_answers();
+    let heard = Rc::new(RefCell::new(None));
+    let hook_heard = Rc::clone(&heard);
+    // A volume that tells names apart by case: Report.txt is not report.txt.
+    let request = SaveRequest::new("Report")
+        .with_extension(".txt")
+        .with_replace_answer(Rc::new(move |target| {
+            *hook_heard.borrow_mut() = Some(target.file_name.to_string());
+            ReplaceAnswer::Save
+        }));
+    let c = SaveController::new(&sample.browser(), request, answers);
+    let mut app = app_over(save_page(&c));
+    click(&mut app, "Designs Row Item Collection", 2);
+    click(&mut app, ACCEPT, 1);
+    assert_eq!(heard.borrow().as_deref(), Some("Report.txt"));
+    assert_eq!(c.mode(), SaveMode::Normal, "no question is asked");
+    assert_eq!(
+        pick_of(&picked),
+        ("Designs".into(), "Report.txt".into(), false),
+        "the save goes ahead, replacing nothing"
+    );
+}
+
+#[test]
+fn an_app_answering_ask_asks_its_question_even_with_nothing_listed() {
+    let sample = Sample::new();
+    let (answers, picked) = save_answers();
+    let question = ReplaceQuestion::new("Check", "Sure?", "Go");
+    let asked = question.clone();
+    let request = SaveRequest::new("fresh")
+        .with_replace_answer(Rc::new(move |_| ReplaceAnswer::Ask(asked.clone())));
+    let c = SaveController::new(&sample.browser(), request, answers);
+    let mut app = app_over(save_page(&c));
+    click(&mut app, "Designs Row Item Collection", 2);
+    click(&mut app, ACCEPT, 1);
+    assert_eq!(
+        c.mode(),
+        SaveMode::Asking {
+            question,
+            file_name: "fresh".into()
+        }
+    );
+    assert!(picked.borrow().is_none());
+    c.confirm();
+    assert_eq!(pick_of(&picked), ("Designs".into(), "fresh".into(), false));
 }
 
 #[test]

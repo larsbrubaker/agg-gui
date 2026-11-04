@@ -17,6 +17,10 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 - `SaveController::keeping_folder_on_create`: Create Folder leaves the dialog in the folder
   showing, the new folder listed there, rather than opening it; without it the new folder opens,
   as before.
+- `ReplaceAnswer` and `SaveRequest::with_replace_answer`: an app's whole answer before each save:
+  ask its question, save without asking (`Save`, for a volume that tells names apart by case, so
+  `Report.mcx` beside `report.mcx` saves without a question and the pick replaces nothing), or
+  the dialog's own. It takes the place of a `with_replace_question` hook, which keeps working.
 
 ## [0.0.10] - 2026-11-03
 

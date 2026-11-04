@@ -15,7 +15,10 @@
 //! question hook, else the dialog's own question when a file of that name is already there
 //! ("Confirm Save As"), else saves. A file is already there when one has the name in any case
 //! (the cautious answer, as macOS and Windows volumes ignore case), so `Report.mcx` asks before
-//! replacing `report.mcx`; the hook's `SaveTarget::exists` says the same. A question goes to the app's [`QuestionHost`] when it has one
+//! replacing `report.mcx`; the hook's `SaveTarget::exists` says the same. An app that knows the
+//! whole answer (a volume telling names apart by case) answers through the request's
+//! [`ReplaceAnswer`](crate::ReplaceAnswer) hook instead: `Save` saves without asking, and the
+//! pick then replaces only a file of exactly that name. A question goes to the app's [`QuestionHost`] when it has one
 //! (its modal message box: confirming saves, cancelling stays); without one the controller asks
 //! in the page ([`SaveMode::Asking`]; the page's buttons call [`SaveController::confirm`] or
 //! [`SaveController::back`]). A question is about the folder showing as it was asked: once the
@@ -50,7 +53,7 @@ use std::rc::{Rc, Weak};
 use agg_gui_files::{tr, Folder};
 
 use crate::dialogs::{
-    BrowserDialogs, NameRequest, ReplaceQuestion, SavePick, SaveRequest, SaveTarget,
+    BrowserDialogs, NameRequest, ReplaceAnswer, ReplaceQuestion, SavePick, SaveRequest, SaveTarget,
 };
 use crate::memory::LocationFuture;
 use crate::move_dialog::place::DialogPlace;
@@ -341,13 +344,20 @@ impl SaveController {
             }
         };
         let exists = self.exists(&file_name);
-        let question = self.app_question(&file_name, exists).or_else(|| {
-            exists
-                .then(|| ReplaceQuestion::replace_existing(&(core.request.shown_name)(&file_name)))
-        });
+        let (question, exact) = match self.app_answer(&file_name, exists) {
+            ReplaceAnswer::Ask(question) => (Some(question), false),
+            ReplaceAnswer::Save => (None, true),
+            ReplaceAnswer::DialogsOwn => {
+                let shown = (core.request.shown_name)(&file_name);
+                (
+                    exists.then(|| ReplaceQuestion::replace_existing(&shown)),
+                    false,
+                )
+            }
+        };
         let asked_at = self.navigation();
         let Some(question) = question else {
-            return self.finish(file_name, asked_at);
+            return self.finish(file_name, asked_at, exact);
         };
         let host = core.questions.borrow().clone();
         match host {
@@ -357,7 +367,7 @@ impl SaveController {
                     question,
                     Box::new(move |save| {
                         if let (true, Some(core)) = (save, weak.upgrade()) {
-                            SaveController { core }.finish(file_name, asked_at);
+                            SaveController { core }.finish(file_name, asked_at, false);
                         }
                     }),
                 );
@@ -380,7 +390,7 @@ impl SaveController {
             _ => None,
         };
         if let Some(file_name) = asked {
-            self.finish(file_name, self.core.asked_at.get());
+            self.finish(file_name, self.core.asked_at.get(), false);
         }
     }
 
@@ -404,30 +414,50 @@ impl SaveController {
     /// header).
     fn exists(&self, file_name: &str) -> bool {
         let wanted = file_name.to_lowercase();
+        self.lists(|name| name.to_lowercase() == wanted)
+    }
+
+    /// Whether the showing folder lists a file whose name `matches`.
+    fn lists(&self, matches: impl Fn(&str) -> bool) -> bool {
         self.core
             .state
             .borrow()
             .active_container()
-            .is_some_and(|c| c.items().iter().any(|i| i.name().to_lowercase() == wanted))
+            .is_some_and(|c| c.items().iter().any(|i| matches(i.name())))
     }
 
-    /// The request's own question before saving as `file_name`, if it has one: its hook handed
-    /// the showing folder with the browser's state let go.
-    fn app_question(&self, file_name: &str, exists: bool) -> Option<ReplaceQuestion> {
-        let hook = self.core.request.replace_question.as_ref()?;
-        let folder = self.core.state.borrow().open_path().last().cloned()?;
+    /// The request's own answer before saving as `file_name`: its answer hook's, else its
+    /// question hook's (a question, or the dialog's own), each handed the showing folder with the
+    /// browser's state let go.
+    fn app_answer(&self, file_name: &str, exists: bool) -> ReplaceAnswer {
+        let request = &self.core.request;
+        if request.replace_answer.is_none() && request.replace_question.is_none() {
+            return ReplaceAnswer::DialogsOwn;
+        }
+        let folder = self.core.state.borrow().open_path().last().cloned();
+        let Some(folder) = folder else {
+            return ReplaceAnswer::DialogsOwn;
+        };
         let folder = folder.borrow();
-        hook(&SaveTarget {
+        let target = SaveTarget {
             folder: folder.as_ref(),
             file_name,
             exists,
-        })
+        };
+        match (&request.replace_answer, &request.replace_question) {
+            (Some(hook), _) => hook(&target),
+            (None, Some(hook)) => {
+                hook(&target).map_or(ReplaceAnswer::DialogsOwn, ReplaceAnswer::Ask)
+            }
+            (None, None) => ReplaceAnswer::DialogsOwn,
+        }
     }
 
     /// Hands the showing folder over with `file_name` (the user has agreed to any question
     /// asked while the browser's navigation count was `asked_at`). A folder changed since saves
-    /// nothing: the question was never about it.
-    fn finish(&self, file_name: String, asked_at: u64) {
+    /// nothing: the question was never about it. `exact`: the app answered `Save`, so the pick
+    /// replaces only a file of exactly that name.
+    fn finish(&self, file_name: String, asked_at: u64, exact: bool) {
         let core = &self.core;
         if core.place.accepted.get() || !self.can_save() {
             return;
@@ -440,7 +470,10 @@ impl SaveController {
         if !core.state.borrow().can_hand_over_active_container() {
             return self.busy();
         }
-        let exists = self.exists(&file_name);
+        let exists = match exact {
+            true => self.lists(|name| name == file_name),
+            false => self.exists(&file_name),
+        };
         core.place.accepted.set(true);
         let taken = core.state.borrow_mut().take_active_container();
         match taken.map(Rc::try_unwrap) {

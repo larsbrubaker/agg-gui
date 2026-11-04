@@ -21,7 +21,10 @@
 //! how a typed name becomes one and how a file's name shows in the field; [`SavePick`] answers),
 //! and the app writes the file. Before replacing a file the dialog asks; an app with more to say
 //! about a target (the file is open elsewhere) asks its own question through
-//! [`SaveRequest::with_replace_question`]. The Open dialog ([`OpenRequest`]) picks files to open
+//! [`SaveRequest::with_replace_question`]; an app that knows the whole answer for its folders (a
+//! volume that tells names apart by case) answers every save through
+//! [`SaveRequest::with_replace_answer`] ([`ReplaceAnswer`]: ask, save without asking, or the dialog's
+//! own). The Open dialog ([`OpenRequest`]) picks files to open
 //! from the folders it browses, answering with them and their folder ([`OpenPick`]); reading
 //! them is the app's.
 //!
@@ -328,6 +331,25 @@ pub type ShownName = Rc<dyn Fn(&str) -> String>;
 /// replace a file already there, saving straight away otherwise).
 pub type ReplaceQuestionHook = Rc<dyn Fn(&SaveTarget<'_>) -> Option<ReplaceQuestion>>;
 
+/// What the app answers before a save ([`SaveRequest::with_replace_answer`]), asked as
+/// [`ReplaceQuestionHook`] is.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ReplaceAnswer {
+    /// Ask this question first (or, for a refusal, say why the save can't go ahead).
+    Ask(ReplaceQuestion),
+    /// Save without asking: the app knows nothing is there to replace (or that replacing it
+    /// needs no question). The pick's `replaces` then says whether a file of exactly that name is
+    /// listed.
+    Save,
+    /// The dialog's own: ask to replace a file already there in any case, else save.
+    DialogsOwn,
+}
+
+/// The app's whole answer before each save ([`ReplaceAnswer`]), asked of every save the namer
+/// accepted with the state let go; it takes the place of a [`ReplaceQuestionHook`].
+pub type ReplaceAnswerHook = Rc<dyn Fn(&SaveTarget<'_>) -> ReplaceAnswer>;
+
 /// The file namer adding `extension` (".mcx") unless the name already ends with it, in any
 /// case.
 pub fn append_extension(extension: &str) -> FileNamer {
@@ -368,6 +390,7 @@ pub struct SaveRequest {
     pub namer: FileNamer,
     pub shown_name: ShownName,
     pub replace_question: Option<ReplaceQuestionHook>,
+    pub replace_answer: Option<ReplaceAnswerHook>,
     pub placeholder: Option<String>,
     pub focus_id: Option<agg_gui::focus::FocusId>,
 }
@@ -382,6 +405,7 @@ impl SaveRequest {
             namer: Rc::new(|typed: &str| Ok(typed.to_string())),
             shown_name: Rc::new(|name: &str| name.to_string()),
             replace_question: None,
+            replace_answer: None,
             placeholder: None,
             focus_id: None,
         }
@@ -437,6 +461,13 @@ impl SaveRequest {
         self.replace_question = Some(hook);
         self
     }
+
+    /// The request asking `hook` before each save for the app's whole answer (see
+    /// [`ReplaceAnswer`]); it takes the place of any [`Self::with_replace_question`] hook.
+    pub fn with_replace_answer(mut self, hook: ReplaceAnswerHook) -> Self {
+        self.replace_answer = Some(hook);
+        self
+    }
 }
 
 impl std::fmt::Debug for SaveRequest {
@@ -445,6 +476,7 @@ impl std::fmt::Debug for SaveRequest {
             .field("title", &self.title)
             .field("initial_name", &self.initial_name)
             .field("replace_question", &self.replace_question.is_some())
+            .field("replace_answer", &self.replace_answer.is_some())
             .finish()
     }
 }
