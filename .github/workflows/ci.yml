@@ -11,6 +11,20 @@ on:
     branches: [main]
   pull_request:
 
+# Every job builds into one target/ on a runner's fixed disk, and the test job
+# links about 45 test binaries per feature set of agg-gui-file-browser alone.
+# On Linux each test binary carries the DWARF of everything it links, so full
+# debuginfo is most of what fills the disk. Line tables keep file:line in
+# panics and backtraces, which is all a CI failure is read by; local builds
+# keep the full debuginfo of `[profile.dev]` in the root Cargo.toml.
+# Incremental state only speeds up recompiling a crate whose source changed,
+# which never happens within a job, so in CI it is written for nothing.
+# Together they take agg-gui-file-browser's two test builds from 12 GB of
+# target/ to 4.6 GB (measured with each test binary holding its own DWARF).
+env:
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
+  CARGO_INCREMENTAL: "0"
+
 jobs:
   # fmt and clippy run on the toolchain pinned in rust-toolchain.toml, so a
   # newer stable's lints never fail CI unannounced. clippy covers every
@@ -58,7 +72,9 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             agg-gui/target
-          key: ${{ runner.os }}-cargo-lint-${{ hashFiles('agg-gui/**/Cargo.toml', 'agg-gui/rust-toolchain.toml') }}
+          # The workflow is in the key because its env (debuginfo, incremental)
+          # decides what lands in target/.
+          key: ${{ runner.os }}-cargo-lint-${{ hashFiles('agg-gui/**/Cargo.toml', 'agg-gui/rust-toolchain.toml', 'agg-gui/.github/workflows/ci.yml') }}
 
       # Not `--all`: that also formats local path dependencies, i.e. the
       # sibling checkouts. In this virtual workspace plain `cargo fmt` covers
@@ -126,14 +142,21 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
+      # Crate sources only, not target/: this job's target/ is too big to
+      # cache. Saved, it was a 9.2 GB archive that a hit would download and
+      # unpack onto the same disk the build then fills, and it took most of
+      # the repo's 10 GiB cache quota. It never paid back either: its key
+      # changes with every version bump, and the recent runs all missed.
+      # The restore key lets a bump start from the previous sources; cargo's
+      # own cleanup of long-unused downloads keeps them from piling up.
       - name: Cache cargo
         uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            agg-gui/target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('agg-gui/**/Cargo.toml') }}
+          key: ${{ runner.os }}-cargo-sources-${{ hashFiles('agg-gui/**/Cargo.toml') }}
+          restore-keys: ${{ runner.os }}-cargo-sources-
 
       - name: Build library
         run: cargo build -p agg-gui
@@ -210,6 +233,14 @@ jobs:
       - name: Run dictation tests
         run: cargo test -p agg-gui-whistle --features native-mic,native-download
 
+      # What the job left of the disk, so a build creeping back towards the
+      # runner's limit shows in a passing run's log before it fails one.
+      - name: Disk left
+        if: always()
+        run: |
+          df -h .
+          du -sh target
+
   # The clipboard feature's per-platform code (`clipboard::has_image` asks the
   # Windows and macOS clipboards for a picture format directly). A check, not
   # a test run, to keep these runners cheap.
@@ -256,7 +287,9 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             agg-gui/target
-          key: ${{ runner.os }}-cargo-clipboard-${{ hashFiles('agg-gui/**/Cargo.toml') }}
+          # The toolchain pin and the workflow's env decide what lands in
+          # target/, so they are in the key with the manifests.
+          key: ${{ runner.os }}-cargo-clipboard-${{ hashFiles('agg-gui/**/Cargo.toml', 'agg-gui/rust-toolchain.toml', 'agg-gui/.github/workflows/ci.yml') }}
 
       - name: Check clipboard feature
         run: cargo check -p agg-gui --features clipboard
