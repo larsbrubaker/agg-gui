@@ -1,14 +1,15 @@
 //! What every item on the computer's disk takes from its path, for the disk provider (`disk`)
 //! and the zip provider (`zip_folder`) alike: the shown name, the dates, the ID, and the location
-//! key a folder tree knows a folder by.
+//! key a folder tree knows a folder by. Reading a key back and comparing two serve only the disk
+//! provider, so they live in its `disk::keys`.
 //!
 //! The ID's exact text is fixed, since an app's thumbnail cache is keyed by it (golden IDs pin
 //! it): a 64-bit FNV-1a hash over the UTF-16 bytes of the path followed by the last write time in
 //! round-trip UTC form, so the ID changes when the file is written. An entry inside a zip archive
 //! hashes the archive's path and the entry's path the same way ([`utf16_hash`]).
 
-use std::ffi::{OsStr, OsString};
-use std::path::{Component, Path, PathBuf};
+use std::ffi::OsStr;
+use std::path::{Component, Path};
 use std::time::Duration;
 
 use crate::sort::system_time_ticks;
@@ -129,8 +130,8 @@ pub fn round_trip_utc(since_epoch: Duration) -> String {
 /// "%25", "%2F" and "%00" (so a key never holds a raw NUL) and every byte that is not text
 /// "%XX", so every byte stays apart (two folders whose names differ only in bytes that are not
 /// text, possible on Linux, get different keys). `/a/b` is `/a/b/`, `C:\x` is `C://x/`. The key
-/// lives only in memory and is never saved; [`disk_key_path`] reads it back and
-/// [`disk_key_within`] compares two.
+/// lives only in memory and is never saved; the disk provider's `disk_key_path` reads it back and
+/// its `disk_key_within` compares two.
 pub fn disk_location_key(path: &Path) -> String {
     let mut key = String::new();
     for part in path.components() {
@@ -164,7 +165,7 @@ fn escape(part: &OsStr) -> String {
 }
 
 /// A drive part ("c:", or "\\?\c:") with its letter upper case; any other part as it is.
-fn drive_upper(part: &str) -> String {
+pub(crate) fn drive_upper(part: &str) -> String {
     let bytes = part.as_bytes();
     let letter_at = match bytes {
         [_, b':'] => Some(0),
@@ -178,69 +179,5 @@ fn drive_upper(part: &str) -> String {
             out
         }
         None => part.to_string(),
-    }
-}
-
-/// A key's parts, the first (a drive) upper case; `None` for a text no folder keys.
-fn key_parts(key: &str) -> Option<Vec<String>> {
-    if !key.is_empty() && !key.ends_with('/') {
-        return None;
-    }
-    let mut parts: Vec<String> = key.split_terminator('/').map(str::to_string).collect();
-    if let Some(first) = parts.first_mut() {
-        *first = drive_upper(first);
-    }
-    Some(parts)
-}
-
-/// A part's bytes from its key text; `None` for a malformed escape.
-fn unescape(part: &str) -> Option<Vec<u8>> {
-    let (bytes, mut out, mut i) = (part.as_bytes(), Vec::new(), 0);
-    while i < bytes.len() {
-        if bytes[i] == b'%' {
-            let hex = part.get(i + 1..i + 3)?;
-            out.push(u8::from_str_radix(hex, 16).ok()?);
-            i += 3;
-        } else {
-            out.push(bytes[i]);
-            i += 1;
-        }
-    }
-    Some(out)
-}
-
-/// The path a folder's location key ([`disk_location_key`]) names; `None` for a text no folder
-/// keys, or a name whose bytes this computer can't hold as a path.
-pub fn disk_key_path(key: &str) -> Option<PathBuf> {
-    let mut path = PathBuf::new();
-    for part in key_parts(key)? {
-        if part.is_empty() {
-            path.push(std::path::MAIN_SEPARATOR_STR);
-            continue;
-        }
-        path.push(os_string(unescape(&part)?)?);
-    }
-    Some(path)
-}
-
-/// `bytes` as a name: text anywhere, other bytes as they are where a name holds any bytes.
-fn os_string(bytes: Vec<u8>) -> Option<OsString> {
-    match String::from_utf8(bytes) {
-        Ok(text) => Some(OsString::from(text)),
-        #[cfg(unix)]
-        Err(e) => Some(std::os::unix::ffi::OsStringExt::from_vec(e.into_bytes())),
-        #[cfg(not(unix))]
-        Err(_) => None,
-    }
-}
-
-/// Whether the folder keyed `inner` ([`disk_location_key`]) is the one keyed `outer` or inside
-/// it: `outer`'s parts start `inner`'s, compared part by part as paths are (so "Designs2" is
-/// beside "Designs"), a drive letter in either case naming one drive. The parts are read from the
-/// keys' own text, so the rule is the same on every computer.
-pub fn disk_key_within(inner: &str, outer: &str) -> bool {
-    match (key_parts(inner), key_parts(outer)) {
-        (Some(inner), Some(outer)) => inner.starts_with(&outer),
-        _ => false,
     }
 }

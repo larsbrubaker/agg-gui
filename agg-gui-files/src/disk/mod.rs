@@ -9,14 +9,15 @@
 //! [`disk_location_key`]) and the same place, the computer.
 //!
 //! Files: `rules` ([`DiskRules`], [`AllFiles`]), `paths` (names, dates, IDs, free names, location
-//! keys), `file`, `folder_link`, `folder` (the folder and its listing), `folder_writes` (add,
-//! remove, rename, move; [`MovedPath`]), `copy` (copying in, keeping the originals, also as a
-//! task) with `copy_tree` (a folder read into a [`CopyNode`] tree and written out), `live_refresh`
+//! keys), `keys` (a location key read back as a path, and one key within another), `file`,
+//! `folder_link`, `folder` (the folder and its listing), `folder_writes` (add, remove, rename,
+//! move; [`MovedPath`]), `copy` (copying in, keeping the originals, also as a task) with
+//! `copy_tree` (a folder read into a [`CopyNode`] tree and written out), `live_refresh`
 //! (relisting after an outside change) over `monitor` (the directory watch an app registers),
 //! `recorded` (the recorded writes) with `history_steps` ([`DiskStep`], how each is taken back
-//! and replayed), `quick_look` (whether a folder has folders, for a tree's arrow), `search` (a folder searching
-//! itself), `computer` ([`ComputerFolder`], the user's folders and the drives) and `trash` (the
-//! system trash a remove sends items to, and puts them back from).
+//! and replayed), `quick_look` (whether a folder has folders, for a tree's arrow), `search` (a
+//! folder searching itself), `computer` ([`ComputerFolder`], the user's folders and the drives)
+//! and `trash` (the system trash a remove sends items to, and puts them back from).
 //!
 //! Everything here reads `std::fs`. In the browser (wasm32-unknown-unknown) there is no disk:
 //! every read fails, so a folder lists its "Missing directory" row and every write fails.
@@ -29,6 +30,7 @@ mod folder;
 mod folder_link;
 mod folder_writes;
 mod history_steps;
+mod keys;
 mod live_refresh;
 mod monitor;
 mod paths;
@@ -38,10 +40,7 @@ mod rules;
 mod search;
 mod trash;
 
-pub use crate::disk_paths::{
-    disk_item_id, disk_item_id_at, disk_key_path, disk_key_within, disk_location_key,
-    round_trip_utc,
-};
+pub use crate::disk_paths::{disk_item_id, disk_item_id_at, disk_location_key, round_trip_utc};
 pub use computer::{drive_roots, ComputerFolder, ComputerFolders};
 pub use copy_tree::{gather, gather_item, read_dir_node, sanitize_file_name, write_node, CopyNode};
 pub use file::{subscribe_file_renamed, DiskFile, FileRenamedListener};
@@ -49,6 +48,7 @@ pub use folder::DiskFolder;
 pub use folder_link::DiskFolderLink;
 pub use folder_writes::MovedPath;
 pub use history_steps::DiskStep;
+pub use keys::{disk_key_path, disk_key_within};
 pub use live_refresh::RefreshInterval;
 pub use monitor::{
     directory_monitor, set_directory_monitor, DirectoryChanged, DirectoryMonitor, DirectoryWatch,
