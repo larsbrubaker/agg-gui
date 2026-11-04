@@ -7,9 +7,9 @@
 //!   parallel tests never share (or reach) a clipboard;
 //! - native without the feature: no clipboard (reads find nothing);
 //! - the browser: `wasm_clipboard`, bridged to the page's copy / cut / paste
-//!   events by `web_adapter`; a copy is also handed to the browser's
-//!   asynchronous Clipboard API, so one made without a copy event (a menu's
-//!   Copy) reaches the system clipboard too.
+//!   events by `web_adapter`; a copy (text, rich text, or a picture as PNG)
+//!   is also handed to the browser's asynchronous Clipboard API, so one made
+//!   without a copy event (a menu's Copy) reaches the system clipboard too.
 //!
 //! `router.rs` holds the routing decision these share; `mod.rs` the public API.
 
@@ -271,10 +271,23 @@ mod browser {
         crate::wasm_clipboard::has_image()
     }
 
-    /// The browser only receives pictures from a paste; writing one to the
-    /// system clipboard would need the asynchronous `ClipboardItem` API.
-    pub(in crate::clipboard) fn set_image(_: ClipboardImage) -> bool {
-        false
+    /// Keep the picture for this page's own paste and write it to the
+    /// system clipboard as `image/png`; `true` when that write was started.
+    /// A picture that fails to encode is logged and leaves the clipboard as
+    /// it was.
+    pub(in crate::clipboard) fn set_image(image: ClipboardImage) -> bool {
+        let png = match image.to_png() {
+            Ok(png) => png,
+            Err(err) => {
+                web_sys::console::error_1(
+                    &format!("agg-gui: the copied picture could not be encoded as PNG: {err}")
+                        .into(),
+                );
+                return false;
+            }
+        };
+        crate::wasm_clipboard::set_image(image);
+        crate::wasm_clipboard::write_system_png(&png)
     }
 }
 

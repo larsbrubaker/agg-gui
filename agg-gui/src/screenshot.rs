@@ -267,10 +267,10 @@ fn unique_download_path(dir: &std::path::Path, filename: &str) -> std::path::Pat
     unreachable!("unbounded integer iterator should always produce a path")
 }
 
-/// Goes through [`crate::clipboard`], so it lands on the system clipboard only
-/// once the app has called `use_system_clipboard` (and on a simulated one in
-/// tests).
-#[cfg(all(not(target_arch = "wasm32"), feature = "clipboard"))]
+/// Goes through [`crate::clipboard`], so natively it lands on the system
+/// clipboard only once the app has called `use_system_clipboard` (and on a
+/// simulated one in tests); in the browser it is written as a PNG.
+#[cfg(any(target_arch = "wasm32", feature = "clipboard"))]
 fn copy_rgba_to_clipboard_impl(
     rgba: &[u8],
     width: u32,
@@ -311,22 +311,6 @@ fn download_png(
 }
 
 #[cfg(target_arch = "wasm32")]
-fn copy_rgba_to_clipboard_impl(
-    rgba: &[u8],
-    width: u32,
-    height: u32,
-) -> Result<ScreenshotExportOutcome, ScreenshotExportError> {
-    let png = encode_png_rgba(rgba, width, height)?;
-    if wasm_copy_png_to_clipboard(&png) {
-        Ok(ScreenshotExportOutcome::Started)
-    } else {
-        Err(ScreenshotExportError::Unsupported(
-            "browser image clipboard API is unavailable",
-        ))
-    }
-}
-
-#[cfg(target_arch = "wasm32")]
 #[wasm_bindgen::prelude::wasm_bindgen(inline_js = r#"
 export function wasm_download_png(filename, bytes) {
     try {
@@ -346,26 +330,9 @@ export function wasm_download_png(filename, bytes) {
         return false;
     }
 }
-
-export function wasm_copy_png_to_clipboard(bytes) {
-    try {
-        if (!navigator.clipboard || typeof ClipboardItem === "undefined") {
-            return false;
-        }
-        const blob = new Blob([bytes], { type: "image/png" });
-        navigator.clipboard
-            .write([new ClipboardItem({ "image/png": blob })])
-            .catch(err => console.error("agg-gui screenshot clipboard failed", err));
-        return true;
-    } catch (err) {
-        console.error("agg-gui screenshot clipboard failed", err);
-        return false;
-    }
-}
 "#)]
 extern "C" {
     fn wasm_download_png(filename: &str, bytes: &[u8]) -> bool;
-    fn wasm_copy_png_to_clipboard(bytes: &[u8]) -> bool;
 }
 
 // ─── Capture-aware render orchestration ─────────────────────────────────

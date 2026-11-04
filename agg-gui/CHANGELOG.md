@@ -201,6 +201,14 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Changed
 
+- In the browser, `clipboard::set_image_rgba` puts the picture on the user's clipboard: it is
+  encoded as PNG and written with `navigator.clipboard.write` (a `ClipboardItem` built inside the
+  call, so Safari accepts it from a click or menu handler), and returns `true` once that write is
+  started. A refused write is logged to the console. The page also keeps the picture, so its own
+  paste right after gets it back (`get_image_rgba`, `has_image`) until a later copy replaces it.
+  `MarkdownView`'s Copy Image and `screenshot::copy_rgba_to_clipboard` now work on the web through
+  it (0.5.6).
+
 - A showing `ModalSheet` offers a key nothing focused took to its own content's
   `on_unconsumed_key` (topmost first) before its default / cancel actions, and swallows only what
   the content leaves, so a dialog page hears its accelerators (F5) whether its field, nothing, or

@@ -14,7 +14,11 @@
 //! `web_adapter::install_keyboard_listeners` bridges to the browser's
 //! `copy` / `cut` / `paste` events; a paste's text, HTML and picture arrive
 //! through the `paste` event (`web_paste`), so in the browser [`get_text`],
-//! [`get_html`] and [`get_image_rgba`] answer what the latest paste carried.
+//! [`get_html`] and [`get_image_rgba`] answer what the latest paste carried,
+//! or this page's own latest copy when that came after it. Every copy is also
+//! handed to the browser's asynchronous Clipboard API, so it reaches the
+//! user's clipboard: text and HTML as themselves, a picture
+//! ([`set_image_rgba`]) as `image/png`.
 //!
 //! [`simulate`] swaps in an in-process clipboard for the calling thread (C#
 //! agg-sharp's `Clipboard.SetSystemClipboard(new SimulatedClipboard())`), so
@@ -84,6 +88,13 @@ impl ClipboardImage {
     pub fn into_rgba(self) -> Vec<u8> {
         self.rgba
     }
+
+    /// The picture as a PNG file: the `image/png` the browser's clipboard
+    /// takes (it has no raw-pixel picture format).
+    #[cfg(any(test, target_arch = "wasm32"))]
+    pub(crate) fn to_png(&self) -> Result<Vec<u8>, crate::screenshot::ScreenshotExportError> {
+        crate::screenshot::encode_png_rgba(&self.rgba, self.width, self.height)
+    }
 }
 
 /// What an in-process clipboard holds. Like a system clipboard it holds one
@@ -111,7 +122,7 @@ impl Contents {
         self.image = None;
     }
 
-    fn put_image(&mut self, image: ClipboardImage) {
+    pub(crate) fn put_image(&mut self, image: ClipboardImage) {
         self.text = None;
         self.html = None;
         self.image = Some(image);
@@ -270,8 +281,16 @@ pub fn html_fragment_for_clipboard(html_text: &str) -> String {
 
 /// Try to write an RGBA image to the clipboard: `width * height * 4` bytes
 /// of RGBA8, top row first. `false` when the clipboard can't take it (a
-/// malformed buffer, no system clipboard, or the browser, which only
-/// receives pictures from a paste).
+/// malformed buffer, or no system clipboard).
+///
+/// In the browser the picture is kept for this page's own paste and written
+/// to the user's clipboard as a PNG through `navigator.clipboard.write`;
+/// `true` means that write was started. Call it from the click or menu
+/// handler of the user's Copy: Safari only accepts a clipboard write made
+/// inside the gesture. The write finishes asynchronously, and a refusal
+/// (permission, an unsupported browser) is logged to the console. `false`
+/// in the browser means it has no Clipboard API for pictures (no secure
+/// context, or no `ClipboardItem`); the page's own paste still gets it.
 pub fn set_image_rgba(data: &[u8], width: u32, height: u32) -> bool {
     let Some(image) = ClipboardImage::new(width, height, data.to_vec()) else {
         return false;
@@ -483,6 +502,40 @@ mod tests {
         assert_eq!(contents.text, None);
         assert_eq!(contents.html.as_deref(), Some("<p>html only</p>"));
         assert_eq!(contents.image, None, "the earlier picture is gone");
+    }
+
+    #[test]
+    fn picture_encodes_as_a_png_of_the_same_pixels() {
+        // The browser's clipboard gets a copied picture as this PNG; pasted
+        // anywhere it must show exactly the copied pixels, alpha included.
+        let rgba: Vec<u8> = (0..3 * 2 * 4).map(|i| (i * 37 % 256) as u8).collect();
+        let image = ClipboardImage::new(3, 2, rgba.clone()).expect("3x2 RGBA");
+        let png = image.to_png().expect("encodes");
+        let mut reader = png::Decoder::new(png.as_slice())
+            .read_info()
+            .expect("a PNG header");
+        let mut decoded = vec![0; reader.output_buffer_size()];
+        let frame = reader.next_frame(&mut decoded).expect("one frame");
+        assert_eq!((frame.width, frame.height), (3, 2));
+        assert_eq!(frame.color_type, png::ColorType::Rgba);
+        assert_eq!(frame.bit_depth, png::BitDepth::Eight);
+        assert_eq!(&decoded[..frame.buffer_size()], rgba.as_slice());
+    }
+
+    #[test]
+    fn copied_picture_stays_until_a_text_copy_replaces_it() {
+        // The browser keeps its own copy in a `Contents` so the page's paste
+        // right after its own Copy Image gets the picture back.
+        let mut contents = Contents::default();
+        contents.put_rich_text("old", "<b>old</b>");
+        let picture = ClipboardImage::new(2, 1, RED_THEN_CLEAR.to_vec()).expect("2x1 RGBA");
+        contents.put_image(picture.clone());
+        assert_eq!(contents.image, Some(picture));
+        assert_eq!(contents.text, None, "the picture replaces the text");
+        assert_eq!(contents.html, None, "and the HTML");
+        contents.put_text("later");
+        assert_eq!(contents.image, None, "a later text copy replaces it");
+        assert_eq!(contents.text.as_deref(), Some("later"));
     }
 
     #[test]
