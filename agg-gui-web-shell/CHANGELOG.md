@@ -191,6 +191,17 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   with MatterCAD's editor sliding in: Firefox 157 painted 6 frames in the
   half-second slide before and 24 after, the same as Chrome. Only the
   browser's WebGPU is asked; wgpu's WebGL2 backend is unchanged.
+- Resizing the window or the devtools panel in Firefox no longer shows a
+  black canvas for several frames in a row instead of the last picture.
+  Setting a canvas's size clears it, and the shell resized on every tick,
+  even on one that could not paint because the GPU still held the frames
+  allowed in flight (in Firefox, which reports finished frames late, most
+  resize ticks). The backing store now takes a new size only on a tick that
+  paints: while the GPU is busy the canvas keeps its size and scale, and the
+  host's geometry and the paint stay with it, so the browser stretches the
+  last frame; the first tick that can paint applies the size and paints it.
+  Without a GPU that can paint (init, a rebuild, a lost device) the size
+  applies at once, as before.
 - Every frame starts from the theme's background: an area no widget paints
   shows the background, never the canvas's initial transparent black or an
   earlier frame's drawing.
