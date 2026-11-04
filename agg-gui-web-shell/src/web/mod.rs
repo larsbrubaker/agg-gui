@@ -274,7 +274,9 @@ where
     // one each tick drains.
     agg_gui::ui_thread::mark_current_thread_as_ui_thread();
     viewport_fit::set_enabled(!config.keyboard_needs_focus);
-    let (_, scale, _) = frame::size_backing_store(&canvas);
+    // No GPU yet, so nothing to wait for: the size applies at once.
+    let (_, scale, _) =
+        frame::size_backing_store(&canvas, crate::backing_resize::PaintReadiness::NoGpu);
     agg_gui::set_device_scale(scale);
     POLICY.with(|p| p.set(config.redraw_policy));
     CANVAS.with(|c| *c.borrow_mut() = Some(canvas.clone()));

@@ -10,8 +10,9 @@
 //! sensors/fullscreen → `on_tick` → drain `agg_gui::ui_thread` → decide →
 //! (`on_frame` → `paint` → `end_frame` → `after_paint` → present →
 //! `after_present`) → `on_idle` → run on or sleep. Every decision is delegated
-//! to a platform-neutral module (`dom_math::fit_backing`, `policy`,
-//! `frames_in_flight`, `recovery`, `frame_schedule`) that is unit tested.
+//! to a platform-neutral module (`dom_math::fit_backing`, `backing_resize`,
+//! `policy`, `frames_in_flight`, `recovery`, `frame_schedule`) that is unit
+//! tested.
 
 use std::cell::RefCell;
 use std::sync::Arc;
@@ -24,6 +25,7 @@ use wasm_bindgen::JsValue;
 use super::gpu::{Acquire, WebGpu};
 use super::{lifecycle, mark_dirty, report_fatal, INPUT_SINCE_FRAME, POINTERS, POLICY, PRESENTED};
 use super::{platform, sensors, APP, CANVAS, CONFIG, CURSOR, DIRTY, FIRST_PAINT, HOST};
+use crate::backing_resize::{plan_backing, Backing, PaintReadiness};
 use crate::config::RedrawPolicy;
 use crate::dom_math::{fit_backing, sanitize_dpr};
 use crate::error::WebShellError;
@@ -134,22 +136,51 @@ pub(super) fn input_scale() -> f64 {
 /// the surface `configure` never disagrees with it and resizes every tick).
 /// A full-window canvas is first capped at the visible viewport's bottom
 /// ([`super::viewport_fit`]), so the client size read here is what shows.
+/// A new size waits while the GPU is too busy to paint this tick
+/// ([`crate::backing_resize`]): the canvas, and the size and scale returned,
+/// stay as they are, and the loop is marked dirty so it ticks on until a
+/// tick that can paint applies the size.
 /// Returns the size, the scale it was built at, and whether it changed.
-pub(super) fn size_backing_store(canvas: &web_sys::HtmlCanvasElement) -> ((u32, u32), f64, bool) {
+pub(super) fn size_backing_store(
+    canvas: &web_sys::HtmlCanvasElement,
+    readiness: PaintReadiness,
+) -> ((u32, u32), f64, bool) {
     super::viewport_fit::fit(canvas);
-    let ((w, h), scale) = fit_backing(
+    let (size, scale) = fit_backing(
         canvas.client_width() as f64,
         canvas.client_height() as f64,
         current_dpr(),
         MAX_DIM.with(|m| m.get()),
     );
-    SCALE.with(|s| s.set(scale));
-    let changed = canvas.width() != w || canvas.height() != h;
-    if changed {
-        canvas.set_width(w);
-        canvas.set_height(h);
+    let current = Backing {
+        size: (canvas.width(), canvas.height()),
+        scale: SCALE.with(|s| s.get()),
+    };
+    let plan = plan_backing(current, Backing { size, scale }, readiness);
+    SCALE.with(|s| s.set(plan.backing.scale));
+    if plan.resize {
+        canvas.set_width(plan.backing.size.0);
+        canvas.set_height(plan.backing.size.1);
     }
-    ((w, h), scale, changed)
+    if plan.deferred {
+        mark_dirty();
+    }
+    (plan.backing.size, plan.backing.scale, plan.resize)
+}
+
+/// Whether this tick can paint, for [`size_backing_store`]. Expires stalled
+/// frames first, so a gate freed by the expiry paints, and resizes, this tick.
+fn paint_readiness() -> PaintReadiness {
+    let ready = GPU.with(|g| matches!(&*g.borrow(), GpuState::Ready(p) if !p.gpu.device_lost()));
+    if !ready {
+        return PaintReadiness::NoGpu;
+    }
+    expire_stalled_frames();
+    if IN_FLIGHT.with(|f| f.borrow().can_submit()) {
+        PaintReadiness::CanPaint
+    } else {
+        PaintReadiness::GpuBusy
+    }
 }
 
 /// Start the frame loop; it sleeps whenever [`decide`] finds nothing to do.
@@ -220,7 +251,7 @@ fn tick() {
     let Some(canvas) = CANVAS.with(|c| c.borrow().clone()) else {
         return;
     };
-    let ((w, h), dpr, resized) = size_backing_store(&canvas);
+    let ((w, h), dpr, resized) = size_backing_store(&canvas, paint_readiness());
     if (agg_gui::device_scale() - dpr).abs() > 1e-9 {
         agg_gui::set_device_scale(dpr);
         mark_dirty();
@@ -252,7 +283,6 @@ fn tick() {
     let ready = GPU.with(|g| matches!(*g.borrow(), GpuState::Ready(_)));
     let mut painted = false;
     if ready {
-        expire_stalled_frames();
         let decision = IN_FLIGHT.with(|f| {
             tick_paint(&f.borrow(), || {
                 FIRST_PAINT.with(|gate| {
@@ -274,7 +304,7 @@ fn tick() {
             })
         });
         if decision == TickPaint::WaitForGpu {
-            wait_for_gpu(resized);
+            wait_for_gpu();
         }
         if decision == TickPaint::Paint {
             painted = paint(w, h);
@@ -394,12 +424,9 @@ fn service_device_loss() -> bool {
 /// A tick with a redraw pending while the GPU still holds the frames allowed
 /// in flight: paint nothing. Every pending request stays as it is (the
 /// decision did not read it), so the first tick after the GPU finishes
-/// paints the latest state.
-fn wait_for_gpu(resized: bool) {
-    // A resize clears the canvas, and its flag lives only for this tick.
-    if resized {
-        mark_dirty();
-    }
+/// paints the latest state. A resize never lands on such a tick: it waits
+/// for one that paints ([`size_backing_store`]).
+fn wait_for_gpu() {
     GPU.with(|g| {
         if let GpuState::Ready(p) = &*g.borrow() {
             // WebGPU resolves completions on its own; wgpu's WebGL2 backend

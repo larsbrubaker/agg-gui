@@ -114,6 +114,7 @@
 #![cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 
 mod adapter_check;
+mod backing_resize;
 mod config;
 mod cursor;
 mod dom_math;
