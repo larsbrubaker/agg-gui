@@ -17,15 +17,17 @@
 //! (the cautious answer, as macOS and Windows volumes ignore case), so `Report.mcx` asks before
 //! replacing `report.mcx`; the hook's `SaveTarget::exists` says the same. An app that knows the
 //! whole answer (a volume telling names apart by case) answers through the request's
-//! [`ReplaceAnswer`](crate::ReplaceAnswer) hook instead: `Save` saves without asking, and the
-//! pick then replaces only a file of exactly that name. A question goes to the app's [`QuestionHost`] when it has one
+//! [`ReplaceAnswer`](crate::ReplaceAnswer) hook instead: `Save` saves without asking, and after
+//! either of the app's answers the pick replaces only a file of exactly that name. A question goes to the app's [`QuestionHost`] when it has one
 //! (its modal message box: confirming saves, cancelling stays); without one the controller asks
 //! in the page ([`SaveMode::Asking`]; the page's buttons call [`SaveController::confirm`] or
 //! [`SaveController::back`]). A question is about the folder showing as it was asked: once the
 //! showing folder changes, the page's next `update` takes an in-page question down, and an answer
-//! that arrives later (the page's confirm, the host's answer) saves nothing. Saving hands the showing folder over and answers with it and the
+//! that arrives later (the page's confirm, the host's answer) saves nothing. The host's answer
+//! holds the dialog, so a page built again under its question still saves on the user's yes. Saving hands the showing folder over and answers with it and the
 //! file name ([`SavePick`]); should something still hold the folder, nothing is saved and the
-//! note says so.
+//! note says so. A note is about the folder it was said in: the next `update` after another
+//! folder shows ends it.
 //!
 //! [`SaveController::update`], called by the page at each layout before its browser lays out,
 //! opens the dialog's place (a starting folder, else where it was last left: `move_dialog`'s
@@ -107,6 +109,11 @@ struct Core {
     focus_asked: Cell<bool>,
     /// The browser's navigation count when the in-page question was asked.
     asked_at: Cell<u64>,
+    /// Whether the in-page question was the app's own (the pick then replaces only a file of
+    /// exactly the name).
+    asked_exact: Cell<bool>,
+    /// The browser's navigation count when the note was said: the note is about that folder.
+    noted_at: Cell<u64>,
 }
 
 /// The Save dialog's logic (see the module header). Clones share one dialog.
@@ -138,6 +145,8 @@ impl SaveController {
                 names: RefCell::new(None),
                 focus_asked: Cell::new(false),
                 asked_at: Cell::new(0),
+                asked_exact: Cell::new(false),
+                noted_at: Cell::new(0),
                 request,
                 answers,
             }),
@@ -265,6 +274,13 @@ impl SaveController {
         !self.core.place.accepted.get() && !self.name().trim().is_empty() && self.can_save()
     }
 
+    /// Shows `note` about the folder showing now (see [`Self::update`]).
+    fn say(&self, note: String) {
+        *self.core.note.borrow_mut() = note;
+        self.core.noted_at.set(self.navigation());
+        self.changed();
+    }
+
     fn changed(&self) {
         let core = &self.core;
         core.changes.set(core.changes.get() + 1);
@@ -301,6 +317,12 @@ impl SaveController {
             *self.core.mode.borrow_mut() = SaveMode::Normal;
             self.changed();
         }
+        // A note is about the folder it was said in: another folder showing ends it.
+        let noted = !self.core.note.borrow().is_empty();
+        if noted && self.navigation() != self.core.noted_at.get() {
+            self.core.note.borrow_mut().clear();
+            self.changed();
+        }
         if let Some(id) = self.core.request.focus_id {
             if !self.core.focus_asked.replace(true) {
                 agg_gui::focus::request_focus(id);
@@ -329,8 +351,7 @@ impl SaveController {
             return;
         }
         if let Some(why) = self.refusal() {
-            *core.note.borrow_mut() = why;
-            return self.changed();
+            return self.say(why);
         }
         let typed = self.name().trim().to_string();
         if typed.is_empty() {
@@ -338,14 +359,11 @@ impl SaveController {
         }
         let file_name = match (core.request.namer)(&typed) {
             Ok(name) => name,
-            Err(why) => {
-                *core.note.borrow_mut() = why;
-                return self.changed();
-            }
+            Err(why) => return self.say(why),
         };
         let exists = self.exists(&file_name);
         let (question, exact) = match self.app_answer(&file_name, exists) {
-            ReplaceAnswer::Ask(question) => (Some(question), false),
+            ReplaceAnswer::Ask(question) => (Some(question), true),
             ReplaceAnswer::Save => (None, true),
             ReplaceAnswer::DialogsOwn => {
                 let shown = (core.request.shown_name)(&file_name);
@@ -362,18 +380,21 @@ impl SaveController {
         let host = core.questions.borrow().clone();
         match host {
             Some(host) => {
-                let weak: Weak<Core> = Rc::downgrade(&self.core);
+                // The answer keeps the dialog alive: an app that builds its page again under the
+                // question (a theme change) still gets the user's answer saved.
+                let core = Rc::clone(&self.core);
                 host(
                     question,
                     Box::new(move |save| {
-                        if let (true, Some(core)) = (save, weak.upgrade()) {
-                            SaveController { core }.finish(file_name, asked_at, false);
+                        if save {
+                            SaveController { core }.finish(file_name, asked_at, exact);
                         }
                     }),
                 );
             }
             None => {
                 core.asked_at.set(asked_at);
+                core.asked_exact.set(exact);
                 *core.mode.borrow_mut() = SaveMode::Asking {
                     question,
                     file_name,
@@ -390,7 +411,11 @@ impl SaveController {
             _ => None,
         };
         if let Some(file_name) = asked {
-            self.finish(file_name, self.core.asked_at.get(), false);
+            self.finish(
+                file_name,
+                self.core.asked_at.get(),
+                self.core.asked_exact.get(),
+            );
         }
     }
 
@@ -455,8 +480,8 @@ impl SaveController {
 
     /// Hands the showing folder over with `file_name` (the user has agreed to any question
     /// asked while the browser's navigation count was `asked_at`). A folder changed since saves
-    /// nothing: the question was never about it. `exact`: the app answered `Save`, so the pick
-    /// replaces only a file of exactly that name.
+    /// nothing: the question was never about it. `exact`: the app answered for itself (`Ask` or
+    /// `Save`), so the pick replaces only a file of exactly that name.
     fn finish(&self, file_name: String, asked_at: u64, exact: bool) {
         let core = &self.core;
         if core.place.accepted.get() || !self.can_save() {
@@ -498,8 +523,7 @@ impl SaveController {
     /// Nothing was saved because the folder was held: back to taking a name, saying so.
     fn busy(&self) {
         *self.core.mode.borrow_mut() = SaveMode::Normal;
-        *self.core.note.borrow_mut() = tr("The folder was busy, so nothing was saved. Try again.");
-        self.changed();
+        self.say(tr("The folder was busy, so nothing was saved. Try again."));
     }
 
     /// Create Folder: asks the new folder's name through the app's dialogs, or in the page (see

@@ -379,7 +379,9 @@ pub fn without_extension(name: &str, extension: &str) -> String {
 /// The Save dialog's question: its heading, the label over the name field, the name it starts
 /// with, how the typed name becomes the file name ([`FileNamer`], the name as typed by default),
 /// how a file's name shows ([`ShownName`], whole by default), the app's own question before a
-/// save, if it has one ([`ReplaceQuestionHook`]), and the name field's grey hint while empty and
+/// save, if it has one ([`ReplaceQuestionHook`]), or its whole answer, which takes that
+/// question's place (`replace_answer`, a [`ReplaceAnswerHook`]), and the name field's grey hint
+/// while empty and
 /// the focus id it is given focus through when the dialog opens (`agg_gui::focus`), if any.
 #[derive(Clone)]
 #[non_exhaustive]

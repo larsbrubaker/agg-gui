@@ -22,6 +22,14 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   `Report.mcx` beside `report.mcx` saves without a question and the pick replaces nothing), or
   the dialog's own. It takes the place of a `with_replace_question` hook, which keeps working.
 
+### Fixed
+
+- `SaveController`: a note (the folder was busy) ends once another folder shows, rather than
+  staying until the name is edited; after the app's own question is confirmed, the pick's
+  `replaces` says whether a file of exactly that name is listed, as after `Save`; and the
+  question host's answer holds the dialog, so a page built again under the question (a theme
+  change) still saves on the user's yes.
+
 ## [0.0.10] - 2026-11-03
 
 ### Added

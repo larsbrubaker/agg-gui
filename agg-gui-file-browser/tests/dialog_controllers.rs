@@ -691,3 +691,77 @@ fn the_question_hosts_answer_saves_nothing_once_the_folder_changed() {
     answer(true);
     assert!(picked.borrow().is_none(), "Drafts was never asked about");
 }
+
+#[test]
+fn a_busy_note_goes_once_the_user_moves_to_another_folder() {
+    let sample = Sample::new();
+    let (answers, picked) = save_answers();
+    let c = SaveController::new(&sample.browser(), SaveRequest::new("notes"), answers);
+    let mut app = app_over(save_page(&c));
+    click(&mut app, "Designs Row Item Collection", 2);
+    // Something else still holds the folder showing, so the save can't take it.
+    let held = c.state().borrow().open_path().last().cloned();
+    click(&mut app, ACCEPT, 1);
+    assert!(picked.borrow().is_none(), "nothing was saved");
+    assert_eq!(
+        c.note(),
+        "The folder was busy, so nothing was saved. Try again."
+    );
+    // The note was about Designs: at the top it no longer applies.
+    c.state().borrow_mut().go_back();
+    layout(&mut app);
+    assert_eq!(trail(&c), "Top");
+    assert_eq!(c.note(), "", "the note went with its folder");
+    drop(held);
+}
+
+#[test]
+fn confirming_an_apps_question_beside_a_name_in_another_case_replaces_nothing() {
+    let sample = Sample::new();
+    let (answers, picked) = save_answers();
+    let request = SaveRequest::new("Report")
+        .with_extension(".txt")
+        .with_replace_answer(Rc::new(|_| {
+            ReplaceAnswer::Ask(ReplaceQuestion::new("Check", "Sure?", "Go"))
+        }));
+    let c = SaveController::new(&sample.browser(), request, answers);
+    let mut app = app_over(save_page(&c));
+    click(&mut app, "Designs Row Item Collection", 2);
+    click(&mut app, ACCEPT, 1);
+    c.confirm();
+    assert_eq!(
+        pick_of(&picked),
+        ("Designs".into(), "Report.txt".into(), false),
+        "only report.txt is listed, which Report.txt is not"
+    );
+}
+
+#[test]
+fn the_hosts_yes_still_saves_once_the_page_that_asked_is_built_again() {
+    let sample = Sample::new();
+    let (answers, picked) = save_answers();
+    let asked: Asked = Rc::default();
+    let host = Rc::clone(&asked);
+    let c = SaveController::new(
+        &sample.browser(),
+        SaveRequest::new("report").with_extension(".txt"),
+        answers,
+    )
+    .with_question_host(Rc::new(move |question, answer| {
+        host.borrow_mut().push((question, answer));
+    }));
+    let mut app = app_over(save_page(&c));
+    click(&mut app, "Designs Row Item Collection", 2);
+    click(&mut app, ACCEPT, 1);
+    let (_, answer) = asked.borrow_mut().pop().expect("the host was asked");
+    // The page is built again under the question (a theme change): the old page and its
+    // controller go.
+    drop(app);
+    drop(c);
+    answer(true);
+    assert_eq!(
+        pick_of(&picked),
+        ("Designs".into(), "report.txt".into(), true),
+        "the user's Replace still saves"
+    );
+}
