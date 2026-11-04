@@ -39,7 +39,8 @@
 //! dialogs when given them ([`SaveController::asking_names_through`]: its input box), else in the
 //! page ([`SaveMode::NamingFolder`]); the folder is made in the showing folder, recorded for Undo,
 //! then opened, unless the app keeps the dialog where it is
-//! ([`SaveController::keeping_folder_on_create`]: the new folder listed among the rest).
+//! ([`SaveController::keeping_folder_on_create`]: the new folder listed among the rest). The input
+//! box's answer holds the dialog, so a page built again under it still makes the user's folder.
 //!
 //! The name lives in a cell the page's field shares; an app that builds its page again (a theme
 //! change) over a new controller hands each one the same cell
@@ -50,7 +51,7 @@
 //! navigation moves.
 
 use std::cell::{Cell, RefCell};
-use std::rc::{Rc, Weak};
+use std::rc::Rc;
 
 use agg_gui_files::{tr, Folder};
 
@@ -538,11 +539,13 @@ impl SaveController {
             return self.changed();
         };
         let request = NameRequest::new(tr("Create Folder"), tr("Folder Name"), "", tr("Create"));
-        let weak: Weak<Core> = Rc::downgrade(&self.core);
+        // The answer keeps the dialog alive, as the question host's does: a page built again
+        // under the input box still makes the user's folder.
+        let core = Rc::clone(&self.core);
         dialogs.ask_name(
             request,
             Box::new(move |name| {
-                if let (Some(name), Some(core)) = (name, weak.upgrade()) {
+                if let Some(name) = name {
                     SaveController { core }.create_folder_named(&name);
                 }
             }),

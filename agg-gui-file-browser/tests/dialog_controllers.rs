@@ -765,3 +765,48 @@ fn the_hosts_yes_still_saves_once_the_page_that_asked_is_built_again() {
         "the user's Replace still saves"
     );
 }
+
+/// A name question's answer, as the app's input box hears it.
+type NameAnswer = Box<dyn FnOnce(Option<String>)>;
+
+/// An app's dialogs whose input box keeps each name question's answer for the test to give.
+#[derive(Default)]
+struct HeldInputBox {
+    answers: RefCell<Vec<NameAnswer>>,
+}
+
+impl BrowserDialogs for HeldInputBox {
+    fn ask_name(&self, _request: NameRequest, answer: NameAnswer) {
+        self.answers.borrow_mut().push(answer);
+    }
+}
+
+#[test]
+fn a_folder_named_after_the_page_that_asked_is_built_again_is_still_made() {
+    let sample = Sample::new();
+    let (answers, _picked) = save_answers();
+    let input = Rc::new(HeldInputBox::default());
+    let c = SaveController::new(&sample.browser(), SaveRequest::new("notes"), answers)
+        .asking_names_through(Rc::clone(&input) as Rc<dyn BrowserDialogs>)
+        .keeping_folder_on_create();
+    let mut app = app_over(save_page(&c));
+    click(&mut app, "Designs Row Item Collection", 2);
+    click(&mut app, CREATE, 1);
+    let answer = input
+        .answers
+        .borrow_mut()
+        .pop()
+        .expect("the name was asked");
+    // The page is built again under the input box (a theme change): the old page and its
+    // controller go.
+    drop(app);
+    drop(c);
+    answer(Some("Brackets".into()));
+    let made: Vec<String> = sample
+        .designs
+        .child_containers()
+        .iter()
+        .map(|l| l.name().to_string())
+        .collect();
+    assert_eq!(made, ["Brackets"], "the user's folder is made");
+}

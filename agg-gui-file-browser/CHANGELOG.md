@@ -28,7 +28,8 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   staying until the name is edited; after the app's own question is confirmed, the pick's
   `replaces` says whether a file of exactly that name is listed, as after `Save`; and the
   question host's answer holds the dialog, so a page built again under the question (a theme
-  change) still saves on the user's yes.
+  change) still saves on the user's yes; the app's input box answer for Create Folder holds it
+  the same way, so the user's folder is still made.
 
 ## [0.0.10] - 2026-11-03
 
