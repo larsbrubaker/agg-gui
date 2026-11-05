@@ -12,12 +12,23 @@
 //! the wait ends with [`GpuWaitError::TimedOut`] and the caller can say what
 //! happened.
 //!
-//! **Why [`GPU_WAIT_BUDGET`] is 30 s.** A frame or a read-back on a healthy
-//! GPU takes milliseconds, and even a software rasterizer on a loaded CI
-//! machine finishes one well inside a few seconds; 30 s is far past any real
-//! frame, so a wait that reaches it is a GPU that is not coming back, not a
-//! slow one. It is short enough that a test reports the hung GPU well before
-//! a runner's own per-test timeout (MatterCAD's is 300 s).
+//! **Why [`GPU_WAIT_BUDGET`] is 30 s.** A frame or a read-back on a hardware
+//! GPU takes milliseconds, so 30 s there is far past any real frame: a wait
+//! that reaches it is a GPU that is not coming back, not a slow one. It is
+//! short enough that a test reports the hung GPU well before a runner's own
+//! per-test timeout (MatterCAD's is 300 s).
+//!
+//! A software rasterizer is different: it shades every pixel on the CPU, so a
+//! large frame's honest cost is seconds, and it grows with the frame's pixels
+//! and with every other process competing for the CPU. A 2560x1600 window
+//! frame whose 3D view draws its scene takes about 9 s on WARP (Windows'
+//! software adapter) on a 4-core CI runner, and several times that when other
+//! software-rendering processes share those cores, which can pass 30 s. On
+//! such an adapter a timeout can therefore mean a frame too expensive for the
+//! machine rather than a hung GPU. The budget stays a hang detector: callers
+//! that render on a software adapter keep each frame's work, and the number
+//! of frames they draw, small enough to finish well inside it, rather than
+//! being given a longer wait.
 //!
 //! **The bound is wgpu's own.** The budget is handed to `Device::poll` as its
 //! timeout; every native backend's wait honours it (Metal polls the command
