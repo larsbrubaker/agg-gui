@@ -5,7 +5,9 @@
 //! backgrounds, separators, inline check / radio marks (in their
 //! own leading column under a `MenuStyle::selection_column`, or in a row's
 //! own `MenuIconSlot`), submenu
-//! chevrons — and delegates the row text and icon glyphs to the shared [`PopupLabels`]
+//! chevrons, each on the row's label line (`RowLayout::line_rect`), with a
+//! described row's muted second line under it — and delegates the row text,
+//! description and icon glyphs to the shared [`PopupLabels`]
 //! cache so every glyph flows through the framework's backbuffer + LCD
 //! path.  It consumes the row rects produced by
 //! [`super::super::geometry::stack_layout`], so it automatically paints at
@@ -33,7 +35,7 @@ use super::super::model::{MenuEntry, MenuSelection};
 use super::super::overflow::PopupScroll;
 use super::super::paint::{
     paint_check_mark, paint_item_row_bg, paint_radio_mark, paint_separator_styled,
-    paint_submenu_arrow, popup_row_text_color, MenuStyle,
+    paint_submenu_arrow, popup_row_description_color, popup_row_text_color, MenuStyle,
 };
 use super::super::state::PopupMenuState;
 use super::super::style::{row_icon_x, row_label_right, row_label_x, row_selection_column};
@@ -83,6 +85,9 @@ pub(super) fn paint_popup_level(
 
         // Hover / open backdrop sits underneath the row's content.
         paint_item_row_bg(ctx, row_layout.rect, hovered, open, item.enabled);
+        // Everything but the backdrop sits on the label's line: the whole
+        // row, or the part above a description's band.
+        let line = row_layout.line_rect();
 
         // Inline marks (swatch / image / check / radio) are painted
         // directly; an icon glyph goes through its own row `Label`.
@@ -95,8 +100,8 @@ pub(super) fn paint_popup_level(
             // thin stroke around the swatch instead of the usual radio
             // glyph so the colour itself stays the dominant cue.
             let size = 12.0;
-            let sx = row_layout.rect.x + style.icon_x - size * 0.5 + 4.0;
-            let sy = row_layout.rect.y + (row_layout.rect.height - size) * 0.5;
+            let sx = line.x + style.icon_x - size * 0.5 + 4.0;
+            let sy = line.y + (line.height - size) * 0.5;
             let fill = if item.enabled {
                 color
             } else {
@@ -121,9 +126,8 @@ pub(super) fn paint_popup_level(
             // at `(int)x, (int)y`, so the offsets snap down to whole device
             // pixels and the picture is never resampled between pixels.
             let size = slot.image_size;
-            let ix = row_layout.rect.x + snap_to_device_px(row_icon_x(style, item));
-            let iy =
-                row_layout.rect.y + snap_to_device_px((row_layout.rect.height - size.height) * 0.5);
+            let ix = line.x + snap_to_device_px(row_icon_x(style, item));
+            let iy = line.y + snap_to_device_px((line.height - size.height) * 0.5);
             if !item.enabled {
                 ctx.save();
                 ctx.set_global_alpha(DISABLED_IMAGE_ALPHA);
@@ -136,8 +140,8 @@ pub(super) fn paint_popup_level(
             // Artwork icon: left edge at the glyph column, centred on the
             // row.  Disabled rows fade it like they fade glyph text.
             let size = image.size();
-            let ix = row_layout.rect.x + row_icon_x(style, item);
-            let iy = row_layout.rect.y + (row_layout.rect.height - size.height) * 0.5;
+            let ix = line.x + row_icon_x(style, item);
+            let iy = line.y + (line.height - size.height) * 0.5;
             if !item.enabled {
                 ctx.save();
                 ctx.set_global_alpha(DISABLED_IMAGE_ALPHA);
@@ -156,7 +160,7 @@ pub(super) fn paint_popup_level(
                 ctx,
                 level_idx,
                 row_idx,
-                row_layout.rect,
+                line,
                 row_icon_x(style, item),
                 inline_color,
             );
@@ -175,8 +179,8 @@ pub(super) fn paint_popup_level(
         if let Some(column) = row_selection_column(style.selection_column, item) {
             // Opt-in leading column (agg-sharp's gutter): a radio row always
             // shows its circle, a check row its mark only when checked.
-            let cx = row_layout.rect.x + column.mark_x;
-            let cy = row_layout.rect.y + row_layout.rect.height * 0.5;
+            let cx = line.x + column.mark_x;
+            let cy = line.y + line.height * 0.5;
             match item.selection {
                 MenuSelection::Radio { selected } => {
                     paint_radio_mark(ctx, cx, cy, inline_color, selected)
@@ -190,15 +194,15 @@ pub(super) fn paint_popup_level(
             let has_left_marker = item.has_leading_icon();
             let cx = if has_left_marker {
                 let right_offset = if item.has_submenu() { 30.0 } else { 12.0 };
-                row_layout.rect.x + row_layout.rect.width - right_offset
+                line.x + line.width - right_offset
             } else {
-                row_layout.rect.x + style.icon_x
+                line.x + style.icon_x
             };
-            let cy = row_layout.rect.y + row_layout.rect.height * 0.5;
+            let cy = line.y + line.height * 0.5;
             paint_check_mark(ctx, cx, cy, inline_color);
         }
         if item.has_submenu() {
-            paint_submenu_arrow(ctx, row_layout.rect, inline_color, style.submenu_arrow);
+            paint_submenu_arrow(ctx, line, inline_color, style.submenu_arrow);
         }
 
         // Row text (label + shortcut) via the Label cache so glyph
@@ -207,12 +211,24 @@ pub(super) fn paint_popup_level(
             ctx,
             level_idx,
             row_idx,
-            row_layout.rect,
+            line,
             row_label_x(style.label_x, style.selection_column, item),
             row_label_right(style.shortcut_right, item),
             item.enabled,
             open && item.enabled,
         );
+        if item.description.is_some() {
+            let color = popup_row_description_color(ctx, item.enabled, open && item.enabled);
+            labels.paint_description(
+                ctx,
+                level_idx,
+                row_idx,
+                row_layout.description_rect(),
+                row_label_x(style.label_x, style.selection_column, item),
+                row_label_right(style.shortcut_right, item),
+                color,
+            );
+        }
     }
 }
 

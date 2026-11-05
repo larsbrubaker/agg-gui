@@ -21,6 +21,9 @@
 //! * a row without a shortcut still keeps `style.shortcut_right` on the
 //!   right, which is where the submenu chevron and right-edge check marks
 //!   paint;
+//! * a row with a [`super::MenuItem::description`] is as wide as the wider
+//!   of its label line and its description (at
+//!   [`super::geometry::DESCRIPTION_SCALE`] of the label's size);
 //! * a row with its own [`super::MenuIconSlot`] starts its label at the
 //!   slot's `label_x` and keeps the slot's `label_right` on the right;
 //! * no row is narrower than [`FIT_MIN_W`] — agg-sharp's 150 px
@@ -45,7 +48,7 @@ use std::sync::Arc;
 
 use crate::text::{measure_advance, Font};
 
-use super::geometry::{MenuMetrics, MENU_W};
+use super::geometry::{MenuMetrics, DESCRIPTION_SCALE, MENU_W};
 use super::model::{MenuEntry, MenuItem};
 use super::paint::MenuStyle;
 use super::style::{row_label_right, row_label_x, SelectionColumn, ShortcutFormat};
@@ -130,9 +133,13 @@ impl FitMeasure {
         let shortcut_w = item
             .shortcut_text_formatted(platform, &self.font, self.shortcut_format)
             .map_or(0.0, |text| SHORTCUT_GAP + self.text_width(&text));
+        // A description's line starts under the label and has the row's
+        // room to itself, so the row fits the wider of the two lines.
+        let description_w = item.description.as_deref().map_or(0.0, |text| {
+            menu_text_width(&self.font, self.font_size * DESCRIPTION_SCALE, text)
+        });
         row_label_x(self.label_x, self.selection_column, item)
-            + label_w
-            + shortcut_w
+            + (label_w + shortcut_w).max(description_w)
             + row_label_right(self.shortcut_right, item)
     }
 

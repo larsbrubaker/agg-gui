@@ -170,6 +170,20 @@ pub fn popup_row_text_color(ctx: &dyn DrawCtx, enabled: bool, open: bool) -> Col
     }
 }
 
+/// The colour of a row's description ([`super::MenuItem::description`]):
+/// the theme's dimmed text, washed out on a disabled row as its label is,
+/// and a softened white on an open submenu row's accent fill.
+pub fn popup_row_description_color(ctx: &dyn DrawCtx, enabled: bool, open: bool) -> Color {
+    let v = ctx.visuals();
+    if !enabled {
+        v.text_dim.with_alpha(0.45)
+    } else if open {
+        Color::white().with_alpha(0.8)
+    } else {
+        v.text_dim
+    }
+}
+
 /// Paint one popup panel's chrome: the optional drop shadow, the fill and
 /// the outline, each taken from `style` (theme colours where the style
 /// leaves them `None`).

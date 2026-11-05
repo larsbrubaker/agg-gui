@@ -293,6 +293,8 @@ mod tests_conformance;
 #[cfg(test)]
 mod tests_conformance_2;
 #[cfg(test)]
+mod tests_description;
+#[cfg(test)]
 mod tests_finger_scroll;
 #[cfg(test)]
 mod tests_fit;

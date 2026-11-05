@@ -2,6 +2,7 @@
 //!
 //! Exercises the shared menu model through both a top menu bar and a
 //! right-click context area so native and WASM builds cover the same behavior.
+//! Option B shows a row's description line (`MenuItem::description`).
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -234,6 +235,7 @@ fn shared_items(prefix: &str) -> Vec<MenuEntry> {
             .into(),
         MenuItem::action("Option B", format!("{prefix}.option-b"))
             .radio(false)
+            .description("A second line says what a choice does")
             .keep_open()
             .into(),
         MenuItem::action("Disabled Item", format!("{prefix}.disabled"))

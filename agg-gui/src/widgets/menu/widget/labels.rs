@@ -4,7 +4,8 @@
 //! through the framework's standard backbuffer + LCD subpixel path.  A popup
 //! row's icon glyph (`MenuItem::icon`) is a `Label` too, laid out in the same
 //! line box as the row's text, so the two share a baseline pixel row under
-//! every line box and device scale.  Each
+//! every line box and device scale.  A described row's second line
+//! (`MenuItem::description`) is a smaller `Label` of its own.  Each
 //! cache stores its `Label`s by stable identity (bar-button index, or
 //! `(layout_index, row_index)` for popup rows) and rebuilds them lazily when
 //! the source text changes.
@@ -19,7 +20,7 @@ use crate::widget::{paint_subtree, Widget};
 use crate::widgets::label::{Label, LabelAlign};
 
 use super::super::fit_width::{menu_text_width, SHORTCUT_GAP};
-use super::super::geometry::PopupLayout;
+use super::super::geometry::{PopupLayout, DESCRIPTION_SCALE};
 use super::super::model::MenuEntry;
 use super::super::paint::popup_row_text_color;
 use super::super::style::ShortcutFormat;
@@ -92,6 +93,9 @@ pub struct PopupRowLabels {
     pub shortcut: Option<Label>,
     /// The row's icon glyph, when it has one.
     pub icon: Option<Label>,
+    /// The row's second line (`MenuItem::description`), when it has one, at
+    /// `geometry::DESCRIPTION_SCALE` of the label's size.
+    pub description: Option<Label>,
 }
 
 /// Cache of `Label`s for every visible popup row, keyed by
@@ -175,6 +179,7 @@ impl PopupLabels {
                 // declaration string of a parsed shortcut.
                 let shortcut_text = item.shortcut_text_formatted(platform, font, shortcut_format);
                 let icon_text = item.icon.map(String::from);
+                let description_size = font_size * DESCRIPTION_SCALE;
                 match &mut level[row_idx] {
                     Some(existing) => {
                         if existing.label.text_str() != item.label {
@@ -202,6 +207,16 @@ impl PopupLabels {
                                 *slot = text.map(|t| make_label(t, font, font_size));
                             }
                         }
+                        match (&mut existing.description, item.description.as_deref()) {
+                            (Some(slot), Some(text)) => {
+                                if slot.text_str() != text {
+                                    slot.set_text(text);
+                                }
+                            }
+                            (slot, text) => {
+                                *slot = text.map(|t| make_row_label(t, font, description_size));
+                            }
+                        }
                     }
                     slot @ None => {
                         *slot = Some(PopupRowLabels {
@@ -210,6 +225,10 @@ impl PopupLabels {
                                 .as_deref()
                                 .map(|s| make_shortcut_label(s, font, font_size)),
                             icon: icon_text.as_deref().map(|t| make_label(t, font, font_size)),
+                            description: item
+                                .description
+                                .as_deref()
+                                .map(|t| make_row_label(t, font, description_size)),
                         });
                     }
                 }
@@ -341,6 +360,53 @@ impl PopupLabels {
         paint_subtree(icon, ctx);
         ctx.restore();
         true
+    }
+
+    /// Paint row `row_idx`'s description in popup level `level_idx` into
+    /// `line` (the row's `RowLayout::description_rect`), starting at
+    /// `label_x` like the label above it and ending `right_pad` from the
+    /// row's right edge, where it ends in an ellipsis if it doesn't fit; in
+    /// `color`.  `false` when the row has no description.
+    #[allow(clippy::too_many_arguments)]
+    pub fn paint_description(
+        &mut self,
+        ctx: &mut dyn DrawCtx,
+        level_idx: usize,
+        row_idx: usize,
+        line: Rect,
+        label_x: f64,
+        right_pad: f64,
+        color: Color,
+    ) -> bool {
+        let Some(description) = self
+            .rows
+            .get_mut(level_idx)
+            .and_then(|level| level.get_mut(row_idx))
+            .and_then(|row| row.as_mut())
+            .and_then(|row| row.description.as_mut())
+        else {
+            return false;
+        };
+        description.set_color(color);
+        let inner_w = (line.width - label_x - right_pad).max(0.0);
+        let size = description.layout(Size::new(inner_w, line.height));
+        description.set_bounds(Rect::new(0.0, 0.0, size.width, size.height));
+        ctx.save();
+        ctx.translate(line.x + label_x, line.y + (line.height - size.height) * 0.5);
+        paint_subtree(description, ctx);
+        ctx.restore();
+        true
+    }
+
+    /// The description label of row `row_idx` in popup level `level_idx`,
+    /// once built and when the row has one.
+    #[cfg(test)]
+    pub(super) fn row_description(&self, level_idx: usize, row_idx: usize) -> Option<&Label> {
+        self.rows
+            .get(level_idx)?
+            .get(row_idx)?
+            .as_ref()
+            .and_then(|row| row.description.as_ref())
     }
 
     /// Convenience: re-resolve the per-row text colour from the

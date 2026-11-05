@@ -14,6 +14,13 @@
 //! `MenuItem.GutterWidth`, e.g. a recent-files row with a thumbnail).  It
 //! stays an ordinary row: hovered, keyboard-selected, activated and
 //! tooltipped like any other.
+//!
+//! A row can carry a second line under its label ([`MenuItem::description`]):
+//! smaller, muted words that say what the choice does.  The row grows by the
+//! description's band (`geometry::description_band`) and stays one row:
+//! its hover fill, hit area and keyboard highlight cover both lines, and its
+//! marks, icon, label, shortcut and chevron sit on the label's line
+//! (`geometry::RowLayout::line_rect`).
 
 use crate::color::Color;
 use crate::event::{Key, Modifiers};
@@ -88,6 +95,12 @@ pub struct MenuItem {
     /// [`MenuItem::with_automation_name()`]; read through
     /// [`menu_row_name`](super::menu_row_name).
     pub automation_name: Option<String>,
+    /// A second line under the label, in smaller muted text (the theme's
+    /// `text_dim`): what the choice does.  The row grows to hold it on the
+    /// mouse and touch layouts alike; one line, ending in an ellipsis on a
+    /// popup too narrow for it.  `None` (the default) keeps the one-line row.
+    /// Set with [`MenuItem::description()`].
+    pub description: Option<String>,
 }
 
 /// A row's own icon slot: a gutter of `gutter_width` starting `gutter_x`
@@ -152,6 +165,7 @@ impl MenuItem {
             row_height: None,
             icon_slot: None,
             automation_name: None,
+            description: None,
         }
     }
 
@@ -173,6 +187,7 @@ impl MenuItem {
             row_height: None,
             icon_slot: None,
             automation_name: None,
+            description: None,
         }
     }
 
@@ -200,6 +215,7 @@ impl MenuItem {
             row_height: None,
             icon_slot: None,
             automation_name: None,
+            description: None,
         }
     }
 
@@ -290,6 +306,13 @@ impl MenuItem {
     /// [`MenuIconSlot`]).
     pub fn icon_slot(mut self, slot: MenuIconSlot) -> Self {
         self.icon_slot = Some(slot);
+        self
+    }
+
+    /// Show `text` on a second, smaller and muted line under the label (see
+    /// the `description` field).
+    pub fn description(mut self, text: impl Into<String>) -> Self {
+        self.description = Some(text.into());
         self
     }
 
