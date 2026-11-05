@@ -35,6 +35,8 @@ Never commit a bug fix that isn't covered by a test.
   to ensure we never lose code or functionality.
 - Never reduce a file's line count by removing comments or blank lines to meet the limit —
   that is not refactoring. Split real logic into separate files/modules.
+- A crate's `CHANGELOG.md` is exempt: it is a growing record of releases, and splitting it by
+  version range adds files without making anything easier to understand.
 
 ### Documentation
 - Every file must begin with a comment block describing its purpose and how it relates

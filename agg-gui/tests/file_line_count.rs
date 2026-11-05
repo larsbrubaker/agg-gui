@@ -5,6 +5,11 @@
 //! under the same limit, including JavaScript/HTML glue such as wasm-bindgen
 //! package output. If a file fails this test, split or refactor it instead of
 //! hiding that source type from the scan.
+//!
+//! The one file the limit doesn't apply to is a crate's `CHANGELOG.md`
+//! ([`UNLIMITED_FILE_NAMES`]): a changelog is a growing record of releases,
+//! read from the top, and splitting it by version range adds files without
+//! making anything easier to understand.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -37,6 +42,11 @@ const EXCLUDED_DIRS: &[&str] = &[
     "demo/playwright-report",
     "tests/resvg-test-suite",
 ];
+
+// Files held to no line limit, by name: a changelog is a growing record of
+// releases, and splitting it by version range adds files without making
+// anything easier to understand.  Every other file is held to `MAX_LINES`.
+const UNLIMITED_FILE_NAMES: &[&str] = &["CHANGELOG.md"];
 
 // Text formats that are part of the project surface area for humans and AI
 // agents. This intentionally includes JS/HTML/CSS/TS, so wasm package glue and
@@ -106,14 +116,20 @@ fn is_excluded(root: &Path, path: &Path) -> bool {
 }
 
 fn should_check_file(path: &Path) -> bool {
-    path.extension()
-        .and_then(|ext| ext.to_str())
-        .map(|ext| {
-            CHECKED_EXTENSIONS
-                .iter()
-                .any(|checked| ext.eq_ignore_ascii_case(checked))
-        })
-        .unwrap_or(false)
+    let unlimited = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| UNLIMITED_FILE_NAMES.contains(&name));
+    !unlimited
+        && path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .map(|ext| {
+                CHECKED_EXTENSIONS
+                    .iter()
+                    .any(|checked| ext.eq_ignore_ascii_case(checked))
+            })
+            .unwrap_or(false)
 }
 
 fn count_lines(path: &Path) -> usize {
@@ -144,4 +160,24 @@ fn build_and_test_output_dirs_are_excluded() {
             "{checked} should be checked"
         );
     }
+}
+
+#[test]
+fn a_long_changelog_passes_while_any_other_long_file_fails() {
+    let dir = std::env::temp_dir().join(format!("file_line_count_{}", std::process::id()));
+    let crate_dir = dir.join("some-crate");
+    fs::create_dir_all(&crate_dir).expect("temp crate dir");
+    let long = "line\n".repeat(MAX_LINES + 1);
+    for name in ["CHANGELOG.md", "README.md", "lib.rs"] {
+        fs::write(crate_dir.join(name), &long).expect("write a long file");
+    }
+    let mut offenders = Vec::new();
+    visit_files(&dir, &dir, &mut offenders);
+    let _ = fs::remove_dir_all(&dir);
+    offenders.sort();
+    let names: Vec<String> = offenders
+        .iter()
+        .map(|(_, path)| path.to_string_lossy().replace('\\', "/"))
+        .collect();
+    assert_eq!(names, ["some-crate/README.md", "some-crate/lib.rs"]);
 }
