@@ -10,17 +10,20 @@
 //! Popup widths come from [`stack_layout_with_width`]'s width callback;
 //! [`stack_layout`] uses the fixed (touch-grown) `menu_w`.
 //!
-//! A row with a [`MenuItem::description`] is taller by [`description_band`]:
-//! its [`RowLayout::rect`] (hover, hit test, keyboard highlight) covers both
-//! lines, [`RowLayout::line_rect`] is the label's line at the top (what a
-//! one-line row's rect would be) and [`RowLayout::description_rect`] the
-//! band under it.
+//! Row heights, and the band a [`MenuItem::description`] adds under a row's
+//! label, are `row_heights.rs`'s; a description wraps to its panel's final
+//! width, so each panel's rows are sized after its width is settled.
 
 use crate::geometry::{Point, Rect, Size};
 
 use super::model::{MenuEntry, MenuItem};
 use super::overflow::{
     current_scroll_gutter, place_hanging, place_vertical, PopupScroll, StackPlacement,
+};
+use super::row_heights::{content_height, level_row_heights, one_line_descriptions, RowHeight};
+pub use super::row_heights::{
+    description_band, entry_description_height, entry_height, DescriptionHeight,
+    DESCRIPTION_BOTTOM_PAD, DESCRIPTION_SCALE,
 };
 use super::state::MenuAnchorKind;
 
@@ -175,58 +178,6 @@ pub struct RowLayout {
     pub description_height: f64,
 }
 
-impl RowLayout {
-    /// The label's line: the whole row for a one-line row, the part above
-    /// the description band for a described one.  Marks, icon, label,
-    /// shortcut and chevron are centred on it.
-    pub fn line_rect(&self) -> Rect {
-        Rect::new(
-            self.rect.x,
-            self.rect.y + self.description_height,
-            self.rect.width,
-            (self.rect.height - self.description_height).max(0.0),
-        )
-    }
-
-    /// The description's line inside its band (Y-up: the band's bottom
-    /// [`DESCRIPTION_BOTTOM_PAD`] stays clear); empty for a one-line row.
-    pub fn description_rect(&self) -> Rect {
-        let pad = DESCRIPTION_BOTTOM_PAD.min(self.description_height);
-        Rect::new(
-            self.rect.x,
-            self.rect.y + pad,
-            self.rect.width,
-            self.description_height - pad,
-        )
-    }
-}
-
-/// A description's text size, relative to its row's label.
-pub const DESCRIPTION_SCALE: f64 = 0.85;
-/// The room kept under a description's line, inside its band.
-pub const DESCRIPTION_BOTTOM_PAD: f64 = 5.0;
-/// The line height of a description, relative to its text size.
-const DESCRIPTION_LINE: f64 = 1.3;
-
-/// How much a [`MenuItem::description`] adds to its row: one line of the
-/// description's text (the metrics' text size scaled by
-/// [`DESCRIPTION_SCALE`], so it grows with a finger-sized menu) and
-/// [`DESCRIPTION_BOTTOM_PAD`] under it, rounded up to a whole logical px.
-pub fn description_band(m: &MenuMetrics) -> f64 {
-    (m.default_font_size * DESCRIPTION_SCALE * DESCRIPTION_LINE + DESCRIPTION_BOTTOM_PAD).ceil()
-}
-
-/// The description band of `entry`'s row: [`description_band`] for an item
-/// row with a description, `0.0` for any other.
-pub fn entry_description_height(entry: &MenuEntry, m: &MenuMetrics) -> f64 {
-    match entry {
-        MenuEntry::Item(item) if item.widget_row.is_none() && item.description.is_some() => {
-            description_band(m)
-        }
-        _ => 0.0,
-    }
-}
-
 #[derive(Clone, Debug)]
 pub enum MenuHit {
     Item(Vec<usize>),
@@ -340,6 +291,7 @@ pub fn stack_layout_with_metrics(
         width,
         m,
         &StackPlacement::unscrolled(),
+        &one_line_descriptions,
     )
 }
 
@@ -355,6 +307,7 @@ pub(crate) fn stack_layout_placed(
     width: &dyn Fn(&[MenuEntry], &MenuMetrics) -> f64,
     m: MenuMetrics,
     placement: &StackPlacement<'_>,
+    descriptions: &DescriptionHeight<'_>,
 ) -> Vec<PopupLayout> {
     // One source of truth for every popup dimension this frame — paint and
     // hit-test both flow through here, so they can never diverge.
@@ -380,39 +333,49 @@ pub(crate) fn stack_layout_placed(
     // parent on neither side (see the end of the loop).
     let mut hang_span: Option<f64> = None;
 
+    // Where a panel `content_h` tall goes: hung from its parent's row when
+    // it fits beside it on neither side, else placed against the window.
+    let place = |content_h: f64, y_top: f64, hang_span: Option<f64>, root: bool| match hang_span {
+        // The legacy bar placement has no window in the menu's space to
+        // place against; it keeps hanging unclamped.
+        Some(span) if !(bar_legacy && anchor_kind == MenuAnchorKind::Bar) => {
+            place_hanging(content_h, y_top, anchor_kind, vis, span, m.window_margin)
+        }
+        _ => place_vertical(
+            content_h,
+            y_top,
+            anchor_kind,
+            vis,
+            root,
+            placement.anchor_span,
+            bar_legacy,
+            m.window_margin,
+        ),
+    };
     loop {
-        let w = width(items, &m);
-        let content_h = popup_height(items, &m);
-        let (y, h) = match hang_span {
-            // The legacy bar placement has no window in the menu's space to
-            // place against; it keeps hanging unclamped.
-            Some(span) if !(bar_legacy && anchor_kind == MenuAnchorKind::Bar) => {
-                place_hanging(content_h, y_top, anchor_kind, vis, span, m.window_margin)
-            }
-            _ => place_vertical(
-                content_h,
-                y_top,
-                anchor_kind,
-                vis,
-                prefix.is_empty(),
-                placement.anchor_span,
-                bar_legacy,
-                m.window_margin,
-            ),
-        };
-        let scrolls = h < content_h - 1e-9;
-        let gutter = if scrolls {
-            current_scroll_gutter()
-        } else {
-            0.0
-        };
         let margin = m.window_margin;
         // No panel is wider than the window less its margins, scroll bar
         // strip included: a touch-grown fixed width (about 357 logical px)
         // overran a phone's 358 px window.  The rows narrow with it and
         // their labels elide before the shortcut / chevron column
-        // (`widget/labels.rs`).
-        let w = w.min(max_panel_w(vis, margin) - gutter).max(0.0);
+        // (`widget/labels.rs`); a description wraps to the width instead,
+        // so the rows are sized at the panel's final width
+        // (`row_heights.rs`), once more without the scroll bar's strip when
+        // the panel turns out to scroll.
+        let wanted = width(items, &m);
+        let mut w = wanted.min(max_panel_w(vis, margin)).max(0.0);
+        let mut heights = level_row_heights(items, &m, w, descriptions);
+        let mut content_h = content_height(&heights, &m);
+        let mut gutter = 0.0;
+        let (mut y, mut h) = place(content_h, y_top, hang_span, prefix.is_empty());
+        if h < content_h - 1e-9 {
+            gutter = current_scroll_gutter();
+            w = wanted.min(max_panel_w(vis, margin) - gutter).max(0.0);
+            heights = level_row_heights(items, &m, w, descriptions);
+            content_h = content_height(&heights, &m);
+            (y, h) = place(content_h, y_top, hang_span, prefix.is_empty());
+        }
+        let scrolls = h < content_h - 1e-9;
         let left = vis.x + margin;
         let panel_w = w + gutter;
         let px = x.clamp(left, (vis.x + vis.width - panel_w - margin).max(left));
@@ -427,7 +390,7 @@ pub(crate) fn stack_layout_placed(
             s
         });
         let offset = scroll.map_or(0.0, |s| s.offset);
-        let rows = row_layouts(items, Rect::new(px, y + offset, w, h), &m);
+        let rows = row_layouts(items, Rect::new(px, y + offset, w, h), &heights);
         layouts.push(PopupLayout {
             rect,
             rows,
@@ -558,23 +521,6 @@ pub fn item_at(items: &[MenuEntry], idx: usize) -> Option<&MenuItem> {
     }
 }
 
-/// Height of one entry's row: separators are thin, widget rows take their
-/// own height, an item with a [`MenuItem::row_height`] takes that (floored
-/// at the metrics' [`MenuMetrics::touch_row_min`], as the style's row is),
-/// every other item takes the (possibly touch-grown) row height.  A
-/// described item adds its [`description_band`] under that.
-pub fn entry_height(entry: &MenuEntry, m: &MenuMetrics) -> f64 {
-    let line = match entry {
-        MenuEntry::Item(item) => match (item.widget_row, item.row_height) {
-            (Some(w), _) => w.height,
-            (None, Some(h)) if h.is_finite() && h > 0.0 => h.max(m.touch_row_min),
-            _ => m.row_h,
-        },
-        MenuEntry::Separator => m.sep_h,
-    };
-    line + entry_description_height(entry, m)
-}
-
 pub fn popup_height(items: &[MenuEntry], m: &MenuMetrics) -> f64 {
     items
         .iter()
@@ -590,16 +536,15 @@ pub fn contains(rect: Rect, pos: Point) -> bool {
         && pos.y <= rect.y + rect.height
 }
 
-fn row_layouts(items: &[MenuEntry], rect: Rect, m: &MenuMetrics) -> Vec<RowLayout> {
+fn row_layouts(items: &[MenuEntry], rect: Rect, heights: &[RowHeight]) -> Vec<RowLayout> {
     let mut y = rect.y + rect.height;
     let mut rows = Vec::with_capacity(items.len());
-    for (idx, entry) in items.iter().enumerate() {
-        let h = entry_height(entry, m);
-        y -= h;
+    for (idx, (entry, h)) in items.iter().zip(heights).enumerate() {
+        y -= h.total;
         rows.push(RowLayout {
-            rect: Rect::new(rect.x, y, rect.width, h),
+            rect: Rect::new(rect.x, y, rect.width, h.total),
             item_index: matches!(entry, MenuEntry::Item(_)).then_some(idx),
-            description_height: entry_description_height(entry, m),
+            description_height: h.description,
         });
     }
     rows

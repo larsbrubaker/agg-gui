@@ -8,6 +8,7 @@ pub mod geometry;
 pub mod model;
 pub mod overflow;
 pub mod paint;
+pub mod row_heights;
 mod row_widgets;
 mod shortcut_text;
 pub mod state;

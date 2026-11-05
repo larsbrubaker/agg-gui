@@ -22,8 +22,9 @@
 //!   right, which is where the submenu chevron and right-edge check marks
 //!   paint;
 //! * a row with a [`super::MenuItem::description`] is as wide as the wider
-//!   of its label line and its description (at
-//!   [`super::geometry::DESCRIPTION_SCALE`] of the label's size);
+//!   of its label line and its description on one line (at
+//!   [`super::geometry::DESCRIPTION_SCALE`] of the label's size); on a
+//!   narrower window the description wraps (`FitMeasure::description_height`);
 //! * a row with its own [`super::MenuIconSlot`] starts its label at the
 //!   slot's `label_x` and keeps the slot's `label_right` on the right;
 //! * no row is narrower than [`FIT_MIN_W`] — agg-sharp's 150 px
@@ -47,6 +48,8 @@
 use std::sync::Arc;
 
 use crate::text::{measure_advance, Font};
+use crate::widget::Widget;
+use crate::widgets::label::{Label, LabelAlign};
 
 use super::geometry::{MenuMetrics, DESCRIPTION_SCALE, MENU_W};
 use super::model::{MenuEntry, MenuItem};
@@ -133,14 +136,29 @@ impl FitMeasure {
         let shortcut_w = item
             .shortcut_text_formatted(platform, &self.font, self.shortcut_format)
             .map_or(0.0, |text| SHORTCUT_GAP + self.text_width(&text));
-        // A description's line starts under the label and has the row's
-        // room to itself, so the row fits the wider of the two lines.
+        // A description starts under the label and has the row's room to
+        // itself: the row fits the wider of the label's line and the
+        // description on one line (it wraps when the window is narrower).
         let description_w = item.description.as_deref().map_or(0.0, |text| {
             menu_text_width(&self.font, self.font_size * DESCRIPTION_SCALE, text)
         });
         row_label_x(self.label_x, self.selection_column, item)
             + (label_w + shortcut_w).max(description_w)
             + row_label_right(self.shortcut_right, item)
+    }
+
+    /// The height of `item`'s description wrapped within a row `row_width`
+    /// wide, between the row's label edge and its right-hand column, at
+    /// [`DESCRIPTION_SCALE`] of the label's size: the wrapping `Label` the
+    /// row paints it with (`widget/labels.rs`), measured, so the row is as
+    /// tall as its painted words.  `None` for a row without one.
+    pub fn description_height(&self, item: &MenuItem, row_width: f64) -> Option<f64> {
+        let text = item.description.as_deref()?;
+        let room = row_width
+            - row_label_x(self.label_x, self.selection_column, item)
+            - row_label_right(self.shortcut_right, item);
+        let label = description_label(text, &self.font, self.font_size);
+        Some(label.measure_min_height(room.max(1.0)))
     }
 
     /// Width of a fitted popup holding `items`: the widest row's natural
@@ -166,4 +184,14 @@ impl FitMeasure {
         let floor = min_w * (m.menu_w / MENU_W);
         widest.ceil().max(floor)
     }
+}
+
+/// A row's description as a `Label`: wrapping to its room, at
+/// [`DESCRIPTION_SCALE`] of the row's `font_size`.  The row paints it and
+/// [`FitMeasure::description_height`] measures it, so the two agree.
+pub(crate) fn description_label(text: &str, font: &Arc<Font>, font_size: f64) -> Label {
+    Label::new(text, Arc::clone(font))
+        .with_font_size(font_size * DESCRIPTION_SCALE)
+        .with_align(LabelAlign::Left)
+        .with_wrap(true)
 }

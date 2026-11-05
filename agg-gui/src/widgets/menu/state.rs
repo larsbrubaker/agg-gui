@@ -11,7 +11,7 @@ use super::geometry::{
     hit_test, item_at_path, metrics_with_style_for, popup_touch_sized, stack_layout_placed,
     MenuHit, MenuMetrics, PopupLayout, MARGIN, ROW_H, SEP_H,
 };
-use super::model::{MenuEntry, MenuSelection};
+use super::model::{MenuEntry, MenuItem, MenuSelection};
 use super::overflow::StackPlacement;
 use paths::{items_at_path, shortcut_path, toggle_selection_at_path};
 
@@ -278,6 +278,13 @@ impl PopupMenuState {
             space_origin: self.space_origin,
             scroll: &scroll,
         };
+        // A description wraps to its panel's width with the font the popup
+        // paints with; before a font is known it counts one line.
+        let descriptions = |item: &MenuItem, row_width: f64| {
+            self.fit_measure
+                .as_ref()
+                .and_then(|measure| measure.description_height(item, row_width))
+        };
         match (self.width, &self.fit_measure) {
             (MenuWidth::FitContent, Some(measure)) => stack_layout_placed(
                 items,
@@ -288,6 +295,7 @@ impl PopupMenuState {
                 &|level, m| measure.popup_width_with_min(level, m, self.min_width),
                 m,
                 &placement,
+                &descriptions,
             ),
             _ => stack_layout_placed(
                 items,
@@ -298,6 +306,7 @@ impl PopupMenuState {
                 &|_, m: &MenuMetrics| m.menu_w,
                 m,
                 &placement,
+                &descriptions,
             ),
         }
     }

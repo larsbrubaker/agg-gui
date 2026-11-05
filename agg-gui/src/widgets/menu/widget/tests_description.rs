@@ -1,8 +1,11 @@
 //! A row's second line (`MenuItem::description`).
 //!
-//! A described row is taller by `geometry::description_band`, on the mouse
-//! and the touch layout alike, and stays one row: hit-testing (and with it
-//! hover and activation) and keyboard selection cover both lines.  Its label
+//! A described row is taller by its description's band, on the mouse and
+//! the touch layout alike, and stays one row: hit-testing (and with it hover
+//! and activation) and keyboard selection cover all of it.  Before a font is
+//! known the band is one line (`geometry::description_band`); with the font
+//! the description wraps to the panel's width, never eliding, and the band
+//! holds every line.  Its label
 //! keeps a one-line row's place in the line above the band, the description
 //! paints under it in the theme's dimmed text, and a fitted popup is wide
 //! enough for the description.  Rows without one keep their exact height
@@ -18,14 +21,16 @@ use crate::gfx_ctx::GfxCtx;
 use crate::text::Font;
 use crate::theme::Visuals;
 
-use super::super::fit_width::FitMeasure;
+use super::super::fit_width::{description_label, FitMeasure, MenuWidth};
 use super::super::geometry::{
-    description_band, effective_metrics, hit_test, metrics_for, MenuHit, ROW_H, TOUCH_MIN,
+    description_band, effective_metrics, hit_test, metrics_for, MenuHit, DESCRIPTION_SCALE, ROW_H,
+    TOUCH_MIN,
 };
 use super::super::model::{MenuEntry, MenuItem};
 use super::super::paint::MenuStyle;
 use super::super::state::MenuResponse;
 use super::PopupMenu;
+use crate::widget::Widget;
 
 const VIEWPORT: Size = Size {
     width: 400.0,
@@ -201,4 +206,116 @@ fn a_fitted_popup_is_wide_enough_for_a_description() {
     let natural = measure.row_natural_width(&described);
     let width = measure.popup_width_with_min(&[described.into()], &effective_metrics(), 0.0);
     assert_eq!(width, natural.ceil(), "the popup fits the described row");
+}
+
+const LONG: &str = "Takes longer and uses your allowance faster, which is worth it for complex \
+                    designs with many parts and careful fillets.";
+
+/// A content-sized menu with a short row and a long described one, open in a
+/// window `width` wide, measured with the font it paints with.
+fn wrapping_menu(width: f64) -> (PopupMenu, Size) {
+    let viewport = Size::new(width, 400.0);
+    let mut menu = PopupMenu::new(vec![
+        MenuEntry::Item(MenuItem::action("Standard", "s")),
+        MenuEntry::Item(MenuItem::action("Best", "b").radio(false).description(LONG)),
+    ]);
+    menu.set_width(MenuWidth::FitContent);
+    menu.set_measure_font(test_font(), 14.0);
+    menu.open_at(Point::new(4.0, 300.0));
+    (menu, viewport)
+}
+
+#[test]
+fn a_long_description_in_a_narrow_window_wraps_and_its_row_grows_by_its_lines() {
+    let _guard = crate::input_profile::profile_test_lock();
+    reset_env();
+    crate::theme::set_visuals(Visuals::dark());
+    let (mut menu, viewport) = wrapping_menu(220.0);
+    let layout = menu.state.layouts(&menu.items, viewport)[0].clone();
+    assert!(
+        layout.rect.width <= 220.0,
+        "the panel keeps inside the window: {:?}",
+        layout.rect
+    );
+    let row = layout.rows[1].clone();
+    let style = MenuStyle::default();
+    let item = MenuItem::action("Best", "b").radio(false).description(LONG);
+    let room = row.rect.width
+        - super::super::style::row_label_x(style.label_x, style.selection_column, &item)
+        - super::super::style::row_label_right(style.shortcut_right, &item);
+    let lines =
+        crate::widgets::label::wrap_text(&test_font(), LONG, 14.0 * DESCRIPTION_SCALE, room);
+    assert!(lines.len() >= 3, "the words wrap: {lines:?}");
+    // The band holds every line: N one-line heights, not one.
+    let one_line = description_label("Takes", &test_font(), 14.0).measure_min_height(1000.0);
+    let text = row.description_rect().height;
+    assert!(
+        text >= lines.len() as f64 * one_line - 0.5,
+        "{} lines of {one_line} fit in {text}",
+        lines.len()
+    );
+    assert_eq!(
+        row.rect.height,
+        row.line_rect().height + row.description_height,
+        "the row is its label's line and the band"
+    );
+    // The whole taller row hit-tests: its bottom edge, under the last line.
+    let layouts = menu.state.layouts(&menu.items, viewport);
+    let bottom = Point::new(row.rect.x + 30.0, row.rect.y + 1.0);
+    assert!(matches!(hit_test(&layouts, bottom), Some(MenuHit::Item(p)) if p == vec![1]));
+
+    // Painted: every line band of the description has ink (it wrapped onto
+    // them rather than ending in an ellipsis on the first).
+    let mut fb = Framebuffer::new(viewport.width as u32, viewport.height as u32);
+    {
+        let mut ctx = GfxCtx::new(&mut fb);
+        ctx.clear(Color::black());
+        menu.paint(&mut ctx, test_font(), 14.0, viewport);
+    }
+    let words = row.description_rect();
+    let n = lines.len();
+    let line_h = words.height / n as f64;
+    for i in 0..n {
+        let stripe = Rect::new(
+            words.x,
+            words.y + words.height - (i as f64 + 1.0) * line_h,
+            words.width,
+            line_h,
+        );
+        assert!(
+            brightest(&fb, stripe) > 50,
+            "line {} of {n} is drawn",
+            i + 1
+        );
+    }
+    assert_eq!(
+        menu.labels.row_description(0, 1).map(|l| l.text_str()),
+        Some(LONG),
+        "the whole description, never cut"
+    );
+}
+
+#[test]
+fn a_wide_window_keeps_the_description_on_one_line_and_touch_still_floors_the_label_line() {
+    let _guard = crate::input_profile::profile_test_lock();
+    reset_env();
+    let (menu, viewport) = wrapping_menu(1200.0);
+    let wide = menu.state.layouts(&menu.items, viewport)[0].rows[1].clone();
+    let one_line = description_label(LONG, &test_font(), 14.0).measure_min_height(1.0e6);
+    assert!(
+        wide.description_rect().height < 2.0 * one_line,
+        "one line when the window has room: {:?}",
+        wide.description_rect()
+    );
+
+    crate::touch_emulation::long_press::set_last_press_was_touch_for_testing(true);
+    let (menu, viewport) = wrapping_menu(220.0);
+    let rows = menu.state.layouts(&menu.items, viewport)[0].rows.clone();
+    assert_eq!(rows[0].rect.height, TOUCH_MIN);
+    assert_eq!(rows[1].line_rect().height, TOUCH_MIN);
+    assert!(
+        rows[1].description_height > 2.0 * one_line,
+        "it wraps on touch too"
+    );
+    reset_env();
 }

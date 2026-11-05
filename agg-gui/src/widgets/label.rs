@@ -44,7 +44,12 @@ mod line_spacing;
 /// Break `text` into lines that each fit within `max_width` pixels at the given
 /// font size.  Explicit `\n` characters always produce a new line.  Returns at
 /// least one entry (possibly an empty string for blank text).
-fn wrap_text(font: &Arc<Font>, text: &str, font_size: f64, max_width: f64) -> Vec<String> {
+pub(crate) fn wrap_text(
+    font: &Arc<Font>,
+    text: &str,
+    font_size: f64,
+    max_width: f64,
+) -> Vec<String> {
     use crate::text::measure_text_metrics;
     let mut result = Vec::new();
     for paragraph in text.split('\n') {
