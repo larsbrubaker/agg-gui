@@ -95,11 +95,12 @@ pub struct MenuItem {
     /// [`MenuItem::with_automation_name()`]; read through
     /// [`menu_row_name`](super::menu_row_name).
     pub automation_name: Option<String>,
-    /// A second line under the label, in smaller muted text (the theme's
-    /// `text_dim`): what the choice does.  The row grows to hold it on the
-    /// mouse and touch layouts alike; one line, ending in an ellipsis on a
-    /// popup too narrow for it.  `None` (the default) keeps the one-line row.
-    /// Set with [`MenuItem::description()`].
+    /// Words under the label, in smaller muted text (the theme's
+    /// `text_dim`): what the choice does.  They wrap to the popup's width,
+    /// never eliding, and the row grows to hold every line on the mouse and
+    /// touch layouts alike (`row_heights.rs`); a fitted popup widens for them
+    /// only up to a reading measure (`fit_width.rs`).  `None` (the default)
+    /// keeps the one-line row.  Set with [`MenuItem::description()`].
     pub description: Option<String>,
 }
 

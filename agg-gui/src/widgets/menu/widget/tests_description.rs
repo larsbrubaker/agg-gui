@@ -21,7 +21,7 @@ use crate::gfx_ctx::GfxCtx;
 use crate::text::Font;
 use crate::theme::Visuals;
 
-use super::super::fit_width::{description_label, FitMeasure, MenuWidth};
+use super::super::fit_width::{description_label, FitMeasure, MenuWidth, DESCRIPTION_MEASURE_EMS};
 use super::super::geometry::{
     description_band, effective_metrics, hit_test, metrics_for, MenuHit, DESCRIPTION_SCALE, ROW_H,
     TOUCH_MIN,
@@ -296,17 +296,35 @@ fn a_long_description_in_a_narrow_window_wraps_and_its_row_grows_by_its_lines() 
 }
 
 #[test]
-fn a_wide_window_keeps_the_description_on_one_line_and_touch_still_floors_the_label_line() {
+fn a_wide_window_caps_a_long_description_at_the_measure_and_touch_still_floors_the_label_line() {
     let _guard = crate::input_profile::profile_test_lock();
     reset_env();
     let (menu, viewport) = wrapping_menu(1200.0);
-    let wide = menu.state.layouts(&menu.items, viewport)[0].rows[1].clone();
+    let layout = menu.state.layouts(&menu.items, viewport)[0].clone();
+    let wide = layout.rows[1].clone();
     let one_line = description_label(LONG, &test_font(), 14.0).measure_min_height(1.0e6);
+    // The long words would make a ~1000 px row: the panel stops at the
+    // reading measure and they wrap inside it, the window's room unused.
+    let room = description_room(&menu, &wide, LONG);
     assert!(
-        wide.description_rect().height < 2.0 * one_line,
-        "one line when the window has room: {:?}",
+        room <= DESCRIPTION_MEASURE_EMS * 14.0 + 1.0,
+        "the description's room ({room}) is capped at the measure"
+    );
+    assert!(
+        wide.description_rect().height >= 2.0 * one_line,
+        "and the words wrap inside it: {:?}",
         wide.description_rect()
     );
+    // A short description still sits on one line, widening the panel past
+    // its short labels.
+    let mut short = PopupMenu::new(vec![MenuEntry::Item(
+        MenuItem::action("A", "a").description("Fast, great for most designs."),
+    )]);
+    short.set_width(MenuWidth::FitContent);
+    short.set_measure_font(test_font(), 14.0);
+    short.open_at(Point::new(4.0, 300.0));
+    let row = short.state.layouts(&short.items, viewport)[0].rows[0].clone();
+    assert!(row.description_rect().height < 2.0 * one_line, "{row:?}");
 
     crate::touch_emulation::long_press::set_last_press_was_touch_for_testing(true);
     let (menu, viewport) = wrapping_menu(220.0);
@@ -318,4 +336,92 @@ fn a_wide_window_keeps_the_description_on_one_line_and_touch_still_floors_the_la
         "it wraps on touch too"
     );
     reset_env();
+}
+
+/// The room a row `row` gives its description under the installed style.
+fn description_room(menu: &PopupMenu, row: &super::super::geometry::RowLayout, text: &str) -> f64 {
+    let item = MenuItem::action("Best", "b").description(text);
+    let style = &menu.style;
+    row.rect.width
+        - super::super::style::row_label_x(style.label_x, style.selection_column, &item)
+        - super::super::style::row_label_right(style.shortcut_right, &item)
+}
+
+#[test]
+fn a_half_pixel_narrower_popup_rewraps_its_description_as_its_row_was_sized() {
+    let _guard = crate::input_profile::profile_test_lock();
+    reset_env();
+    const TWO_WORDS: &str = "alpha beta";
+    let font = test_font();
+    let size = 14.0 * DESCRIPTION_SCALE;
+    let words_w = crate::text::measure_advance(&font, TWO_WORDS, size);
+    let mut menu = PopupMenu::new(vec![MenuEntry::Item(
+        MenuItem::action("Best", "b").description(TWO_WORDS),
+    )]);
+    menu.set_measure_font(Arc::clone(&font), 14.0);
+    menu.open_at(Point::new(0.0, 300.0));
+    // A window narrow enough that the panel is the window less its margins,
+    // then moved so the room is a quarter pixel either side of the words.
+    let probe = Size::new(120.0, 400.0);
+    let row = menu.state.layouts(&menu.items, probe)[0].rows[0].clone();
+    let room = description_room(&menu, &row, TWO_WORDS);
+    let fits = Size::new(probe.width + (words_w + 0.25 - room), 400.0);
+    let breaks = Size::new(fits.width - 0.5, 400.0);
+
+    let paint = |menu: &mut PopupMenu, viewport: Size| {
+        let mut fb = Framebuffer::new(viewport.width.ceil() as u32, viewport.height as u32);
+        let mut ctx = GfxCtx::new(&mut fb);
+        menu.paint(&mut ctx, Arc::clone(&font), 14.0, viewport);
+    };
+    paint(&mut menu, fits);
+    let one = menu
+        .labels
+        .row_description(0, 0)
+        .expect("label")
+        .bounds()
+        .height;
+    let band_one = menu.state.layouts(&menu.items, fits)[0].rows[0].description_rect();
+    paint(&mut menu, breaks);
+    let two = menu
+        .labels
+        .row_description(0, 0)
+        .expect("label")
+        .bounds()
+        .height;
+    let band_two = menu.state.layouts(&menu.items, breaks)[0].rows[0].description_rect();
+    assert!(
+        band_two.height > band_one.height,
+        "the row grew for the second line"
+    );
+    assert!(
+        two > 1.5 * one,
+        "the painted words wrap to two lines as the row was sized ({one} -> {two})"
+    );
+    assert!(
+        two <= band_two.height + 0.5,
+        "and fit the band ({two} in {band_two:?})"
+    );
+}
+
+#[test]
+fn a_plain_row_fits_to_exactly_its_label_shortcut_and_padding() {
+    let style = MenuStyle::default();
+    let font = test_font();
+    let measure = FitMeasure::new(Arc::clone(&font), 14.0, &style);
+    let plain = MenuItem::action("Select All", "s").shortcut("Ctrl+A");
+    let platform = crate::platform::current_platform();
+    let shortcut = plain
+        .shortcut_text_formatted(platform, &font, style.shortcut_format)
+        .expect("a shortcut");
+    let label_w = crate::text::measure_advance(&font, "Select All", 14.0);
+    let shortcut_w = super::super::fit_width::SHORTCUT_GAP
+        + crate::text::measure_advance(&font, &shortcut, 14.0);
+    let expected = super::super::style::row_label_x(style.label_x, None, &plain)
+        + label_w
+        + shortcut_w
+        + super::super::style::row_label_right(style.shortcut_right, &plain);
+    assert_eq!(
+        measure.row_natural_width(&plain).to_bits(),
+        expected.to_bits()
+    );
 }

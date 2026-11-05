@@ -97,6 +97,9 @@ pub struct PopupRowLabels {
     /// The row's description (`MenuItem::description`), when it has one:
     /// `fit_width::description_label`, wrapping to the row.
     pub description: Option<Label>,
+    /// The width the description was last wrapped at, `None` before its first
+    /// paint (`PopupLabels::paint_description`).
+    pub description_width: Option<f64>,
 }
 
 /// Cache of `Label`s for every visible popup row, keyed by
@@ -207,15 +210,23 @@ impl PopupLabels {
                                 *slot = text.map(|t| make_label(t, font, font_size));
                             }
                         }
-                        match (&mut existing.description, item.description.as_deref()) {
+                        // New words are wrapped afresh at the next paint.
+                        let rewrap = match (&mut existing.description, item.description.as_deref())
+                        {
                             (Some(slot), Some(text)) => {
-                                if slot.text_str() != text {
+                                let changed = slot.text_str() != text;
+                                if changed {
                                     slot.set_text(text);
                                 }
+                                changed
                             }
                             (slot, text) => {
                                 *slot = text.map(|t| description_label(t, font, font_size));
+                                true
                             }
+                        };
+                        if rewrap {
+                            existing.description_width = None;
                         }
                     }
                     slot @ None => {
@@ -229,6 +240,7 @@ impl PopupLabels {
                                 .description
                                 .as_deref()
                                 .map(|t| description_label(t, font, font_size)),
+                            description_width: None,
                         });
                     }
                 }
@@ -363,36 +375,47 @@ impl PopupLabels {
     }
 
     /// Paint row `row_idx`'s description in popup level `level_idx` into
-    /// `line` (the row's `RowLayout::description_rect`), starting at
-    /// `label_x` like the label above it and wrapping before `right_pad`
-    /// from the row's right edge, its first line at the top; in `color`.
-    /// `false` when the row has no description.
-    #[allow(clippy::too_many_arguments)]
+    /// `area` (the row's `RowLayout::description_text_rect`), wrapped to its
+    /// width, its first line at the top; in `color`.  `false` when the row has
+    /// no description.
+    ///
+    /// The row was sized by `FitMeasure::description_height`, which wraps a
+    /// fresh `Label` at exactly this width.  A cached `Label` re-wraps only
+    /// when its width moves by more than a pixel, so a sub-pixel resize across
+    /// a word break would paint a line the row has no room for, or leave a
+    /// blank one: at any other width the description is rebuilt, wrapping as
+    /// the measure did.
     pub fn paint_description(
         &mut self,
         ctx: &mut dyn DrawCtx,
         level_idx: usize,
         row_idx: usize,
-        line: Rect,
-        label_x: f64,
-        right_pad: f64,
+        area: Rect,
         color: Color,
     ) -> bool {
-        let Some(description) = self
+        let (font, font_size) = (self.font.clone(), self.last_font_size);
+        let Some(row) = self
             .rows
             .get_mut(level_idx)
             .and_then(|level| level.get_mut(row_idx))
             .and_then(|row| row.as_mut())
-            .and_then(|row| row.description.as_mut())
         else {
             return false;
         };
+        let Some(description) = row.description.as_mut() else {
+            return false;
+        };
+        if row.description_width != Some(area.width) {
+            if let Some(font) = &font {
+                *description = description_label(description.text_str(), font, font_size);
+            }
+            row.description_width = Some(area.width);
+        }
         description.set_color(color);
-        let inner_w = (line.width - label_x - right_pad).max(0.0);
-        let size = description.layout(Size::new(inner_w, line.height));
+        let size = description.layout(Size::new(area.width, area.height));
         description.set_bounds(Rect::new(0.0, 0.0, size.width, size.height));
         ctx.save();
-        ctx.translate(line.x + label_x, line.y + (line.height - size.height) * 0.5);
+        ctx.translate(area.x, area.y + area.height - size.height);
         paint_subtree(description, ctx);
         ctx.restore();
         true

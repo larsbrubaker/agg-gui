@@ -23,8 +23,9 @@
 //!   paint;
 //! * a row with a [`super::MenuItem::description`] is as wide as the wider
 //!   of its label line and its description on one line (at
-//!   [`super::geometry::DESCRIPTION_SCALE`] of the label's size); on a
-//!   narrower window the description wraps (`FitMeasure::description_height`);
+//!   [`super::geometry::DESCRIPTION_SCALE`] of the label's size), the
+//!   description's text capped at [`DESCRIPTION_MEASURE_EMS`]; past that, or
+//!   on a narrower window, it wraps (`FitMeasure::description_height`);
 //! * a row with its own [`super::MenuIconSlot`] starts its label at the
 //!   slot's `label_x` and keeps the slot's `label_right` on the right;
 //! * no row is narrower than [`FIT_MIN_W`] — agg-sharp's 150 px
@@ -58,6 +59,12 @@ use super::style::{row_label_right, row_label_x, SelectionColumn, ShortcutFormat
 
 /// Gap between a row's label and its shortcut in a fitted popup (logical px).
 pub const SHORTCUT_GAP: f64 = 20.0;
+/// The widest a description may make a fitted row's text, in ems of the
+/// row's label: about 50 characters of the smaller description text, a
+/// comfortable line to read beside a menu's short labels.  A longer
+/// description wraps within it rather than stretching the popup across the
+/// window; a row whose label line is wider sets the width instead.
+pub const DESCRIPTION_MEASURE_EMS: f64 = 22.0;
 /// Narrowest fitted popup at desktop metrics (logical px).
 pub const FIT_MIN_W: f64 = 156.0;
 
@@ -136,15 +143,20 @@ impl FitMeasure {
         let shortcut_w = item
             .shortcut_text_formatted(platform, &self.font, self.shortcut_format)
             .map_or(0.0, |text| SHORTCUT_GAP + self.text_width(&text));
+        let left = row_label_x(self.label_x, self.selection_column, item);
+        let right = row_label_right(self.shortcut_right, item);
+        // Summed in this order so a row without a description is the width it
+        // always was, to the bit.
+        let line_w = left + label_w + shortcut_w + right;
         // A description starts under the label and has the row's room to
-        // itself: the row fits the wider of the label's line and the
-        // description on one line (it wraps when the window is narrower).
-        let description_w = item.description.as_deref().map_or(0.0, |text| {
-            menu_text_width(&self.font, self.font_size * DESCRIPTION_SCALE, text)
-        });
-        row_label_x(self.label_x, self.selection_column, item)
-            + (label_w + shortcut_w).max(description_w)
-            + row_label_right(self.shortcut_right, item)
+        // itself.  It widens the row to hold it on one line only up to
+        // `DESCRIPTION_MEASURE_EMS`; past that it wraps, and a narrower window
+        // wraps it sooner.
+        item.description.as_deref().map_or(line_w, |text| {
+            let words = menu_text_width(&self.font, self.font_size * DESCRIPTION_SCALE, text);
+            let measure = DESCRIPTION_MEASURE_EMS * self.font_size;
+            line_w.max(left + words.min(measure) + right)
+        })
     }
 
     /// The height of `item`'s description wrapped within a row `row_width`

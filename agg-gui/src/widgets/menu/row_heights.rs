@@ -21,6 +21,8 @@ use crate::geometry::Rect;
 
 use super::geometry::{MenuMetrics, RowLayout};
 use super::model::{MenuEntry, MenuItem};
+use super::paint::MenuStyle;
+use super::style::{row_label_right, row_label_x};
 
 /// A description's text size, relative to its row's label.
 pub const DESCRIPTION_SCALE: f64 = 0.85;
@@ -62,6 +64,22 @@ impl RowLayout {
             self.rect.y + pad,
             self.rect.width,
             self.description_height - pad,
+        )
+    }
+
+    /// The area `item`'s description wraps in under `style`: the
+    /// [`Self::description_rect`] from the label's edge to the row's
+    /// right-hand column, the room `FitMeasure::description_height` measures
+    /// and the row paints into.
+    pub fn description_text_rect(&self, style: &MenuStyle, item: &MenuItem) -> Rect {
+        let band = self.description_rect();
+        let left = row_label_x(style.label_x, style.selection_column, item);
+        let right = row_label_right(style.shortcut_right, item);
+        Rect::new(
+            band.x + left,
+            band.y,
+            (band.width - left - right).max(0.0),
+            band.height,
         )
     }
 }

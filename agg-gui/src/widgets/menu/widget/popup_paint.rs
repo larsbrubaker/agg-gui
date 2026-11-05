@@ -223,9 +223,7 @@ pub(super) fn paint_popup_level(
                 ctx,
                 level_idx,
                 row_idx,
-                row_layout.description_rect(),
-                row_label_x(style.label_x, style.selection_column, item),
-                row_label_right(style.shortcut_right, item),
+                row_layout.description_text_rect(style, item),
                 color,
             );
         }

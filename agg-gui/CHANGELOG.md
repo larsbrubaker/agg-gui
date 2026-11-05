@@ -13,8 +13,10 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 - `MenuItem::description(text)`: a smaller, muted (`text_dim`) description under a menu row's label,
   wrapped to the popup's width (never elided); the row grows by its lines (mouse and touch) and
   stays one row: hover, hit area and keyboard cover it, marks and label sit on
-  `RowLayout::line_rect`, and a fitted popup fits it on one line where the window allows. Rows
-  without one are unchanged. New: `RowLayout::description_height`, `menu::row_heights` (0.5.7).
+  `RowLayout::line_rect`, and a fitted popup widens for it only up to
+  `fit_width::DESCRIPTION_MEASURE_EMS` (22 ems), wrapping it past that. Rows without one are
+  unchanged. New: `RowLayout::description_height` and `description_text_rect`, `menu::row_heights`
+  (0.5.7).
 
 - `mouse_button_held(MouseButton) -> bool`: whether a mouse button is held down, as of the last
   pointer event `App` processed, whichever widget (if any) heard it. A release counts even when it
