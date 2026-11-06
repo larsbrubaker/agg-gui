@@ -1,6 +1,6 @@
 //! Pointer-input methods on [`App`] — mouse move/down/up plus the
-//! modal-subtree hit extension they share, with the hover a modal lets
-//! pass outside its bounds. The press and release entry points keep
+//! modal-subtree hit extension they share, with the hover (and wheel) a
+//! modal lets pass outside its bounds. The press and release entry points keep
 //! [`crate::event::mouse_button_held`] current before dispatching. Split out of `app.rs`
 //! (800-line guardrail); keyboard routing is in `keyboard.rs`, wheel
 //! routing stays in `app.rs`.
@@ -69,13 +69,14 @@ impl App {
         full
     }
 
-    /// Where a pointer move (hover) at `pos` goes while a modal is active:
-    /// the hit inside the modal's subtree. `None` when no modal is active,
-    /// or when the modal lets hover outside it pass
+    /// Where a pointer move (hover) or a wheel turn at `pos` goes while a
+    /// modal is active: the hit inside the modal's subtree. `None` when no
+    /// modal is active, or when the modal lets the pointer outside it pass
     /// ([`Widget::modal_hover_passes_outside`]) and `pos` is outside its
-    /// bounds; the move then takes the ordinary hit-tested route, so the
-    /// widgets beside a light-dismiss panel still show their cursors.
-    fn modal_hover_path(&self, pos: Point) -> Option<Vec<usize>> {
+    /// bounds; the move or wheel then takes the ordinary hit-tested route,
+    /// so the widgets beside a light-dismiss panel still show their cursors
+    /// and still scroll and zoom.
+    pub(super) fn modal_hover_path(&self, pos: Point) -> Option<Vec<usize>> {
         let modal_path = active_modal_path(self.root.as_ref())?;
         if let Some((widget, local)) = self.modal_local(&modal_path, pos) {
             let bounds = widget.bounds();

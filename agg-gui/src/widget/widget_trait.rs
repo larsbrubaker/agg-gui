@@ -159,13 +159,14 @@ pub trait Widget {
         false
     }
 
-    /// Whether, while this widget is the active modal, pointer moves outside
-    /// its bounds hover the widgets under the pointer as usual: their hover
-    /// state and cursor (a splitter's resize pointer) show, as beside any
-    /// panel. Presses, releases, the wheel and keys still go to the modal, so
-    /// a press outside still reaches it first (to close it). For a
+    /// Whether, while this widget is the active modal, pointer moves and
+    /// wheel turns outside its bounds reach the widgets under the pointer as
+    /// usual: their hover state and cursor (a splitter's resize pointer)
+    /// show, and a list scrolls or a view zooms under the wheel, as beside
+    /// any panel. Presses, releases and keys still go to the modal, so a
+    /// press outside still reaches it first (to close it). For a
     /// light-dismiss panel with no backdrop; a dialog over a backdrop keeps
-    /// the default `false`, hiding what is beneath.
+    /// the default `false`, hiding what is beneath and taking every wheel.
     fn modal_hover_passes_outside(&self) -> bool {
         false
     }

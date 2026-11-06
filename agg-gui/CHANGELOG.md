@@ -88,8 +88,8 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 - `Widget::modal_hover_passes_outside` (default `false`): a modal that answers `true` lets pointer
   moves outside its bounds hover the widgets under the pointer as usual, so a light-dismiss panel
   with no backdrop leaves the cursors beside it showing (a splitter's resize pointer), including
-  after `App::refresh_cursor`. Presses, releases, the wheel and keys still go to the modal, and a
-  drag it captured keeps every move.
+  after `App::refresh_cursor`. Presses, releases and keys still go to the modal, and a drag it
+  captured keeps every move.
 
 - Long press: a finger held still for `LONG_PRESS_DELAY` (500 ms) within `LONG_PRESS_SLOP` of where
   it went down, with no second finger, is a right press and release at the touch-down point, so
@@ -208,6 +208,12 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   app.
 
 ### Changed
+
+- The mouse wheel outside a modal that answers `Widget::modal_hover_passes_outside` reaches the
+  widget under the pointer, as its hover does, so a list beside a light-dismiss panel scrolls and a
+  view beside it zooms. The wheel used to go to the modal, which ignored it outside itself, so it
+  was lost. Inside the modal, and anywhere while a modal that keeps the default (a dialog over a
+  backdrop) is up, the wheel goes to the modal as before (0.5.8).
 
 - In the browser, `clipboard::set_image_rgba` puts the picture on the user's clipboard: it is
   encoded as PNG and written with `navigator.clipboard.write` (a `ClipboardItem` built inside the

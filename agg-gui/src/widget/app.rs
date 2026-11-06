@@ -440,6 +440,11 @@ impl App {
     }
 
     /// Mouse wheel with explicit horizontal component and modifier state.
+    ///
+    /// While a modal is active the wheel goes into the modal's subtree,
+    /// except outside a modal that lets the pointer pass
+    /// ([`Widget::modal_hover_passes_outside`]): there it reaches the widget
+    /// under the pointer, as a move's hover does (`modal_hover_path`).
     pub fn on_mouse_wheel_xy_mods(
         &mut self,
         screen_x: f64,
@@ -451,8 +456,8 @@ impl App {
         self.resolve_tracked_paths();
         let pos = super::keyboard_scroll::lift_to_world(self.flip_y(screen_x, screen_y));
         set_current_mouse_world(pos);
-        let hit = active_modal_path(self.root.as_ref())
-            .map(|path| self.extend_modal_path(&path, pos))
+        let hit = self
+            .modal_hover_path(pos)
             .or_else(|| self.compute_hit(pos));
         let event = Event::MouseWheel {
             pos,
