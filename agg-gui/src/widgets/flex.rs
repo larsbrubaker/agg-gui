@@ -34,7 +34,9 @@
 //! # Cross-axis anchoring
 //!
 //! `FlexColumn` reads each child's `h_anchor()` to place it horizontally
-//! within the column's inner width.  A `FlexColumn` child whose `v_anchor()`
+//! within the column's inner width (for a fit-width column measured with an
+//! unbounded width, the width it reports; see [`cross_x_h`]).  A
+//! `FlexColumn` child whose `v_anchor()`
 //! stretches is a flex child of factor 1 on the main axis (agg-sharp's
 //! `FlowLayoutWidget`), unless it was added with a factor of its own.  `FlexRow` reads `v_anchor()` to place
 //! children vertically within the row's inner height.
@@ -74,30 +76,12 @@ pub const DEFAULT_ROW_GAP: f64 = 8.0;
 // Cross-axis placement helpers
 // ---------------------------------------------------------------------------
 
-/// Compute `(x, actual_width)` for a child in a `FlexColumn` (horizontal
-/// cross-axis placement).
-///
-/// - `pad_l`     — column's left inner-padding offset.
-/// - `inner_w`   — column's usable width (after padding, before margins).
-/// - `margin_l/r` — child's left/right margins (logical units).
-/// - `natural_w` — width returned by `child.layout()`.
-/// - `min_w/max_w` — child's min/max width constraints.
-// Each argument is a distinct drawing/geometry input; a struct would only rename them.
-#[allow(clippy::too_many_arguments)]
-fn place_cross_h(
-    anchor: HAnchor,
-    pad_l: f64,
-    inner_w: f64,
-    margin_l: f64,
-    margin_r: f64,
-    natural_w: f64,
-    min_w: f64,
-    max_w: f64,
-) -> (f64, f64) {
-    let slot_w = (inner_w - margin_l - margin_r).max(0.0);
-
-    // Determine width.
-    let actual_w = if anchor.is_stretch() {
+/// The width of a child in a `FlexColumn` (horizontal cross-axis size): its
+/// `natural_w` (from `child.layout()`), or the `slot_w` it was offered (the
+/// column's inner width less its margins) for a stretching anchor, held to
+/// its `min_w`/`max_w` limits.
+fn cross_width_h(anchor: HAnchor, slot_w: f64, natural_w: f64, min_w: f64, max_w: f64) -> f64 {
+    if anchor.is_stretch() {
         // LEFT | RIGHT → fill slot
         clamp_to_limits(slot_w, min_w, max_w)
     } else if anchor == HAnchor::MAX_FIT_OR_STRETCH {
@@ -115,10 +99,27 @@ fn place_cross_h(
     } else {
         // FIT, LEFT, RIGHT, CENTER, ABSOLUTE — use natural width.
         clamp_to_limits(natural_w, min_w, max_w)
-    };
+    }
+}
 
-    // Determine x position.
-    let x = if anchor.contains(HAnchor::RIGHT) && !anchor.contains(HAnchor::LEFT) {
+/// The left `x` of a child of width `actual_w` in a `FlexColumn`
+/// (horizontal cross-axis placement).
+///
+/// - `pad_l`     — column's left inner-padding offset.
+/// - `inner_w`   — the width the child is anchored within (after padding,
+///   before margins): the offered inner width, or for a fit-width column
+///   measured with an unbounded width the width it reports.
+/// - `margin_l/r` — child's left/right margins (logical units).
+fn cross_x_h(
+    anchor: HAnchor,
+    pad_l: f64,
+    inner_w: f64,
+    margin_l: f64,
+    margin_r: f64,
+    actual_w: f64,
+) -> f64 {
+    let slot_w = (inner_w - margin_l - margin_r).max(0.0);
+    if anchor.contains(HAnchor::RIGHT) && !anchor.contains(HAnchor::LEFT) {
         // RIGHT only (not stretch): right-align within margin slot.
         (pad_l + inner_w - margin_r - actual_w).max(pad_l)
     } else if anchor.contains(HAnchor::CENTER) && !anchor.is_stretch() {
@@ -127,9 +128,7 @@ fn place_cross_h(
     } else {
         // LEFT, STRETCH, FIT, ABSOLUTE, MIN/MAX_FIT_OR_STRETCH — left-align.
         pad_l + margin_l
-    };
-
-    (x, actual_w)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -529,6 +528,16 @@ impl Widget for FlexColumn {
         } else {
             pad_b + effective_h
         };
+        // The width children are anchored within: the offered one, except
+        // for a fit-width column measured with an unbounded width, which
+        // reports its widest child and so anchors within that. Centred or
+        // right-anchored in the offered width, a child would land some
+        // 1e307 px right, far outside the column it reports.
+        let anchor_w = if self.fit_width && available.width > 1.0e9 {
+            max_child_natural_w
+        } else {
+            inner_w
+        };
 
         for i in 0..n {
             let m = &margins[i];
@@ -558,9 +567,8 @@ impl Widget for FlexColumn {
             let min_w = self.children[i].min_size().width;
             let max_w = self.children[i].max_size().width;
 
-            let (child_x, child_w) = place_cross_h(
-                h_anchor, pad_l, inner_w, m.left, m.right, natural_w, min_w, max_w,
-            );
+            let child_w = cross_width_h(h_anchor, slot_w, natural_w, min_w, max_w);
+            let child_x = cross_x_h(h_anchor, pad_l, anchor_w, m.left, m.right, child_w);
 
             // Round to integers so bitmap content (cached text, images) lands on
             // exact pixel boundaries and isn't sub-pixel sampled into blur —

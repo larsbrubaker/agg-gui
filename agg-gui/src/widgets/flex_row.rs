@@ -6,7 +6,10 @@
 //! [`crate::widgets::flex`]; `FlexColumn` lives there.
 //!
 //! `FlexRow` reads each child's `v_anchor()` to place it vertically within
-//! the row's inner height (see [`place_cross_v`]).  A child whose
+//! the row's inner height (see [`cross_y_v`]): the height it was offered, or
+//! for a row measured with an unbounded height (`available.height > 1e9`, a
+//! scroll view's natural-height pass) the height its children take, so a
+//! centred child stays inside the row it reports.  A child whose
 //! `h_anchor()` stretches is a flex child of factor 1 on the main axis
 //! (agg-sharp's `FlowLayoutWidget`), unless it was added with a factor of its
 //! own.
@@ -30,30 +33,12 @@ use crate::widget::Widget;
 use crate::widgets::flex::DEFAULT_ROW_GAP;
 use crate::widgets::flex_share::{share_flex_space, FlexItem};
 
-/// Compute `(y, actual_height)` for a child in a `FlexRow` (vertical
-/// cross-axis placement, Y-up).
-///
-/// - `pad_b`     — row's bottom inner-padding offset.
-/// - `inner_h`   — row's usable height (after padding, before margins).
-/// - `margin_b/t` — child's bottom/top margins (logical units).
-/// - `natural_h` — height returned by `child.layout()`.
-/// - `min_h/max_h` — child's min/max height constraints.
-// Each argument is a distinct drawing/geometry input; a struct would only rename them.
-#[allow(clippy::too_many_arguments)]
-fn place_cross_v(
-    anchor: VAnchor,
-    pad_b: f64,
-    inner_h: f64,
-    margin_b: f64,
-    margin_t: f64,
-    natural_h: f64,
-    min_h: f64,
-    max_h: f64,
-) -> (f64, f64) {
-    let slot_h = (inner_h - margin_b - margin_t).max(0.0);
-
-    // Determine height.
-    let actual_h = if anchor.is_stretch() {
+/// The height of a child in a `FlexRow` (vertical cross-axis size): its
+/// `natural_h` (from `child.layout()`), or the `slot_h` it was offered (the
+/// row's inner height less its margins) for a stretching anchor, held to its
+/// `min_h`/`max_h` limits.
+fn cross_height_v(anchor: VAnchor, slot_h: f64, natural_h: f64, min_h: f64, max_h: f64) -> f64 {
+    if anchor.is_stretch() {
         clamp_to_limits(slot_h, min_h, max_h)
     } else if anchor == VAnchor::MAX_FIT_OR_STRETCH {
         clamp_to_limits(
@@ -69,10 +54,28 @@ fn place_cross_v(
         )
     } else {
         clamp_to_limits(natural_h, min_h, max_h)
-    };
+    }
+}
 
-    // Determine y position (Y-up: BOTTOM = low Y, TOP = high Y).
-    let y = if anchor.contains(VAnchor::TOP) && !anchor.contains(VAnchor::BOTTOM) {
+/// The bottom `y` of a child of height `actual_h` in a `FlexRow` (vertical
+/// cross-axis placement, Y-up).
+///
+/// - `pad_b`     — row's bottom inner-padding offset.
+/// - `inner_h`   — the height the child is anchored within (after padding,
+///   before margins): the offered inner height, or for a row measured with
+///   an unbounded height the height its children take.
+/// - `margin_b/t` — child's bottom/top margins (logical units).
+fn cross_y_v(
+    anchor: VAnchor,
+    pad_b: f64,
+    inner_h: f64,
+    margin_b: f64,
+    margin_t: f64,
+    actual_h: f64,
+) -> f64 {
+    let slot_h = (inner_h - margin_b - margin_t).max(0.0);
+    // Y-up: BOTTOM = low Y, TOP = high Y.
+    if anchor.contains(VAnchor::TOP) && !anchor.contains(VAnchor::BOTTOM) {
         // TOP only: top-align in slot.
         (pad_b + inner_h - margin_t - actual_h).max(pad_b)
     } else if anchor.contains(VAnchor::CENTER) && !anchor.is_stretch() {
@@ -81,9 +84,7 @@ fn place_cross_v(
     } else {
         // BOTTOM, STRETCH, FIT, ABSOLUTE — bottom-align.
         pad_b + margin_b
-    };
-
-    (y, actual_h)
+    }
 }
 
 /// Take `overflow` out of the widths of the children that can shrink (`floors[i]`
@@ -456,6 +457,9 @@ impl Widget for FlexRow {
             available.width - pad_r
         };
         let mut max_slot_h = 0.0f64; // tallest slot (content + margins)
+                                     // Each visible child's `(x, height, final width, final height)`,
+                                     // sized here and given its `y` once the row's height is known.
+        let mut placed: Vec<Option<(f64, f64, f64, f64)>> = vec![None; n];
 
         for i in 0..n {
             let m = &margins[i];
@@ -484,9 +488,7 @@ impl Widget for FlexRow {
             let min_h = self.children[i].min_size().height;
             let max_h = self.children[i].max_size().height;
 
-            let (child_y, child_h) = place_cross_v(
-                v_anchor, pad_b, inner_h, m.bottom, m.top, natural_h, min_h, max_h,
-            );
+            let child_h = cross_height_v(v_anchor, slot_h, natural_h, min_h, max_h);
 
             // Round to integers — same reason as FlexColumn (pixel-perfect
             // blits) — unless the child opts out of integer bounds.
@@ -502,12 +504,7 @@ impl Widget for FlexRow {
             if (final_h - slot_h).abs() > 0.5 || (final_w - content_w).abs() > 0.5 {
                 self.children[i].layout(Size::new(final_w, final_h));
             }
-            self.children[i].set_bounds(Rect::new(
-                snap_extent(snap, child_x),
-                snap_extent(snap, child_y),
-                final_w,
-                final_h,
-            ));
+            placed[i] = Some((child_x, child_h, final_w, final_h));
             // The row fits the height it placed, not the unrounded one, or a
             // 22.67 px child placed at 23 would lose a third of a pixel.
             max_slot_h = max_slot_h.max(final_h + m.vertical());
@@ -518,6 +515,39 @@ impl Widget for FlexRow {
             } else {
                 cursor_x = child_x + content_w + m.right + gap;
             }
+        }
+
+        // Anchor each child vertically. A row offered a finite height
+        // anchors within it. A row measured with an unbounded height (a
+        // column in a scroll view reading its natural height) reports its
+        // content height, so it anchors within that: centred or
+        // top-anchored in the offered height, a child would land some
+        // 1e307 px up, far off screen, while its siblings sit at the bottom.
+        let anchor_h = if available.height > 1.0e9 {
+            max_slot_h
+        } else {
+            inner_h
+        };
+        for (i, slot) in placed.iter().enumerate() {
+            let Some((child_x, child_h, final_w, final_h)) = *slot else {
+                continue;
+            };
+            let m = &margins[i];
+            let child_y = cross_y_v(
+                self.children[i].v_anchor(),
+                pad_b,
+                anchor_h,
+                m.bottom,
+                m.top,
+                child_h,
+            );
+            let snap = self.children[i].enforce_integer_bounds();
+            self.children[i].set_bounds(Rect::new(
+                snap_extent(snap, child_x),
+                snap_extent(snap, child_y),
+                final_w,
+                final_h,
+            ));
         }
 
         // Return the natural (intrinsic) height to avoid propagating huge

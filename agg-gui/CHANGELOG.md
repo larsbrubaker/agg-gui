@@ -158,6 +158,14 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Fixed
 
+- A `FlexRow` laid out with an unbounded height (a column in a scroll view reading its natural
+  height, `available.height > 1e9`) anchors its `VAnchor::CENTER` and `VAnchor::TOP` children
+  within the height it reports, the tallest child, instead of the offered height, where they
+  landed some 1e307 px up, off screen, while their siblings sat at the bottom. A fit-width
+  `FlexColumn` laid out with an unbounded width likewise anchors its `HAnchor::CENTER` and
+  `HAnchor::RIGHT` children within the width it reports. Layouts with a finite offer are
+  unchanged (0.5.10).
+
 - A press whose widget is rebuilt away mid-drag (a list rebuilt with fewer children than the
   pressed one's index) keeps its pointer capture on the deepest ancestor still in the tree, which
   now receives the remaining moves, the release and a later `MouseCaptureLost`, wherever the
