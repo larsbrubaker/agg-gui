@@ -3,8 +3,8 @@
 //! and grows while the search runs; `sections` groups the same matches by the source they came
 //! from. A search root that presents itself in sections ([`Folder::search_sections`]) gets one
 //! [`SearchSection`] per source; anything else is one section, itself. How each source is walked
-//! is `search_walk`'s: its matching items, then its child folders, a folder that searches itself
-//! left to do so, a folder whose listing comes later waited for. Every result remembers where it
+//! is `search_walk`'s: its matching folder rows and items, then its child folders, a folder that
+//! searches itself left to do so, a folder whose listing comes later waited for. Every result remembers where it
 //! was found ([`SearchOrigin`]), which is what reveals an item with no path of its own and what
 //! asks that folder for the item's picture (`get_thumbnail`).
 //!

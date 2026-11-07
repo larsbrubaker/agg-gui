@@ -92,7 +92,9 @@ impl BrowserState {
     fn finger_tap_opens(&self, index: usize) -> bool {
         self.finger_tap_opens_folders
             && agg_gui::last_press_was_touch()
-            && matches!(self.listed_entry(index), Some(BrowserEntry::Container(_)))
+            && self
+                .listed_entry(index)
+                .is_some_and(|entry| entry.is_container())
     }
 
     /// A plain left press on row `index` (no keys held): with taps activating (or this a finger's
@@ -134,6 +136,12 @@ impl BrowserState {
     pub(super) fn activate_in(&mut self, index: usize, how: Activation) {
         match self.listed_entry(index) {
             Some(BrowserEntry::Container(link)) => self.open(link.as_ref()),
+            // A folder a search found is listed as its link: opening it goes into the folder.
+            Some(BrowserEntry::Item(item)) if item.as_container_link().is_some() => {
+                if let Some(link) = item.as_container_link() {
+                    self.open(link);
+                }
+            }
             Some(entry @ BrowserEntry::Item(_)) if self.item_events.is_some() => {
                 if let Some(events) = self.item_events.as_mut() {
                     events.push(ItemEvent::Activated(entry));

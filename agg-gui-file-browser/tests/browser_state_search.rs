@@ -1,14 +1,15 @@
 //! `BrowserState` showing a search's results over a `MemoryFolder` tree: the results stand below
 //! the folder searched, list in sections with their headers, keep their selection when shown
 //! again, carry a rolled-up section's selected results until it opens, and leave the path when
-//! the user walks back up. Search results are never remembered as the browser's place.
+//! the user walks back up. A folder found by its name is a folder row that opens the folder.
+//! Search results are never remembered as the browser's place.
 
 use std::rc::Rc;
 
 use agg_gui::Modifiers;
 use agg_gui_file_browser::{
-    run_ready_local_tasks, BrowserConfig, BrowserMemory, BrowserState, ListSlot, LocalSpawner,
-    OpenFolder, SearchSectionCollapseState,
+    run_ready_local_tasks, Activation, BrowserConfig, BrowserMemory, BrowserState, ListSlot,
+    LocalSpawner, OpenFolder, SearchSectionCollapseState,
 };
 use agg_gui_files::{Folder, MemoryFolder, SearchResultsFolder, SortKey};
 
@@ -133,6 +134,41 @@ fn a_sort_key_picked_while_searching_sorts_the_results() {
         .push_search_results(finished_search(&root, "gear"));
     state.borrow_mut().set_user_sort_key(SortKey::Name);
     assert_eq!(names(&state.borrow()), ["gear a.stl", "gear b.stl"]);
+}
+
+/// A folder found by its name ("Card Holder" for "card") lists as a folder row, before the files
+/// of its section, and opening it goes into the folder.
+#[test]
+fn a_folder_result_is_a_folder_row_that_opens_the_folder() {
+    let root = MemoryFolder::new("Design Apps");
+    root.add_file("card stand.stl", b"s".to_vec());
+    let holder = root.add_folder("Card Holder").expect("a folder");
+    holder.add_file("base.stl", b"b".to_vec());
+    root.add_folder("Bracket").expect("a folder");
+    let state = BrowserState::new(Box::new(root.clone()), BrowserConfig::default());
+    state
+        .borrow_mut()
+        .push_search_results(finished_search(&root, "card"));
+    {
+        let s = state.borrow();
+        assert_eq!(names(&s), ["Card Holder", "card stand.stl"]);
+        let entries = s.entries();
+        assert!(entries[0].is_container(), "drawn as a folder row");
+        assert!(!entries[1].is_container());
+        let look = agg_gui_file_browser::BrowserNames::default();
+        assert_eq!(
+            entries[0].row_name(&look),
+            look.folder_row_for("Card Holder")
+        );
+    }
+    BrowserState::activate(&state, 0, Activation::DoubleClick);
+    let s = state.borrow();
+    assert!(s.showing_search_results().is_none(), "the folder opened");
+    assert_eq!(
+        s.path_names().last().map(String::as_str),
+        Some("Card Holder")
+    );
+    assert_eq!(names(&s), ["base.stl"]);
 }
 
 /// A memory noting the open folder's name each time it is handed a place.

@@ -11,7 +11,7 @@
 # author), published here under agg-gui's MIT licence.
 [package]
 name = "agg-gui-file-browser"
-version = "0.0.11"
+version = "0.0.12"
 edition = "2021"
 # Matches the rest of the agg-gui workspace.
 rust-version = "1.88"
@@ -43,7 +43,7 @@ disk = ["agg-gui-files/disk"]
 # Default features off so they stay the consumer's choice (see `reflect`).
 agg-gui = { path = "../agg-gui", version = "0.5.5", default-features = false }
 # A 0.0.x requirement is written as a range: plain "0.0.2" would pin that one version.
-agg-gui-files = { path = "../agg-gui-files", version = ">=0.0.5, <0.1.0" }
+agg-gui-files = { path = "../agg-gui-files", version = ">=0.0.7, <0.1.0" }
 # The UI clock's instants (std's own Instant natively; the browser's clock on wasm32), as agg-gui
 # and agg-gui-files use them.
 web-time = "1"
@@ -51,7 +51,7 @@ web-time = "1"
 [dev-dependencies]
 # The history's tests undo and redo real changes on a folder on disk (a scratch folder under the
 # system's temp directory), so the tests also build agg-gui-files' disk folders.
-agg-gui-files = { path = "../agg-gui-files", version = ">=0.0.5, <0.1.0", features = ["disk"] }
+agg-gui-files = { path = "../agg-gui-files", version = ">=0.0.7, <0.1.0", features = ["disk"] }
 
 [[test]]
 name = "live_relist"

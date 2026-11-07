@@ -1,4 +1,5 @@
-//! The search across folders (`SearchResultsFolder`): its walk, sections, origins, the wait for a
+//! The search across folders (`SearchResultsFolder`): its walk (folders found by name as well as
+//! items), sections, origins, the wait for a
 //! folder whose listing comes later (and the timer bounding it), cancelling, failures, and the
 //! content-file test. A folder with its own search is `StubFolder` with a `search` closure; a
 //! load waiter is released by the folder's content-changed, so the late-listing stub raises it
@@ -587,6 +588,57 @@ fn a_waiting_search_does_not_keep_its_executor_alive() {
     assert_eq!(Rc::strong_count(&executor), 2);
     results.dispose();
     run_to_end(&executor, &results);
+}
+
+/// A folder named for what the user typed ("Card Holder" for "card") is a result of its own, at
+/// the root and one level down, a row that opens the folder; one whose name does not match is
+/// not, and a matching folder's matching items are still found.
+#[test]
+fn a_folder_whose_name_matches_is_a_result_that_opens_it() {
+    let root = MemoryFolder::new("Design Apps");
+    let holder = root.add_folder("Card Holder").expect("a folder");
+    holder.add_file("card base.stl", Vec::new());
+    holder.add_file("lid.stl", Vec::new());
+    let other = root.add_folder("Other").expect("a folder");
+    other.add_folder("Card Box").expect("a folder");
+    root.add_folder("Bracket").expect("a folder");
+    let results = search_to_end(&root, "card");
+
+    assert_eq!(
+        names(&results.items()),
+        sorted(&["Card Holder", "card base.stl", "Card Box"])
+    );
+    let items = results.items();
+    let find = |name: &str| {
+        items
+            .iter()
+            .find(|i| i.name() == name)
+            .expect("found")
+            .clone()
+    };
+    // A folder result is a row that opens its folder, not a file.
+    let holder_result = find("Card Holder");
+    let link = holder_result.as_container_link().expect("a folder row");
+    let opened = link.get_container().expect("the folder opens");
+    assert_eq!(opened.name(), "Card Holder");
+    // Found in the root it was listed in, and in "Other" one level down.
+    let holder_origin = results.try_get_origin(&holder_result).expect("origin");
+    assert!(holder_origin.container().is_none());
+    let box_result = find("Card Box");
+    assert!(box_result.as_container_link().is_some());
+    let box_origin = results.try_get_origin(&box_result).expect("origin");
+    assert_eq!(box_origin.container().expect("walked").name(), "Other");
+}
+
+/// A sectioned root's sources are where the search looks, not what it finds: a source named for
+/// the query is a section header, never also a result.
+#[test]
+fn a_search_source_is_not_a_result_though_its_name_matches() {
+    let cards = MemoryFolder::new("Cards");
+    cards.add_folder("Card Box").expect("a folder");
+    let search_root = StubFolder::sectioned(vec![cards.link()]);
+    let results = search_to_end(&search_root, "card");
+    assert_eq!(names(&results.items()), sorted(&["Card Box"]));
 }
 
 /// The content-file test can't reach a search already running, so a late call is a mistake a

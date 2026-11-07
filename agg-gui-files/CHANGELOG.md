@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps.
 
+## [0.0.7] - 2026-11-07
+
+### Fixed
+
+- A search finds folders by their names, not only items: a folder whose name holds every term
+  of the query ("Card Holder" for "card") is a result, its folder row (its `FolderLink`, which
+  opens the folder), found below the search root as deep as the walk goes, and reported before
+  the items of the folder that lists it. A folder on disk searching itself reports a matching
+  sub-folder as a `disk::DiskFolderLink`, skipping the folders its walk skips (hidden, `$` and
+  links). A sectioned root's sections are still searched, never results. A consumer that treats
+  every search result as a file now sees folder rows among them; `Item::as_container_link`
+  tells them apart.
+
 ## [0.0.6] - 2026-11-04
 
 ### Added

@@ -2,8 +2,9 @@
 //! (`push_search_results`), so the breadcrumbs show them under it, and listed in sections, one per
 //! source. While any part of the search runs a "Searching" line leads the list; each section then
 //! gets a header (its name, and "(n)", "No results" or its error once it is done) over its
-//! results, each section sorted on its own ([`search_listing`]; a browser's item filter keeps
-//! only its kinds of results, counted so). A rolled-up section keeps its
+//! results, each section sorted on its own, its folders (found by name, listed as their links,
+//! which `BrowserEntry` treats as folder rows) before its files ([`search_listing`]; a browser's
+//! item filter keeps only its kinds of results, counted so). A rolled-up section keeps its
 //! header and hides its rows; what is rolled up is remembered by name (ignoring case) for the
 //! session ([`SearchSectionCollapseState`]), so every search and every browser agree.
 //!
@@ -131,6 +132,11 @@ pub(super) fn listing_kept(
             .filter(|item| item.is_visible() && keep(item.as_ref()))
             .collect();
         sort_items(&mut items, sort, |item| item.as_ref());
+        // Folders found by name lead their section, as folders lead any folder's listing.
+        let (mut items, files): (Vec<_>, Vec<_>) = items
+            .into_iter()
+            .partition(|item| item.as_container_link().is_some());
+        items.extend(files);
         let collapsed = SearchSectionCollapseState::session(|s| s.is_collapsed(section.name()));
         let status = if let Some(error) = section.error_message() {
             Some(error)
@@ -225,7 +231,7 @@ impl BrowserState {
     /// otherwise one per entry.
     pub fn list_slots(&self) -> Vec<ListSlot> {
         if let Some(results) = self.showing_search_results() {
-            return listing_kept(results, self.sort, &|i| self.keeps_item(i)).0;
+            return listing_kept(results, self.sort, &|i| self.keeps_result(i)).0;
         }
         (0..self.entries().len()).map(ListSlot::Entry).collect()
     }

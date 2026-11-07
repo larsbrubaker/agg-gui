@@ -1,6 +1,7 @@
 //! A folder on disk searching itself: every folder under it is walked for the files its rules
-//! list whose names (less the extension) hold every term of the query, in a stable order (a
-//! folder's files, then each sub-folder, depth first); hidden folders are not walked, a blank
+//! list whose names (less the extension) hold every term of the query, and the folders whose
+//! names hold them, in a stable order (a folder's matching sub-folders, its files, then each
+//! sub-folder, depth first); hidden folders are neither found nor walked, a blank
 //! query finds nothing, and the folder's own listing is left alone.
 
 use std::cell::RefCell;
@@ -49,6 +50,44 @@ fn a_search_finds_listed_files_below_the_folder_in_walk_order() {
         2,
         "the folder's own listing is untouched"
     );
+}
+
+/// A folder named for the query is a result, a row that opens it, reported before the files
+/// beside it; a hidden folder is not, and the walk still goes into a matching folder.
+#[test]
+fn a_search_finds_folders_whose_names_match() {
+    let dir = TempDir::new();
+    dir.file("card.stl", b"c");
+    let holder = dir.folder("Card Holder");
+    std::fs::write(holder.join("holder card.stl"), b"c").unwrap();
+    let other = dir.folder("Other");
+    std::fs::create_dir(other.join("Card Box")).unwrap();
+    dir.folder(".card hidden");
+    let folder = DiskFolder::new(dir.path(), stl_only());
+    assert_eq!(
+        search(&folder, "card"),
+        ["Card Holder", "card.stl", "holder card.stl", "Card Box"]
+    );
+
+    let found = Rc::new(RefCell::new(Vec::new()));
+    let sink = Rc::clone(&found);
+    block_on(folder.search_provider().unwrap().search_async(
+        "holder",
+        Rc::new(move |batch: Vec<Rc<dyn Item>>| sink.borrow_mut().extend(batch)),
+        SearchCancel::new(),
+    ))
+    .unwrap();
+    let found = found.borrow();
+    let row = found
+        .iter()
+        .find(|i| i.name() == "Card Holder")
+        .expect("the folder");
+    let opened = row
+        .as_container_link()
+        .expect("a folder row")
+        .get_container()
+        .expect("it opens");
+    assert_eq!(opened.name(), "Card Holder");
 }
 
 #[test]

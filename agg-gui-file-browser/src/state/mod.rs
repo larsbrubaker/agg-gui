@@ -288,7 +288,7 @@ impl BrowserState {
             return loading;
         }
         if let Some(results) = self.showing_search_results() {
-            return search::listing_kept(results, self.sort, &|i| self.keeps_item(i)).1;
+            return search::listing_kept(results, self.sort, &|i| self.keeps_result(i)).1;
         }
         let Some(folder) = self.active_container() else {
             return Vec::new();

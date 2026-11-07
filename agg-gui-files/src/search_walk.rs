@@ -1,6 +1,8 @@
 //! How a [`crate::SearchResultsFolder`] walks one section (`search_results`). Each source is
-//! walked: its matching items (`search_terms`), then its child folders, at most
-//! [`MAX_FALLBACK_DEPTH`] levels down. A folder whose listing arrives after `load`
+//! walked: its matching folder rows, then its matching items (`search_terms`; a folder row is a
+//! result as its link, which opens the folder), then its child folders (a matching one too), at
+//! most [`MAX_FALLBACK_DEPTH`] levels down. A sectioned folder's sections are sources, never
+//! results. A folder whose listing arrives after `load`
 //! ([`Folder::is_load_pending`]: a server folder) is waited for, at most [`ASYNC_LOAD_TIMEOUT`]
 //! (20 s), then searched as it stands; the wait's deadline is a [`WakeTimer`] (`wake_timer`). A
 //! folder that searches itself ([`Folder::search_provider`]: a folder on disk) is not walked: it
@@ -20,7 +22,7 @@ use std::time::Duration;
 use web_time::Instant;
 
 use crate::folder::{ContentChangedListener, Folder};
-use crate::item::Item;
+use crate::item::{FolderLink, Item};
 use crate::message_item::MessageItem;
 use crate::search::{SearchCancel, SearchReport};
 use crate::search_results::{RootSnapshot, SearchOrigin, SearchSection, SearchShared};
@@ -70,8 +72,10 @@ pub(crate) async fn search_section(
             }
         }
         None => {
-            // The root is the browser's, already loaded: its items, then its children.
-            let matches = matching(&root.items, shared);
+            // The root is the browser's, already loaded: its matching folders and items, then
+            // its children.
+            let mut matches = matching_folders(&root.child_containers, shared);
+            matches.extend(matching(&root.items, shared));
             shared.add_results(section, &SEARCH_ROOT_ORIGIN.with(Rc::clone), matches);
             let mut outcome = Ok(());
             for link in &root.child_containers {
@@ -119,6 +123,16 @@ fn matching(items: &[Rc<dyn Item>], shared: &SearchShared) -> Vec<Rc<dyn Item>> 
         .iter()
         .filter(|item| name_matches(item.name(), shared.query.as_str(), content_file))
         .cloned()
+        .collect()
+}
+
+/// The folder rows of `links` whose names match the search's query, as results. A folder's name
+/// is matched whole: it has no extension to drop.
+fn matching_folders(links: &[Rc<dyn FolderLink>], shared: &SearchShared) -> Vec<Rc<dyn Item>> {
+    links
+        .iter()
+        .filter(|link| name_matches(link.name(), shared.query.as_str(), None))
+        .map(|link| Rc::clone(link) as Rc<dyn Item>)
         .collect()
 }
 
@@ -171,11 +185,18 @@ fn search_container<'a>(
         if folder.is_load_pending() {
             WaitForLoad::new(folder.as_ref(), shared).await;
         }
-        shared.add_results(section, &origin, matching(&folder.items(), shared));
         // Snapshotted before the walk: resolving a child can reload the folder that listed it.
-        let child_links = folder
-            .search_sections()
-            .unwrap_or_else(|| folder.child_containers());
+        let sections = folder.search_sections();
+        let is_sectioned = sections.is_some();
+        let child_links = sections.unwrap_or_else(|| folder.child_containers());
+        // A sectioned folder's sections are where to look, not what was found.
+        let mut matches = if is_sectioned {
+            Vec::new()
+        } else {
+            matching_folders(&child_links, shared)
+        };
+        matches.extend(matching(&folder.items(), shared));
+        shared.add_results(section, &origin, matches);
         for link in child_links {
             if shared.cancel.is_cancelled() {
                 return Ok(());

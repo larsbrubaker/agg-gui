@@ -117,8 +117,11 @@ impl OpenController {
         let files: Vec<Rc<dyn Item>> = selected
             .iter()
             .filter_map(|entry| match entry {
-                BrowserEntry::Item(item) => Some(Rc::clone(item)),
-                BrowserEntry::Container(_) => None,
+                // A folder a search found is a folder row, never a file to open.
+                BrowserEntry::Item(item) if item.as_container_link().is_none() => {
+                    Some(Rc::clone(item))
+                }
+                BrowserEntry::Item(_) | BrowserEntry::Container(_) => None,
             })
             .collect();
         match (files.is_empty(), selected) {

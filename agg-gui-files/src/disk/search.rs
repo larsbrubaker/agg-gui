@@ -1,19 +1,22 @@
 //! A [`DiskFolder`] searching itself: walks every directory under the folder for the files its
-//! rules list whose names match the query ([`file_name_contains_filter`]), reporting them in
-//! batches. The folder's own listing is untouched: a search across folders must not disturb the
-//! folder the user is looking at.
+//! rules list whose names match the query ([`file_name_contains_filter`]) and the folders whose
+//! names match it (matched whole, reported as a [`DiskFolderLink`] that opens the folder with the
+//! same rules), reporting them in batches. The folder's own listing is untouched: a search across
+//! folders must not disturb the folder the user is looking at.
 //!
 //! The walk is a local future on the search's executor (the app's, pumped each frame), so it
-//! yields after every directory to keep the frame moving. The order is a directory's files, then
-//! each sub-directory, depth first, each sorted by path so results come in a stable order. Hidden
-//! folders ('.git'), '$' system folders, links (how a walk loops or wanders off the drive) and,
-//! on Windows, hidden or system folders are not descended into.
+//! yields after every directory to keep the frame moving. The order is a directory's matching
+//! sub-directories, then its files, then each sub-directory walked, depth first, each sorted by
+//! path so results come in a stable order. Hidden folders ('.git'), '$' system folders, links
+//! (how a walk loops or wanders off the drive) and, on Windows, hidden or system folders are
+//! neither reported nor descended into.
 
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use super::file::DiskFile;
 use super::folder::{is_readable_directory, DiskFolder};
+use super::folder_link::DiskFolderLink;
 use super::paths::lists_as_folder;
 use crate::item::Item;
 use crate::search::{yield_now, SearchCancel, SearchFuture, SearchProvider, SearchReport};
@@ -74,6 +77,24 @@ impl SearchProvider for DiskFolder {
                     continue;
                 }
                 let (files, sub_directories) = list(&directory);
+                let sub_directories: Vec<PathBuf> = sub_directories
+                    .into_iter()
+                    .filter(|sub_directory| should_descend_into(sub_directory))
+                    .collect();
+                // A folder is named whole: it has no extension to drop.
+                for sub_directory in &sub_directories {
+                    let name = sub_directory
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_default();
+                    if name_matches(&name, filter.as_str(), None) {
+                        let link = DiskFolderLink::new(sub_directory.clone(), Rc::clone(&rules));
+                        batch.push(Rc::new(link) as Rc<dyn Item>);
+                        if batch.len() >= SEARCH_BATCH_SIZE {
+                            flush_batch(&report, &mut batch, &cancel);
+                        }
+                    }
+                }
                 for file in files {
                     if cancel.is_cancelled() {
                         return Ok(());
@@ -93,9 +114,7 @@ impl SearchProvider for DiskFolder {
                     }
                 }
                 for sub_directory in sub_directories.into_iter().rev() {
-                    if should_descend_into(&sub_directory) {
-                        stack.push((sub_directory, depth + 1));
-                    }
+                    stack.push((sub_directory, depth + 1));
                 }
                 yield_now().await;
             }
