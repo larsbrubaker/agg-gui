@@ -13,10 +13,14 @@
 //! the route the press really takes, or disturb widgets whose `hit_test`
 //! remembers the press it was asked about).
 //!
-//! Outside a preview, and in a preview of the event's own target (which has
-//! no child to descend into), the answer is `None`. A dispatch started from
-//! inside a preview (a widget routing into a sub-tree it owns) sets and then
-//! restores its own answer, so the outer preview's is never clobbered.
+//! The answer is `None` outside a preview, during every `on_event` the
+//! dispatch delivers (the target's and the bubbling ancestors', even in a
+//! dispatch nested inside a preview), and when the path names a child the
+//! previewing widget no longer has (a stale captured path, which the dispatch
+//! stops at instead of entering). A dispatch started from inside a preview (a
+//! widget routing into a sub-tree it owns) sets and then restores its own
+//! answers, so the outer preview's is never clobbered, a panic unwinding out
+//! of a preview included.
 
 use std::cell::Cell;
 
@@ -26,8 +30,8 @@ std::thread_local! {
 
 /// During [`Widget::preview_event`](super::Widget::preview_event): the index
 /// of the child of the previewing widget that the event is dispatched into
-/// next. `None` outside a preview, or when the previewing widget is the
-/// event's target.
+/// next. `None` outside a preview, in `on_event`, and when the dispatch's
+/// path names a child the previewing widget no longer has.
 pub fn previewed_child() -> Option<usize> {
     PREVIEWED_CHILD.with(Cell::get)
 }

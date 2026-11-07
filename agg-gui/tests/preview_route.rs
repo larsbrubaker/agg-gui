@@ -6,12 +6,14 @@
 //! modal on demand (child 2). Presses go through the real `App` input path;
 //! the root and the content record what `previewed_child` answers in their
 //! previews, and the leaf (the target, which has no preview of its own in the
-//! dispatch) and code outside any dispatch see `None`.
+//! dispatch) and code outside any dispatch see `None`. Direct dispatches cover
+//! a dispatch nested inside a preview (the outer answer comes back, also after
+//! a panic) and a stale path naming a child that is gone.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use agg_gui::widget::previewed_child;
+use agg_gui::widget::{dispatch_event_dyn, previewed_child};
 use agg_gui::{
     App, DrawCtx, Event, EventResult, Modifiers, MouseButton, Point, Rect, Size, Widget,
 };
@@ -25,6 +27,7 @@ struct Node {
     bounds: Rect,
     hit: Option<Rect>,
     modal: Option<Rc<Cell<bool>>>,
+    panics: bool,
     children: Vec<Box<dyn Widget>>,
     log: Log,
 }
@@ -36,6 +39,7 @@ impl Node {
             bounds,
             hit: None,
             modal: None,
+            panics: false,
             children: Vec::new(),
             log: Rc::clone(log),
         }
@@ -74,6 +78,9 @@ impl Widget for Node {
     fn preview_event(&mut self, e: &Event) -> EventResult {
         if matches!(e, Event::MouseDown { .. }) {
             self.log.borrow_mut().push((self.name, previewed_child()));
+            if self.panics {
+                panic!("{} panics in its preview", self.name);
+            }
         }
         EventResult::Ignored
     }
@@ -144,6 +151,144 @@ fn a_press_on_a_layer_over_the_content_names_the_layer() {
         press(&mut app, &log, 400.0, 300.0),
         [("root", Some(1)), ("target", None)]
     );
+}
+
+fn mouse_down() -> Event {
+    Event::MouseDown {
+        pos: Point::new(10.0, 10.0),
+        button: MouseButton::Left,
+        modifiers: Modifiers::default(),
+    }
+}
+
+/// A container whose preview routes the event into a sub-tree it owns outside `children()` (as
+/// a window routes into its title bar), logging `previewed_child` before and after; the
+/// sub-tree's own preview panics when `owned.panics` is set, and the container catches it.
+struct Nester {
+    bounds: Rect,
+    children: Vec<Box<dyn Widget>>,
+    owned: Node,
+    log: Log,
+}
+
+impl Widget for Nester {
+    fn type_name(&self) -> &'static str {
+        "Nester"
+    }
+    fn bounds(&self) -> Rect {
+        self.bounds
+    }
+    fn set_bounds(&mut self, b: Rect) {
+        self.bounds = b;
+    }
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.children
+    }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+        &mut self.children
+    }
+    fn layout(&mut self, _available: Size) -> Size {
+        Size::new(self.bounds.width, self.bounds.height)
+    }
+    fn paint(&mut self, _ctx: &mut dyn DrawCtx) {}
+    fn preview_event(&mut self, e: &Event) -> EventResult {
+        self.log
+            .borrow_mut()
+            .push(("nester before", previewed_child()));
+        let owned = &mut self.owned;
+        let nested = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            dispatch_event_dyn(owned, &[0], e, Point::new(10.0, 10.0))
+        }));
+        if nested.is_err() {
+            self.log.borrow_mut().push(("caught", None));
+        }
+        self.log
+            .borrow_mut()
+            .push(("nester after", previewed_child()));
+        EventResult::Ignored
+    }
+    fn on_event(&mut self, _e: &Event) -> EventResult {
+        EventResult::Ignored
+    }
+}
+
+/// A Nester (owning [sub-root [leaf]]) whose own child 1 the outer dispatch enters.
+fn nester(log: &Log, inner_panics: bool) -> Nester {
+    let full = Rect::new(0.0, 0.0, 100.0, 100.0);
+    let mut owned = Node::new("sub-root", full, log);
+    owned.panics = inner_panics;
+    owned
+        .children
+        .push(Box::new(Node::new("sub-leaf", full, log)));
+    Nester {
+        bounds: full,
+        children: vec![
+            Box::new(Node::new("first", full, log)),
+            Box::new(Node::new("second", full, log)),
+        ],
+        owned,
+        log: Rc::clone(log),
+    }
+}
+
+#[test]
+fn a_dispatch_nested_in_a_preview_restores_the_outer_answer() {
+    let log = Log::default();
+    let mut root = nester(&log, false);
+    dispatch_event_dyn(&mut root, &[1], &mouse_down(), Point::new(10.0, 10.0));
+    assert_eq!(
+        *log.borrow(),
+        [
+            ("nester before", Some(1)),
+            ("sub-root", Some(0)),
+            // The nested target's on_event is no preview: None, not the outer 1.
+            ("target", None),
+            ("nester after", Some(1)),
+            ("target", None),
+        ]
+    );
+    assert_eq!(previewed_child(), None);
+}
+
+#[test]
+fn a_preview_that_panics_still_restores_the_outer_answer() {
+    let log = Log::default();
+    let mut root = nester(&log, true);
+    dispatch_event_dyn(&mut root, &[1], &mouse_down(), Point::new(10.0, 10.0));
+    assert_eq!(
+        *log.borrow(),
+        [
+            ("nester before", Some(1)),
+            ("sub-root", Some(0)),
+            ("caught", None),
+            ("nester after", Some(1)),
+            ("target", None),
+        ]
+    );
+    // And a panic unwinding out of the outermost dispatch leaves nothing behind.
+    let mut lone = Node::new("lone", Rect::new(0.0, 0.0, 100.0, 100.0), &log);
+    lone.panics = true;
+    lone.children.push(Box::new(Node::new(
+        "leaf",
+        Rect::new(0.0, 0.0, 100.0, 100.0),
+        &log,
+    )));
+    let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        dispatch_event_dyn(&mut lone, &[0], &mouse_down(), Point::new(10.0, 10.0))
+    }));
+    assert!(unwound.is_err());
+    assert_eq!(previewed_child(), None);
+}
+
+#[test]
+fn a_stale_path_names_no_child() {
+    let log = Log::default();
+    let full = Rect::new(0.0, 0.0, 100.0, 100.0);
+    let mut root = Node::new("root", full, &log);
+    root.children.push(Box::new(Node::new("only", full, &log)));
+    // A path captured before child 3 went away: the dispatch stops at the root.
+    dispatch_event_dyn(&mut root, &[3, 0], &mouse_down(), Point::new(10.0, 10.0));
+    assert_eq!(*log.borrow(), [("root", None), ("target", None)]);
 }
 
 #[test]

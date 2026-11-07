@@ -14,8 +14,9 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   its child that the routed event is dispatched into next, from the path `App` chose (an active
   modal, a global overlay under the pointer, else the ordinary hit). A root hosting layers over
   its main content can tell a press aimed at the content from one aimed at a dialog, popup or
-  overlay above it without hit-testing again. `None` outside a preview and for the event's own
-  target; a dispatch nested inside a preview restores the outer answer (0.5.9).
+  overlay above it without hit-testing again. `None` outside a preview, during every `on_event`
+  (even in a dispatch nested inside a preview) and when a stale path names a child that is gone; a
+  dispatch nested inside a preview restores the outer answer, also when a preview panics (0.5.9).
 
 - `MenuItem::description(text)`: a smaller, muted (`text_dim`) description under a menu row's label,
   wrapped to the popup's width (never elided); the row grows by its lines (mouse and touch) and

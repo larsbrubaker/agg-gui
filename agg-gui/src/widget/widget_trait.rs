@@ -216,6 +216,11 @@ pub trait Widget {
     /// press anywhere inside it — select or raise itself — while the slider
     /// or text field under the pointer still gets the press.
     ///
+    /// While this runs, [`previewed_child`](crate::widget::previewed_child)
+    /// names the child the event is dispatched into next, so a root hosting
+    /// layers over its content can tell which of them the event is for
+    /// without hit-testing again.
+    ///
     /// Return `Ignored` (the default) to let the event continue. Returning
     /// a consuming result intercepts it: no deeper preview runs and no
     /// widget's `on_event` sees the event. A preview that only observes

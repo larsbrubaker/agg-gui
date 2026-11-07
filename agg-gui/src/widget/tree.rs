@@ -201,6 +201,8 @@ pub fn global_overlay_hit_path(widget: &dyn Widget, local_pos: Point) -> Option<
 /// recurring bug class where a widget mutates paint-affecting state on an
 /// event but forgets to request a draw, leaving part of itself stale.
 fn deliver(widget: &mut dyn Widget, event: &Event) -> EventResult {
+    // `on_event` is never a preview, even inside a dispatch nested in one.
+    let _route = super::preview_route::enter_preview(None);
     super::event_observer::notify(widget, event);
     auto_request_draw(widget.on_event(event))
 }
@@ -276,8 +278,11 @@ fn dispatch_path(
     // event before anything below it. A consuming preview intercepts it.
     // While it runs, `previewed_child` names the child the event goes into.
     let before_preview = crate::animation::invalidation_epoch();
+    // A stale index (see below) is never descended into, so the preview is
+    // told no child rather than one the event will not enter.
+    let next = Some(path[0]).filter(|&idx| idx < root.children().len());
     let preview = {
-        let _route = super::preview_route::enter_preview(Some(path[0]));
+        let _route = super::preview_route::enter_preview(next);
         auto_request_draw(root.preview_event(event))
     };
     if preview.requests_redraw() || before_preview != crate::animation::invalidation_epoch() {
