@@ -10,6 +10,13 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- `widget::previewed_child() -> Option<usize>`: during a widget's `preview_event`, the index of
+  its child that the routed event is dispatched into next, from the path `App` chose (an active
+  modal, a global overlay under the pointer, else the ordinary hit). A root hosting layers over
+  its main content can tell a press aimed at the content from one aimed at a dialog, popup or
+  overlay above it without hit-testing again. `None` outside a preview and for the event's own
+  target; a dispatch nested inside a preview restores the outer answer (0.5.9).
+
 - `MenuItem::description(text)`: a smaller, muted (`text_dim`) description under a menu row's label,
   wrapped to the popup's width (never elided); the row grows by its lines (mouse and touch) and
   stays one row: hover, hit area and keyboard cover it, marks and label sit on

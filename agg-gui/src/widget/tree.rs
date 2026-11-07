@@ -7,7 +7,9 @@
 //! widget that claims a position; the App event router uses that path to
 //! dispatch mouse events to the right subtree. Routed dispatch offers the
 //! event to each ancestor's `preview_event` root-first before delivering it
-//! to the target and bubbling it back up. The dispatch family keeps
+//! to the target and bubbling it back up; during each preview,
+//! [`previewed_child`](super::previewed_child) names the child the event goes
+//! into next (`preview_route.rs`). The dispatch family keeps
 //! [`event_root`](super::event_root)'s local → root stack in step with the
 //! path it walks, so handlers can ask where they sit in root space.
 //!
@@ -272,8 +274,12 @@ fn dispatch_path(
     }
     // Parent-first preview (`Widget::preview_event`): an ancestor sees the
     // event before anything below it. A consuming preview intercepts it.
+    // While it runs, `previewed_child` names the child the event goes into.
     let before_preview = crate::animation::invalidation_epoch();
-    let preview = auto_request_draw(root.preview_event(event));
+    let preview = {
+        let _route = super::preview_route::enter_preview(Some(path[0]));
+        auto_request_draw(root.preview_event(event))
+    };
     if preview.requests_redraw() || before_preview != crate::animation::invalidation_epoch() {
         root.mark_dirty();
     }

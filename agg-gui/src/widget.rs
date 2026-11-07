@@ -36,6 +36,7 @@ pub(crate) mod keyboard_scroll;
 mod named_target;
 mod paint;
 pub(crate) mod paint_timing;
+mod preview_route;
 mod tree;
 mod tree_inspector;
 
@@ -53,6 +54,7 @@ pub use paint::{
     current_paint_clip, is_local_rect_in_paint_clip, logical_root_transform, paint_global_overlays,
     paint_subtree, visible_root_rect,
 };
+pub use preview_route::previewed_child;
 pub use tree::{
     activate_action_at, active_modal_path, cancel_action_path, default_action_path, dispatch_event,
     dispatch_event_broadcast, dispatch_event_dyn, dispatch_unconsumed_key, global_overlay_hit_path,
