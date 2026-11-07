@@ -1,5 +1,4 @@
-//! One row of a browser's listing ([`BrowserEntry`]: a folder row or an item; an item that is a
-//! folder's link, as a search reports a folder it found, is a folder row too) and the identity a
+//! One row of a browser's listing ([`BrowserEntry`]: a folder row or an item) and the identity a
 //! selection is matched back by when the rows are made again ([`item_identity_key`]). A row is
 //! compared by object (`same_row`), so a re-sort can never leave the selection on another item;
 //! the identity key is for the times the folder hands back new objects for the same content (a
@@ -37,25 +36,15 @@ impl BrowserEntry {
 
     /// The row's widget name in `names` (a folder row's, or an item row's).
     pub fn row_name(&self, names: &BrowserNames) -> String {
-        if self.is_container() {
-            names.folder_row_for(self.name())
-        } else {
-            names.item_row_for(self.name())
-        }
-    }
-
-    /// Whether the row opens a folder: a folder row, or an item that is a folder's link (a
-    /// folder a search found by its name).
-    pub fn is_container(&self) -> bool {
-        self.container_link().is_some()
-    }
-
-    /// The link the row opens, for either kind of folder row; `None` for any other item.
-    pub fn container_link(&self) -> Option<&dyn FolderLink> {
         match self {
-            BrowserEntry::Container(link) => Some(link.as_ref()),
-            BrowserEntry::Item(item) => item.as_container_link(),
+            BrowserEntry::Container(link) => names.folder_row_for(link.name()),
+            BrowserEntry::Item(item) => names.item_row_for(item.name()),
         }
+    }
+
+    /// Whether the row opens a folder.
+    pub fn is_container(&self) -> bool {
+        matches!(self, BrowserEntry::Container(_))
     }
 
     /// The row's item (a folder row's link, seen as an item).

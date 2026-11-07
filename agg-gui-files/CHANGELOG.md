@@ -8,16 +8,27 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ## [0.0.7] - 2026-11-07
 
+### Added
+
+- `Item::into_container_link`: a shared item as the shared `FolderLink` it is, so a list holding
+  a folder row only as an item (a search's results) can treat it as a folder row everywhere.
+  Defaults to `None`; every `FolderLink` in this crate answers `Some(self)`, and an app's own
+  `FolderLink` types should too (as they should `as_container_link`), or a search leaves them
+  out of its results.
+
 ### Fixed
 
 - A search finds folders by their names, not only items: a folder whose name holds every term
   of the query ("Card Holder" for "card") is a result, its folder row (its `FolderLink`, which
   opens the folder), found below the search root as deep as the walk goes, and reported before
-  the items of the folder that lists it. A folder on disk searching itself reports a matching
-  sub-folder as a `disk::DiskFolderLink`, skipping the folders its walk skips (hidden, `$` and
-  links). A sectioned root's sections are still searched, never results. A consumer that treats
-  every search result as a file now sees folder rows among them; `Item::as_container_link`
-  tells them apart.
+  the items of the folder that lists it (once per path that reaches it, as items are). A folder
+  on disk searching itself reports a matching sub-folder as a `disk::DiskFolderLink`, skipping
+  the folders its walk skips (hidden, `$` and links), and, with the `zip` feature, a matching
+  zip file as the `zip_folder::ZipFolderLink` its listing shows (it was never reported before).
+  A sectioned folder's sections are still searched, never results, at the root or below. A
+  folder row that does not answer `as_container_link` and `into_container_link` is never
+  reported, so no folder shows as a file. A consumer that treats every search result as a file
+  now sees folder rows among them; `Item::as_container_link` tells them apart.
 
 ## [0.0.6] - 2026-11-04
 

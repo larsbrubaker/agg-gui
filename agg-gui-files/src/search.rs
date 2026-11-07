@@ -68,7 +68,9 @@ pub trait SearchProvider {
 
     /// Searches this folder and its descendants for `query`, handing back matches through
     /// `report` in batches as they are found, and stopping promptly once `cancel` is set. Leaves
-    /// the folder's own items untouched.
+    /// the folder's own items untouched. A match may be a folder row as well as an item: a
+    /// folder whose name matches, reported as its [`crate::FolderLink`] (which answers
+    /// `as_container_link` and `into_container_link`), so the user can open it from the results.
     fn search_async<'a>(
         &'a self,
         query: &str,

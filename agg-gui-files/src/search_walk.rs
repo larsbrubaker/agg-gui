@@ -2,8 +2,8 @@
 //! walked: its matching folder rows, then its matching items (`search_terms`; a folder row is a
 //! result as its link, which opens the folder), then its child folders (a matching one too), at
 //! most [`MAX_FALLBACK_DEPTH`] levels down. A sectioned folder's sections are sources, never
-//! results. A folder whose listing arrives after `load`
-//! ([`Folder::is_load_pending`]: a server folder) is waited for, at most [`ASYNC_LOAD_TIMEOUT`]
+//! results. A folder reachable by two paths is reported once per path, as an item is. A folder
+//! whose listing arrives after `load` ([`Folder::is_load_pending`]: a server folder) is waited for, at most [`ASYNC_LOAD_TIMEOUT`]
 //! (20 s), then searched as it stands; the wait's deadline is a [`WakeTimer`] (`wake_timer`). A
 //! folder that searches itself ([`Folder::search_provider`]: a folder on disk) is not walked: it
 //! reports its own matches. A section that fails records its message, and the spawner logs it
@@ -127,20 +127,23 @@ fn matching(items: &[Rc<dyn Item>], shared: &SearchShared) -> Vec<Rc<dyn Item>> 
 }
 
 /// The folder rows of `links` whose names match the search's query, as results. A folder's name
-/// is matched whole: it has no extension to drop.
+/// is matched whole: it has no extension to drop. A link that does not say it is one
+/// (`as_container_link`) is left out: held as an item it would look like a file.
 fn matching_folders(links: &[Rc<dyn FolderLink>], shared: &SearchShared) -> Vec<Rc<dyn Item>> {
     links
         .iter()
+        .filter(|link| link.as_container_link().is_some())
         .filter(|link| name_matches(link.name(), shared.query.as_str(), None))
         .map(|link| Rc::clone(link) as Rc<dyn Item>)
         .collect()
 }
 
 /// A folder that searches itself (and says that search answers for this instance) does; any
-/// other is loaded if empty, waited for if its listing is still coming, its matching items
-/// taken, and its children walked (a sectioned folder's sections only: a computer's top level
-/// would otherwise walk every drive). `parents` are the walked folders above it, below the search
-/// root: what gives a result's origin its breadcrumb trail.
+/// other is loaded if empty, waited for if its listing is still coming, its matching folder rows
+/// and items taken (a sectioned folder's sections are not results), and its children walked (a
+/// sectioned folder's sections only: a computer's top level would otherwise walk every drive).
+/// `parents` are the walked folders above it, below the search root: what gives a result's
+/// origin its breadcrumb trail.
 fn search_container<'a>(
     shared: &'a Rc<SearchShared>,
     section: &'a Rc<SearchSection>,

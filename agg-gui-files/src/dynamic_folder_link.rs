@@ -145,6 +145,10 @@ impl Item for DynamicFolderLink {
         Some(self)
     }
 
+    fn into_container_link(self: Rc<Self>) -> Option<Rc<dyn FolderLink>> {
+        Some(self)
+    }
+
     /// The concrete link, so a drag can tell a top-level row from other rows and open it to
     /// learn where its folder lives.
     fn as_any(&self) -> Option<&dyn std::any::Any> {

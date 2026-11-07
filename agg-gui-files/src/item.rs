@@ -11,6 +11,7 @@
 use std::any::Any;
 use std::future::Future;
 use std::pin::Pin;
+use std::rc::Rc;
 
 use crate::error::LoadError;
 use crate::folder::Folder;
@@ -41,8 +42,15 @@ pub trait Item {
     fn as_asset(&self) -> Option<&dyn Asset> {
         None
     }
-    /// The item as a link that opens a folder, if it is one.
+    /// The item as a link that opens a folder, if it is one. Every [`FolderLink`] answers
+    /// `Some(self)`.
     fn as_container_link(&self) -> Option<&dyn FolderLink> {
+        None
+    }
+    /// The shared item as a shared link that opens a folder, if it is one: what lets a list that
+    /// holds a folder row only as an item (a search's results) treat it as a folder row
+    /// everywhere. Every [`FolderLink`] answers `Some(self)`.
+    fn into_container_link(self: Rc<Self>) -> Option<Rc<dyn FolderLink>> {
         None
     }
     /// The item as content with a stream of bytes, if it is one.
@@ -113,6 +121,11 @@ pub trait AssetStream: Asset {
 pub type StreamFuture = Pin<Box<dyn Future<Output = Result<Option<Vec<u8>>, LoadError>>>>;
 
 /// An item that opens a folder (a folder row).
+///
+/// An implementor overrides [`Item::as_container_link`] and [`Item::into_container_link`], each
+/// answering `Some(self)`: the defaults answer `None`, which makes the link look like a plain
+/// item wherever it is held as one. A search skips a link that does not answer
+/// `as_container_link` rather than report a folder as a file.
 pub trait FolderLink: Item {
     /// Makes the folder this link opens (not yet loaded).
     fn get_container(&self) -> Result<Box<dyn Folder>, String>;

@@ -1,12 +1,15 @@
 //! A [`DiskFolder`] searching itself: walks every directory under the folder for the files its
 //! rules list whose names match the query ([`file_name_contains_filter`]) and the folders whose
 //! names match it (matched whole, reported as a [`DiskFolderLink`] that opens the folder with the
-//! same rules), reporting them in batches. The folder's own listing is untouched: a search across
-//! folders must not disturb the folder the user is looking at.
+//! same rules), reporting them in batches. A zip file the listing shows as a folder
+//! (`paths::lists_as_folder`, with the `zip` feature) is found as that folder row, by the name the
+//! row shows, so the listing and the search agree. The folder's own listing is untouched: a
+//! search across folders must not disturb the folder the user is looking at.
 //!
 //! The walk is a local future on the search's executor (the app's, pumped each frame), so it
 //! yields after every directory to keep the frame moving. The order is a directory's matching
-//! sub-directories, then its files, then each sub-directory walked, depth first, each sorted by
+//! sub-directories, its matching zip folders, then its files, then each sub-directory walked,
+//! depth first, each sorted by
 //! path so results come in a stable order. Hidden folders ('.git'), '$' system folders, links
 //! (how a walk loops or wanders off the drive) and, on Windows, hidden or system folders are
 //! neither reported nor descended into.
@@ -95,6 +98,15 @@ impl SearchProvider for DiskFolder {
                         }
                     }
                 }
+                // A zip file the listing shows as a folder is found as that folder row.
+                for file in files.iter().filter(|file| lists_as_folder(file)) {
+                    if let Some(link) = zip_folder_result(file, &filter) {
+                        batch.push(link);
+                        if batch.len() >= SEARCH_BATCH_SIZE {
+                            flush_batch(&report, &mut batch, &cancel);
+                        }
+                    }
+                }
                 for file in files {
                     if cancel.is_cancelled() {
                         return Ok(());
@@ -123,6 +135,20 @@ impl SearchProvider for DiskFolder {
             Ok(())
         })
     }
+}
+
+/// The folder row of a zip file that lists as a folder, when the name that row shows matches
+/// `filter` (whole, as a folder's name is).
+#[cfg(feature = "zip")]
+fn zip_folder_result(file: &Path, filter: &str) -> Option<Rc<dyn Item>> {
+    let link = crate::zip_folder::ZipFolderLink::new(file, None);
+    name_matches(link.name(), filter, None).then(|| Rc::new(link) as Rc<dyn Item>)
+}
+
+/// Without the `zip` feature no file lists as a folder.
+#[cfg(not(feature = "zip"))]
+fn zip_folder_result(_file: &Path, _filter: &str) -> Option<Rc<dyn Item>> {
+    None
 }
 
 /// A directory's files and sub-directories, each sorted by path, and nothing for one the file

@@ -612,3 +612,35 @@ fn a_drop_holding_a_protected_item_moves_nothing_and_says_why() {
     );
     assert!(!state.borrow().history().can_undo());
 }
+
+/// A folder a search found by its name takes a drop like any folder row: gear.stl, found beside
+/// it by the same search ("ar"), dropped on the found Parts lands in it.
+#[test]
+fn a_row_dropped_on_a_folder_found_by_search_moves_into_it() {
+    let dir = workshop("search-result");
+    let (mut app, state) = browser_app(disk(&dir), BrowserConfig::default(), ViewMode::Rows);
+    let spawner = Rc::new(agg_gui_file_browser::LocalSpawner::new(Rc::new(
+        |m: &str| panic!("fault: {m}"),
+    )));
+    // The folder the browser shows is loaded; the search reads it as it stands.
+    let mut root = disk(&dir);
+    root.load();
+    let mut results = agg_gui_files::SearchResultsFolder::new(root.as_ref(), "ar", spawner);
+    results.start_search();
+    for _ in 0..1000 {
+        if results.is_finished() {
+            break;
+        }
+        run_ready_local_tasks();
+    }
+    assert!(results.is_finished(), "the search ends");
+    state.borrow_mut().push_search_results(Rc::new(results));
+    frame(&mut app);
+    let target = "Parts Row Item Collection";
+    let at = drag_over(&mut app, "Row Item gear.stl", target);
+    // Search results are no place of their own, so the drop is the between-places one: a copy.
+    assert_eq!(property(&app, target, "drop_label"), "Copy to Parts");
+    release(&mut app, at, Modifiers::default());
+    assert!(dir.join("Parts/gear.stl").exists());
+    let _ = std::fs::remove_dir_all(&dir);
+}

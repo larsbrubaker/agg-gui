@@ -596,7 +596,8 @@ fn a_waiting_search_does_not_keep_its_executor_alive() {
 #[test]
 fn a_folder_whose_name_matches_is_a_result_that_opens_it() {
     let root = MemoryFolder::new("Design Apps");
-    let holder = root.add_folder("Card Holder").expect("a folder");
+    root.add_file("a card.stl", Vec::new());
+    let holder = root.add_folder("Zebra Card Holder").expect("a folder");
     holder.add_file("card base.stl", Vec::new());
     holder.add_file("lid.stl", Vec::new());
     let other = root.add_folder("Other").expect("a folder");
@@ -604,9 +605,18 @@ fn a_folder_whose_name_matches_is_a_result_that_opens_it() {
     root.add_folder("Bracket").expect("a folder");
     let results = search_to_end(&root, "card");
 
+    // In walk order: a folder's matching folders before its matching items ("Zebra..." before
+    // "a card.stl", against the alphabet), then the folders below it.
+    let found = results.items();
+    let walk_order: Vec<&str> = found.iter().map(|i| i.name()).collect();
     assert_eq!(
-        names(&results.items()),
-        sorted(&["Card Holder", "card base.stl", "Card Box"])
+        walk_order,
+        [
+            "Zebra Card Holder",
+            "a card.stl",
+            "card base.stl",
+            "Card Box"
+        ]
     );
     let items = results.items();
     let find = |name: &str| {
@@ -617,10 +627,11 @@ fn a_folder_whose_name_matches_is_a_result_that_opens_it() {
             .clone()
     };
     // A folder result is a row that opens its folder, not a file.
-    let holder_result = find("Card Holder");
+    let holder_result = find("Zebra Card Holder");
     let link = holder_result.as_container_link().expect("a folder row");
     let opened = link.get_container().expect("the folder opens");
-    assert_eq!(opened.name(), "Card Holder");
+    assert_eq!(opened.name(), "Zebra Card Holder");
+    assert!(Rc::clone(&holder_result).into_container_link().is_some());
     // Found in the root it was listed in, and in "Other" one level down.
     let holder_origin = results.try_get_origin(&holder_result).expect("origin");
     assert!(holder_origin.container().is_none());
@@ -639,6 +650,99 @@ fn a_search_source_is_not_a_result_though_its_name_matches() {
     let search_root = StubFolder::sectioned(vec![cards.link()]);
     let results = search_to_end(&search_root, "card");
     assert_eq!(names(&results.items()), sorted(&["Card Box"]));
+}
+
+/// A sectioned folder found below a search source is walked through its sections, and those
+/// sections are where to look, not results: "Card Deck" is a section, its "card a.stl" a result.
+#[test]
+fn a_sectioned_folder_below_a_source_does_not_report_its_sections() {
+    let deck = MemoryFolder::new("Card Deck");
+    deck.add_file("card a.stl", Vec::new());
+    let deck_link = deck.link();
+    let inner = StubFolder::sectioned(vec![deck_link]);
+    let source = StubFolder::new("Source", &[]);
+    source
+        .children
+        .borrow_mut()
+        .push(link_to("Inner", move || Box::new(inner.clone())));
+    let search_root =
+        StubFolder::sectioned(vec![link_to("Source", move || Box::new(source.clone()))]);
+    let results = search_to_end(&search_root, "card");
+    assert_eq!(names(&results.items()), sorted(&["card a.stl"]));
+}
+
+/// A folder link that does not say it is one (`as_container_link`) would look like a file among
+/// the results, so the walk leaves it out.
+#[test]
+fn a_link_that_does_not_answer_as_a_folder_is_not_a_result() {
+    struct BareLink;
+    impl Item for BareLink {
+        fn id(&self) -> &str {
+            "Card Bare"
+        }
+        fn name(&self) -> &str {
+            "Card Bare"
+        }
+        fn is_protected(&self) -> bool {
+            false
+        }
+        fn is_visible(&self) -> bool {
+            true
+        }
+    }
+    impl FolderLink for BareLink {
+        fn get_container(&self) -> Result<Box<dyn Folder>, String> {
+            Err("not opened in this test".to_string())
+        }
+        fn is_read_only(&self) -> bool {
+            true
+        }
+    }
+    let search_root = StubFolder::new("Root", &["card stand"]);
+    search_root.children.borrow_mut().push(Rc::new(BareLink));
+    let results = search_to_end(&search_root, "card");
+    assert_eq!(names(&results.items()), sorted(&["card stand"]));
+
+    // One that says it is a folder but can't be handed on as one, reported by a folder's own
+    // search, is left out too: a list holding it as an item would show it as a file.
+    struct HalfLink;
+    impl Item for HalfLink {
+        fn id(&self) -> &str {
+            "Card Half"
+        }
+        fn name(&self) -> &str {
+            "Card Half"
+        }
+        fn is_protected(&self) -> bool {
+            false
+        }
+        fn is_visible(&self) -> bool {
+            true
+        }
+        fn as_container_link(&self) -> Option<&dyn FolderLink> {
+            Some(self)
+        }
+    }
+    impl FolderLink for HalfLink {
+        fn get_container(&self) -> Result<Box<dyn Folder>, String> {
+            Err("not opened in this test".to_string())
+        }
+        fn is_read_only(&self) -> bool {
+            true
+        }
+    }
+    let reporter = StubFolder::provider("Reporter", |report, _cancel| {
+        report(vec![
+            Rc::new(HalfLink) as Rc<dyn Item>,
+            Rc::new(StubItem("card kept".to_string())),
+        ]);
+        Box::pin(async { Ok(()) })
+    });
+    let search_root = StubFolder::sectioned(vec![link_to("Reporter", move || {
+        Box::new(reporter.clone())
+    })]);
+    let results = search_to_end(&search_root, "card");
+    assert_eq!(names(&results.items()), sorted(&["card kept"]));
 }
 
 /// The content-file test can't reach a search already running, so a late call is a mistake a

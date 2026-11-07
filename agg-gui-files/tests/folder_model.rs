@@ -79,6 +79,12 @@ impl Item for Link {
     fn is_visible(&self) -> bool {
         self.1
     }
+    fn as_container_link(&self) -> Option<&dyn FolderLink> {
+        Some(self)
+    }
+    fn into_container_link(self: Rc<Self>) -> Option<Rc<dyn FolderLink>> {
+        Some(self)
+    }
 }
 
 impl FolderLink for Link {

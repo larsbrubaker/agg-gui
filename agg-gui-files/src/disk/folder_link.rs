@@ -134,6 +134,10 @@ impl Item for DiskFolderLink {
         Some(self)
     }
 
+    fn into_container_link(self: Rc<Self>) -> Option<Rc<dyn FolderLink>> {
+        Some(self)
+    }
+
     fn as_any(&self) -> Option<&dyn Any> {
         Some(self)
     }

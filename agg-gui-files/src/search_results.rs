@@ -4,9 +4,9 @@
 //! from. A search root that presents itself in sections ([`Folder::search_sections`]) gets one
 //! [`SearchSection`] per source; anything else is one section, itself. How each source is walked
 //! is `search_walk`'s: its matching folder rows and items, then its child folders, a folder that
-//! searches itself left to do so, a folder whose listing comes later waited for. Every result remembers where it
-//! was found ([`SearchOrigin`]), which is what reveals an item with no path of its own and what
-//! asks that folder for the item's picture (`get_thumbnail`).
+//! searches itself left to do so, a folder whose listing comes later waited for. Every result
+//! remembers where it was found ([`SearchOrigin`]), which is what reveals an item with no path of
+//! its own and what asks that folder for the item's picture (`get_thumbnail`).
 //!
 //! Which names carry an extension worth dropping before matching (the file types the app opens,
 //! so "stl" does not match every mesh) is the app's to say: [`SearchResultsFolder::with_content_files`]
@@ -157,13 +157,22 @@ impl SearchShared {
         }
     }
 
-    /// Files a batch under its section and appends it to the flattened list.
+    /// Files a batch under its section and appends it to the flattened list. A folder row that
+    /// can't be handed on as one (`into_container_link` answers `None`) is left out: a list would
+    /// show it as a file.
     pub(crate) fn add_results(
         &self,
         section: &SearchSection,
         origin: &Rc<SearchOrigin>,
         batch: Vec<Rc<dyn Item>>,
     ) {
+        let batch: Vec<Rc<dyn Item>> = batch
+            .into_iter()
+            .filter(|item| {
+                item.as_container_link().is_none()
+                    || Rc::clone(item).into_container_link().is_some()
+            })
+            .collect();
         if batch.is_empty() {
             return;
         }

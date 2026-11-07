@@ -76,6 +76,9 @@ impl Item for ZipFolderLink {
     fn as_container_link(&self) -> Option<&dyn FolderLink> {
         Some(self)
     }
+    fn into_container_link(self: std::rc::Rc<Self>) -> Option<std::rc::Rc<dyn FolderLink>> {
+        Some(self)
+    }
     fn as_any(&self) -> Option<&dyn Any> {
         Some(self)
     }

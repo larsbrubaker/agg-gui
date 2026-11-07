@@ -2,9 +2,11 @@
 //! (`push_search_results`), so the breadcrumbs show them under it, and listed in sections, one per
 //! source. While any part of the search runs a "Searching" line leads the list; each section then
 //! gets a header (its name, and "(n)", "No results" or its error once it is done) over its
-//! results, each section sorted on its own, its folders (found by name, listed as their links,
-//! which `BrowserEntry` treats as folder rows) before its files ([`search_listing`]; a browser's
-//! item filter keeps only its kinds of results, counted so). A rolled-up section keeps its
+//! results, each section sorted on its own, its folders (found by name: folder rows,
+//! `BrowserEntry::Container`, from `Item::into_container_link`, so they open, take drops and can
+//! be a Move's or an Open's folder) before its files ([`search_listing`]; a browser's item filter
+//! keeps only its kinds of results, counted so, and the folder rules its folders). A rolled-up
+//! section keeps its
 //! header and hides its rows; what is rolled up is remembered by name (ignoring case) for the
 //! session ([`SearchSectionCollapseState`]), so every search and every browser agree.
 //!
@@ -159,7 +161,12 @@ pub(super) fn listing_kept(
         }
         for item in items {
             slots.push(ListSlot::Entry(entries.len()));
-            entries.push(BrowserEntry::Item(item));
+            // A folder found by name is a folder row, so it opens, takes drops and can be a
+            // Move's or an Open's folder like any other.
+            entries.push(match Rc::clone(&item).into_container_link() {
+                Some(link) => BrowserEntry::Container(link),
+                None => BrowserEntry::Item(item),
+            });
         }
     }
     (slots, entries)

@@ -12,12 +12,11 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Fixed
 
-- A folder among a search's results (agg-gui-files 0.0.7 finds folders by name) is a folder
-  row: `BrowserEntry::is_container` answers true for an item that is a folder link, its row and
-  tile are named and drawn as a folder's, it lists before the files of its section, and opening
-  it goes into the folder rather than handing it to the app as a file. An open dialog never
-  returns one as a chosen file. `BrowserEntry::container_link` gives either kind of folder row's
-  link.
+- A folder among a search's results (agg-gui-files 0.0.7 finds folders by name) is listed as a
+  folder row (`BrowserEntry::Container`, through `Item::into_container_link`), before the files
+  of its section, shown by the folder rules ("Show Folders", the folder filter) rather than the
+  item filter. So it behaves like any folder: opening it goes into it, it takes drops and springs
+  open, Open with it selected opens it, and it can be a Move's destination.
 
 ## [0.0.11] - 2026-11-03
 
