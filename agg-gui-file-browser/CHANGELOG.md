@@ -8,6 +8,19 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ## [Unreleased]
 
+## [0.0.13] - 2026-11-08
+
+### Fixed
+
+- Restoring a remembered location (`BrowserState::restore_location`) reads only the folder it
+  shows. The folders above it go on the path for the breadcrumbs without being listed or
+  activated, and each is read the first time the user goes back up to it (a breadcrumb, Back, a
+  hand-over that shows it again). A dialog remembered deep under a huge folder (a temp folder
+  holding tens of thousands of entries) reopened only after listing every folder above it, which
+  held the UI thread for seconds; it now costs one listing. A hook handed the path still gets
+  every folder on it, with its name, place and writability; an ancestor's rows are empty until it
+  shows.
+
 ## [0.0.12] - 2026-11-07
 
 ### Fixed

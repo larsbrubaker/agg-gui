@@ -3,8 +3,15 @@
 //! one the browser leaves is deactivated and its listener taken back off. The folders above it on
 //! the path stay loaded for the breadcrumbs but are neither activated nor listened to, so a change
 //! in a folder does not reload the one behind it. `BrowserState` (`state/mod.rs`) calls `leave`
-//! before the showing folder changes and `listen` (before a new folder's load) or `enter` (for one
-//! already loaded, an ancestor shown again) after.
+//! before the showing folder changes and `listen` (before a new folder's load) or `enter` (for an
+//! ancestor shown again) after.
+//!
+//! A restored location puts the folders above the one it shows on the path unread
+//! (`mark_unread`): only their names are needed for the breadcrumbs, and listing each could take
+//! seconds in a huge folder. `enter` reads such a folder the first time it shows (listening
+//! first, so an answer that arrives during the load is not missed), and never again after that,
+//! as for any ancestor. The hold on an unread folder is weak, so it never keeps a folder the path
+//! dropped alive, nor counts as a hold on the showing folder.
 //!
 //! A folder that changed behind the browser's back without saying so (a file another program
 //! wrote, in a folder no directory monitor follows) is listed again on the user's ask
@@ -18,7 +25,7 @@
 //! told to try again.
 
 use std::cell::{Cell, RefCell};
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 
 use agg_gui_files::{ContentChangedListener, Folder};
 
@@ -52,12 +59,17 @@ struct WatchCells {
     live: Cell<u64>,
 }
 
+/// A weak hold on a folder on the path ([`OpenFolder`]).
+type HeldFolder = Weak<RefCell<Box<dyn Folder>>>;
+
 /// The browser's subscription to its showing folder (see the module header).
 #[derive(Default)]
 pub(super) struct ActiveWatch {
     cells: Rc<WatchCells>,
     /// The listener on the showing folder, which `leave` takes back off.
     listener: RefCell<Option<ContentChangedListener>>,
+    /// The folders on the path not read yet (see the module header), held weakly.
+    unread: RefCell<Vec<HeldFolder>>,
 }
 
 impl ActiveWatch {
@@ -96,13 +108,36 @@ impl ActiveWatch {
         self.cells.live.set(self.cells.live.get() + 1);
     }
 
-    /// Activates and listens to the last folder on `path`, one already loaded (an ancestor shown
-    /// again).
+    /// Activates and listens to the last folder on `path`, an ancestor shown again, reading it
+    /// first if a restore left it unread.
     pub(super) fn enter(&self, path: &[OpenFolder]) {
-        if let Some(showing) = path.last() {
-            let mut showing = showing.borrow_mut();
+        let Some(showing) = path.last() else {
+            return;
+        };
+        let unread = self.take_unread(showing);
+        let mut showing = showing.borrow_mut();
+        if unread {
+            self.listen(showing.as_ref());
+            showing.load();
+            showing.activate();
+        } else {
             showing.activate();
             self.listen(showing.as_ref());
         }
+    }
+
+    /// Notes that `folder`, put on the path above the one showing, has not been read.
+    pub(super) fn mark_unread(&self, folder: &OpenFolder) {
+        self.unread.borrow_mut().push(Rc::downgrade(folder));
+    }
+
+    /// Whether `folder` was unread, which it no longer counts as once asked; folders the path
+    /// has dropped are forgotten on the way.
+    fn take_unread(&self, folder: &OpenFolder) -> bool {
+        let mut unread = self.unread.borrow_mut();
+        unread.retain(|held| held.strong_count() > 0);
+        let before = unread.len();
+        unread.retain(|held| !std::ptr::eq(held.as_ptr(), Rc::as_ptr(folder)));
+        unread.len() != before
     }
 }

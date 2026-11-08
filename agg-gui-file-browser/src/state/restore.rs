@@ -18,7 +18,8 @@
 //!
 //! When a restore's search answers, the listeners added with
 //! [`BrowserState::add_restore_finished`] hear how it went ([`RestoreOutcome`]): the folders
-//! opened (all of them, or down to the crumb the user clicked meanwhile), the location could not be reached, the user ended the restore (went elsewhere
+//! opened (all of them, or down to the crumb the user clicked meanwhile; only the last is read,
+//! the ones above it when the user goes back up to them), the location could not be reached, the user ended the restore (went elsewhere
 //! meanwhile), or a newer restore began. They are told outside any borrow of the
 //! state, so they may read it. A key the memory remembers nothing under starts no restore and
 //! tells nothing.

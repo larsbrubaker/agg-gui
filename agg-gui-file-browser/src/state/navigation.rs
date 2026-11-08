@@ -4,7 +4,8 @@
 //! over to a dialog's work (`take_active_container`) or replacing it (`replace_active_container`),
 //! and remembering and restoring a dialog's place through the config's `BrowserMemory`
 //! (`remember_location`, `restore_location`, which tells the restore's listeners how its answer
-//! went; the memory is handed a copy of the path's handles with the state let go). Every change of the showing folder leaves the old one and listens to
+//! went, and reads only the folder it shows, leaving the ones above it unread until the user goes
+//! back up to them; the memory is handed a copy of the path's handles with the state let go). Every change of the showing folder leaves the old one and listens to
 //! the new (`state/active_watch.rs`), restores the folder's view (`state/view.rs`), bumps the
 //! navigation counter and tells the container-changed listeners (how a search learns the user
 //! walked away from its results). Part of `state/mod.rs`, whose fields it reads.
@@ -64,6 +65,24 @@ impl BrowserState {
         self.restore_user_view();
         self.changed();
         self.navigated();
+    }
+
+    /// Shows the last of `folders` below the one showing, with the others between: a restored
+    /// location. Only the folder shown is read (listed and activated); the ones above it go on
+    /// the path unread, for the breadcrumbs, and each is read when the user goes back up to it
+    /// (`ActiveWatch::enter`). So a place deep under a huge folder (a full temp folder, a crowded
+    /// Downloads) reopens with one listing rather than one per level. Nothing happens for none.
+    fn show_restored(&mut self, mut folders: Vec<Box<dyn Folder>>) {
+        let Some(shown) = folders.pop() else {
+            return;
+        };
+        self.watch.leave(&self.path);
+        for above in folders {
+            let above: OpenFolder = Rc::new(RefCell::new(above));
+            self.watch.mark_unread(&above);
+            self.path.push(above);
+        }
+        self.show_below(shown);
     }
 
     /// Shows the folders `located` below the path's folder at `base` (a search's root, or the
@@ -221,14 +240,16 @@ impl BrowserState {
         self.navigated();
     }
 
-    /// The folders from the root down to the showing one, each borrowed while it is held.
+    /// The folders from the root down to the showing one, each borrowed while it is held. One a
+    /// restore put above the showing folder lists nothing until it shows (`show_restored`).
     pub fn path_containers(&self) -> impl Iterator<Item = Ref<'_, dyn Folder>> {
         self.path
             .iter()
             .map(|c| Ref::map(c.borrow(), |b| b.as_ref()))
     }
 
-    /// The open path's shared folders, from the root down: what a hook is handed.
+    /// The open path's shared folders, from the root down: what a hook is handed. One a restore
+    /// put above the showing folder lists nothing until it shows (`show_restored`).
     pub fn open_path(&self) -> Vec<OpenFolder> {
         self.path.clone()
     }
@@ -283,7 +304,8 @@ impl BrowserState {
     }
 
     /// Opens the folder the config's memory remembers under `key`, once found (the search runs
-    /// on the config's spawner): the folders below the root are opened down to it. Nothing
+    /// on the config's spawner): the folders below the root are put on the path down to it, only
+    /// the remembered one read (`show_restored`). Nothing
     /// happens when none is remembered, it can't be reached, or the user has moved the browser
     /// meanwhile (their choice wins). While it is found, a trail the memory names
     /// (`BrowserMemory::last_location_trail`) shows as the breadcrumbs over a loading line
@@ -376,9 +398,7 @@ impl BrowserState {
                 }
                 (Some(shortened), Some(folders)) => {
                     let keep = shortened.unwrap_or(folders.len());
-                    for folder in folders.into_iter().take(keep) {
-                        s.push_container(folder);
-                    }
+                    s.show_restored(folders.into_iter().take(keep).collect());
                     // Read by listeners told later (a ready answer's, at the spawner's next
                     // turn), when the user may have moved on from where it landed.
                     s.restore_landed_at = Some(s.navigation);
