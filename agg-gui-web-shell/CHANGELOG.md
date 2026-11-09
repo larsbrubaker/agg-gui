@@ -22,6 +22,16 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   left to the browser's garbage collector.
 - With `offscreen_scene`, the scene blit's per-draw buffers are destroyed
   right after its submit instead of waiting for the garbage collector.
+- On WebGPU, the default device limits (no `WebShellConfig::limits`
+  override) take the adapter's own `max_storage_buffer_binding_size` and
+  `max_buffer_size` instead of wgpu's 128 MiB / 256 MiB defaults, as
+  agg-gui-wgpu 0.6.1's native devices do, so a compute pass can use buffers
+  as large as the browser allows. WebGL2's limits are unchanged.
+- The device also gets `wgpu::Features::TIMESTAMP_QUERY` whenever the adapter
+  offers it, whatever `WebShellConfig::optional_features` holds, as
+  agg-gui-wgpu 0.6.1's devices do. A browser may round the timestamps
+  (Chrome rounds them to 100 microseconds), so a short pass cannot be timed
+  finely there.
 
 ### Added
 

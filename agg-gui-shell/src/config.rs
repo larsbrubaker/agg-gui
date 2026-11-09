@@ -123,6 +123,7 @@ pub struct ShellConfig {
     /// Device features requested when the adapter offers them, passed through
     /// to `agg_gui_wgpu::GpuConfig` (which masks them against
     /// `adapter.features()` so an adapter lacking one still yields a device).
+    /// `TIMESTAMP_QUERY` is always requested this way, whatever this holds.
     pub optional_features: wgpu::Features,
     /// Render on wgpu's software (fallback) adapter instead of the GPU,
     /// passed through to `agg_gui_wgpu::GpuConfig::force_fallback_adapter`

@@ -99,9 +99,10 @@ pub struct HeadlessOptions {
     /// Features the device gets when the adapter offers them, as
     /// [`crate::GpuConfig::optional_features`]: masked against the adapter's,
     /// so an absent one degrades instead of failing the request. Default
-    /// empty. The shared device is made with the first call's features, so
-    /// every caller in a process should ask for the same ones (the ones its
-    /// window's device asks for).
+    /// empty (`TIMESTAMP_QUERY` is requested whatever this holds). The shared
+    /// device is made with the first call's features, so every caller in a
+    /// process should ask for the same ones (the ones its window's device
+    /// asks for).
     pub optional_features: wgpu::Features,
 }
 
@@ -319,7 +320,8 @@ impl HeadlessGpu {
     }
 
     /// The adapter's own limits, which the device's request raised its
-    /// texture size limit to (see `device_descriptor`).
+    /// texture size, storage-binding size and buffer size limits to (see
+    /// `device_descriptor`).
     pub fn adapter_limits(&self) -> &wgpu::Limits {
         &self.adapter_limits
     }

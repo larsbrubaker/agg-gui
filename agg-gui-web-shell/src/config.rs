@@ -128,7 +128,8 @@ pub struct WebShellConfig {
     pub device_label: String,
     /// Device features requested **when the adapter offers them** (masked
     /// against `adapter.features()`), like
-    /// `agg_gui_wgpu::GpuConfig::with_optional_features`.
+    /// `agg_gui_wgpu::GpuConfig::with_optional_features`. `TIMESTAMP_QUERY`
+    /// is always requested this way, whatever this holds.
     pub optional_features: wgpu::Features,
     /// Device features the app cannot run without. An adapter lacking any of
     /// them fails start-up with [`crate::WebShellError::MissingFeatures`]
@@ -138,8 +139,10 @@ pub struct WebShellConfig {
     /// `Limits::downlevel_webgl2_defaults()` on WebGL2 and `Limits::default()`
     /// on WebGPU, each with the texture-dimension caps raised to what the
     /// adapter offers (`using_resolution`) — a DPR-3 phone canvas overshoots
-    /// the conservative 2048 WebGL2 default. Set it when the app's own
-    /// renderer needs more (storage-buffer sizes for compute, for example).
+    /// the conservative 2048 WebGL2 default. On WebGPU the storage-binding
+    /// and buffer-size limits are the adapter's own too, so a compute pass
+    /// can use buffers as large as the browser allows. Set it when the app's
+    /// own renderer needs some other limit raised.
     pub limits: Option<wgpu::Limits>,
     /// The app's check of the adapter the browser handed out, run before the
     /// device is requested (and again on a device-loss rebuild). Its `Err`

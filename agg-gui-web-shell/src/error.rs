@@ -116,6 +116,12 @@ pub(crate) fn pick_surface_format(formats: &[wgpu::TextureFormat]) -> Option<wgp
 }
 
 /// The device limits to request for `backend`, honouring an explicit override.
+///
+/// On WebGPU the storage-binding and buffer-size limits are the adapter's own,
+/// as agg-gui-wgpu's native devices ask for (its `gpu::device_descriptor`): a
+/// compute pass over a large canvas needs buffers past wgpu's 128 MiB / 256 MiB
+/// defaults, and asking for exactly what the adapter reports cannot fail the
+/// request. WebGL2 has no storage buffers, so its downlevel limits stay.
 pub(crate) fn device_limits(
     backend: wgpu::Backend,
     adapter_limits: wgpu::Limits,
@@ -124,17 +130,23 @@ pub(crate) fn device_limits(
     if let Some(l) = override_limits {
         return l.clone();
     }
-    let base = if backend == wgpu::Backend::Gl {
-        wgpu::Limits::downlevel_webgl2_defaults()
-    } else {
-        wgpu::Limits::default()
-    };
-    base.using_resolution(adapter_limits)
+    if backend == wgpu::Backend::Gl {
+        return wgpu::Limits::downlevel_webgl2_defaults().using_resolution(adapter_limits);
+    }
+    wgpu::Limits {
+        max_storage_buffer_binding_size: adapter_limits.max_storage_buffer_binding_size,
+        max_buffer_size: adapter_limits.max_buffer_size,
+        ..wgpu::Limits::default().using_resolution(adapter_limits)
+    }
 }
 
 /// The device features to request: every `required` feature (an error naming
 /// the missing ones when the adapter lacks any) plus the `optional` ones the
-/// adapter offers.
+/// adapter offers. `TIMESTAMP_QUERY` is always optional, as on agg-gui-wgpu's
+/// native devices, so a custom render pass can time its own work on the GPU's
+/// clock wherever the browser allows it. A browser may round the results
+/// (Chrome rounds them to 100 microseconds), so a short pass cannot be timed
+/// finely there.
 pub(crate) fn device_features(
     adapter: wgpu::Features,
     required: wgpu::Features,
@@ -144,7 +156,7 @@ pub(crate) fn device_features(
     if !missing.is_empty() {
         return Err(WebShellError::MissingFeatures(missing));
     }
-    Ok(required | (optional & adapter))
+    Ok(required | ((optional | wgpu::Features::TIMESTAMP_QUERY) & adapter))
 }
 
 #[cfg(test)]
@@ -175,6 +187,33 @@ mod tests {
             got.max_storage_buffers_per_shader_stage,
             wgpu::Limits::downlevel_webgl2_defaults().max_storage_buffers_per_shader_stage
         );
+    }
+
+    #[test]
+    fn webgpu_limits_take_the_adapters_buffer_sizes() {
+        let adapter = wgpu::Limits {
+            max_storage_buffer_binding_size: 2_147_483_644,
+            max_buffer_size: 4_294_967_296,
+            max_texture_dimension_2d: 16384,
+            ..wgpu::Limits::default()
+        };
+        let got = device_limits(wgpu::Backend::BrowserWebGpu, adapter.clone(), None);
+        assert_eq!(got.max_storage_buffer_binding_size, 2_147_483_644);
+        assert_eq!(got.max_buffer_size, 4_294_967_296);
+        assert_eq!(got.max_texture_dimension_2d, 16384);
+        // Everything else stays at the WebGPU defaults, which every WebGPU
+        // adapter offers, so the request cannot exceed the adapter.
+        assert_eq!(got.max_bind_groups, wgpu::Limits::default().max_bind_groups);
+        assert!(got.check_limits(&adapter));
+    }
+
+    #[test]
+    fn timestamp_queries_are_requested_only_when_offered() {
+        use wgpu::Features as F;
+        let with = device_features(F::TIMESTAMP_QUERY, F::empty(), F::empty()).unwrap();
+        assert_eq!(with, F::TIMESTAMP_QUERY);
+        let without = device_features(F::DEPTH_CLIP_CONTROL, F::empty(), F::empty()).unwrap();
+        assert_eq!(without, F::empty());
     }
 
     #[test]

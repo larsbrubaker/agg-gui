@@ -6,6 +6,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps.
 
+## [0.6.1] - 2026-11-09
+
+### Changed
+
+- Every device this crate creates (`Gpu::new`'s and `HeadlessGpu`'s) gets the
+  adapter's own `max_storage_buffer_binding_size` and `max_buffer_size`
+  instead of wgpu's defaults (128 MiB and 256 MiB), so a custom render pass
+  can bind and read back buffers as large as the card allows (a compute pass
+  over a view of many millions of pixels). The request equals what the
+  adapter reports, so it cannot fail device creation; every other limit is
+  unchanged. A buffer above the old 256 MiB limit (or a storage binding above
+  128 MiB) now reaches the driver instead of failing wgpu's validation, so a
+  consumer that relied on that validation error to catch an oversized buffer
+  checks the size against `device.limits()` itself.
+- Those devices also get `wgpu::Features::TIMESTAMP_QUERY` whenever the
+  adapter offers it (never when it does not, so it cannot fail device
+  creation), whatever `GpuConfig::optional_features` /
+  `HeadlessOptions::optional_features` hold, so a custom render pass can time
+  its own work on the GPU's clock: `device.features()` now includes
+  `TIMESTAMP_QUERY` wherever the adapter offers it.
+
 ## [0.6.0] - 2026-10-29
 
 ### Added

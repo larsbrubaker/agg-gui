@@ -90,6 +90,7 @@ pub struct GpuConfig {
     /// adapter that lacks one still yields a device (the app degrades instead
     /// of failing to start). For an app renderer that can use, e.g.,
     /// `FLOAT32_BLENDABLE` when present and fall back when not.
+    /// `TIMESTAMP_QUERY` is always requested this way, whatever this holds.
     pub optional_features: wgpu::Features,
     /// How long the swap chain may stay continuously unconfigured — every
     /// `Surface::configure` retry failing — before [`Gpu::try_acquire_frame`]
@@ -362,17 +363,29 @@ pub(crate) fn device_descriptor<'a>(
     memory_hints: GpuMemoryHints,
     adapter: &wgpu::Adapter,
 ) -> wgpu::DeviceDescriptor<'a> {
+    let adapter_limits = adapter.limits();
     wgpu::DeviceDescriptor {
         label: Some(label),
         // Optional features are masked against what the adapter actually
         // offers, so asking for an absent one degrades instead of failing
-        // `request_device`.
-        required_features: optional_features & adapter.features(),
+        // `request_device`. Timestamp queries are always among them, so a
+        // custom render pass can time its own work on the GPU's clock
+        // wherever the adapter can.
+        required_features: (optional_features | wgpu::Features::TIMESTAMP_QUERY)
+            & adapter.features(),
         // The default limits, raised to the adapter's real texture size limit
         // (usually 16384, against the default 8192): a supersampled 3D view on
         // a fullscreen HiDPI window needs textures several times the window's
-        // size, and the default would force it down to a softer frame.
-        required_limits: wgpu::Limits::default().using_resolution(adapter.limits()),
+        // size, and the default would force it down to a softer frame. The
+        // storage-binding and buffer-size limits are the adapter's own (the
+        // defaults are 128 MiB and 256 MiB): a compute pass over a large view
+        // needs per-pixel buffers past them. Each is exactly the adapter's
+        // value, so neither can make the request exceed what it supports.
+        required_limits: wgpu::Limits {
+            max_storage_buffer_binding_size: adapter_limits.max_storage_buffer_binding_size,
+            max_buffer_size: adapter_limits.max_buffer_size,
+            ..wgpu::Limits::default().using_resolution(adapter_limits)
+        },
         memory_hints: memory_hints.into(),
         experimental_features: wgpu::ExperimentalFeatures::default(),
         trace: wgpu::Trace::Off,
