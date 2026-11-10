@@ -95,9 +95,10 @@ fn scene(passes: bool) -> Scene {
     let mut modal_widget = WheelWidget::leaf(Rect::new(0.0, 0.0, 100.0, ROOT), &modal);
     modal_widget.modal = true;
     modal_widget.passes = passes;
-    modal_widget
-        .children
-        .push(Box::new(WheelWidget::leaf(Rect::new(10.0, 10.0, 80.0, 180.0), &list)));
+    modal_widget.children.push(Box::new(WheelWidget::leaf(
+        Rect::new(10.0, 10.0, 80.0, 180.0),
+        &list,
+    )));
     let root = WheelWidget {
         bounds: Rect::new(0.0, 0.0, ROOT, ROOT),
         modal: false,

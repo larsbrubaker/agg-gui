@@ -456,9 +456,7 @@ impl App {
         self.resolve_tracked_paths();
         let pos = super::keyboard_scroll::lift_to_world(self.flip_y(screen_x, screen_y));
         set_current_mouse_world(pos);
-        let hit = self
-            .modal_hover_path(pos)
-            .or_else(|| self.compute_hit(pos));
+        let hit = self.modal_hover_path(pos).or_else(|| self.compute_hit(pos));
         let event = Event::MouseWheel {
             pos,
             delta_y,
