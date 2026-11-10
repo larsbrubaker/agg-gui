@@ -224,6 +224,8 @@ pub use snap::{
     compute_snap, next_snap_id, ResizeEdge as SnapResizeEdge, SnapGuide, SnapId, SnapMode,
     SnapOverlay, SnapResult, Snappable, DEFAULT_THRESHOLD as SNAP_DEFAULT_THRESHOLD,
 };
+#[cfg(feature = "svg-text")]
+pub use svg::svg_fontdb_from_font_data;
 pub use svg::{
     compare_svg_rgba, parse_svg, render_svg, render_svg_at_size, render_svg_at_size_with_options,
     render_svg_at_size_with_resources, render_svg_to_framebuffer,
@@ -235,10 +237,9 @@ pub use svg::{
     render_svg_tree_region_at_size, render_svg_tree_region_to_framebuffer_at_size,
     render_svg_tree_to_framebuffer, render_svg_tree_to_framebuffer_at_size,
     render_svg_tree_to_lcd_buffer, render_svg_tree_to_lcd_buffer_at_size, render_svg_with_options,
-    set_default_svg_parse_options, svg_fontdb_from_font_data, SvgCompareResult,
-    SvgCompareThresholds, SvgParseOptions, SvgRenderError, SvgTree, DEFAULT_ALPHA_TOLERANCE,
-    DEFAULT_MISMATCH_RATIO, DEFAULT_OPAQUE_RGB_TOLERANCE, DEFAULT_TRANSLUCENT_RGB_TOLERANCE,
-    DEFAULT_VISUAL_RGB_TOLERANCE,
+    set_default_svg_parse_options, SvgCompareResult, SvgCompareThresholds, SvgParseOptions,
+    SvgRenderError, SvgTree, DEFAULT_ALPHA_TOLERANCE, DEFAULT_MISMATCH_RATIO,
+    DEFAULT_OPAQUE_RGB_TOLERANCE, DEFAULT_TRANSLUCENT_RGB_TOLERANCE, DEFAULT_VISUAL_RGB_TOLERANCE,
 };
 pub use text::{
     elide_text, elide_to_width, ellipsize_to_width, ellipsize_with, measure_text_metrics,

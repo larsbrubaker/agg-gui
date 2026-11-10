@@ -99,6 +99,12 @@ jobs:
           cargo clippy -p agg-gui-files --all-targets --features zip -- -D warnings
           cargo clippy -p agg-gui-files --all-targets --features disk,zip -- -D warnings
 
+      # agg-gui with no default features (no `svg-text`, no `reflect`), as
+      # agg-gui-wgpu and the shells build it. The workspace clippy above never
+      # sees that build: the demos turn the defaults back on.
+      - name: Clippy (agg-gui, no default features)
+        run: cargo clippy -p agg-gui --no-default-features --all-targets -- -D warnings
+
       # Its browser halves: the provider in the UI module, and the worker
       # module, built with simd128 as demo/build-whistle.sh builds it.
       - name: Clippy (agg-gui-whistle, wasm)
@@ -163,6 +169,13 @@ jobs:
 
       - name: Run tests
         run: cargo test -p agg-gui
+
+      # The whole suite again with no default features: SVGs whose text is
+      # skipped without `svg-text` (svg::no_text_tests), and every other test
+      # without `reflect`. Not narrowed to those tests, because any test can
+      # come to lean on a default feature and only a full run catches that.
+      - name: Run tests (no default features)
+        run: cargo test -p agg-gui --no-default-features
 
       # The file browser's model.
       - name: Run file model tests

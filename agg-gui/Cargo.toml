@@ -1,6 +1,6 @@
 [package]
 name = "agg-gui"
-version = "0.5.11"
+version = "0.5.12"
 edition = "2021"
 # agg-rust (a path dependency) requires 1.88; wgpu 29 needs 1.87 and arboard 3.6 needs 1.71.
 rust-version = "1.88"
@@ -40,7 +40,9 @@ web-time = "1"
 pulldown-cmark = "0.11"
 png = "0.17"
 qrcodegen = "1.8"
-usvg = "0.48.1"
+# SVG parsing. Its text machinery (fonts, shaping) is the `svg-text` feature;
+# `svgz` keeps gzip-compressed SVG data loading on in every build.
+usvg = { version = "0.48.1", default-features = false, features = ["svgz"] }
 # The picture formats agg-gui itself decodes (Markdown images, pictures inside
 # SVGs, animated GIFs): the ones a web page shows. TIFF, OpenEXR, HDR, PNM,
 # TGA, DDS, farbfeld and QOI are the `image-extra-formats` feature; together
@@ -53,7 +55,7 @@ base64 = "0.22.1"
 foldhash = { version = "0.2", default-features = false }
 
 [features]
-default        = ["reflect"]
+default        = ["reflect", "svg-text"]
 # clipboard: the native system clipboard through arboard, plus the platform
 # APIs arboard wraps for `clipboard::has_image`'s cheap format check (arboard
 # itself can only answer by decoding the picture).
@@ -72,6 +74,19 @@ reflect        = ["dep:bevy_reflect"]
 # image-extra-formats: every other format the `image` crate decodes by
 # default, for an app whose Markdown or SVG pictures use them.
 image-extra-formats = ["image/default"]
+# svg-text: lets usvg turn an SVG's `<text>` into paths, with the fonts the
+# parse options hold. `SvgParseOptions::new()` holds none; the default options
+# the convenience helpers (`render_svg` and friends) use load the system's
+# fonts, and a browser has none, so a wasm app draws SVG text only once it
+# passes fonts in through
+# `set_default_svg_parse_options(SvgParseOptions::new().with_fontdb(..))`.
+# It pulls a second font stack beside the one agg-gui draws its own text with:
+# fontdb, harfrust, skrifa and read-fonts, plus usvg's text layout (about
+# 1.1 MB of a wasm's code). Without it an SVG's text is never drawn while
+# everything else in the SVG still is, and `SvgParseOptions::with_fontdb` and
+# `svg_fontdb_from_font_data` do not exist. Default-on so SVGs with text keep
+# drawing it; an app whose SVGs hold no text can turn it off.
+svg-text       = ["usvg/text", "usvg/system-fonts", "usvg/memmap-fonts"]
 
 # HTTP(S) fetch for remote markdown images (`http_fetch.rs`).  Native: ureq's
 # blocking client over rustls with the RustCrypto provider and the Mozilla

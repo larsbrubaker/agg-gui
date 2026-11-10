@@ -57,6 +57,7 @@ fn load_sub_svg(data: &[u8], opts: &usvg::Options) -> Option<usvg::ImageKind> {
             resolve_data: Box::new(|_, _, _| None),
             resolve_string: Box::new(|_, _| None),
         },
+        #[cfg(feature = "svg-text")]
         fontdb: Arc::clone(&opts.fontdb),
         ..usvg::Options::default()
     };

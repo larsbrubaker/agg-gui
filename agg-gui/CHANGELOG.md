@@ -233,6 +233,18 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Changed
 
+- **Breaking for apps that build agg-gui with `default-features = false` and draw SVG text:** SVG
+  `<text>` is drawn only with the new `svg-text` feature, which is a default feature. Such an app
+  (agg-gui-wgpu, agg-gui-shell and the other workspace crates that turn the defaults off leave it
+  off) now gets an SVG's text skipped while the rest of the SVG draws, and
+  `SvgParseOptions::with_fontdb` and `svg_fontdb_from_font_data` no longer exist for it. To keep
+  SVG text, add `features = ["svg-text"]` to its agg-gui dependency. Apps on the default features
+  see no change. Without the feature, `SvgParseOptions::with_font_family` stays and has no effect,
+  and usvg is built with only its `svgz` feature, which leaves out usvg's text layout and its font
+  stack, fontdb, harfrust, skrifa and read-fonts (about 1.1 MB of a wasm's code); usvg's `writer`
+  came with text, so a crate writing SVG through usvg enables it on its own usvg dependency
+  (0.5.12).
+
 - The mouse wheel outside a modal that answers `Widget::modal_hover_passes_outside` reaches the
   widget under the pointer, as its hover does, so a list beside a light-dismiss panel scrolls and a
   view beside it zooms. The wheel used to go to the modal, which ignored it outside itself, so it

@@ -181,6 +181,8 @@ fn shape_rendering_without_anti_aliasing_draws_whole_pixels() {
     }
 }
 
+/// Text draws only with the `svg-text` feature.
+#[cfg(feature = "svg-text")]
 #[test]
 fn shape_rendering_does_not_affect_text() {
     let image = render(

@@ -4,10 +4,23 @@
 //! applications.  It parses SVG with `usvg`, then emits drawing commands only
 //! through [`crate::draw_ctx::DrawCtx`] so RGBA software, LCD coverage, and
 //! hardware targets all share one render path.
+//!
+//! An SVG's `<text>` is drawn only with the crate's `svg-text` feature (on by
+//! default), which lets usvg turn text into paths with the fonts the parse
+//! options hold. `SvgParseOptions::new()` holds none; the default options the
+//! convenience helpers use load the system's, and a browser has none, so a
+//! wasm host passes its own through [`set_default_svg_parse_options`].
+//! `SvgParseOptions::with_fontdb`, `svg_fontdb_from_font_data` and the
+//! generic-family setup in `font_defaults.rs` exist only with the feature.
+//! Without it usvg drops text while parsing and everything else in the SVG
+//! draws as usual; [`SvgParseOptions::with_font_family`] stays, with nothing
+//! to affect.
 
 use std::fmt;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, OnceLock, RwLock};
+#[cfg(feature = "svg-text")]
+use std::sync::Arc;
+use std::sync::{OnceLock, RwLock};
 
 use agg_rust::math_stroke::{LineCap, LineJoin};
 use agg_rust::trans_affine::TransAffine;
@@ -111,11 +124,12 @@ impl From<image::ImageError> for SvgRenderError {
 ///
 /// `agg-gui` keeps SVG rendering in the core library, but font selection is
 /// intentionally application-owned. Callers that need SVG text should provide a
-/// `fontdb` built from their own assets.
+/// `fontdb` built from their own assets (the `svg-text` feature).
 #[derive(Clone, Default)]
 pub struct SvgParseOptions {
     resources_dir: Option<PathBuf>,
     font_family: Option<String>,
+    #[cfg(feature = "svg-text")]
     fontdb: Option<Arc<usvg::fontdb::Database>>,
 }
 
@@ -130,13 +144,15 @@ impl SvgParseOptions {
         self
     }
 
-    /// Set the preferred SVG text family for documents that omit one.
+    /// Set the preferred SVG text family for documents that omit one. Without
+    /// the `svg-text` feature no text is drawn, so this changes nothing.
     pub fn with_font_family(mut self, family: impl Into<String>) -> Self {
         self.font_family = Some(family.into());
         self
     }
 
     /// Provide a prepared font database for SVG text parsing.
+    #[cfg(feature = "svg-text")]
     pub fn with_fontdb(mut self, fontdb: Arc<usvg::fontdb::Database>) -> Self {
         self.fontdb = Some(fontdb);
         self
@@ -149,11 +165,19 @@ fn default_svg_parse_options_cell() -> &'static RwLock<SvgParseOptions> {
     DEFAULT_SVG_PARSE_OPTIONS.get_or_init(|| RwLock::new(system_svg_parse_options()))
 }
 
+/// The default options: the system's fonts for SVG text.
+#[cfg(feature = "svg-text")]
 fn system_svg_parse_options() -> SvgParseOptions {
     let mut fontdb = usvg::fontdb::Database::new();
     fontdb.load_system_fonts();
     font_defaults::configure_generic_font_families(&mut fontdb, None);
     SvgParseOptions::new().with_fontdb(Arc::new(fontdb))
+}
+
+/// The default options: no fonts, as nothing draws SVG text.
+#[cfg(not(feature = "svg-text"))]
+fn system_svg_parse_options() -> SvgParseOptions {
+    SvgParseOptions::new()
 }
 
 /// Replace the default SVG parse options used by convenience render helpers.
@@ -167,6 +191,7 @@ pub fn set_default_svg_parse_options(options: SvgParseOptions) {
 }
 
 /// Build a `usvg` font database from caller-owned font bytes.
+#[cfg(feature = "svg-text")]
 pub fn svg_fontdb_from_font_data<I>(
     fonts: I,
     generic_family: Option<&str>,
@@ -203,6 +228,7 @@ pub fn parse_svg(data: &[u8], svg_options: &SvgParseOptions) -> Result<usvg::Tre
     if let Some(font_family) = &svg_options.font_family {
         options.font_family = font_family.clone();
     }
+    #[cfg(feature = "svg-text")]
     if let Some(fontdb) = &svg_options.fontdb {
         options.fontdb = Arc::clone(fontdb);
     }
@@ -642,14 +668,17 @@ pub mod compare;
 mod gradient_tests;
 #[cfg(test)]
 mod image_tests;
+#[cfg(all(test, not(feature = "svg-text")))]
+mod no_text_tests;
 #[cfg(test)]
 mod opacity_tests;
 #[cfg(test)]
 mod static_data_svg_icon_tests;
-#[cfg(test)]
+#[cfg(all(test, feature = "svg-text"))]
 mod text_tests;
 
 mod clip;
+#[cfg(feature = "svg-text")]
 mod font_defaults;
 mod image_resample;
 mod mask;

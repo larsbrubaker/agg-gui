@@ -32,6 +32,7 @@ Optional features:
 | `winit-adapter` | `agg_gui::winit_adapter` — maps winit `MouseButton` / `Modifiers` / `Key` / `CursorIcon` to the crate's input types |
 | `clipboard` | `arboard`-backed system clipboard, once the app calls `clipboard::use_system_clipboard()` (`agg_gui_shell::run` does); until then copy and paste use an in-process clipboard, so test binaries never touch the user's clipboard |
 | `image-extra-formats` | Markdown and SVG pictures in TIFF, OpenEXR, HDR, PNM, TGA, DDS, farbfeld and QOI (PNG, JPEG, GIF, WebP, BMP and ICO always decode) |
+| `svg-text` (default) | `<text>` in SVGs drawn with the fonts the parse options hold, through fontdb, harfrust and skrifa (about 1.1 MB of a wasm). `SvgParseOptions::new()` holds no fonts; the default options of `render_svg` and friends load the system's, and a browser has none, so a wasm app passes fonts in with `set_default_svg_parse_options(SvgParseOptions::new().with_fontdb(..))`. Without the feature an SVG's text is skipped and the rest still draws |
 
 ```toml
 [dependencies]
