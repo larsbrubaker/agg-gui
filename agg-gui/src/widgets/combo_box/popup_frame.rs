@@ -220,6 +220,7 @@ impl ComboBox {
             }),
             state_style: self.state_style,
             lazy_fonts: self.lazy_fonts_for_paint(),
+            font: Arc::clone(&self.font),
             font_size: self.font_size,
             label_w: (self.bounds.width - PAD_X * 2.0 - ARROW_W).max(0.0),
             disabled_items: self.disabled_items.clone(),

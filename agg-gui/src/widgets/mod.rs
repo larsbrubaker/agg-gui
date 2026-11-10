@@ -104,7 +104,9 @@ pub use color_picker::ColorPicker;
 pub use color_wheel_picker::{
     color_wheel_picker_dialog, color_wheel_picker_dialog_with_on_close, ColorWheelPicker,
 };
-pub use combo_box::{ComboBox, ComboBoxDisabledStyle, ComboBoxStateStyle, ComboBoxStyle};
+pub use combo_box::{
+    ComboBox, ComboBoxDisabledStyle, ComboBoxFontRefresh, ComboBoxStateStyle, ComboBoxStyle,
+};
 pub use conditional::Conditional;
 pub use container::Container;
 pub use drag_value::DragValue;

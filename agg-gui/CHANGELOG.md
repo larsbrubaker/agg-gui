@@ -10,6 +10,14 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- `ComboBox::refresh_item_fonts()` and `ComboBox::item_font_refresh_handle() -> ComboBoxFontRefresh`
+  (`ComboBoxFontRefresh::refresh()`): say that the fonts a `with_item_font_fn` resolver answers may
+  have changed (a face finished downloading). Each row is asked once more the next time it paints
+  in the open list and redraws in the new answer, back to the combo's own font when the answer is
+  now `None`; rows never painted are still never asked, and a draw is requested so an open list
+  updates without input. The handle is a cheap `Rc` clone a host keeps after handing the combo to
+  a widget tree. Without a refresh a row is still asked once (0.5.11).
+
 - `widget::previewed_child() -> Option<usize>`: during a widget's `preview_event`, the index of
   its child that the routed event is dispatched into next, from the path `App` chose (an active
   modal, a global overlay under the pointer, else the ordinary hit). A root hosting layers over

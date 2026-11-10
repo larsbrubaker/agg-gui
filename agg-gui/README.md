@@ -46,7 +46,7 @@ agg-gui = { version = "0.5", features = ["winit-adapter", "clipboard"] }
 | `Button` | Themeable background, focus ring, disabled state, click callback |
 | `CollapsingHeader` | Expand/collapse section with animated disclosure |
 | `Checkbox` | Animated check mark, shared state cell for two-way binding |
-| `ComboBox` | Popup-backed single-selection control; per-instance closed-box fill/border/hover/radius/height via `with_style(ComboBoxStyle)` |
+| `ComboBox` | Popup-backed single-selection control; per-instance closed-box fill/border/hover/radius/height via `with_style(ComboBoxStyle)`; rows in a face of their own, resolved as each first paints (`with_item_font_fn`) and asked again after `refresh_item_fonts` / `ComboBoxFontRefresh` |
 | `ColorPicker` | Interactive color selection widget |
 | `Slider` | Linear value control with focus ring and keyboard nudge; per-instance track/thumb color and track radius via `with_style(SliderStyle)` |
 | `DragValue` | Click-drag to increment/decrement numeric values |

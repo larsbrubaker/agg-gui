@@ -73,6 +73,8 @@ pub(super) struct ComboPopupRequest {
     pub(super) state_style: ComboBoxStateStyle,
     /// Lazy per-row fonts, resolved here as each row first paints.
     pub(super) lazy_fonts: Option<Rc<lazy_fonts::LazyItemFonts>>,
+    /// The combo's own font, for a lazy row whose answer is now `None`.
+    pub(super) font: Arc<Font>,
     /// Item text size and label width, for a row that swaps to its font.
     pub(super) font_size: f64,
     pub(super) label_w: f64,
@@ -143,6 +145,9 @@ pub struct ComboBox {
     /// Per-item fonts asked for on first paint — see
     /// [`ComboBox::with_item_font_fn`] (`combo_box/lazy_fonts.rs`).
     lazy_item_fonts: Option<Rc<lazy_fonts::LazyItemFonts>>,
+    /// Shared with every [`ComboBoxFontRefresh`] handed out: a refresh asks
+    /// the lazy rows again (`combo_box/lazy_fonts.rs`).
+    item_font_refresh: ComboBoxFontRefresh,
     /// Optional per-item hover help, set via [`with_item_tooltips`].
     /// `tooltips[i]` is shown beside option `i` while it is hovered in the
     /// open dropdown — the agg-gui equivalent of egui's per-item
@@ -235,6 +240,7 @@ impl ComboBox {
             item_labels,
             item_fonts: None,
             lazy_item_fonts: None,
+            item_font_refresh: ComboBoxFontRefresh::default(),
             item_tooltips: None,
             popup_opens_up: false,
             popup_visible_count: DEFAULT_VISIBLE_ITEMS,
@@ -444,6 +450,7 @@ mod press;
 mod selection;
 mod style;
 pub use enabled::ComboBoxDisabledStyle;
+pub use lazy_fonts::ComboBoxFontRefresh;
 pub use style::{ComboBoxStateStyle, ComboBoxStyle};
 
 impl Widget for ComboBox {

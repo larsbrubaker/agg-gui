@@ -54,7 +54,7 @@ impl Label {
     ///
     /// Bold: the system bold companion when set (unless the label ignores
     /// the system font), else the regular choice thickened.
-    pub(super) fn active_font(&self) -> Arc<Font> {
+    pub(crate) fn active_font(&self) -> Arc<Font> {
         if self.bold && !self.ignore_system_font {
             if let Some(bold) = crate::font_settings::current_system_bold_font() {
                 return bold;

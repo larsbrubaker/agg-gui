@@ -34,7 +34,7 @@ use crate::widgets::menu::current_menu_style;
 use crate::widgets::scrollbar::paint_prepared_scrollbar;
 
 use super::item_enabled::request_row_disabled;
-use super::lazy_fonts::swap_row_font;
+use super::lazy_fonts::apply_row_font;
 
 /// Corner radius of a highlighted row, inset 2 px inside the panel so the
 /// panel's rounded corners never cut it: the radius a popup-menu row's
@@ -140,14 +140,17 @@ fn paint_combo_popup(ctx: &mut dyn DrawCtx, request: ComboPopupRequest) {
         }
 
         let label = &mut labels[idx];
-        // The first paint of a row is what asks for its own font, so rows
-        // never scrolled into view never cost one (`combo_box/lazy_fonts.rs`).
-        if let Some(font) = request
-            .lazy_fonts
-            .as_ref()
-            .and_then(|l| l.resolve_first(idx))
-        {
-            swap_row_font(label, font, request.font_size, request.label_w);
+        // The first paint of a row (and its first after a refresh) is what
+        // asks for its own font, so rows never scrolled into view never cost
+        // one (`combo_box/lazy_fonts.rs`).
+        if let Some(change) = request.lazy_fonts.as_ref().and_then(|l| l.resolve(idx)) {
+            apply_row_font(
+                label,
+                change,
+                &request.font,
+                request.font_size,
+                request.label_w,
+            );
         }
         let item_text = st.item_text.unwrap_or(v.text_color);
         label.set_color(if disabled {

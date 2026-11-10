@@ -1,6 +1,8 @@
 //! `ComboBox::with_item_font_fn`: a row's font is asked for the first time
 //! that row paints in the open list — never while the combo is built or
-//! closed, never for rows scrolled out of view, and once per row.
+//! closed, never for rows scrolled out of view, and once per row until the
+//! host refreshes them (`ComboBox::refresh_item_fonts`, `ComboBoxFontRefresh`),
+//! when each painted row is asked once more and redrawn in the new answer.
 
 use super::*;
 use crate::text::Font;
@@ -124,6 +126,137 @@ fn test_combo_lazy_item_font_none_keeps_the_combo_font_and_is_asked_once() {
     assert_eq!(*asked.borrow(), 1);
     assert!(root_combo(&app).item_font_requested(0));
     assert!(root_combo(&app).item_font(0).is_none());
+}
+
+/// The face row `idx`'s label really draws with.
+fn label_font(app: &App, idx: usize) -> Arc<Font> {
+    root_combo(app)
+        .item_label_font(idx)
+        .expect("the row has a label")
+}
+
+/// A lazy combo whose resolver answers whatever `answer` holds right now
+/// (as a host whose faces arrive over the network does) and logs each row
+/// it is asked about.
+type Answer = Rc<RefCell<Option<Arc<Font>>>>;
+fn changing_combo(combo_font: Arc<Font>) -> (ComboBox, Answer, Rc<RefCell<Vec<usize>>>) {
+    let answer: Answer = Rc::new(RefCell::new(None));
+    let asked = Rc::new(RefCell::new(Vec::new()));
+    let (now, log) = (Rc::clone(&answer), Rc::clone(&asked));
+    let combo = ComboBox::new(options(), 0, combo_font).with_item_font_fn(move |i| {
+        log.borrow_mut().push(i);
+        now.borrow().clone()
+    });
+    (combo, answer, asked)
+}
+
+#[test]
+fn test_combo_lazy_item_fonts_refresh_asks_painted_rows_again() {
+    crate::set_scroll_style(crate::widgets::ScrollBarStyle::default());
+    let (combo_font, font_a, font_b) = (font(), font(), font());
+    let (combo, answer, asked) = changing_combo(Arc::clone(&combo_font));
+    let refresh = combo.item_font_refresh_handle();
+    let mut app = App::new(Box::new(combo));
+    let viewport = Size::new(180.0, 120.0);
+    app.layout(viewport);
+
+    // The face is not here yet: the first paint answers `None`.
+    click(&mut app, 12.0, viewport.height - 12.0);
+    paint(&mut app, viewport);
+    let visible: usize = property(&app, "popup_visible_count").parse().unwrap();
+    assert!(visible < ROWS, "the list must be taller than its popup");
+    let first_pass: Vec<usize> = (0..visible).collect();
+    assert_eq!(*asked.borrow(), first_pass);
+    assert!(Arc::ptr_eq(&label_font(&app, 0), &combo_font));
+
+    // The face arrives, but nobody says so: each row keeps its first answer.
+    *answer.borrow_mut() = Some(Arc::clone(&font_a));
+    paint(&mut app, viewport);
+    assert_eq!(
+        *asked.borrow(),
+        first_pass,
+        "rows are asked once without a refresh"
+    );
+    assert!(Arc::ptr_eq(&label_font(&app, 0), &combo_font));
+    assert!(root_combo(&app).item_font(0).is_none());
+
+    // The host says the fonts changed: the open list asks for a frame, and
+    // that frame asks each painted row exactly once more.
+    crate::animation::reset_draw_signals();
+    refresh.refresh();
+    assert!(
+        crate::animation::wants_draw(),
+        "a refresh redraws an open list without input"
+    );
+    assert!(!root_combo(&app).item_font_requested(0));
+    paint(&mut app, viewport);
+    let mut expected = first_pass.clone();
+    expected.extend(0..visible);
+    assert_eq!(*asked.borrow(), expected);
+    assert!(Arc::ptr_eq(&label_font(&app, 0), &font_a));
+    assert!(Arc::ptr_eq(
+        &root_combo(&app).item_font(0).unwrap(),
+        &font_a
+    ));
+    assert!(Arc::ptr_eq(&label_font(&app, visible - 1), &font_a));
+    assert!(
+        !root_combo(&app).item_font_requested(visible),
+        "a row never painted is still not asked"
+    );
+    paint(&mut app, viewport);
+    assert_eq!(*asked.borrow(), expected, "one refresh asks each row once");
+
+    // A second, different answer replaces the first.
+    *answer.borrow_mut() = Some(Arc::clone(&font_b));
+    refresh.refresh();
+    paint(&mut app, viewport);
+    expected.extend(0..visible);
+    assert_eq!(*asked.borrow(), expected);
+    assert!(Arc::ptr_eq(&label_font(&app, 0), &font_b));
+    assert!(Arc::ptr_eq(
+        &root_combo(&app).item_font(0).unwrap(),
+        &font_b
+    ));
+
+    // An answer of `None` puts the row back in the combo's own font.
+    *answer.borrow_mut() = None;
+    refresh.refresh();
+    paint(&mut app, viewport);
+    expected.extend(0..visible);
+    assert_eq!(*asked.borrow(), expected);
+    assert!(Arc::ptr_eq(&label_font(&app, 0), &combo_font));
+    assert!(root_combo(&app).item_font(0).is_none());
+    assert!(!root_combo(&app).item_font_requested(visible));
+}
+
+#[test]
+fn test_combo_refresh_item_fonts_on_the_widget_reaches_a_closed_list() {
+    let (combo_font, font_a) = (font(), font());
+    let (combo, answer, asked) = changing_combo(combo_font);
+    let mut app = App::new(Box::new(combo));
+    let viewport = Size::new(180.0, 120.0);
+    app.layout(viewport);
+    click(&mut app, 12.0, viewport.height - 12.0);
+    paint(&mut app, viewport);
+    let visible = asked.borrow().len();
+    assert!(visible > 0);
+
+    // Close the list, refresh through the widget in the tree, reopen.
+    click(&mut app, 12.0, viewport.height - 12.0);
+    assert_eq!(property(&app, "open"), "false");
+    *answer.borrow_mut() = Some(Arc::clone(&font_a));
+    app.root_mut()
+        .as_any_mut()
+        .and_then(|a| a.downcast_mut::<ComboBox>())
+        .expect("the root is the combo")
+        .refresh_item_fonts();
+    paint(&mut app, viewport);
+    assert_eq!(asked.borrow().len(), visible, "a closed list asks nothing");
+    click(&mut app, 12.0, viewport.height - 12.0);
+    assert_eq!(property(&app, "open"), "true");
+    paint(&mut app, viewport);
+    assert_eq!(asked.borrow().len(), visible * 2);
+    assert!(Arc::ptr_eq(&label_font(&app, 0), &font_a));
 }
 
 #[test]
