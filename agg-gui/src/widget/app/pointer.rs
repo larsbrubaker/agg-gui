@@ -1,6 +1,7 @@
 //! Pointer-input methods on [`App`] — mouse move/down/up plus the
 //! modal-subtree hit extension they share, with the hover (and wheel) a
-//! modal lets pass outside its bounds. The press and release entry points keep
+//! modal lets pass outside its bounds; a move inside a modal clears the
+//! hover of the widget it left as the ordinary route does. The press and release entry points keep
 //! [`crate::event::mouse_button_held`] current before dispatching. Split out of `app.rs`
 //! (800-line guardrail); keyboard routing is in `keyboard.rs`, wheel
 //! routing stays in `app.rs`.
@@ -91,6 +92,20 @@ impl App {
         Some(self.extend_modal_path(&modal_path, pos))
     }
 
+    /// Announce the hovered chain for a pointer at `path` inside the active
+    /// modal, sending the widget the pointer left the `(-1, -1)` hover-clear
+    /// move the ordinary route sends (`App::dispatch_pointer_move`): the move
+    /// itself goes only to `path`, so a widget that clears its hover on a
+    /// move outside itself (a `Button`) would otherwise keep it. A widget
+    /// holding the capture keeps getting real positions instead.
+    fn update_modal_hover(&mut self, path: &[usize]) {
+        let to_clear = self
+            .hovered
+            .clone()
+            .filter(|old| old.as_slice() != path && self.captured.as_ref() != Some(old));
+        self.update_hover_chain_clearing(Some(path), None, to_clear);
+    }
+
     /// Mouse cursor moved with an explicit modifier state. Equivalent to
     /// [`App::on_modifiers_changed`] followed by [`App::on_mouse_move`], for
     /// shells whose pointer events carry modifiers (browser `MouseEvent`).
@@ -114,7 +129,7 @@ impl App {
         let pos = super::keyboard_scroll::lift_to_world(screen);
         set_current_mouse_world(pos);
         if let Some(path) = self.modal_hover_path(pos) {
-            self.update_hover_chain(Some(&path), None);
+            self.update_modal_hover(&path);
             let event = Event::MouseMove { pos };
             // A widget holding the capture (a slider thumb, a resize edge)
             // gets every move until the release, wherever the pointer is,
@@ -363,7 +378,7 @@ impl App {
     fn refresh_hover_after_release(&mut self, pos: Point) {
         crate::cursor::reset_cursor_icon();
         if let Some(path) = self.modal_hover_path(pos) {
-            self.update_hover_chain(Some(&path), None);
+            self.update_modal_hover(&path);
             dispatch_event(&mut self.root, &path, &Event::MouseMove { pos }, pos);
             self.store_hovered(Some(path));
             return;

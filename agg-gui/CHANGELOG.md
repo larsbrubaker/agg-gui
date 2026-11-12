@@ -166,6 +166,17 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Fixed
 
+- A widget inside a showing modal (a `ModalSheet`'s dialog) lets go of its hover when the pointer
+  moves off it: a move inside the modal sends the widget the pointer left the same `(-1, -1)`
+  hover-clear move the ordinary route sends, also when a release re-resolves hover. A `Button` in
+  a dialog used to light up the first time the pointer reached it and stay lit. A `Button` also
+  clears its hover and press on `MouseLeave` (0.5.13).
+
+- A `Button`'s focus ring shows only for focus the keyboard gave (Tab), and draws over the
+  button's fill, so an opaque fill no longer hides it. A press that gives or finds focus hides the
+  ring until focus is next gained, so pressing a button and sliding off it before letting go no
+  longer leaves it ringed; Space and Enter still activate the focused button (0.5.13).
+
 - A `FlexRow` laid out with an unbounded height (a column in a scroll view reading its natural
   height, `available.height > 1e9`) anchors its `VAnchor::CENTER` and `VAnchor::TOP` children
   within the height it reports, the tallest child, instead of the offered height, where they

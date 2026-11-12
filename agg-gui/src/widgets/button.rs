@@ -118,6 +118,9 @@ pub struct Button {
     hovered: bool,
     pressed: bool,
     focused: bool,
+    /// Whether the focus ring shows while `focused`: set when focus is
+    /// gained, cleared by a press, so only focus the keyboard gave is ringed.
+    focus_visible: bool,
 }
 
 /// Colour of a glyph icon for the current visuals; `None` keeps the default.
@@ -158,6 +161,7 @@ impl Button {
             hovered: false,
             pressed: false,
             focused: false,
+            focus_visible: false,
         }
     }
 
@@ -528,33 +532,6 @@ impl Widget for Button {
         // the accent surface — that's the existing primary-button look.
         let muted = self.subtle && !active;
 
-        // Focus ring — drawn JUST INSIDE the button bounds so the parent's
-        // `clip_children_rect` (defaults to widget bounds) doesn't chop
-        // the leftmost stroke pixel when the button sits flush against
-        // a container edge.  Painting outside-bounds with negative
-        // coordinates was the long-standing cause of "the left edge of
-        // my button looks clipped" reports.
-        if enabled && self.focused {
-            let ring = self.theme.focus_ring_width;
-            let focus_ring = if use_visuals {
-                v.accent_focus
-            } else {
-                self.theme.focus_ring_color
-            };
-            ctx.set_stroke_color(focus_ring);
-            ctx.set_line_width(ring);
-            ctx.begin_path();
-            let inset = ring * 0.5;
-            ctx.rounded_rect(
-                inset,
-                inset,
-                (w - ring).max(0.0),
-                (h - ring).max(0.0),
-                (r - inset).max(0.0),
-            );
-            ctx.stroke();
-        }
-
         // Background — color depends on interaction state. Disabled buttons
         // use neutral widget colors instead of a washed-out accent, so they
         // don't look like secondary active actions.
@@ -592,6 +569,35 @@ impl Widget for Button {
         ctx.begin_path();
         ctx.rounded_rect(0.0, 0.0, w, h, r);
         ctx.fill();
+
+        // Focus ring — over the fill, so an opaque fill never hides it, and
+        // only for focus the keyboard gave (`focus_visible`). Drawn JUST
+        // INSIDE the button bounds so the parent's
+        // `clip_children_rect` (defaults to widget bounds) doesn't chop
+        // the leftmost stroke pixel when the button sits flush against
+        // a container edge.  Painting outside-bounds with negative
+        // coordinates was the long-standing cause of "the left edge of
+        // my button looks clipped" reports.
+        if enabled && self.focused && self.focus_visible {
+            let ring = self.theme.focus_ring_width;
+            let focus_ring = if use_visuals {
+                v.accent_focus
+            } else {
+                self.theme.focus_ring_color
+            };
+            ctx.set_stroke_color(focus_ring);
+            ctx.set_line_width(ring);
+            ctx.begin_path();
+            let inset = ring * 0.5;
+            ctx.rounded_rect(
+                inset,
+                inset,
+                (w - ring).max(0.0),
+                (h - ring).max(0.0),
+                (r - inset).max(0.0),
+            );
+            ctx.stroke();
+        }
 
         // Optional outline — opt-in via `with_outlined()` for inactive
         // segmented buttons that want a defined edge against a same-colour

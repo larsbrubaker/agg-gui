@@ -5,6 +5,10 @@
 //! file has direct access to `Button`'s private fields and helper
 //! methods — the trait impl in `button.rs` keeps only the
 //! `fn on_event` shell delegating to [`Button::handle_event`].
+//!
+//! The button is hovered between the move that reaches it and the move or
+//! `MouseLeave` that says the pointer left; its focus ring shows for focus
+//! the keyboard gave, never for focus a press gave or found.
 
 use crate::event::{Event, EventResult, MouseButton};
 use crate::widget::Widget;
@@ -35,14 +39,29 @@ impl Button {
                 }
                 EventResult::Ignored
             }
+            // The pointer is no longer over the button or anything in it.
+            // Not `MouseOut`: that also arrives when the pointer moves onto
+            // the button's own label, and the button is still under it then.
+            Event::MouseLeave => {
+                if self.hovered || self.pressed {
+                    self.hovered = false;
+                    self.pressed = false;
+                    crate::animation::request_draw();
+                }
+                EventResult::Ignored
+            }
             Event::MouseDown {
                 button: MouseButton::Left,
                 ..
             } => {
-                if !self.pressed {
+                if !self.pressed || self.focus_visible {
                     crate::animation::request_draw();
                 }
                 self.pressed = true;
+                // Focus a press gave (the `App` focuses the button just
+                // before this press reaches it) or found draws no ring: the
+                // ring shows where the keyboard is, for keyboard navigation.
+                self.focus_visible = false;
                 // Note: we deliberately do NOT set `hovered` here. Touch has
                 // no hover phase, and nothing clears `hovered` on a
                 // touchscreen (no MouseMove/MouseLeave after a tap), so
@@ -95,6 +114,9 @@ impl Button {
             Event::FocusGained => {
                 let was = self.focused;
                 self.focused = true;
+                // Shown until a press reaches the button (`MouseDown` above),
+                // which a press that gave this focus does at once.
+                self.focus_visible = true;
                 if !was {
                     crate::animation::request_draw();
                     EventResult::Consumed
