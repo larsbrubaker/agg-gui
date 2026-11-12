@@ -60,6 +60,9 @@ pub struct App {
     /// sent `FocusGained`; `None` when nothing is focused or the focused
     /// widget has no `WidgetBase`. See [`focus_change`].
     focus_stamp: Option<crate::focus::FocusStamp>,
+    /// How the focus came: by keyboard (shown) or by a press (not). See
+    /// [`focus_change`].
+    focus_visible: bool,
     /// Whether last frame's aggregate was `Some` — lets the gesture router
     /// detect the `None`→`Some` start edge (when it hit-tests) versus an
     /// ongoing gesture (when it delivers to the captured path only).
@@ -123,6 +126,7 @@ impl App {
             gesture_captured: None,
             anchors: path_anchor::TrackedAnchors::default(),
             focus_stamp: None,
+            focus_visible: true,
             gesture_in_progress: false,
             file_drag_active: false,
             viewport_height: 1.0,
@@ -686,16 +690,11 @@ impl App {
     /// pointer-leave sentinel, which a captured widget never receives.
     fn dispatch_pointer_move(&mut self, pos: Point, to_capture: bool) {
         let new_hit = self.compute_hit(pos);
-        // If the hovered widget changed, clear the old one — but skip the clear
-        // event when the old widget still has mouse capture (it should keep
-        // receiving real positions, not a (-1,-1) sentinel that snaps state).
-        // The clear goes with the old leaf's own leave, before any enter
-        // (`hover_chain.rs`).
+        // If the hovered widget changed, clear the old one, unless a drag's
+        // capture is on its branch (`hover_clear_target`). The clear goes
+        // with the old leaf's own leave, before any enter (`hover_chain.rs`).
         let hover_changed = new_hit != self.hovered;
-        let to_clear = self
-            .hovered
-            .clone()
-            .filter(|old| hover_changed && self.captured.as_ref() != Some(old));
+        let to_clear = self.hover_clear_target(new_hit.as_deref());
         self.update_hover_chain_clearing(new_hit.as_deref(), Some(pos), to_clear);
         if hover_changed {
             self.store_hovered(new_hit.clone());
@@ -740,6 +739,7 @@ impl App {
 
     /// Move focus to the next (or previous) focusable widget in paint order.
     fn advance_focus(&mut self, forward: bool) {
+        self.set_focus_visible(true);
         let mut all: Vec<Vec<usize>> = Vec::new();
         collect_focusable(self.root.as_ref(), &mut vec![], &mut all);
         if all.is_empty() {

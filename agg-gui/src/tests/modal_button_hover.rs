@@ -294,3 +294,57 @@ fn a_button_lets_go_of_its_hover_and_press_when_the_pointer_leaves_it() {
     b.on_event(&Event::MouseLeave);
     assert_eq!(paint_button(&mut b), REST, "MouseLeave clears the press");
 }
+
+/// A fresh button where the focused one stands, as an app rebuilding that
+/// part of the tree (a page change, a list refresh) puts one.
+fn rebuild_focused_button(app: &mut App, name: &str) {
+    let path = app
+        .focused_path()
+        .map(|p| p.to_vec())
+        .expect("a button has focus");
+    let (last, parent) = path.split_last().expect("the button is below the root");
+    let mut widget: &mut dyn Widget = app.root_mut();
+    for &i in parent {
+        widget = widget.children_mut()[i].as_mut();
+    }
+    widget.children_mut()[*last] = Box::new(button(name));
+    app.layout(VIEW);
+}
+
+#[test]
+fn a_button_rebuilt_after_a_click_gets_no_ring() {
+    let mut app = dialog();
+    let (x, y) = press_point(&app, BUTTONS[0]);
+    move_to(&mut app, (x, y));
+    app.on_mouse_down(x, y, MouseButton::Left, Modifiers::default());
+    app.on_mouse_up(x, y, MouseButton::Left, Modifiers::default());
+    let fb = paint(&mut app);
+    assert_ne!(edge(&app, &fb, BUTTONS[0]), RING, "no ring after the click");
+    rebuild_focused_button(&mut app, BUTTONS[0]);
+    move_to(&mut app, (x, y));
+    let fb = paint(&mut app);
+    assert_eq!(app.focused_widget_type_name(), Some("Button"));
+    assert_ne!(
+        edge(&app, &fb, BUTTONS[0]),
+        RING,
+        "the rebuilt button takes the focus, not a ring"
+    );
+}
+
+#[test]
+fn a_button_rebuilt_after_tab_keeps_the_ring() {
+    let mut app = dialog();
+    tab(&mut app);
+    let fb = paint(&mut app);
+    let ringed = BUTTONS
+        .into_iter()
+        .find(|id| edge(&app, &fb, id) == RING)
+        .expect("Tab rings a button");
+    rebuild_focused_button(&mut app, ringed);
+    let fb = paint(&mut app);
+    assert_eq!(
+        edge(&app, &fb, ringed),
+        RING,
+        "the rebuilt button is ringed"
+    );
+}

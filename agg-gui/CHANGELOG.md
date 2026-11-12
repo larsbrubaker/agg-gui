@@ -173,9 +173,17 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   clears its hover and press on `MouseLeave` (0.5.13).
 
 - A `Button`'s focus ring shows only for focus the keyboard gave (Tab), and draws over the
-  button's fill, so an opaque fill no longer hides it. A press that gives or finds focus hides the
-  ring until focus is next gained, so pressing a button and sliding off it before letting go no
-  longer leaves it ringed; Space and Enter still activate the focused button (0.5.13).
+  button's fill, so an opaque fill no longer hides it. The `App` records how focus came in the new
+  `WidgetBase::focus_visible`: a keyboard move shows it, a press hides it (also on a widget that
+  already had focus), and a requested focus or a replacement taking focus after a rebuild keeps
+  the last answer. Pressing a button and sliding off it before letting go, or a click that
+  rebuilds the clicked button, no longer leaves a ring; Space and Enter still activate the
+  focused button (0.5.13).
+
+- While a drag holds the pointer capture, the `(-1, -1)` hover-clear move no longer goes to a
+  widget on the capture's branch (inside the captured widget or an ancestor of it), with or
+  without a modal: the clear bubbles, so the drag's owner heard a move to `(-1, -1)` mid-drag
+  (0.5.13).
 
 - A `FlexRow` laid out with an unbounded height (a column in a scroll view reading its natural
   height, `available.height > 1e9`) anchors its `VAnchor::CENTER` and `VAnchor::TOP` children

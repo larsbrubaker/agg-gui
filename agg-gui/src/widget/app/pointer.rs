@@ -27,6 +27,7 @@ impl App {
     /// [keeps focus on press](Widget::keeps_focus_on_press) (a menu host)
     /// leaves it alone, and anything else — or no widget — clears it.
     fn focus_for_press(&mut self, hit: Option<&[usize]>) {
+        self.set_focus_visible(false);
         let widget = hit.and_then(|path| widget_at_path_ref(self.root.as_ref(), path));
         match (hit, widget) {
             (Some(path), Some(w)) if takes_click_focus(w) => self.set_focus(Some(path.to_vec())),
@@ -96,14 +97,28 @@ impl App {
     /// modal, sending the widget the pointer left the `(-1, -1)` hover-clear
     /// move the ordinary route sends (`App::dispatch_pointer_move`): the move
     /// itself goes only to `path`, so a widget that clears its hover on a
-    /// move outside itself (a `Button`) would otherwise keep it. A widget
-    /// holding the capture keeps getting real positions instead.
+    /// move outside itself (a `Button`) would otherwise keep it.
     fn update_modal_hover(&mut self, path: &[usize]) {
-        let to_clear = self
-            .hovered
-            .clone()
-            .filter(|old| old.as_slice() != path && self.captured.as_ref() != Some(old));
+        let to_clear = self.hover_clear_target(Some(path));
         self.update_hover_chain_clearing(Some(path), None, to_clear);
+    }
+
+    /// The widget a move to `new` sends the `(-1, -1)` hover-clear: the
+    /// previously hovered one, when the move left it. Never while a drag's
+    /// capture sits on the same branch as it (the captured widget, one of
+    /// its ancestors or one inside it): the clear bubbles and is previewed
+    /// along its path, so the drag's owner would take it for a move to
+    /// `(-1, -1)`, and it gets every real position anyway.
+    pub(super) fn hover_clear_target(&self, new: Option<&[usize]>) -> Option<Vec<usize>> {
+        let old = self.hovered.as_deref()?;
+        if Some(old) == new {
+            return None;
+        }
+        let on_capture_branch = self
+            .captured
+            .as_deref()
+            .is_some_and(|cap| old.starts_with(cap) || cap.starts_with(old));
+        (!on_capture_branch).then(|| old.to_vec())
     }
 
     /// Mouse cursor moved with an explicit modifier state. Equivalent to

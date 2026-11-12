@@ -23,6 +23,12 @@
 //! No `FocusLost` goes to the widget that was replaced: it is out of the
 //! tree.
 //!
+//! Whether focus is shown (`WidgetBase::focus_visible`, a `Button`'s ring)
+//! depends on how it came: a keyboard move (Tab) shows it, a press hides it,
+//! also on a widget that already had focus, and anything else (a requested
+//! focus, a replacement taking over after a rebuild) keeps the last answer,
+//! so a click that rebuilds the clicked button leaves the new one unringed.
+//!
 //! "Was told" is decided by a [`FocusStamp`] the `App` writes into the
 //! widget's `WidgetBase` with each `FocusGained`, because heap addresses get
 //! reused by rebuilt widgets. A focused widget without a `WidgetBase` falls
@@ -70,6 +76,7 @@ impl App {
         if let Some(new) = new_path.as_deref() {
             let base = widget_at_path(&mut self.root, new).and_then(|w| w.widget_base_mut());
             if let Some(base) = base {
+                base.focus_visible = self.focus_visible;
                 let stamp = FocusStamp::fresh();
                 self.focus_stamp = Some(stamp.duplicate());
                 base.focus_stamp = stamp;
@@ -81,6 +88,23 @@ impl App {
             self.viewport_size.width,
             self.root.as_mut(),
         );
+    }
+
+    /// Record how focus arrives from here on (see the module docs) and tell
+    /// the focused widget, which redraws if that changes what it shows.
+    pub(super) fn set_focus_visible(&mut self, visible: bool) {
+        if self.focus_visible == visible {
+            return;
+        }
+        self.focus_visible = visible;
+        let Some(path) = self.focus.clone() else {
+            return;
+        };
+        if let Some(base) = widget_at_path(&mut self.root, &path).and_then(|w| w.widget_base_mut())
+        {
+            base.focus_visible = visible;
+            crate::animation::request_draw();
+        }
     }
 
     /// Whether the widget at the focus path is the one last sent

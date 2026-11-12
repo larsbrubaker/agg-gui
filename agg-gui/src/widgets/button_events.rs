@@ -8,7 +8,7 @@
 //!
 //! The button is hovered between the move that reaches it and the move or
 //! `MouseLeave` that says the pointer left; its focus ring shows for focus
-//! the keyboard gave, never for focus a press gave or found.
+//! the keyboard gave, as the `App` records in `WidgetBase::focus_visible`.
 
 use crate::event::{Event, EventResult, MouseButton};
 use crate::widget::Widget;
@@ -54,14 +54,10 @@ impl Button {
                 button: MouseButton::Left,
                 ..
             } => {
-                if !self.pressed || self.focus_visible {
+                if !self.pressed {
                     crate::animation::request_draw();
                 }
                 self.pressed = true;
-                // Focus a press gave (the `App` focuses the button just
-                // before this press reaches it) or found draws no ring: the
-                // ring shows where the keyboard is, for keyboard navigation.
-                self.focus_visible = false;
                 // Note: we deliberately do NOT set `hovered` here. Touch has
                 // no hover phase, and nothing clears `hovered` on a
                 // touchscreen (no MouseMove/MouseLeave after a tap), so
@@ -114,9 +110,6 @@ impl Button {
             Event::FocusGained => {
                 let was = self.focused;
                 self.focused = true;
-                // Shown until a press reaches the button (`MouseDown` above),
-                // which a press that gave this focus does at once.
-                self.focus_visible = true;
                 if !was {
                     crate::animation::request_draw();
                     EventResult::Consumed

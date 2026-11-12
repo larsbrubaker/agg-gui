@@ -450,6 +450,13 @@ pub struct WidgetBase {
     /// Written only by the `App`.
     #[cfg_attr(feature = "reflect", reflect(ignore))]
     pub focus_stamp: crate::focus::FocusStamp,
+    /// Whether this widget, while focused, shows that it has the keyboard (a
+    /// focus ring): `true` for focus the keyboard moved here (Tab), `false`
+    /// once a press gave focus or landed while it was here; a replacement
+    /// handed focus after a rebuild gets what the widget it replaced had.
+    /// Written only by the [`App`](crate::widget::App) (`focus_change.rs`).
+    #[cfg_attr(feature = "reflect", reflect(ignore))]
+    pub focus_visible: bool,
 }
 
 impl WidgetBase {
@@ -476,6 +483,7 @@ impl WidgetBase {
             shared_size_pass: false,
             draw_on_top_of_siblings: false,
             focus_stamp: crate::focus::FocusStamp::default(),
+            focus_visible: false,
         }
     }
 

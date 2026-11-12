@@ -108,6 +108,7 @@ mod lcd_text_at_scale;
 mod line_box_snapped;
 mod logical_root_transform;
 mod modal_button_hover;
+mod modal_hover_clear;
 mod mouse_button_held;
 mod mouse_down_focus_grab_tests;
 mod nested_child_transform;
