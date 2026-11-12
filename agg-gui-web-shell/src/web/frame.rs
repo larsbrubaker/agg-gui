@@ -89,6 +89,9 @@ fn new_ctx(gpu: &WebGpu) -> WgpuGfxCtx {
     // Custom render passes see the device's rejected frames as
     // `WgpuCustomRenderCtx::lost_frames`.
     .with_uncaptured_errors(&gpu.errors)
+    // No `with_device_lost`: nothing in the browser records a loss, and the
+    // browser's WebGPU does not destroy a mapped buffer's range when the
+    // device is lost, so the context's own never-raised flag is right here.
     // Custom render passes key their GPU state on the device's generation,
     // which a rebuilt device never shares with the lost one.
     .with_device_generation(gpu.device_generation)
@@ -579,6 +582,7 @@ fn paint(w: u32, h: u32) -> bool {
             let mut blit_buffers = Vec::new();
             fb.blit_downsample_retiring(
                 &p.gpu.device,
+                &p.gpu.queue,
                 &mut encoder,
                 &surface_view,
                 (w, h),

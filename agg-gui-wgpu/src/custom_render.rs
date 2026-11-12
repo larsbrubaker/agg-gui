@@ -136,6 +136,27 @@ pub struct WgpuCustomRenderCtx<'a> {
     /// can compare equal to the lost one whose resources are gone. Never 0.
     /// See [`crate::next_device_generation`].
     pub device_generation: u64,
+    /// Whether [`Self::device`] has been lost, as the shell's device-lost
+    /// callback records it: clone it to keep, and check
+    /// [`DeviceLostFlag::is_lost`](crate::DeviceLostFlag::is_lost) at any later
+    /// moment (a later frame, a worker, a later tick). Check it immediately
+    /// before taking the mapped range of any buffer made on this device: a
+    /// loss destroys every buffer, a mapped one included, and
+    /// `get_mapped_range` on a destroyed buffer panics. On one polling
+    /// thread the flag is raised no later than the poll that destroys the
+    /// buffers; a poll on another thread between the check and the read is
+    /// the one case it cannot cover (see `device_lost_flag.rs`). Never raised
+    /// in the browser, whose shell records no loss and whose WebGPU does not
+    /// destroy mapped ranges, nor when the context's creator never called
+    /// [`WgpuGfxCtx::set_device_lost`](crate::WgpuGfxCtx::set_device_lost);
+    /// the native shell and the headless frame always do.
+    ///
+    /// The flag belongs to this one device. Take it again whenever
+    /// [`Self::device_generation`] changes and keep it beside the resources
+    /// made on that device: a flag kept across a rebuild stays raised for
+    /// ever, and would make the renderer skip its read-backs on the new
+    /// device.
+    pub device_lost: &'a crate::DeviceLostFlag,
     /// The number of the window frame being recorded
     /// ([`WgpuGfxCtx::frame_number`](crate::WgpuGfxCtx::frame_number)),
     /// increasing by one each frame on this context. Store it with whatever

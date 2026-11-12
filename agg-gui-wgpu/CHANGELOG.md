@@ -6,6 +6,82 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps.
 
+## [0.7.0] - Unreleased
+
+### Fixed
+
+- A frame drawn on a lost graphics device no longer panics the app. Every
+  buffer made on a lost device is invalid, and a buffer filled through a
+  mapping at creation (`wgpu::util::DeviceExt::create_buffer_init`) panicked
+  in `Buffer::get_mapped_range` on the first frame after the loss, before the
+  shell could see `Gpu::device_lost` and rebuild (the SSAA blit's
+  `ssaa_blit_uniforms`, reached every frame the tumble cube draws). The SSAA
+  blits, the blend-mode proxy blit and the tumble cube now fill their buffers
+  through the queue: on a lost device the write is an error the device's
+  error handler gets (`UncapturedErrors` counts it), the frame is lost, and the
+  shell rebuilds and redraws. Pictures are unchanged.
+- Reading back a mapped buffer of a lost device no longer panics. A loss
+  destroys every buffer made on the device, a read-back mapped before the
+  loss included, and `Buffer::get_mapped_range` on a destroyed buffer panics;
+  every read-back now checks the device's loss record right before its read:
+  - `HeadlessTarget::read_rgba` / `read_framebuffer` (and `HeadlessFrame`'s)
+    return `HeadlessError::DeviceLost`.
+  - `WgpuGfxCtx::read_screenshot` and `DrawCtx::read_captured_screenshot`
+    return an empty buffer.
+  - `WgpuGfxCtx::poll_capture_readback` and `poll_capture_readback_scaled`
+    return `None` and drop the read-back in flight (its map may have
+    completed frames before the loss), without polling the lost device,
+    which wgpu panics on.
+
+  The wait before a read-back reports the loss it finds itself: after
+  `Device::destroy` the poll that finds the queue empty frees the device's
+  buffers, runs the lost callback and still succeeds, and that wait now
+  returns the loss instead of letting its read go ahead.
+
+  The record is the context's `DeviceLostFlag` (below): a context made with
+  `WgpuGfxCtx::new` and never given one reads back as before.
+
+### Added
+
+- `create_buffer_filled(device, queue, &BufferInitDescriptor)`: a buffer
+  holding the given bytes, filled by `queue.write_buffer`, the same size and
+  bytes `create_buffer_init` gives. A custom render pass uses it for any
+  buffer it fills on the frame path, so its frame survives a lost device too.
+  `MAP_READ` / `MAP_WRITE` usages are not supported.
+- `DeviceLostFlag`: a clonable handle on a device's loss record, with
+  `is_lost()` and `lost_reason()`. On one thread that polls the device it is
+  raised no later than the poll that destroys the device's buffers; a poll on
+  another thread between a check and a read is the one case it cannot cover.
+  Never raised in the browser, where nothing records a loss and WebGPU does
+  not destroy mapped ranges. `Gpu::device_lost_flag()` and
+  `HeadlessGpu::device_lost_flag()` return the device's; `Gpu::device_lost()`
+  reads the same record. `DeviceLostFlag::watch(&device)` (native only)
+  makes the flag for a device the app opened itself, such as a compute
+  device of its own; it replaces that device's lost callback, so a callback
+  set before stops being called and the device is watched once.
+- `WgpuGfxCtx::set_device_lost(&flag)`, `with_device_lost(&flag)` and
+  `device_lost()`: the context's flag, which its read-backs check. agg-gui-shell
+  and `HeadlessFrame` hand the device's over. Migration: a host that makes its
+  own `WgpuGfxCtx` from a `Gpu` adds
+  `.with_device_lost(gpu.device_lost_flag())`; without it the context's flag is
+  never raised and its read-backs are unguarded.
+- `WgpuCustomRenderCtx::device_lost: &DeviceLostFlag`, the context's flag. A
+  custom pass that reads a mapped buffer of its own checks
+  `ctx.device_lost.is_lost()` right before `get_mapped_range`, and one that
+  reads later (a later frame, a worker) keeps `ctx.device_lost.clone()` and
+  checks it then, after that thread's last poll. The struct is
+  `#[non_exhaustive]`, so the new field is not breaking.
+
+### Changed
+
+- **Breaking:** the `SsaaFramebuffer` blits take the queue they fill their
+  per-draw buffers with, right after the device: `blit_to`,
+  `blit_downsample_3x_to`, `blit_downsample_4x_to`, `blit_downsample_to` and
+  `blit_downsample_retiring` each gain `queue: &wgpu::Queue` as their second
+  parameter. Migration: pass the queue the encoder is submitted on
+  (`WgpuCustomRenderCtx::queue` inside a custom render pass).
+  `blit_downsample_in` is unchanged.
+
 ## [0.6.1] - 2026-11-09
 
 ### Changed

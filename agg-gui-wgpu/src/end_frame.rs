@@ -285,11 +285,13 @@ impl WgpuGfxCtx {
             self.viewport,
             self.adapter_caps.as_ref(),
             frame_info,
+            &self.device_lost,
             &mut self.textures,
         );
         if let Some((_, view)) = &proxy {
             crate::comp_op::blit_proxy(
                 &self.device,
+                &self.queue,
                 &mut self.textures,
                 &mut encoder,
                 &self.comp_op,
@@ -337,6 +339,7 @@ fn execute_prepared<'a>(
     surface_viewport: (f32, f32),
     adapter_caps: Option<&crate::adapter_caps::AdapterCaps>,
     frame_info: crate::frame_timing::PassFrameInfo,
+    device_lost: &crate::DeviceLostFlag,
     textures: &mut crate::texture_life::TextureLedger,
 ) {
     // Initial clear: only honoured if the very first command is Clear.  Mid-frame
@@ -517,6 +520,7 @@ fn execute_prepared<'a>(
                         downlevel: adapter_caps.map(|caps| &caps.downlevel),
                         lost_frames: frame_info.lost_frames,
                         device_generation: frame_info.device_generation,
+                        device_lost,
                         frame: frame_info.frame,
                         last_frame_completion: frame_info.last_frame_completion,
                         retire: &mut *textures,

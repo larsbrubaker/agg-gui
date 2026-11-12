@@ -5,10 +5,11 @@
 //! lifetime of the context.  Every pipeline, bind-group layout, and shared
 //! sampler lives here.
 //!
-//! Uniform data is NOT stored here — each draw command in `end_frame` creates
-//! a small `wgpu::Buffer` via `device.create_buffer_init()` so that multiple
-//! draw commands of the same pipeline type in one frame do not overwrite each
-//! other's uniforms.
+//! Uniform data is NOT stored here — each draw command in `end_frame` takes
+//! its own slice of the frame's uniform arena (`buffer_arena.rs`, uploaded
+//! through the queue before the frame's submit) and binds it at that offset,
+//! so multiple draw commands of the same pipeline type in one frame do not
+//! overwrite each other's uniforms.
 
 use std::mem::size_of;
 

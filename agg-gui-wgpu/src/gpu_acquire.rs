@@ -16,34 +16,13 @@
 //! decides how to wake for a retry — [`RetryWake`] — so this crate never
 //! reaches into the event loop's draw scheduling on the modern path.
 
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, MutexGuard};
+use std::sync::MutexGuard;
 use std::time::Duration;
 
 use web_time::Instant;
 
 use super::{surface_acquire_action, Gpu, SurfaceAcquire};
 use crate::surface_retry::{ConfigureRetry, RetryAction, RetryLog};
-
-/// Watch `device` for loss: the returned flag is set from wgpu's device-lost
-/// callback, whatever the reason.
-///
-/// Device loss (TDR, driver update, GPU reset, RDP session change) is
-/// reported out-of-band: nothing in the per-frame API returns an error, so a
-/// shell that does not watch this flag silently renders nothing forever.
-/// `DeviceLostReason::Destroyed` counts too: a destroyed device is as dead as
-/// a lost one, and wgpu's `Device::destroy` is how a loss is simulated
-/// (agg-sharp `WebGpuControlDeviceLossTests` destroys the device and requires
-/// the loss to be seen). Dropping the owner drops the flag with it, so its
-/// own teardown can never trigger a rebuild.
-pub(crate) fn watch_device_loss(device: &wgpu::Device) -> Arc<AtomicBool> {
-    let lost = Arc::new(AtomicBool::new(false));
-    let flag = Arc::clone(&lost);
-    device.set_device_lost_callback(move |_reason, _message| {
-        flag.store(true, Ordering::Relaxed);
-    });
-    lost
-}
 
 /// Result of [`Gpu::try_acquire_frame`].
 #[derive(Debug)]
@@ -148,7 +127,7 @@ pub(super) fn try_configure(
     device: &wgpu::Device,
     surface: &wgpu::Surface<'_>,
     config: &wgpu::SurfaceConfiguration,
-    device_lost: &AtomicBool,
+    device_lost: &crate::DeviceLostFlag,
 ) -> Result<(), String> {
     // Scopes nest: pop in reverse push order. A backend failure inside the
     // swap-chain call (e.g. DXGI refusing the resize) can surface as either
@@ -161,7 +140,7 @@ pub(super) fn try_configure(
     if let Some(err) = validation_err.or(internal_err) {
         return Err(err.to_string());
     }
-    if device_lost.load(Ordering::Relaxed) {
+    if device_lost.is_lost() {
         return Err("device lost".to_owned());
     }
     Ok(())

@@ -10,10 +10,11 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Changed
 
-- **Breaking:** built on agg-gui-wgpu 0.6.0, whose types this crate
+- **Breaking:** built on agg-gui-wgpu 0.7.0, whose types this crate
   re-exports (the whole crate as `agg_gui_wgpu`, and `WgpuGfxCtx`),
-  so their 0.6.0 changes reach this crate's API. A consumer that names
-  agg-gui-wgpu itself moves it to 0.6 too; one that sets
+  so their 0.6.0 and 0.7.0 changes reach this crate's API (0.7.0: the
+  `SsaaFramebuffer` blits take the queue). A consumer that names
+  agg-gui-wgpu itself moves it to 0.7 too; one that sets
   `default-features = false` on agg-gui-wgpu and renders through WebGL2
   enables its `webgl` feature.
 - The tumble cube and every other custom render pass on agg-gui-wgpu rebuild
@@ -22,6 +23,9 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   left to the browser's garbage collector.
 - With `offscreen_scene`, the scene blit's per-draw buffers are destroyed
   right after its submit instead of waiting for the garbage collector.
+- A frame painted on a lost device no longer panics in the SSAA blit (the
+  `offscreen_scene` blit included) or the tumble cube (agg-gui-wgpu 0.7.0):
+  the frame is lost and the shell rebuilds the device, as it already did.
 - On WebGPU, the default device limits (no `WebShellConfig::limits`
   override) take the adapter's own `max_storage_buffer_binding_size` and
   `max_buffer_size` instead of wgpu's 128 MiB / 256 MiB defaults, as

@@ -144,13 +144,15 @@ impl TextureLedger {
     /// Make a buffer holding `desc`'s contents that lives for the frame being
     /// recorded only: it is retired at once, so the next
     /// [`Self::destroy_retired`] (after the frame's submit) destroys it.
+    /// Filled through `queue` ([`crate::create_buffer_filled`]), so a frame
+    /// on a lost device does not panic here.
     pub(crate) fn create_buffer_for_frame(
         &mut self,
         device: &wgpu::Device,
+        queue: &wgpu::Queue,
         desc: &wgpu::util::BufferInitDescriptor<'_>,
     ) -> wgpu::Buffer {
-        use wgpu::util::DeviceExt;
-        let buffer = device.create_buffer_init(desc);
+        let buffer = crate::create_buffer_filled(device, queue, desc);
         self.retire_buffer(buffer.clone());
         buffer
     }

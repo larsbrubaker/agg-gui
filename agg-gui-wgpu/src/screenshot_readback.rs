@@ -7,8 +7,11 @@
 //! `end_frame` the capture closure copies it into a top-down RGBA8
 //! buffer via a padded staging buffer.
 //!
-//! The copy itself ([`read_texture_rgba`]) is shared with the offscreen
-//! targets of `crate::headless`.
+//! The copy itself ([`read_texture_rgba_bounded`]) is shared with the
+//! offscreen targets of `crate::headless`. It checks the device's loss record
+//! after its wait and before reading the mapped buffer, which a loss destroys
+//! (`crate::device_lost_flag`); `screenshot_readback_lost_tests.rs` stands in
+//! for a loss found by that wait.
 //!
 //! Also owns the release half of that stash: [`WgpuGfxCtx::present`] /
 //! [`WgpuGfxCtx::release_frame_texture`] drop the ctx's frame handles before
@@ -100,7 +103,8 @@ impl WgpuGfxCtx {
     /// into the surface that's still valid post-render.
     ///
     /// Returns an empty buffer if no surface texture is currently stashed
-    /// (including after [`Self::present`] / [`Self::release_frame_texture`]).
+    /// (including after [`Self::present`] / [`Self::release_frame_texture`]),
+    /// or when the device is lost ([`Self::device_lost`]).
     pub fn read_screenshot(&self) -> (Vec<u8>, u32, u32) {
         let Some(texture) = self.surface_texture.as_ref() else {
             return (Vec::new(), 0, 0);
@@ -110,7 +114,16 @@ impl WgpuGfxCtx {
         if w == 0 || h == 0 {
             return (Vec::new(), 0, 0);
         }
-        match read_texture_rgba(&self.device, &self.queue, texture, self.surface_format) {
+        // The context's loss record refuses the read once the device is lost
+        // (`crate::device_lost_flag`), and a known loss skips the wait.
+        match read_texture_rgba_bounded(
+            &self.device,
+            &self.queue,
+            texture,
+            self.surface_format,
+            Some(self.device_lost.loss()),
+            crate::GPU_WAIT_BUDGET,
+        ) {
             Ok(pixels) => (pixels, w, h),
             Err(_) => (Vec::new(), 0, 0),
         }
@@ -124,9 +137,11 @@ impl WgpuGfxCtx {
 /// swapped on the way out, so callers always get RGBA order; any other format
 /// is copied as is, so it must be 4 bytes per texel. A texture that was not
 /// created with `COPY_SRC` is refused with an error. Blocks on the device
-/// until the copy is mapped, for at most [`crate::GPU_WAIT_BUDGET`]. Used by
-/// [`WgpuGfxCtx::read_screenshot`]; [`read_texture_rgba_bounded`] is the same
-/// copy with the caller's device-loss record and budget.
+/// until the copy is mapped, for at most [`crate::GPU_WAIT_BUDGET`], on a
+/// device nobody watches for loss (the frame-capture tests);
+/// [`read_texture_rgba_bounded`] is the same copy with the caller's
+/// device-loss record and budget.
+#[cfg(test)]
 pub(crate) fn read_texture_rgba(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
@@ -171,6 +186,26 @@ pub(crate) fn read_texture_rgba_bounded(
     loss: Option<&DeviceLoss>,
     budget: std::time::Duration,
 ) -> Result<Vec<u8>, ReadbackError> {
+    read_texture_rgba_after(device, queue, texture, format, loss, || {
+        wait_for_submission(device, None, loss, budget)
+    })
+}
+
+/// [`read_texture_rgba_bounded`] with the wait for the copy handed in, so a
+/// test can stand in for a loss the wait finds after the map completed,
+/// which nothing outside wgpu can make happen at that moment. `wait` must
+/// return only once the map callback has run (or fail).
+pub(crate) fn read_texture_rgba_after<W>(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    texture: &wgpu::Texture,
+    format: wgpu::TextureFormat,
+    loss: Option<&DeviceLoss>,
+    wait: W,
+) -> Result<Vec<u8>, ReadbackError>
+where
+    W: FnOnce() -> Result<(), GpuWaitError>,
+{
     // A texture without COPY_SRC cannot be read back: the copy would be a
     // validation error and the capture a blank or garbage image. Refuse it so
     // the caller reports a failed capture instead.
@@ -237,11 +272,16 @@ pub(crate) fn read_texture_rgba_bounded(
     // A finished wait has run the map callback (wgpu fires it inside the
     // poll), so the receive below never blocks; a failed one returns before
     // it, leaving the callback to fire with an error when `staging` drops.
-    wait_for_submission(device, None, loss, budget).map_err(ReadbackError::Wait)?;
+    wait().map_err(ReadbackError::Wait)?;
     receiver
         .recv()
         .expect("map_async sender dropped before resolving")
         .map_err(ReadbackError::Map)?;
+    // A loss destroys the mapped buffer, and reading it would panic. The
+    // wait above is the last poll on this thread, so a loss it found is
+    // recorded by now (`crate::device_lost_flag`).
+    crate::device_lost_flag::mapped_read_allowed(loss)
+        .map_err(|reason| ReadbackError::Wait(GpuWaitError::DeviceLost(reason)))?;
 
     // Surface format may be Bgra8Unorm; PNG / JS expects RGBA so swap
     // R↔B per pixel as we copy.  Surface textures are Y-down, which

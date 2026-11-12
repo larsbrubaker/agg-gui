@@ -47,8 +47,9 @@ use crate::gpu_budget::{
     create_within_budget, report_to, spawn_thread, BACKGROUND_THREAD_AVAILABLE, GPU_STARTUP_BUDGET,
 };
 use crate::gpu_shared_startup::SharedStartup;
-use crate::gpu_wait::{watch_device_loss_reason, DeviceLoss};
+use crate::gpu_wait::DeviceLoss;
 use crate::screenshot_readback::ReadbackError;
+use crate::DeviceLostFlag;
 use crate::{GpuMemoryHints, WgpuGfxCtx, GPU_WAIT_BUDGET};
 
 #[path = "headless_error.rs"]
@@ -162,7 +163,7 @@ pub struct HeadlessGpu {
     /// report (see [`HeadlessGpu::wgpu_adapter`]).
     wgpu_adapter: wgpu::Adapter,
     /// Whether, and why, the device was lost.
-    loss: Arc<DeviceLoss>,
+    loss: DeviceLostFlag,
     /// The hints the device was requested with.
     memory_hints: GpuMemoryHints,
     /// This device's generation ([`crate::next_device_generation`]).
@@ -339,6 +340,13 @@ impl HeadlessGpu {
         self.loss.lost_reason()
     }
 
+    /// The shared record behind [`Self::device_lost`], as
+    /// [`crate::Gpu::device_lost_flag`]; [`HeadlessFrame`] hands it to its
+    /// context.
+    pub fn device_lost_flag(&self) -> &DeviceLostFlag {
+        &self.loss
+    }
+
     /// The memory hints the device was requested with — for the shared
     /// device, the first caller's (see [`Self::shared_with_options`]).
     pub fn memory_hints(&self) -> GpuMemoryHints {
@@ -381,7 +389,7 @@ fn request_headless_device(options: HeadlessOptions) -> Result<HeadlessGpu, Head
     );
     let (device, queue) = pollster::block_on(adapter.request_device(&descriptor))
         .map_err(|e| HeadlessError::RequestDevice(e.to_string()))?;
-    let loss = watch_device_loss_reason(&device);
+    let loss = DeviceLostFlag::watch(&device);
     Ok(HeadlessGpu {
         device: Arc::new(device),
         queue: Arc::new(queue),
@@ -418,7 +426,7 @@ impl HeadlessTarget {
             width,
             height,
         );
-        target.loss = Some(Arc::clone(&gpu.loss));
+        target.loss = Some(gpu.loss.shared());
         target
     }
 
@@ -598,6 +606,7 @@ impl HeadlessFrame {
             h as f32,
         )
         .with_adapter(gpu.wgpu_adapter())
+        .with_device_lost(&gpu.loss)
         .with_device_generation(gpu.device_generation);
         Self {
             ctx,

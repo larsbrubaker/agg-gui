@@ -448,8 +448,14 @@ impl WgpuGfxCtx {
     /// Unlike [`Self::poll_capture_readback`] there is no per-pixel swizzle
     /// here — the blit already produced RGBA in the surface's own byte
     /// encoding — so the only CPU work is stripping the row padding.
+    ///
+    /// On a lost device ([`Self::device_lost`]) the readback in flight is
+    /// dropped and `None` returned, as [`Self::poll_capture_readback`] does.
     pub fn poll_capture_readback_scaled(&mut self) -> Option<(Vec<u8>, u32, u32)> {
-        let _ = self.device.poll(wgpu::PollType::Poll);
+        if !crate::device_lost_flag::poll_unless_lost(&self.device, self.device_lost.loss()) {
+            self.pending_scaled_readback = None;
+            return None;
+        }
         match self.pending_scaled_readback.as_ref()?.done.try_recv() {
             Ok(Ok(())) => {}
             Err(std::sync::mpsc::TryRecvError::Empty) => return None, // not ready yet
@@ -466,6 +472,9 @@ impl WgpuGfxCtx {
             padded_bpr,
             ..
         } = self.pending_scaled_readback.take()?;
+        // The map may have completed frames before the poll above; checked
+        // again here, right before the read.
+        crate::device_lost_flag::mapped_read_allowed(Some(self.device_lost.loss())).ok()?;
 
         let unpadded_bpr = (w * 4) as usize;
         let mut out = Vec::with_capacity((w as usize) * (h as usize) * 4);

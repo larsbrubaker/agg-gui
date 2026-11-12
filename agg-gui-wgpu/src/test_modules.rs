@@ -60,6 +60,9 @@ mod root_transform_readback_tests;
 mod rotated_text_readback_tests;
 #[path = "save_restore_readback_tests.rs"]
 mod save_restore_readback_tests;
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "screenshot_readback_lost_tests.rs"]
+mod screenshot_readback_lost_tests;
 #[path = "screenshot_scaled_tests.rs"]
 mod screenshot_scaled_tests;
 #[cfg(not(target_arch = "wasm32"))]

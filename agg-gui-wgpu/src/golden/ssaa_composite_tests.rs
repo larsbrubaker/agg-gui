@@ -64,6 +64,7 @@ fn composite(factor: u32) -> Option<Vec<u8>> {
     });
     fb.blit_downsample_to(
         &device,
+        &queue,
         &mut encoder,
         &target.view,
         (W, H),

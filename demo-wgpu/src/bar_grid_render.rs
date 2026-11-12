@@ -25,7 +25,6 @@
 
 use agg_gui::geometry::Rect;
 use bytemuck::{Pod, Zeroable};
-use wgpu::util::DeviceExt;
 
 use crate::bar_grid_math::{look_at, mat4_mul, normalize3, perspective};
 use crate::ssaa::SsaaFramebuffer;
@@ -250,6 +249,7 @@ pub struct BarGridWgpuRenderer {
 impl BarGridWgpuRenderer {
     pub fn new(
         device: &wgpu::Device,
+        queue: &wgpu::Queue,
         surface_format: wgpu::TextureFormat,
         ssaa_samples: u32,
         start: web_time::Instant,
@@ -365,23 +365,35 @@ impl BarGridWgpuRenderer {
         });
 
         let verts = bar_box_verts();
-        let vbo = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("bar_grid_vbo"),
-            contents: bytemuck::cast_slice(&verts),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
+        let vbo = agg_gui_wgpu::create_buffer_filled(
+            device,
+            queue,
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("bar_grid_vbo"),
+                contents: bytemuck::cast_slice(&verts),
+                usage: wgpu::BufferUsages::VERTEX,
+            },
+        );
         let indices = bar_box_indices();
-        let ibo = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("bar_grid_ibo"),
-            contents: bytemuck::cast_slice(&indices),
-            usage: wgpu::BufferUsages::INDEX,
-        });
+        let ibo = agg_gui_wgpu::create_buffer_filled(
+            device,
+            queue,
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("bar_grid_ibo"),
+                contents: bytemuck::cast_slice(&indices),
+                usage: wgpu::BufferUsages::INDEX,
+            },
+        );
         let instances = bar_instance_data();
-        let instance_vbo = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("bar_grid_instance_vbo"),
-            contents: bytemuck::cast_slice(&instances),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
+        let instance_vbo = agg_gui_wgpu::create_buffer_filled(
+            device,
+            queue,
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("bar_grid_instance_vbo"),
+                contents: bytemuck::cast_slice(&instances),
+                usage: wgpu::BufferUsages::VERTEX,
+            },
+        );
 
         Self {
             pipeline,
@@ -448,6 +460,7 @@ impl BarGridWgpuRenderer {
     pub fn draw(
         &mut self,
         device: &wgpu::Device,
+        queue: &wgpu::Queue,
         encoder: &mut wgpu::CommandEncoder,
         target_view: &wgpu::TextureView,
         target_size: (u32, u32),
@@ -498,11 +511,15 @@ impl BarGridWgpuRenderer {
             peak_color: palette.peak,
             _pad4: 0.0,
         };
-        let bar_ub = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("bar_grid_uniforms"),
-            contents: bytemuck::bytes_of(&bar_uniforms),
-            usage: wgpu::BufferUsages::UNIFORM,
-        });
+        let bar_ub = agg_gui_wgpu::create_buffer_filled(
+            device,
+            queue,
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("bar_grid_uniforms"),
+                contents: bytemuck::bytes_of(&bar_uniforms),
+                usage: wgpu::BufferUsages::UNIFORM,
+            },
+        );
         let bar_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("bar_grid_bg"),
             layout: &self.bind_group_layout,
@@ -576,6 +593,7 @@ impl BarGridWgpuRenderer {
         match self.ssaa_scale {
             0..=2 => fb.blit_to(
                 device,
+                queue,
                 encoder,
                 target_view,
                 target_size,
@@ -585,6 +603,7 @@ impl BarGridWgpuRenderer {
             ),
             3 => fb.blit_downsample_3x_to(
                 device,
+                queue,
                 encoder,
                 target_view,
                 target_size,
@@ -594,6 +613,7 @@ impl BarGridWgpuRenderer {
             ),
             _ => fb.blit_downsample_4x_to(
                 device,
+                queue,
                 encoder,
                 target_view,
                 target_size,

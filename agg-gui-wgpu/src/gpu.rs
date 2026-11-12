@@ -403,7 +403,7 @@ pub struct Gpu {
     surface: wgpu::Surface<'static>,
     surface_format: wgpu::TextureFormat,
     config: wgpu::SurfaceConfiguration,
-    device_lost: Arc<std::sync::atomic::AtomicBool>,
+    device_lost: crate::DeviceLostFlag,
     /// The device's uncaptured wgpu errors, logged and counted.
     uncaptured_errors: crate::UncapturedErrors,
     /// This device's generation ([`crate::next_device_generation`]).
@@ -500,8 +500,9 @@ impl Gpu {
             }
         }
 
-        // Device loss is reported out-of-band; see `watch_device_loss`.
-        let device_lost = acquire::watch_device_loss(&device);
+        // Device loss is reported out-of-band, through the device-lost
+        // callback the flag installs (`crate::device_lost_flag`).
+        let device_lost = crate::DeviceLostFlag::watch(&device);
         // A rejected submission costs its frame, not the app: wgpu's default
         // handler panics (see `crate::uncaptured_errors`).
         let uncaptured_errors = crate::UncapturedErrors::install(&device);
@@ -556,7 +557,14 @@ impl Gpu {
     /// (agg-sharp), which is the closest thing to a reference implementation of
     /// the recovery this flag is meant to drive.
     pub fn device_lost(&self) -> bool {
-        self.device_lost.load(std::sync::atomic::Ordering::Relaxed)
+        self.device_lost.is_lost()
+    }
+
+    /// The shared record behind [`Self::device_lost`], with the reason wgpu
+    /// gave; hand it to the render context with
+    /// [`crate::WgpuGfxCtx::set_device_lost`].
+    pub fn device_lost_flag(&self) -> &crate::DeviceLostFlag {
+        &self.device_lost
     }
 
     pub fn device(&self) -> &Arc<wgpu::Device> {

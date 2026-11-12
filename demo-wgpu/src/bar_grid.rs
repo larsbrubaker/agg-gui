@@ -71,6 +71,7 @@ impl WgpuCustomRender for BarGridCustomRenderer {
         if let Some(r) = self.inner.as_mut() {
             r.draw(
                 ctx.device,
+                ctx.queue,
                 ctx.encoder,
                 ctx.target_view,
                 ctx.target_size,
@@ -216,6 +217,7 @@ impl Widget for WgpuCubeWidget {
                     if needs_rebuild {
                         slot.set_renderer(BarGridWgpuRenderer::new(
                             wgpu_ctx.device(),
+                            wgpu_ctx.queue(),
                             wgpu_ctx.surface_format(),
                             raw,
                             self.start,

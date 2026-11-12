@@ -183,6 +183,12 @@ mod shaders;
 mod text_render;
 mod texture_life;
 pub use texture_life::{BufferCounts, TextureCounts};
+/// Buffers filled through the queue, so a frame on a lost device cannot panic.
+mod buffer_fill;
+pub use buffer_fill::create_buffer_filled;
+/// Whether a device is lost, checked before every read of a mapped buffer.
+mod device_lost_flag;
+pub use device_lost_flag::DeviceLostFlag;
 
 /// Every in-crate test module (see `test_modules.rs`).
 #[cfg(test)]
@@ -383,6 +389,9 @@ pub struct WgpuGfxCtx {
     /// (`uncaptured_errors.rs`); custom render passes read its count as
     /// `lost_frames`.
     pub(crate) uncaptured_errors: Option<UncapturedErrors>,
+    /// The device's loss record (`device_lost_flag.rs`), never raised until a
+    /// shell hands its own; read-backs and custom render passes check it.
+    pub(crate) device_lost: DeviceLostFlag,
 
     // ── render pipelines (created in Phase 2) ────────────────────────────────
     pub(crate) pipelines: WgpuPipelines,
@@ -615,6 +624,7 @@ impl WgpuGfxCtx {
             viewport: (width, height),
             adapter_caps: None,
             uncaptured_errors: None,
+            device_lost: DeviceLostFlag::default(),
             pipelines,
             commands: Vec::new(),
             texture_cache: HashMap::new(),

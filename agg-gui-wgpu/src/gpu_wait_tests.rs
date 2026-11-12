@@ -1,7 +1,8 @@
 //! Rust-only tests for `gpu_wait.rs`: a bounded wait on a GPU that never
 //! finishes ends with a timeout inside its bound, a lost device is reported
-//! with its reason (without polling it, when the loss is already known), and
-//! a panic wgpu raises inside the poll becomes a loss rather than escaping.
+//! with its reason (without polling it, when the loss is already known, and
+//! even when the poll that found it succeeded), and a panic wgpu raises
+//! inside the poll becomes a loss rather than escaping.
 //! No GPU is needed: the poll is a stand-in.
 
 use std::cell::Cell;
@@ -92,6 +93,29 @@ fn a_loss_during_the_wait_names_its_reason_instead_of_the_timeout() {
         result,
         Err(GpuWaitError::DeviceLost(
             "Unknown: the GPU was reset".to_string()
+        ))
+    );
+}
+
+/// After `Device::destroy` the poll that finds the queue empty frees the
+/// device's buffers, runs the device-lost callback and still returns `Ok`:
+/// the wait that found the loss must report it, or its caller goes on to
+/// read a buffer that is gone.
+#[test]
+fn a_loss_recorded_by_a_poll_that_succeeds_is_reported() {
+    let loss = DeviceLoss::default();
+    let result = bounded_wait(
+        |_| {
+            loss.record("Destroyed: Device destroyed".to_string());
+            Ok(wgpu::PollStatus::QueueEmpty)
+        },
+        Some(&loss),
+        Duration::from_millis(10),
+    );
+    assert_eq!(
+        result,
+        Err(GpuWaitError::DeviceLost(
+            "Destroyed: Device destroyed".to_string()
         ))
     );
 }

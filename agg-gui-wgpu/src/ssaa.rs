@@ -51,7 +51,7 @@
 //! // Each frame:
 //! fb.ensure_size(device, widget_w * scale, widget_h * scale);
 //! // ... begin_render_pass with fb.render_view() + fb.depth_view(), draw your 3-D scene ...
-//! fb.blit_to(device, encoder, target_view, target_size, dst_rect, parent_clip, pipelines);
+//! fb.blit_to(device, queue, encoder, target_view, target_size, dst_rect, parent_clip, pipelines);
 //! ```
 //!
 //! # Releasing GPU memory
@@ -63,22 +63,24 @@
 //! frames) destroys the rest.
 //!
 //! A blit's uniform and vertex buffers are made for that one draw: they
-//! cannot be persistent buffers rewritten each frame, because a blit has no
-//! queue to write them with and two blits recorded into one encoder would
-//! both see the last write. Only whoever submits the encoder knows when they
-//! may be destroyed (destroying one before that submit fails it), so the
+//! cannot be persistent buffers rewritten each frame, because two blits
+//! recorded into one encoder would both see the last write. They are filled
+//! through the queue ([`crate::create_buffer_filled`]), never through a
+//! mapping at creation, so a blit on a lost device records nothing harmful
+//! instead of panicking; that is why every blit takes the queue. The write
+//! lands before the next submission's commands, so the blit recorded into
+//! that submission reads the bytes. Only whoever submits the encoder knows
+//! when they may be destroyed (destroying one before that submit fails it), so the
 //! framebuffer does not keep them: [`SsaaFramebuffer::blit_downsample_in`]
 //! hands them to a custom render pass's context, which destroys them after
 //! the frame's submit, and [`SsaaFramebuffer::blit_downsample_retiring`]
 //! hands them to a caller that submits its own encoder. The other blit
 //! methods drop them, leaving them to the garbage collector in the browser.
 
-use agg_gui::geometry::Rect;
-use wgpu::util::DeviceExt;
-
 use crate::custom_render::WgpuCustomRenderCtx;
 use crate::pipelines::{TexUniforms, WgpuPipelines};
 use crate::texture_life::{TextureCounts, TextureLedger};
+use agg_gui::geometry::Rect;
 
 /// Map a UI-facing "samples" choice to the linear render-target scale factor
 /// used when supersampling onto an oversized framebuffer.
@@ -275,6 +277,7 @@ impl SsaaFramebuffer {
     pub fn blit_to(
         &self,
         device: &wgpu::Device,
+        queue: &wgpu::Queue,
         encoder: &mut wgpu::CommandEncoder,
         target_view: &wgpu::TextureView,
         target_size: (u32, u32),
@@ -284,6 +287,7 @@ impl SsaaFramebuffer {
     ) {
         self.blit_to_inner(
             device,
+            queue,
             encoder,
             target_view,
             target_size,
@@ -308,6 +312,7 @@ impl SsaaFramebuffer {
     pub fn blit_downsample_3x_to(
         &self,
         device: &wgpu::Device,
+        queue: &wgpu::Queue,
         encoder: &mut wgpu::CommandEncoder,
         target_view: &wgpu::TextureView,
         target_size: (u32, u32),
@@ -317,6 +322,7 @@ impl SsaaFramebuffer {
     ) {
         self.blit_to_inner(
             device,
+            queue,
             encoder,
             target_view,
             target_size,
@@ -338,6 +344,7 @@ impl SsaaFramebuffer {
     pub fn blit_downsample_4x_to(
         &self,
         device: &wgpu::Device,
+        queue: &wgpu::Queue,
         encoder: &mut wgpu::CommandEncoder,
         target_view: &wgpu::TextureView,
         target_size: (u32, u32),
@@ -347,6 +354,7 @@ impl SsaaFramebuffer {
     ) {
         self.blit_to_inner(
             device,
+            queue,
             encoder,
             target_view,
             target_size,
@@ -386,6 +394,7 @@ impl SsaaFramebuffer {
     pub fn blit_downsample_to(
         &self,
         device: &wgpu::Device,
+        queue: &wgpu::Queue,
         encoder: &mut wgpu::CommandEncoder,
         target_view: &wgpu::TextureView,
         target_size: (u32, u32),
@@ -397,6 +406,7 @@ impl SsaaFramebuffer {
         let pipeline = downsample_pipeline(pipelines, factor);
         self.blit_to_inner(
             device,
+            queue,
             encoder,
             target_view,
             target_size,
@@ -420,6 +430,7 @@ impl SsaaFramebuffer {
         let retire = &mut *ctx.retire;
         self.blit_to_inner(
             ctx.device,
+            ctx.queue,
             ctx.encoder,
             ctx.target_view,
             ctx.target_size,
@@ -439,6 +450,7 @@ impl SsaaFramebuffer {
     pub fn blit_downsample_retiring(
         &self,
         device: &wgpu::Device,
+        queue: &wgpu::Queue,
         encoder: &mut wgpu::CommandEncoder,
         target_view: &wgpu::TextureView,
         target_size: (u32, u32),
@@ -450,6 +462,7 @@ impl SsaaFramebuffer {
     ) {
         self.blit_to_inner(
             device,
+            queue,
             encoder,
             target_view,
             target_size,
@@ -465,6 +478,7 @@ impl SsaaFramebuffer {
     fn blit_to_inner(
         &self,
         device: &wgpu::Device,
+        queue: &wgpu::Queue,
         encoder: &mut wgpu::CommandEncoder,
         target_view: &wgpu::TextureView,
         target_size: (u32, u32),
@@ -484,11 +498,15 @@ impl SsaaFramebuffer {
             _pad: [0.0; 2],
             tint: [1.0, 1.0, 1.0, 1.0],
         };
-        let tex_ub = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("ssaa_blit_uniforms"),
-            contents: bytemuck::bytes_of(&tex_uniforms),
-            usage: wgpu::BufferUsages::UNIFORM,
-        });
+        let tex_ub = crate::create_buffer_filled(
+            device,
+            queue,
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("ssaa_blit_uniforms"),
+                contents: bytemuck::bytes_of(&tex_uniforms),
+                usage: wgpu::BufferUsages::UNIFORM,
+            },
+        );
         let tex_bg0 = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("ssaa_blit_bg0"),
             layout: &pipelines.tex_bgl0,
@@ -522,11 +540,15 @@ impl SsaaFramebuffer {
             x0, y0, 0.0, 1.0, x1, y0, 1.0, 1.0, x1, y1, 1.0, 0.0, x0, y0, 0.0, 1.0, x1, y1, 1.0,
             0.0, x0, y1, 0.0, 0.0,
         ];
-        let vb = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("ssaa_blit_vb"),
-            contents: bytemuck::cast_slice(&verts),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
+        let vb = crate::create_buffer_filled(
+            device,
+            queue,
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("ssaa_blit_vb"),
+                contents: bytemuck::cast_slice(&verts),
+                usage: wgpu::BufferUsages::VERTEX,
+            },
+        );
 
         // Convert parent_clip (Y-up) ∩ dst_rect to wgpu Y-down for set_scissor.
         let scissor = parent_clip

@@ -35,8 +35,10 @@
 //! buffer's status, Vulkan and DX12 wait on their fence with it), so no
 //! helper thread is spent per frame. A lost device is checked before the poll
 //! (wgpu panics when a lost device is polled, since a loss has no
-//! `PollError`) and a panic inside the poll is caught and reported as a loss,
-//! the only way wgpu reports one it finds while polling.
+//! `PollError`) and again after it, since the poll that finds a destroyed
+//! device's queue empty records the loss and still succeeds; a panic inside
+//! the poll is caught and reported as a loss, the only way wgpu reports one
+//! it finds while polling a driver-lost device.
 //!
 //! Used by `crate::headless` (frame pacing) and `crate::screenshot_readback`
 //! (the read-back copy). Rust-only tests live in `gpu_wait_tests.rs`.
@@ -171,18 +173,37 @@ where
     if let Some(reason) = loss.and_then(DeviceLoss::lost_reason) {
         return Err(GpuWaitError::DeviceLost(reason));
     }
-    let failure = match panic::catch_unwind(AssertUnwindSafe(|| poll(budget))) {
-        Ok(Ok(_)) => return Ok(()),
-        Ok(Err(wgpu::PollError::Timeout)) => GpuWaitError::TimedOut { budget },
-        Ok(Err(e)) => GpuWaitError::Failed(e.to_string()),
-        Err(payload) => GpuWaitError::DeviceLost(crate::gpu_budget::panic_text(payload.as_ref())),
+    let failure = match catch_poll(|| poll(budget)) {
+        Ok(Ok(_)) => None,
+        Ok(Err(wgpu::PollError::Timeout)) => Some(GpuWaitError::TimedOut { budget }),
+        Ok(Err(e)) => Some(GpuWaitError::Failed(e.to_string())),
+        Err(panic) => Some(GpuWaitError::DeviceLost(panic)),
     };
     // A loss reported while the wait ran explains a timeout or a panic better
-    // than either does on its own.
-    match loss.and_then(DeviceLoss::lost_reason) {
-        Some(reason) => Err(GpuWaitError::DeviceLost(reason)),
-        None => Err(failure),
+    // than either does on its own, and it turns a poll that succeeded into a
+    // loss: after `Device::destroy` the poll that finds the queue empty frees
+    // the device's buffers, runs the device-lost callback and still returns
+    // `Ok`, so this wait is the one that found the loss and must say so.
+    match (loss.and_then(DeviceLoss::lost_reason), failure) {
+        (Some(reason), _) => Err(GpuWaitError::DeviceLost(reason)),
+        (None, Some(failure)) => Err(failure),
+        (None, None) => Ok(()),
     }
+}
+
+/// Run `poll`, turning a panic inside it into `Err` with the panic's text:
+/// the crate's one catch around `Device::poll`, used by [`bounded_wait`] and
+/// `crate::device_lost_flag::poll_unless_lost`.
+///
+/// wgpu 29 reports a loss it finds while polling only by panicking: when the
+/// driver's fence wait or read fails, `Device::poll` raises its fatal error
+/// (`handle_error_fatal`) after wgpu-core's `lose()` has already run the
+/// device-lost callback, so the loss is recorded by the time this returns.
+/// On wasm a panic aborts and nothing is caught, but the WebGPU backend's
+/// poll does nothing there, so there is nothing to catch.
+pub(crate) fn catch_poll<T>(poll: impl FnOnce() -> T) -> Result<T, String> {
+    panic::catch_unwind(AssertUnwindSafe(poll))
+        .map_err(|payload| crate::gpu_budget::panic_text(payload.as_ref()))
 }
 
 #[cfg(test)]

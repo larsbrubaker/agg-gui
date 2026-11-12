@@ -8,10 +8,8 @@
 
 use std::sync::Arc;
 
-use agg_gui::widgets::tumble_cube::{CubeView, FACE_SIZE};
-use wgpu::util::DeviceExt;
-
 use super::{cube_vertices, effect_block, lights_block, rows, SCENE_WGSL};
+use agg_gui::widgets::tumble_cube::{CubeView, FACE_SIZE};
 
 const MIP_COUNT: u32 = 9; // 256 → 1
 /// position 3 + normal 3 + uv 2 + edge hints 3 + colour 4 floats.
@@ -74,7 +72,14 @@ fn uniform_buffer(device: &wgpu::Device, label: &str, bytes: u64) -> wgpu::Buffe
 }
 
 impl GpuState {
-    pub(crate) fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Self {
+    /// Build the cube's GPU state on `device`. Its vertices and indices are
+    /// filled through `queue` ([`crate::create_buffer_filled`]), so a state
+    /// built on a lost device is invalid but does not panic.
+    pub(crate) fn new(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        format: wgpu::TextureFormat,
+    ) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("tumble cube scene"),
             source: wgpu::ShaderSource::Wgsl(SCENE_WGSL.into()),
@@ -187,16 +192,24 @@ impl GpuState {
         });
 
         let (verts, indices) = cube_vertices();
-        let vbuf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("tumble cube vb"),
-            contents: bytemuck::cast_slice(&verts),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
-        let ibuf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("tumble cube ib"),
-            contents: bytemuck::cast_slice(&indices),
-            usage: wgpu::BufferUsages::INDEX,
-        });
+        let vbuf = crate::create_buffer_filled(
+            device,
+            queue,
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("tumble cube vb"),
+                contents: bytemuck::cast_slice(&verts),
+                usage: wgpu::BufferUsages::VERTEX,
+            },
+        );
+        let ibuf = crate::create_buffer_filled(
+            device,
+            queue,
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("tumble cube ib"),
+                contents: bytemuck::cast_slice(&indices),
+                usage: wgpu::BufferUsages::INDEX,
+            },
+        );
         let transform = uniform_buffer(device, "tumble cube transform", 128);
         let lights = uniform_buffer(device, "tumble cube lights", 128);
         let effect = uniform_buffer(device, "tumble cube effect", 208);

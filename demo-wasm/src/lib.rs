@@ -651,6 +651,7 @@ pub fn render(width: u32, height: u32, frame_ms: f64) {
                     let dst_rect = agg_gui::Rect::new(0.0, 0.0, width as f64, height as f64);
                     scene_fb.blit_to(
                         &device,
+                        &queue,
                         &mut encoder,
                         &surface_view,
                         (width, height),

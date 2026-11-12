@@ -408,6 +408,7 @@ pub(crate) fn alloc_proxy(
 /// copy mode, no blending).
 pub(crate) fn blit_proxy(
     device: &wgpu::Device,
+    queue: &wgpu::Queue,
     textures: &mut TextureLedger,
     encoder: &mut wgpu::CommandEncoder,
     comp: &CompOpGpu,
@@ -425,6 +426,7 @@ pub(crate) fn blit_proxy(
     // than left to the browser's garbage collector (see `texture_life`).
     let buffer = textures.create_buffer_for_frame(
         device,
+        queue,
         &wgpu::util::BufferInitDescriptor {
             label: Some("comp_op_blit"),
             contents: bytemuck::bytes_of(&uniforms),

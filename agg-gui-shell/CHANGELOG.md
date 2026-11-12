@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps.
 
+## [0.7.0] - Unreleased
+
+### Changed
+
+- **Breaking:** built on agg-gui-wgpu 0.7.0. This crate re-exports its
+  `WgpuGfxCtx`, `Gpu`, `GpuInitError`, `CopySrc` and `gpu_budget`, so they are
+  now agg-gui-wgpu 0.7's: a consumer that names agg-gui-wgpu itself (for
+  `SsaaFramebuffer`, whose blits now take the queue, or anything else) moves
+  it to 0.7 too, or its types will not match the shell's.
+- A frame painted on a lost device no longer panics in the SSAA blit or the
+  tumble cube (agg-gui-wgpu 0.7.0): the frame is lost and the shell rebuilds
+  the device on the next one, as it already did.
+- The shell's render context is given the device's `DeviceLostFlag`, so its
+  screenshot read-backs return empty on a lost device instead of panicking,
+  and custom render passes see the loss as `WgpuCustomRenderCtx::device_lost`.
+
 ## [0.6.0] - 2026-10-29
 
 ### Changed

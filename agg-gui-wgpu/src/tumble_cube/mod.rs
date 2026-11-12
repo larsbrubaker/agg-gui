@@ -121,7 +121,11 @@ impl WgpuCustomRender for CubeGpu {
             // Dropping destroys them (`GpuState` and `SsaaFramebuffer` drop
             // impls); this frame has not recorded anything with them yet.
             self.framebuffer = None;
-            self.state = Some(gpu::GpuState::new(ctx.device, ctx.surface_format));
+            self.state = Some(gpu::GpuState::new(
+                ctx.device,
+                ctx.queue,
+                ctx.surface_format,
+            ));
             self.device_generation = ctx.device_generation;
             // A rebuilt state has blank textures: fill them below, this frame.
             self.faces_uploaded = false;

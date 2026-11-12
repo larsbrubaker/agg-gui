@@ -4,6 +4,8 @@
 //! touches [`WgpuGfxCtx::capture_texture`]: the GPU-direct surface snapshot, the
 //! textured re-draw of that snapshot into the scene, and both readback flavours
 //! (blocking for native Save/Copy, non-blocking for the web screen-share sender).
+//! Both check the context's loss record right before reading their mapped
+//! buffer, which a lost device destroys (`crate::device_lost_flag`).
 //!
 //! The `DrawCtx` trait methods in `draw_ctx_impl.rs` are thin delegates onto the
 //! `*_impl` inherent methods here, following the same convention used by
@@ -204,13 +206,25 @@ impl WgpuGfxCtx {
         });
         // Bounded: a hung GPU must fail the capture, not park the UI thread
         // (see `crate::gpu_wait`). A finished wait has run the map callback.
-        if let Err(e) =
-            crate::gpu_wait::wait_for_submission(&self.device, None, None, crate::GPU_WAIT_BUDGET)
-        {
+        let loss = self.device_lost.loss();
+        if let Err(e) = crate::gpu_wait::wait_for_submission(
+            &self.device,
+            None,
+            Some(loss),
+            crate::GPU_WAIT_BUDGET,
+        ) {
             log::warn!("agg-gui-wgpu: screenshot read-back abandoned: {e}");
             return (Vec::new(), 0, 0);
         }
         if receiver.recv().ok().and_then(|r| r.ok()).is_none() {
+            return (Vec::new(), 0, 0);
+        }
+        // The wait was this thread's last poll: a loss it found destroyed
+        // the mapped buffer, and reading it would panic.
+        if let Err(reason) = crate::device_lost_flag::mapped_read_allowed(Some(loss)) {
+            log::warn!(
+                "agg-gui-wgpu: screenshot read-back abandoned: the device was lost: {reason}"
+            );
             return (Vec::new(), 0, 0);
         }
 
@@ -324,8 +338,15 @@ impl WgpuGfxCtx {
     /// Harvest a completed readback's pixels, or `None` if still pending / none
     /// in flight.  Never blocks: on the web the map resolves on a later event
     /// loop turn; the cheap non-blocking `poll` keeps native progressing too.
+    ///
+    /// On a lost device ([`Self::device_lost`]) the readback in flight is
+    /// dropped and `None` returned: its map may have completed frames ago,
+    /// but the loss destroyed the buffer, and reading it would panic.
     pub fn poll_capture_readback(&mut self) -> Option<(Vec<u8>, u32, u32)> {
-        let _ = self.device.poll(wgpu::PollType::Poll);
+        if !crate::device_lost_flag::poll_unless_lost(&self.device, self.device_lost.loss()) {
+            self.pending_readback = None;
+            return None;
+        }
         match self.pending_readback.as_ref()?.done.try_recv() {
             Ok(Ok(())) => {}
             Err(std::sync::mpsc::TryRecvError::Empty) => return None, // not ready yet
@@ -341,7 +362,10 @@ impl WgpuGfxCtx {
             h,
             padded_bpr,
             ..
-        } = self.pending_readback.take().unwrap();
+        } = self.pending_readback.take()?;
+        // The harvest reads a map that may have completed frames before the
+        // poll above; checked again here, right before the read.
+        crate::device_lost_flag::mapped_read_allowed(Some(self.device_lost.loss())).ok()?;
 
         let bgra = matches!(
             self.surface_format,

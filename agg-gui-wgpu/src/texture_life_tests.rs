@@ -224,6 +224,7 @@ fn an_ssaa_blit_hands_its_buffers_to_the_caller_that_submits() {
         for half in [0.0, 16.0] {
             fb.blit_downsample_retiring(
                 device,
+                queue,
                 &mut encoder,
                 &target.view,
                 (32, 32),
