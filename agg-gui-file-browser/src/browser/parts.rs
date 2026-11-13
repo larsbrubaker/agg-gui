@@ -18,6 +18,11 @@
 //! capture, GUI automation's widget handles) follow. A bar whose shape changed (the list-only
 //! form's toolbar losing its view button on a phone's panel) is the new build's, the box moved
 //! into it ([`take_search_box`]).
+//!
+//! The breadcrumb trail is kept the same way when the new build's would equal it
+//! (`bread_crumb.rs`'s `CrumbKey`): [`keep_crumbs`] moves the old trail into the new bar, so a
+//! restore landing on the trail it showed (the navigation count and the header change, the path
+//! does not) leaves the crumbs under the pointer the widgets the user is pressing.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -31,6 +36,8 @@ use crate::state::BrowserState;
 
 /// The search slot's type name, which [`take_search_box`] finds it by.
 const SEARCH_SLOT: &str = "SearchSlot";
+/// The breadcrumb trail's type name, which [`keep_crumbs`] finds it by.
+const CRUMBS: &str = "FolderBreadCrumbWidget";
 
 /// The place in the header where the search box stands (see the module header).
 pub struct SearchSlot {
@@ -171,6 +178,30 @@ fn put_search_box(widget: &mut dyn Widget, search_box: Box<dyn Widget>) {
         .find(|c| holds_search_slot(c.as_ref()))
     {
         put_search_box(child.as_mut(), search_box);
+    }
+}
+
+/// The breadcrumb trail standing somewhere under `widgets`.
+fn crumbs_mut(widgets: &mut [Box<dyn Widget>]) -> Option<&mut Box<dyn Widget>> {
+    for widget in widgets.iter_mut() {
+        if widget.type_name() == CRUMBS {
+            return Some(widget);
+        }
+        if let Some(found) = crumbs_mut(widget.children_mut()) {
+            return Some(found);
+        }
+    }
+    None
+}
+
+/// Moves the breadcrumb trail standing in `old` (the bars a rebuild replaces) into `new` (the nav
+/// bar just built, whose trail equals it), in place of `new`'s own; nothing when either has none.
+pub(crate) fn keep_crumbs(old: &mut [Box<dyn Widget>], new: &mut Box<dyn Widget>) {
+    let Some(old_crumbs) = crumbs_mut(old) else {
+        return;
+    };
+    if let Some(new_crumbs) = crumbs_mut(std::slice::from_mut(new)) {
+        std::mem::swap(old_crumbs, new_crumbs);
     }
 }
 

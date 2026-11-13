@@ -7,6 +7,12 @@
 //! The floor is up button / root / "..." / current folder. Which crumbs fit depends on the width,
 //! so [`FolderBreadCrumbWidget`] keeps every crumb and re-elides at each layout whose width
 //! differs from the last.
+//!
+//! A trail built from equal inputs ([`CrumbKey`]: the names, the look's style and widget names,
+//! the up button's tooltip) looks and acts the same, since each crumb's click goes to its depth
+//! through the caller's handler; so the composed browser keeps the trail it has rather than build
+//! an equal one (`browser/mod.rs`), and a crumb under the pointer stays the widget the user
+//! pressed.
 
 use std::rc::Rc;
 use std::sync::Arc;
@@ -17,7 +23,7 @@ use agg_gui_files::tr;
 
 use crate::icon_button::BrowserIconButton;
 use crate::link_label::LinkLabel;
-use crate::look::{BrowserIcon, BrowserLook};
+use crate::look::{BrowserIcon, BrowserLook, BrowserNames, BrowserStyle};
 
 /// The space between neighbouring pieces of the trail.
 const GAP: f64 = 4.0;
@@ -187,6 +193,29 @@ impl Widget for FolderBreadCrumbWidget {
     fn paint(&mut self, _ctx: &mut dyn DrawCtx) {}
     fn on_event(&mut self, _event: &Event) -> EventResult {
         EventResult::Ignored
+    }
+}
+
+/// What [`folder_bread_crumb_for`] builds a trail from, besides its click handler and font (a
+/// browser's own, fixed for its life): two trails of equal keys look and act the same.
+#[derive(Clone, PartialEq)]
+pub(crate) struct CrumbKey {
+    names: Vec<String>,
+    style: BrowserStyle,
+    widget_names: BrowserNames,
+    up_tooltip: String,
+}
+
+impl CrumbKey {
+    /// The key of the trail for `names` (the root first) drawn in `look` now: the look's style is
+    /// read as it is now (a theme switch changes it), and so is the tooltip's language.
+    pub(crate) fn new(names: &[String], look: &Rc<dyn BrowserLook>) -> Self {
+        Self {
+            names: names.to_vec(),
+            style: look.style(),
+            widget_names: look.names().clone(),
+            up_tooltip: tr("Click to go back"),
+        }
     }
 }
 

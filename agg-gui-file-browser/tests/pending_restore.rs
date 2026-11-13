@@ -5,10 +5,12 @@
 //! remembers each folder the user moves to; the root's header markdown stays hidden meanwhile.
 //! Each answer tells the restore-finished listeners whether it landed, failed, was abandoned by
 //! the user or superseded by a retry; a landed restore is not written back to the memory, nor is
-//! a superseded one's root, but one the user shortened with a crumb is.
+//! a superseded one's root, but one the user shortened with a crumb is. A restore landing on the
+//! trail it showed keeps the same crumb widgets, so a click pressed on one as it lands goes
+//! through; a new trail or a new look builds them again.
 //! Driven through agg-gui's `App` with real clicks.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::future::Future;
 use std::pin::Pin;
 use std::rc::Rc;
@@ -18,8 +20,9 @@ use std::task::{Context, Poll, Waker};
 use agg_gui::text::Font;
 use agg_gui::{App, Event, Modifiers, MouseButton, Point, Rect, Size, Widget};
 use agg_gui_file_browser::{
-    run_ready_local_tasks, BrowserConfig, BrowserMemory, BrowserPage, BrowserState, FileBrowser,
-    LocationFuture, OpenFolder, RestoreOutcome, ViewMode,
+    run_ready_local_tasks, BrowserConfig, BrowserLayout, BrowserLook, BrowserMemory, BrowserNames,
+    BrowserOptions, BrowserPage, BrowserState, BrowserStyle, FileBrowser, LocationFuture,
+    OpenFolder, RestoreOutcome, ViewMode,
 };
 use agg_gui_files::{DynamicFolder, Folder, MemoryFolder};
 
@@ -442,4 +445,170 @@ fn a_restore_a_retry_superseded_writes_nothing_when_its_late_answer_comes() {
         [(RestoreOutcome::Superseded, 1), (RestoreOutcome::Landed, 3)]
     );
     assert!(memory.remembered.borrow().is_empty());
+}
+
+/// The crumb named `id`'s address (which widget it is) and its window rectangle.
+fn crumb_at(app: &App, id: &str) -> (*const (), Rect) {
+    let (widget, rect) =
+        find(app.root(), id, Point::default()).unwrap_or_else(|| panic!("no widget named {id}"));
+    ((widget as *const dyn Widget).cast::<()>(), rect)
+}
+
+/// The breadcrumb trail widget's pieces, each as its type name and properties.
+fn crumb_pieces(
+    app: &App,
+    state: &Rc<RefCell<BrowserState>>,
+) -> Vec<(String, Vec<(String, String)>)> {
+    let id = state.borrow().config().look.names().bread_crumb.clone();
+    let (trail, _) = find(app.root(), &id, Point::default()).expect("a breadcrumb trail");
+    trail
+        .children()
+        .iter()
+        .map(|piece| {
+            let properties = piece.properties().into_iter();
+            let properties = properties.map(|(k, v)| (k.to_string(), v)).collect();
+            (piece.type_name().to_string(), properties)
+        })
+        .collect()
+}
+
+/// The texts of the trail's folder links, the root first.
+fn crumb_texts(app: &App, state: &Rc<RefCell<BrowserState>>) -> Vec<String> {
+    crumb_pieces(app, state)
+        .into_iter()
+        .filter(|(kind, _)| kind == "LinkLabel")
+        .filter_map(|(_, properties)| properties.into_iter().find(|(k, _)| k == "text"))
+        .map(|(_, text)| text)
+        .collect()
+}
+
+#[test]
+fn a_crumb_pressed_as_the_restore_lands_on_its_trail_is_kept_and_its_click_goes_through() {
+    for layout in [BrowserLayout::TreeAndList, BrowserLayout::ListOnly] {
+        pressed_as_it_lands(layout);
+    }
+}
+
+/// A press on Home while the restore is found, the restore landing, then the release.
+fn pressed_as_it_lands(form: BrowserLayout) {
+    let memory = Slow::new();
+    agg_gui::set_device_scale(1.0);
+    let config = BrowserConfig::builder()
+        .memory(Rc::clone(&memory) as Rc<dyn BrowserMemory>)
+        .options(BrowserOptions {
+            layout: form,
+            ..BrowserOptions::default()
+        })
+        .build();
+    let state = BrowserState::new(Box::new(memory.home.clone()), config);
+    state.borrow_mut().set_view_mode(ViewMode::Rows);
+    let mut app = App::new(Box::new(FileBrowser::new(&state, font()).remembering(KEY)));
+    layout(&mut app);
+    let home = crumb(&state, "Home");
+    let (before, r) = crumb_at(&app, &home);
+    let (x, y) = (r.x + r.width / 2.0, HEIGHT - (r.y + r.height / 2.0));
+    app.on_mouse_move(x, y);
+    app.on_mouse_down(x, y, MouseButton::Left, Modifiers::default());
+    // The folder lands on the trail it showed while the button is down.
+    memory.answer();
+    layout(&mut app);
+    assert_eq!(property(&app, "restoring"), "false");
+    assert_eq!(
+        state.borrow().path_names(),
+        ["Home", "Projects", "Brackets"]
+    );
+    let (after, _) = crumb_at(&app, &home);
+    assert_eq!(
+        before, after,
+        "{form:?}: the crumb under the pointer is the same widget"
+    );
+    app.on_mouse_up(x, y, MouseButton::Left, Modifiers::default());
+    layout(&mut app);
+    assert_eq!(
+        state.borrow().path_names(),
+        ["Home"],
+        "{form:?}: the click on Home goes through"
+    );
+}
+
+#[test]
+fn a_new_trail_builds_new_crumbs_whose_up_button_climbs_from_there() {
+    let memory = Slow::new();
+    let state = state(&memory);
+    let mut app = App::new(Box::new(FileBrowser::new(&state, font()).remembering(KEY)));
+    layout(&mut app);
+    memory.answer();
+    layout(&mut app);
+    assert_eq!(crumb_texts(&app, &state), ["Home", "Projects", "Brackets"]);
+    click(&mut app, &crumb(&state, "Projects"));
+    assert_eq!(state.borrow().path_names(), ["Home", "Projects"]);
+    assert_eq!(crumb_texts(&app, &state), ["Home", "Projects"]);
+    let up = state.borrow().config().look.names().up_button.clone();
+    click(&mut app, &up);
+    assert_eq!(state.borrow().path_names(), ["Home"], "up from Projects");
+    assert_eq!(crumb_texts(&app, &state), ["Home"]);
+}
+
+/// The default look's style at a text size the test changes.
+struct SizedLook {
+    names: BrowserNames,
+    font_size: Cell<f64>,
+}
+
+impl BrowserLook for SizedLook {
+    fn style(&self) -> BrowserStyle {
+        BrowserStyle {
+            font_size: self.font_size.get(),
+            ..BrowserStyle::default()
+        }
+    }
+    fn names(&self) -> &BrowserNames {
+        &self.names
+    }
+}
+
+#[test]
+fn a_look_changed_while_finding_shows_in_the_crumbs_once_the_restore_lands() {
+    let memory = Slow::new();
+    agg_gui::set_device_scale(1.0);
+    let look = Rc::new(SizedLook {
+        names: BrowserNames::default(),
+        font_size: Cell::new(14.0),
+    });
+    let config = BrowserConfig::builder()
+        .memory(Rc::clone(&memory) as Rc<dyn BrowserMemory>)
+        .look(Rc::clone(&look) as Rc<dyn BrowserLook>)
+        .build();
+    let state = BrowserState::new(Box::new(memory.home.clone()), config);
+    state.borrow_mut().set_view_mode(ViewMode::Rows);
+    let mut app = App::new(Box::new(FileBrowser::new(&state, font()).remembering(KEY)));
+    layout(&mut app);
+    // The separators ("/", the plain labels other than an elision's "...") are one unit larger
+    // than the links.
+    let separator_sizes = |app: &App| -> Vec<String> {
+        crumb_pieces(app, &state)
+            .into_iter()
+            .filter(|(kind, properties)| {
+                kind == "Label" && properties.iter().any(|(k, v)| k == "text" && v == "/")
+            })
+            .filter_map(|(_, properties)| {
+                let size = properties.into_iter().find(|(k, _)| k == "font_size");
+                size.map(|(_, v)| v)
+            })
+            .collect()
+    };
+    assert_eq!(separator_sizes(&app), ["15.0", "15.0"]);
+    look.font_size.set(20.0);
+    memory.answer();
+    layout(&mut app);
+    assert_eq!(
+        state.borrow().path_names(),
+        ["Home", "Projects", "Brackets"]
+    );
+    // The larger trail may elide a crumb and its separator: every one shown is the new look's.
+    let sizes = separator_sizes(&app);
+    assert!(
+        !sizes.is_empty() && sizes.iter().all(|s| s == "21.0"),
+        "the new look's crumbs: {sizes:?}"
+    );
 }

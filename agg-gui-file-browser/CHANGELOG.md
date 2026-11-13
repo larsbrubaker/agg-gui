@@ -8,6 +8,16 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ## [Unreleased]
 
+## [0.0.14] - 2026-11-13
+
+### Fixed
+
+- `FileBrowser` keeps its breadcrumb widgets when it rebuilds its header for the same trail, look
+  and language, as when a remembered folder that was loading lands on the trail it showed. Every
+  crumb used to be built again then, so a click pressed on one (Home) as the folder landed was
+  lost: the crumb under the pointer was a new widget that had not seen the press. A new trail, or
+  a look whose style or widget names changed, still builds new crumbs.
+
 ## [0.0.13] - 2026-11-08
 
 ### Fixed

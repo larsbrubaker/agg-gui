@@ -31,7 +31,9 @@
 //! the list (and its scroll position) and the notice (and its fade) are kept, and so is the bar
 //! holding the search box, around the same box: only what stands beside the box is new
 //! (`parts.rs`), so the box keeps its text and focus and stays the widget a pointer is on its
-//! way to.
+//! way to. The breadcrumb trail is kept too while the new build's would be the same (the same
+//! trail, look and language), as when a restore lands on the trail it showed: a crumb the user
+//! is clicking as the folder lands stays the widget under the pointer, and the click goes through.
 //!
 //! A browser given a location key ([`FileBrowser::remembering`]) opens where the config's
 //! memory says it was last left under that key, showing that place's breadcrumbs over a loading
@@ -59,7 +61,7 @@ use std::sync::Arc;
 use agg_gui::text::Font;
 use agg_gui::{DrawCtx, Event, EventResult, FlexRow, Insets, MouseButton, Rect, Size, Widget};
 
-use crate::bread_crumb::folder_bread_crumb_for;
+use crate::bread_crumb::{folder_bread_crumb_for, CrumbKey};
 use crate::config::BrowserLayout;
 use crate::history::notice::BrowserNotice;
 use crate::list::BrowserList;
@@ -73,7 +75,9 @@ use crate::search::controller::SearchController;
 use crate::search::search_box::SearchBox;
 use crate::state::{BrowserState, RestoreOutcome};
 use crate::tree::{BrowserTree, TreeModel};
-use parts::{holds_search_slot, keep_search_bar, BottomBorder, ListColumn, SearchSlot};
+use parts::{
+    holds_search_slot, keep_crumbs, keep_search_bar, BottomBorder, ListColumn, SearchSlot,
+};
 
 /// The tab form's search box width, in logical units.
 pub const SEARCH_BOX_WIDTH: f64 = 200.0;
@@ -128,6 +132,8 @@ pub struct FileBrowser {
     /// The search box while no header holds it (before the first build).
     search_box: Option<Box<dyn Widget>>,
     built: Option<HeaderKey>,
+    /// What the nav bar's breadcrumb trail was built from: an equal trail is kept, not built.
+    crumbs_built: Option<CrumbKey>,
     /// The memory key the browser's place is remembered under, if any.
     location_key: Option<String>,
     /// The navigation count last remembered under `location_key` (or a restore landed at),
@@ -177,6 +183,7 @@ impl FileBrowser {
             body_compact: None,
             search_box: Some(Box::new(search_box)),
             built: None,
+            crumbs_built: None,
             location_key: None,
             remembered: Rc::new(Cell::new(None)),
             overlays: Vec::new(),
@@ -325,6 +332,17 @@ impl FileBrowser {
         self.body_compact = Some(key.compact);
         let notice = notice
             .unwrap_or_else(|| Box::new(BrowserNotice::new(&self.state, Arc::clone(&self.font))));
+        // The tree form's nav bar holds the search box; the list-only form's toolbar does.
+        let search_slot = match self.list_only {
+            true => None,
+            false => Some(SearchSlot::new_or_empty(search_box.take())),
+        };
+        let mut nav_bar = self.nav_bar(search_slot);
+        let crumbs = CrumbKey::new(&key.path, &self.look);
+        if self.crumbs_built.as_ref() == Some(&crumbs) {
+            keep_crumbs(&mut old_bars, &mut nav_bar);
+        }
+        self.crumbs_built = Some(crumbs);
         let mut kept = old_bars
             .into_iter()
             .find(|bar| holds_search_slot(bar.as_ref()));
@@ -335,8 +353,8 @@ impl FileBrowser {
                 bar
             }
         };
+        let nav_bar = keep(nav_bar);
         if self.list_only {
-            let nav_bar = keep(self.nav_bar(None));
             let toolbar =
                 keep(self.toolbar(SearchSlot::new_or_empty(search_box.take()), key.compact));
             self.place(nav_bar, Role::Bar);
@@ -351,7 +369,6 @@ impl FileBrowser {
                 self.place(Box::new(bar), Role::Message);
             }
         } else {
-            let nav_bar = keep(self.nav_bar(Some(SearchSlot::new_or_empty(search_box.take()))));
             self.place(nav_bar, Role::Bar);
             self.place(body, Role::Body);
         }
