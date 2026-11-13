@@ -1,4 +1,5 @@
-//! DOM → agg-gui input and sizing math: mouse-button codes, the `buttons`
+//! DOM → agg-gui input and sizing math: mouse-button codes, which buttons'
+//! browser handling the canvas cancels, the `buttons`
 //! bitmask, CSS-pixel → physical-pixel positions, canvas backing-store size,
 //! device-pixel-ratio sanitising, the cap that keeps a full-window canvas
 //! inside the visible viewport, and whether the keyboard is the app's.
@@ -151,6 +152,18 @@ pub(crate) fn mouse_button_from_dom(button: i16) -> MouseButton {
     }
 }
 
+/// Whether the canvas cancels the browser's own handling of a mouse press,
+/// release and `auxclick` of DOM button `button`, so the app has the button
+/// to itself. Only the middle button: browsers answer it on their own
+/// (Windows autoscrolls the page, Linux pastes the selection), which would
+/// move or change the host page while the app pans with it. The left
+/// button's press focuses the canvas and keeps text editing working, the
+/// right button's menu is cancelled through `contextmenu`, and the back and
+/// forward buttons keep navigating the page.
+pub(crate) fn cancels_mouse_button_default(button: i16) -> bool {
+    button == 1
+}
+
 /// Modifiers from a DOM event's `shiftKey/ctrlKey/altKey/metaKey`. The event's
 /// own flags are authoritative — cached key state goes stale across an
 /// Alt+Tab that never delivers the matching `keyup`.
@@ -233,6 +246,14 @@ mod tests {
         assert_eq!(mouse_button_from_dom(2), MouseButton::Right);
         assert_eq!(mouse_button_from_dom(3), MouseButton::Other(3));
         assert_eq!(mouse_button_from_dom(-1), MouseButton::Other(0));
+    }
+
+    #[test]
+    fn only_the_middle_buttons_browser_handling_is_cancelled() {
+        assert!(cancels_mouse_button_default(1));
+        for button in [-1, 0, 2, 3, 4] {
+            assert!(!cancels_mouse_button_default(button), "button {button}");
+        }
     }
 
     #[test]

@@ -65,6 +65,8 @@ web-sys = { version = "0.3.82", features = [
     "PointerEvent",
     "MouseEvent",
     "WheelEvent",
+    # Listeners that must be able to cancel (web/input.rs: `passive: false`)
+    "AddEventListenerOptions",
     # Browser input methods (web/ime.rs)
     "HtmlInputElement",
     "InputEvent",

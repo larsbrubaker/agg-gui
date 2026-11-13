@@ -162,6 +162,13 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Fixed
 
+- A canvas embedded in a page that scrolls keeps its gestures from the page:
+  a middle press on it no longer starts the browser's autoscroll (Windows)
+  and a middle click no longer pastes (Linux) while the app pans with the
+  button, since its `mousedown`, `mouseup` and `auxclick` have their browser
+  handling cancelled (the pointer events still reach the app). The wheel and
+  `contextmenu` listeners are registered `passive: false`, so their
+  cancelling is honoured on every browser.
 - A full-window app on a page that sizes its canvas with `100vh` no longer
   runs under the bottom of the screen on Android Chrome while the address bar
   shows (`100vh` there is the viewport with the bar hidden, about 56 CSS px

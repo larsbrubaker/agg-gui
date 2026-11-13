@@ -5,6 +5,12 @@
 //! page, `WebShellConfig::keyboard_needs_focus`). Each DOM event becomes an `agg_gui::shell_input::ForwarderEvent` carrying its own
 //! position and modifiers, handed to the shell's forwarder ([`forward`]).
 //!
+//! The canvas keeps its gestures from the host page: the wheel, the context
+//! menu and the middle button's press, release and `auxclick` (autoscroll,
+//! paste) have their browser handling cancelled by listeners registered
+//! `passive: false`, and `touch-action: none` keeps one- and two-finger
+//! touches from scrolling or zooming the page.
+//!
 //! Extracted from `demo-wgpu`'s `web_shell` (pointer events, touch pipeline,
 //! wheel normaliser, cursor icon) with AtomArtist's additions (pointer-leave
 //! clears hover, `buttons` resync for the idle guard). The numeric mapping is
@@ -20,8 +26,9 @@ use wasm_bindgen::JsCast;
 use super::{forward, sensors};
 use super::{frame::input_scale, lifecycle, note_input, note_input_without_repaint};
 use crate::dom_math::{
-    canvas_tabindex_to_add, client_to_physical, keyboard_belongs_to_app, modifiers,
-    mouse_button_from_dom, pressed_button_count, PageFocus, PointerKind,
+    cancels_mouse_button_default, canvas_tabindex_to_add, client_to_physical,
+    keyboard_belongs_to_app, modifiers, mouse_button_from_dom, pressed_button_count, PageFocus,
+    PointerKind,
 };
 use crate::pointer::move_forces_repaint;
 
@@ -102,6 +109,33 @@ pub(super) fn add_listener<E>(
     let cb = Closure::<dyn FnMut(E)>::new(handler);
     if target
         .add_event_listener_with_callback(event, cb.as_ref().unchecked_ref())
+        .is_ok()
+    {
+        // Leaked deliberately: listeners live as long as the page.
+        cb.forget();
+    }
+}
+
+/// [`add_listener`] for a handler that cancels the event's browser handling:
+/// registered `passive: false`, so the browser waits for it and honours its
+/// `preventDefault()` (it may treat a wheel or touch listener as passive
+/// otherwise, and scroll the page while the app uses the gesture).
+fn add_cancelling_listener<E>(
+    target: &web_sys::EventTarget,
+    event: &str,
+    handler: impl FnMut(E) + 'static,
+) where
+    E: wasm_bindgen::convert::FromWasmAbi + 'static,
+{
+    let cb = Closure::<dyn FnMut(E)>::new(handler);
+    let options = web_sys::AddEventListenerOptions::new();
+    options.set_passive(false);
+    if target
+        .add_event_listener_with_callback_and_add_event_listener_options(
+            event,
+            cb.as_ref().unchecked_ref(),
+            &options,
+        )
         .is_ok()
     {
         // Leaked deliberately: listeners live as long as the page.
@@ -260,7 +294,8 @@ pub(super) fn install_pointer_listeners(canvas: &web_sys::HtmlCanvasElement, nee
     {
         let c = canvas.clone();
         // DOM deltas → agg-gui notches (fractional for precision devices).
-        add_listener(target, "wheel", move |e: web_sys::WheelEvent| {
+        // The wheel over the canvas is the app's: the page must not scroll.
+        add_cancelling_listener(target, "wheel", move |e: web_sys::WheelEvent| {
             e.prevent_default();
             let (x, y) = pos(&c, e.client_x(), e.client_y());
             // DOM deltaY is positive-scroll-DOWN; App wants positive =
@@ -288,7 +323,21 @@ pub(super) fn install_pointer_listeners(canvas: &web_sys::HtmlCanvasElement, nee
             note_input();
         });
     }
-    add_listener(target, "contextmenu", |e: web_sys::Event| {
+    // The right button is the app's (a context menu of its own, a drag).
+    add_cancelling_listener(target, "contextmenu", |e: web_sys::Event| {
         e.prevent_default()
     });
+    // The middle button is the app's too (a pan): the browser's own answer
+    // to it (autoscroll on Windows, starting at the press; paste on Linux,
+    // at the click) would move or change the page under the drag. Cancelling
+    // the pointer event does not reach these, so the mouse events are
+    // cancelled themselves; the pointer listeners above still deliver the
+    // press, drag and release.
+    for event in ["mousedown", "mouseup", "auxclick"] {
+        add_cancelling_listener(target, event, |e: web_sys::MouseEvent| {
+            if cancels_mouse_button_default(e.button()) {
+                e.prevent_default();
+            }
+        });
+    }
 }
