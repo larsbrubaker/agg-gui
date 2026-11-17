@@ -10,6 +10,9 @@
 #[cfg(not(target_arch = "wasm32"))]
 #[path = "adapter_caps_tests.rs"]
 mod adapter_caps_tests;
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "bind_group_reuse_tests.rs"]
+mod bind_group_reuse_tests;
 #[path = "clip_path_readback_tests.rs"]
 mod clip_path_readback_tests;
 #[path = "dead_sweep_tests.rs"]

@@ -37,6 +37,7 @@ use agg_gui::color::Color;
 use agg_gui::CompOp;
 use agg_rust::color::Rgba8;
 
+use crate::bind_group_cache::BindGroupCache;
 use crate::end_frame::{Prepared, PreparedSlice};
 use crate::texture_life::TextureLedger;
 use crate::{DrawCommand, WgpuGfxCtx};
@@ -128,31 +129,37 @@ impl CompOpGpu {
         Self { bgl, pipeline }
     }
 
+    /// Made for one composite of one frame (its destination copy is a
+    /// one-frame texture), so counted as such in `bind_groups`.
     fn bind_group(
         &self,
         device: &wgpu::Device,
+        bind_groups: &mut BindGroupCache,
         coverage: &wgpu::TextureView,
         dest: &wgpu::TextureView,
         uniform: wgpu::BindingResource<'_>,
     ) -> wgpu::BindGroup {
-        device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("comp_op_bg"),
-            layout: &self.bgl,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(coverage),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::TextureView(dest),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: uniform,
-                },
-            ],
-        })
+        bind_groups.one_frame(
+            device,
+            &wgpu::BindGroupDescriptor {
+                label: Some("comp_op_bg"),
+                layout: &self.bgl,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(coverage),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::TextureView(dest),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: uniform,
+                    },
+                ],
+            },
+        )
     }
 }
 
@@ -244,6 +251,7 @@ pub(crate) fn prepare_end(
     uniform: &PreparedSlice,
     clip: Option<[i32; 4]>,
     textures: &mut TextureLedger,
+    bind_groups: &mut BindGroupCache,
 ) -> Prepared {
     // Lives for this frame only: destroyed after the frame's submit.
     let dest = textures.create_for_frame(
@@ -266,6 +274,7 @@ pub(crate) fn prepare_end(
     let dest_view = dest.create_view(&wgpu::TextureViewDescriptor::default());
     let bg = comp.bind_group(
         device,
+        bind_groups,
         view,
         &dest_view,
         wgpu::BindingResource::Buffer(uniform.uniform_binding()),
@@ -406,10 +415,13 @@ pub(crate) fn alloc_proxy(
 
 /// Copy the proxy onto the surface, texel for texel (the composite shader's
 /// copy mode, no blending).
+// Each argument is a distinct GPU resource the blit uses; a struct would only rename them.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn blit_proxy(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     textures: &mut TextureLedger,
+    bind_groups: &mut BindGroupCache,
     encoder: &mut wgpu::CommandEncoder,
     comp: &CompOpGpu,
     proxy: &wgpu::TextureView,
@@ -433,7 +445,13 @@ pub(crate) fn blit_proxy(
             usage: wgpu::BufferUsages::UNIFORM,
         },
     );
-    let bg = comp.bind_group(device, proxy, proxy, buffer.as_entire_binding());
+    let bg = comp.bind_group(
+        device,
+        bind_groups,
+        proxy,
+        proxy,
+        buffer.as_entire_binding(),
+    );
     let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
         label: Some("comp_op_blit"),
         color_attachments: &[Some(wgpu::RenderPassColorAttachment {

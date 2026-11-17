@@ -3,7 +3,7 @@
 //!
 //! Two-phase approach to satisfy wgpu's borrow rules:
 //!
-//! 1. **Prepare** — walk `commands`, allocate GPU buffers, build bind groups.
+//! 1. **Prepare** — walk `commands`, allocate GPU buffers, get bind groups.
 //!    All owned resources are collected in a `Vec<Prepared>`.  A *size stack*
 //!    is simulated so each command's uniforms get the resolution of whichever
 //!    render target is current at that point in the command list.
@@ -17,6 +17,7 @@
 
 use std::sync::Arc;
 
+use crate::bind_group_cache::UniformBind;
 use crate::end_frame_prepare::prepare_all;
 use crate::pipelines::WgpuPipelines;
 use crate::{LastEndFrameStats, WgpuGfxCtx};
@@ -69,7 +70,7 @@ pub(crate) enum Prepared {
         vb: PreparedSlice,
         ib: PreparedSlice,
         index_count: u32,
-        bg0: wgpu::BindGroup,
+        bg0: UniformBind,
         clip: Option<[i32; 4]>,
     },
     /// AA solid (per-vertex alpha from tess2 halo strips).
@@ -77,7 +78,7 @@ pub(crate) enum Prepared {
         vb: PreparedSlice,
         ib: PreparedSlice,
         index_count: u32,
-        bg0: wgpu::BindGroup,
+        bg0: UniformBind,
         clip: Option<[i32; 4]>,
     },
     /// AA via texture lookup — agg-sharp `Graphics2DGpu` port.
@@ -87,7 +88,7 @@ pub(crate) enum Prepared {
         vb: PreparedSlice,
         ib: PreparedSlice,
         index_count: u32,
-        bg0: wgpu::BindGroup,
+        bg0: UniformBind,
         bg1: Arc<wgpu::BindGroup>,
         clip: Option<[i32; 4]>,
     },
@@ -98,7 +99,7 @@ pub(crate) enum Prepared {
         vb: PreparedSlice,
         ib: PreparedSlice,
         index_count: u32,
-        bg0: wgpu::BindGroup,
+        bg0: UniformBind,
         bg1: wgpu::BindGroup,
         clip: Option<[i32; 4]>,
     },
@@ -107,8 +108,8 @@ pub(crate) enum Prepared {
         _texture: Arc<wgpu::Texture>,
         _view: wgpu::TextureView,
         vb: PreparedSlice,
-        bg0: wgpu::BindGroup,
-        bg1: wgpu::BindGroup,
+        bg0: UniformBind,
+        bg1: Arc<wgpu::BindGroup>,
         clip: Option<[i32; 4]>,
     },
     /// LCD subpixel mask (3-pass, or single grayscale pass when `flatten`).
@@ -117,8 +118,8 @@ pub(crate) enum Prepared {
         _view: wgpu::TextureView,
         vb: PreparedSlice,
         ib: PreparedSlice,
-        bg0s: [wgpu::BindGroup; 3],
-        bg1: wgpu::BindGroup,
+        bg0s: [UniformBind; 3],
+        bg1: Arc<wgpu::BindGroup>,
         clip: Option<[i32; 4]>,
         flatten: bool,
     },
@@ -130,8 +131,8 @@ pub(crate) enum Prepared {
         _alpha_view: wgpu::TextureView,
         vb: PreparedSlice,
         ib: PreparedSlice,
-        bg0s: [wgpu::BindGroup; 3],
-        bg1: wgpu::BindGroup,
+        bg0s: [UniformBind; 3],
+        bg1: Arc<wgpu::BindGroup>,
         clip: Option<[i32; 4]>,
         flatten: bool,
     },
@@ -146,8 +147,8 @@ pub(crate) enum Prepared {
         _texture: Arc<wgpu::Texture>,
         _view: wgpu::TextureView,
         vb: PreparedSlice,
-        bg0: wgpu::BindGroup,
-        bg1: wgpu::BindGroup,
+        bg0: UniformBind,
+        bg1: Arc<wgpu::BindGroup>,
         parent_clip: Option<[i32; 4]>,
     },
     /// End clip-layer rendering and composite onto the parent through the
@@ -159,8 +160,8 @@ pub(crate) enum Prepared {
         ib: PreparedSlice,
         /// 0 for an empty clip — nothing is drawn.
         index_count: u32,
-        bg0: wgpu::BindGroup,
-        bg1: wgpu::BindGroup,
+        bg0: UniformBind,
+        bg1: Arc<wgpu::BindGroup>,
         parent_clip: Option<[i32; 4]>,
     },
     /// Composite a retained layer onto the current target — no layer-stack
@@ -169,8 +170,8 @@ pub(crate) enum Prepared {
         _texture: Arc<wgpu::Texture>,
         _view: wgpu::TextureView,
         vb: PreparedSlice,
-        bg0: wgpu::BindGroup,
-        bg1: wgpu::BindGroup,
+        bg0: UniformBind,
+        bg1: Arc<wgpu::BindGroup>,
         parent_clip: Option<[i32; 4]>,
     },
     /// Begin a blend-mode draw's coverage layer (see `crate::comp_op`).
@@ -235,6 +236,7 @@ impl WgpuGfxCtx {
             &self.comp_op,
             self.surface_format,
             &mut self.textures,
+            &mut self.bind_groups,
         );
         // Upload everything `prepare_all` staged in the arenas — one write
         // per chunk.  Must precede the `queue.submit` below; timed as part of
@@ -293,6 +295,7 @@ impl WgpuGfxCtx {
                 &self.device,
                 &self.queue,
                 &mut self.textures,
+                &mut self.bind_groups,
                 &mut encoder,
                 &self.comp_op,
                 view,
@@ -309,8 +312,11 @@ impl WgpuGfxCtx {
         self.frame_timing.after_submit(&self.queue, t_submit);
         // Everything let go so far was last used by this frame or an earlier
         // one, all submitted now: destroy it (see `texture_life`). Layer
-        // textures no frame asked for this time go with it.
+        // textures no frame asked for this time go with it, and so do the
+        // bind groups kept over anything that goes (`bind_group_cache`).
         self.layer_pool.end_frame(&mut self.textures);
+        self.bind_groups
+            .end_frame(&self.frame_arenas.uniform, &self.textures);
         self.textures.destroy_retired();
         self.frame_arenas.destroy_retired();
 
@@ -368,7 +374,7 @@ fn execute_prepared<'a>(
     type PendingComposite<'p> = (
         &'p PreparedSlice,
         Option<(&'p PreparedSlice, u32)>,
-        &'p wgpu::BindGroup,
+        &'p UniformBind,
         &'p wgpu::BindGroup,
         Option<[i32; 4]>,
     );
@@ -400,14 +406,14 @@ fn execute_prepared<'a>(
                     match indexed {
                         None => {
                             pass.set_pipeline(&pipelines.layer_pipeline);
-                            pass.set_bind_group(0, bg0, &[]);
+                            bg0.set(&mut pass);
                             pass.set_bind_group(1, bg1, &[]);
                             pass.set_vertex_buffer(0, vb.wgpu_slice());
                             pass.draw(0..6, 0..1);
                         }
                         Some((ib, index_count)) if index_count > 0 => {
                             pass.set_pipeline(&pipelines.layer_mesh_pipeline);
-                            pass.set_bind_group(0, bg0, &[]);
+                            bg0.set(&mut pass);
                             pass.set_bind_group(1, bg1, &[]);
                             pass.set_vertex_buffer(0, vb.wgpu_slice());
                             pass.set_index_buffer(ib.wgpu_slice(), wgpu::IndexFormat::Uint32);
@@ -478,7 +484,7 @@ fn execute_prepared<'a>(
                     ..
                 } => {
                     target_stack.pop();
-                    pending_composite = Some((vb, None, bg0, bg1, *parent_clip));
+                    pending_composite = Some((vb, None, bg0, &**bg1, *parent_clip));
                     i += 1;
                 }
                 Prepared::PopLayerMasked {
@@ -492,7 +498,7 @@ fn execute_prepared<'a>(
                 } => {
                     target_stack.pop();
                     pending_composite =
-                        Some((vb, Some((ib, *index_count)), bg0, bg1, *parent_clip));
+                        Some((vb, Some((ib, *index_count)), bg0, &**bg1, *parent_clip));
                     i += 1;
                 }
                 Prepared::Custom {
@@ -557,7 +563,7 @@ fn execute_one(
                 return;
             }
             pass.set_pipeline(&pipelines.solid_pipeline);
-            pass.set_bind_group(0, bg0, &[]);
+            bg0.set(pass);
             pass.set_vertex_buffer(0, vb.wgpu_slice());
             pass.set_index_buffer(ib.wgpu_slice(), wgpu::IndexFormat::Uint32);
             pass.draw_indexed(0..*index_count, 0, 0..1);
@@ -573,7 +579,7 @@ fn execute_one(
                 return;
             }
             pass.set_pipeline(&pipelines.aa_solid_pipeline);
-            pass.set_bind_group(0, bg0, &[]);
+            bg0.set(pass);
             pass.set_vertex_buffer(0, vb.wgpu_slice());
             pass.set_index_buffer(ib.wgpu_slice(), wgpu::IndexFormat::Uint32);
             pass.draw_indexed(0..*index_count, 0, 0..1);
@@ -590,7 +596,7 @@ fn execute_one(
                 return;
             }
             pass.set_pipeline(&pipelines.aa_texture_pipeline);
-            pass.set_bind_group(0, bg0, &[]);
+            bg0.set(pass);
             pass.set_bind_group(1, &**bg1, &[]);
             pass.set_vertex_buffer(0, vb.wgpu_slice());
             pass.set_index_buffer(ib.wgpu_slice(), wgpu::IndexFormat::Uint32);
@@ -609,7 +615,7 @@ fn execute_one(
                 return;
             }
             pass.set_pipeline(&pipelines.gradient_pipeline);
-            pass.set_bind_group(0, bg0, &[]);
+            bg0.set(pass);
             pass.set_bind_group(1, bg1, &[]);
             pass.set_vertex_buffer(0, vb.wgpu_slice());
             pass.set_index_buffer(ib.wgpu_slice(), wgpu::IndexFormat::Uint32);
@@ -622,8 +628,8 @@ fn execute_one(
                 return;
             }
             pass.set_pipeline(&pipelines.image_pipeline);
-            pass.set_bind_group(0, bg0, &[]);
-            pass.set_bind_group(1, bg1, &[]);
+            bg0.set(pass);
+            pass.set_bind_group(1, &**bg1, &[]);
             pass.set_vertex_buffer(0, vb.wgpu_slice());
             pass.draw(0..6, 0..1);
         }
@@ -639,20 +645,20 @@ fn execute_one(
             if !apply_clip(pass, *clip, vp) {
                 return;
             }
-            pass.set_bind_group(1, bg1, &[]);
+            pass.set_bind_group(1, &**bg1, &[]);
             pass.set_vertex_buffer(0, vb.wgpu_slice());
             pass.set_index_buffer(ib.wgpu_slice(), wgpu::IndexFormat::Uint32);
             if *flatten {
                 // Single alpha-writing grayscale pass (inside a layer). Uniforms
                 // in bg0s[0] carry the colour; the channel field is ignored.
                 pass.set_pipeline(&pipelines.text_gray);
-                pass.set_bind_group(0, &bg0s[0], &[]);
+                bg0s[0].set(pass);
                 pass.draw_indexed(0..6, 0, 0..1);
             } else {
                 let lcd_pipelines = [&pipelines.lcd_r, &pipelines.lcd_g, &pipelines.lcd_b];
                 for ch in 0..3 {
                     pass.set_pipeline(lcd_pipelines[ch]);
-                    pass.set_bind_group(0, &bg0s[ch], &[]);
+                    bg0s[ch].set(pass);
                     pass.draw_indexed(0..6, 0, 0..1);
                 }
             }
@@ -669,7 +675,7 @@ fn execute_one(
             if !apply_clip(pass, *clip, vp) {
                 return;
             }
-            pass.set_bind_group(1, bg1, &[]);
+            pass.set_bind_group(1, &**bg1, &[]);
             pass.set_vertex_buffer(0, vb.wgpu_slice());
             pass.set_index_buffer(ib.wgpu_slice(), wgpu::IndexFormat::Uint32);
             if *flatten {
@@ -677,13 +683,13 @@ fn execute_one(
                 // groups works — they share resolution + global_alpha and only
                 // differ in the (here-ignored) channel selector.
                 pass.set_pipeline(&pipelines.lcb_flatten);
-                pass.set_bind_group(0, &bg0s[0], &[]);
+                bg0s[0].set(pass);
                 pass.draw_indexed(0..6, 0, 0..1);
             } else {
                 let lcb_pipelines = [&pipelines.lcb_r, &pipelines.lcb_g, &pipelines.lcb_b];
                 for ch in 0..3 {
                     pass.set_pipeline(lcb_pipelines[ch]);
-                    pass.set_bind_group(0, &bg0s[ch], &[]);
+                    bg0s[ch].set(pass);
                     pass.draw_indexed(0..6, 0, 0..1);
                 }
             }
@@ -702,8 +708,8 @@ fn execute_one(
                 return;
             }
             pass.set_pipeline(&pipelines.layer_pipeline);
-            pass.set_bind_group(0, bg0, &[]);
-            pass.set_bind_group(1, bg1, &[]);
+            bg0.set(pass);
+            pass.set_bind_group(1, &**bg1, &[]);
             pass.set_vertex_buffer(0, vb.wgpu_slice());
             pass.draw(0..6, 0..1);
         }

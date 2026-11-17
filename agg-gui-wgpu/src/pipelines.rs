@@ -7,14 +7,17 @@
 //!
 //! Uniform data is NOT stored here — each draw command in `end_frame` takes
 //! its own slice of the frame's uniform arena (`buffer_arena.rs`, uploaded
-//! through the queue before the frame's submit) and binds it at that offset,
-//! so multiple draw commands of the same pipeline type in one frame do not
-//! overwrite each other's uniforms.
+//! through the queue before the frame's submit) and binds it at that offset
+//! (a dynamic offset into a bind group kept per arena chunk, see
+//! `bind_group_cache.rs`), so multiple draw commands of the same pipeline
+//! type in one frame do not overwrite each other's uniforms. The bind-group
+//! layouts are built in `bind_group_layouts.rs`.
 
 use std::mem::size_of;
 
 use bytemuck::{Pod, Zeroable};
 
+use crate::bind_group_layouts::{mk_tex1_bgl, mk_tex2_bgl, mk_uniform_bgl};
 use crate::shaders::{
     AA_SOLID_WGSL, AA_TEXTURE_WGSL, GRADIENT_WGSL, LAYER_WGSL, LCB_FLATTEN_WGSL, LCB_WGSL,
     LCD_WGSL, SOLID_WGSL, TEXT_GRAY_WGSL, TEX_DOWNSAMPLE_3X_WGSL, TEX_DOWNSAMPLE_4X_WGSL, TEX_WGSL,
@@ -649,86 +652,6 @@ fn mk_shader(device: &wgpu::Device, label: &str, src: &str) -> wgpu::ShaderModul
     device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some(label),
         source: wgpu::ShaderSource::Wgsl(src.into()),
-    })
-}
-
-/// Bind-group layout with a single uniform buffer at binding 0, visible to
-/// both vertex and fragment stages.
-fn mk_uniform_bgl(device: &wgpu::Device, label: &str, size: u64) -> wgpu::BindGroupLayout {
-    device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        label: Some(label),
-        entries: &[wgpu::BindGroupLayoutEntry {
-            binding: 0,
-            visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-            ty: wgpu::BindingType::Buffer {
-                ty: wgpu::BufferBindingType::Uniform,
-                has_dynamic_offset: false,
-                min_binding_size: wgpu::BufferSize::new(size),
-            },
-            count: None,
-        }],
-    })
-}
-
-/// Bind-group layout for group 1 with one `texture_2d<f32>` (binding 0) and
-/// one filtering sampler (binding 1).
-fn mk_tex1_bgl(device: &wgpu::Device, label: &str) -> wgpu::BindGroupLayout {
-    device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        label: Some(label),
-        entries: &[
-            wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Texture {
-                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                    view_dimension: wgpu::TextureViewDimension::D2,
-                    multisampled: false,
-                },
-                count: None,
-            },
-            wgpu::BindGroupLayoutEntry {
-                binding: 1,
-                visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                count: None,
-            },
-        ],
-    })
-}
-
-/// Bind-group layout for the LCB pipeline's group 1: two `texture_2d<f32>`
-/// (bindings 0 and 1, colour plane + alpha plane) and one sampler (binding 2).
-fn mk_tex2_bgl(device: &wgpu::Device, label: &str) -> wgpu::BindGroupLayout {
-    device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        label: Some(label),
-        entries: &[
-            wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Texture {
-                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                    view_dimension: wgpu::TextureViewDimension::D2,
-                    multisampled: false,
-                },
-                count: None,
-            },
-            wgpu::BindGroupLayoutEntry {
-                binding: 1,
-                visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Texture {
-                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                    view_dimension: wgpu::TextureViewDimension::D2,
-                    multisampled: false,
-                },
-                count: None,
-            },
-            wgpu::BindGroupLayoutEntry {
-                binding: 2,
-                visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                count: None,
-            },
-        ],
     })
 }
 

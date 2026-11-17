@@ -170,6 +170,13 @@ impl TextureLedger {
         self.foreign.push(texture);
     }
 
+    /// The textures let go and waiting for [`Self::destroy_retired`], the
+    /// context's and those handed over: what is bound to them must be let go
+    /// too (`bind_group_cache.rs`).
+    pub(crate) fn retired_textures(&self) -> impl Iterator<Item = &wgpu::Texture> {
+        self.retired.iter().chain(&self.foreign)
+    }
+
     /// Destroy everything retired so far. Called right after a submit: the
     /// encoders that used these textures have all been submitted.
     pub(crate) fn destroy_retired(&mut self) {

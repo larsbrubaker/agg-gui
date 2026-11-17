@@ -598,7 +598,9 @@ impl SsaaFramebuffer {
         );
         pass.set_scissor_rect(scissor.0, scissor.1, scissor.2, scissor.3);
         pass.set_pipeline(pipeline);
-        pass.set_bind_group(0, &tex_bg0, &[]);
+        // `tex_bgl0` takes a dynamic offset; this blit's uniforms are the
+        // whole of their own buffer.
+        pass.set_bind_group(0, &tex_bg0, &[0]);
         pass.set_bind_group(1, &tex_bg1, &[]);
         pass.set_vertex_buffer(0, vb.slice(..));
         pass.draw(0..6, 0..1);

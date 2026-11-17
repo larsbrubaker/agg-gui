@@ -151,6 +151,9 @@ pub struct WgpuPaintContext {
 }
 
 mod aa_step;
+mod bind_group_cache;
+mod bind_group_layouts;
+pub use bind_group_cache::BindGroupCounts;
 mod buffer_arena;
 /// Blend modes on the GPU — see `comp_op.rs`.
 mod comp_op;
@@ -520,6 +523,9 @@ pub struct WgpuGfxCtx {
     /// instead of allocating their own, which is the single biggest lever
     /// against the per-command `create_buffer_init` cost.
     pub(crate) frame_arenas: buffer_arena::FrameArenas,
+    /// The bind groups the frames reuse, and the count of every one made
+    /// (`bind_group_cache.rs`).
+    pub(crate) bind_groups: bind_group_cache::BindGroupCache,
 
     /// 1024×1 RGBA8 alpha-step texture for the AA-texture pipeline.
     /// Column 0 = `(255, 255, 255, 0)`, columns 1..1023 =
@@ -599,20 +605,13 @@ impl WgpuGfxCtx {
         // since the texture itself is immutable.
         let aa_step_texture = aa_step::build_aa_step_texture(&device, &queue);
         let aa_step_view = aa_step_texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let aa_step_bg1 = Arc::new(device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("aa_step_bg1"),
-            layout: &pipelines.aa_texture_bgl1,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&aa_step_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&pipelines.linear_sampler),
-                },
-            ],
-        }));
+        let mut bind_groups = bind_group_cache::BindGroupCache::default();
+        let aa_step_bg1 = Arc::new(aa_step::build_aa_step_bind_group(
+            &device,
+            &pipelines,
+            &aa_step_view,
+            &mut bind_groups,
+        ));
         let aa_step_texture = Arc::new(aa_step_texture);
         let comp_op = comp_op::CompOpGpu::new(&device, surface_format);
         let max_texture_dim = device.limits().max_texture_dimension_2d;
@@ -668,6 +667,7 @@ impl WgpuGfxCtx {
             pending_scaled_readback: None,
             scaled_blit: None,
             frame_arenas,
+            bind_groups,
             aa_step_texture,
             aa_step_view,
             aa_step_bg1,

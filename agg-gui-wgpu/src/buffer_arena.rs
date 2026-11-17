@@ -157,6 +157,13 @@ impl GpuArena {
         }
     }
 
+    /// Whether `buffer` is one of this arena's chunks now (not one it
+    /// replaced): what a bind group kept over a chunk is checked against
+    /// (`bind_group_cache.rs`).
+    pub fn holds(&self, buffer: &Buffer) -> bool {
+        self.chunks.iter().any(|chunk| **chunk == *buffer)
+    }
+
     /// How many chunks this arena holds and has replaced without destroying
     /// yet, for tests.
     #[cfg(test)]

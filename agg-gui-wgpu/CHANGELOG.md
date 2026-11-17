@@ -6,6 +6,41 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps.
 
+## [0.7.1] - Unreleased
+
+### Fixed
+
+- In Firefox, an app no longer loses its WebGPU device after a minute or two
+  of redraws. Firefox frees a bind group only when JavaScript's garbage
+  collector collects it, and takes each one's descriptors from a fixed
+  per-device heap (about a million on D3D12), so a UI that made a few
+  hundred bind groups every frame (one per draw for its uniforms, one per
+  textured draw) ran the heap out while it animated, and the device was
+  lost with `Out of memory`. Steady frames now make no bind groups: the
+  uniform bind groups are made once per chunk of the frame's uniform buffer
+  and each draw binds its uniforms at a dynamic offset, and the bind groups
+  over textures that outlive a frame (images, LCD text, layers) are kept
+  while frames draw them and let go when a frame does not or the texture is
+  let go. Only a texture made for one frame (a gradient's ramp, a blend-mode
+  composite's copy) gets a bind group of its own each frame. Pictures are
+  unchanged.
+
+### Added
+
+- `WgpuGfxCtx::bind_group_counts()` returns `BindGroupCounts`: how many bind
+  groups the context has made, by kind (`uniform`, `texture`, `one_frame`),
+  and how many it keeps (`cached`). After the first frames of a steady UI
+  only `one_frame` grows.
+
+### Changed
+
+- The uniform bind-group layouts of `WgpuPipelines` (`solid_bgl`,
+  `aa_solid_bgl`, `aa_texture_bgl0`, `gradient_bgl0`, `tex_bgl0`,
+  `layer_bgl0`, `lcd_bgl0`, `lcb_bgl0`) take a dynamic offset. Code that
+  makes its own bind group against one of them passes the offset of its
+  uniforms in `set_bind_group` (`&[0]` for a buffer of its own) instead of
+  `&[]`.
+
 ## [0.7.0] - Unreleased
 
 ### Fixed

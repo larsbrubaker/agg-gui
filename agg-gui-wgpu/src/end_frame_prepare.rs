@@ -1,8 +1,11 @@
 //! Phase-1 (prepare) of the deferred command flush — see `end_frame.rs`.
 //!
-//! Walks the [`DrawCommand`] list, allocates every GPU buffer / bind group /
-//! transient texture each command needs, and stores them in [`Prepared`]
-//! variants for the execute phase to dispatch.  A *size stack* mirrors the
+//! Walks the [`DrawCommand`] list, allocates every GPU buffer and transient
+//! texture each command needs, takes its bind groups from the context's
+//! `BindGroupCache` (`bind_group_cache.rs`: kept from frame to frame, so a
+//! steady frame makes none but those over its one-frame textures), and
+//! stores them in [`Prepared`] variants for the execute phase to dispatch.
+//! A *size stack* mirrors the
 //! layer push/pop sequence so each command's uniforms get the resolution of
 //! whichever render target is current at that point in the list.
 //!
@@ -21,6 +24,7 @@
 
 use std::sync::Arc;
 
+use crate::bind_group_cache::{BindGroupCache, UniformBind};
 use crate::buffer_arena::FrameArenas;
 use crate::comp_op::{self, CompOpGpu};
 use crate::end_frame::{Prepared, PreparedSlice};
@@ -55,6 +59,7 @@ pub(crate) fn prepare_all(
     comp_op: &CompOpGpu,
     format: wgpu::TextureFormat,
     textures: &mut TextureLedger,
+    bind_groups: &mut BindGroupCache,
 ) -> Vec<Prepared> {
     let mut size_stack: Vec<(f32, f32)> = vec![viewport];
     let mut out: Vec<Prepared> = Vec::with_capacity(commands.len());
@@ -89,7 +94,7 @@ pub(crate) fn prepare_all(
                     color: [color.r, color.g, color.b, a],
                 };
                 let ub = alloc_uniform(device, arenas, bytemuck::bytes_of(&uniforms));
-                let bg0 = mk_uniform_bg(device, &pipelines.solid_bgl, &ub);
+                let bg0 = bind_groups.uniform(device, &pipelines.solid_bgl, &ub);
                 let vb = alloc_vertex(device, arenas, bytemuck::cast_slice(verts.as_slice()));
                 let ib = alloc_index(device, arenas, bytemuck::cast_slice(indices.as_slice()));
                 out.push(Prepared::Solid {
@@ -118,7 +123,7 @@ pub(crate) fn prepare_all(
                     color: [color.r, color.g, color.b, a],
                 };
                 let ub = alloc_uniform(device, arenas, bytemuck::bytes_of(&uniforms));
-                let bg0 = mk_uniform_bg(device, &pipelines.aa_solid_bgl, &ub);
+                let bg0 = bind_groups.uniform(device, &pipelines.aa_solid_bgl, &ub);
                 let vb = alloc_vertex(device, arenas, bytemuck::cast_slice(verts.as_slice()));
                 let ib = alloc_index(device, arenas, bytemuck::cast_slice(indices.as_slice()));
                 out.push(Prepared::AaSolid {
@@ -147,7 +152,7 @@ pub(crate) fn prepare_all(
                     color: [color.r, color.g, color.b, a],
                 };
                 let ub = alloc_uniform(device, arenas, bytemuck::bytes_of(&uniforms));
-                let bg0 = mk_uniform_bg(device, &pipelines.aa_texture_bgl0, &ub);
+                let bg0 = bind_groups.uniform(device, &pipelines.aa_texture_bgl0, &ub);
                 let vb = alloc_vertex(device, arenas, aa_tex_verts_as_bytes(verts));
                 let ib = alloc_index(device, arenas, bytemuck::cast_slice(indices.as_slice()));
                 out.push(Prepared::AaTexture {
@@ -213,21 +218,24 @@ pub(crate) fn prepare_all(
                     },
                 );
                 let ramp_view = ramp_tex.create_view(&wgpu::TextureViewDescriptor::default());
-                let bg0 = mk_uniform_bg(device, &pipelines.gradient_bgl0, &ub);
-                let bg1 = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: None,
-                    layout: &pipelines.gradient_bgl1,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: wgpu::BindingResource::TextureView(&ramp_view),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: wgpu::BindingResource::Sampler(&pipelines.linear_sampler),
-                        },
-                    ],
-                });
+                let bg0 = bind_groups.uniform(device, &pipelines.gradient_bgl0, &ub);
+                let bg1 = bind_groups.one_frame(
+                    device,
+                    &wgpu::BindGroupDescriptor {
+                        label: None,
+                        layout: &pipelines.gradient_bgl1,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: wgpu::BindingResource::TextureView(&ramp_view),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: wgpu::BindingResource::Sampler(&pipelines.linear_sampler),
+                            },
+                        ],
+                    },
+                );
                 let vb = alloc_vertex(device, arenas, bytemuck::cast_slice(verts.as_slice()));
                 let ib = alloc_index(device, arenas, bytemuck::cast_slice(indices.as_slice()));
                 out.push(Prepared::Gradient {
@@ -256,26 +264,13 @@ pub(crate) fn prepare_all(
                     tint: *tint,
                 };
                 let ub = alloc_uniform(device, arenas, bytemuck::bytes_of(&uniforms));
-                let bg0 = mk_uniform_bg(device, &pipelines.tex_bgl0, &ub);
+                let bg0 = bind_groups.uniform(device, &pipelines.tex_bgl0, &ub);
                 let sampler = if *nearest {
                     &pipelines.nearest_sampler
                 } else {
                     &pipelines.linear_sampler
                 };
-                let bg1 = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: None,
-                    layout: &pipelines.tex_bgl1,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: wgpu::BindingResource::TextureView(view),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: wgpu::BindingResource::Sampler(sampler),
-                        },
-                    ],
-                });
+                let bg1 = bind_groups.texture(device, &pipelines.tex_bgl1, view, None, sampler);
                 let vb = alloc_vertex(device, arenas, bytemuck::cast_slice(verts.as_slice()));
                 out.push(Prepared::Textured {
                     _texture: Arc::clone(texture),
@@ -304,22 +299,16 @@ pub(crate) fn prepare_all(
                     };
                     alloc_uniform(device, arenas, bytemuck::bytes_of(&u))
                 });
-                let bg0s: [wgpu::BindGroup; 3] =
-                    std::array::from_fn(|ch| mk_uniform_bg(device, &pipelines.lcd_bgl0, &ubs[ch]));
-                let bg1 = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: None,
-                    layout: &pipelines.lcd_bgl1,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: wgpu::BindingResource::TextureView(view),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: wgpu::BindingResource::Sampler(&pipelines.nearest_sampler),
-                        },
-                    ],
+                let bg0s: [UniformBind; 3] = std::array::from_fn(|ch| {
+                    bind_groups.uniform(device, &pipelines.lcd_bgl0, &ubs[ch])
                 });
+                let bg1 = bind_groups.texture(
+                    device,
+                    &pipelines.lcd_bgl1,
+                    view,
+                    None,
+                    &pipelines.nearest_sampler,
+                );
                 let idx: [u32; 6] = [0, 1, 2, 0, 2, 3];
                 let vb = alloc_vertex(device, arenas, bytemuck::cast_slice(verts.as_slice()));
                 let ib = alloc_index(device, arenas, bytemuck::cast_slice(&idx));
@@ -353,26 +342,16 @@ pub(crate) fn prepare_all(
                     };
                     alloc_uniform(device, arenas, bytemuck::bytes_of(&u))
                 });
-                let bg0s: [wgpu::BindGroup; 3] =
-                    std::array::from_fn(|ch| mk_uniform_bg(device, &pipelines.lcb_bgl0, &ubs[ch]));
-                let bg1 = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: None,
-                    layout: &pipelines.lcb_bgl1,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: wgpu::BindingResource::TextureView(color_view),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: wgpu::BindingResource::TextureView(alpha_view),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 2,
-                            resource: wgpu::BindingResource::Sampler(&pipelines.nearest_sampler),
-                        },
-                    ],
+                let bg0s: [UniformBind; 3] = std::array::from_fn(|ch| {
+                    bind_groups.uniform(device, &pipelines.lcb_bgl0, &ubs[ch])
                 });
+                let bg1 = bind_groups.texture(
+                    device,
+                    &pipelines.lcb_bgl1,
+                    color_view,
+                    Some(alpha_view),
+                    &pipelines.nearest_sampler,
+                );
                 let idx: [u32; 6] = [0, 1, 2, 0, 2, 3];
                 let vb = alloc_vertex(device, arenas, bytemuck::cast_slice(verts.as_slice()));
                 let ib = alloc_index(device, arenas, bytemuck::cast_slice(&idx));
@@ -431,11 +410,12 @@ pub(crate) fn prepare_all(
                     mask_rect,
                 };
                 let ub = alloc_uniform(device, arenas, bytemuck::bytes_of(&u));
-                let bg0 = mk_uniform_bg(device, &pipelines.layer_bgl0, &ub);
-                let bg1 = layer_texture_bg(
+                let bg0 = bind_groups.uniform(device, &pipelines.layer_bgl0, &ub);
+                let bg1 = bind_groups.texture(
                     device,
                     &pipelines.layer_bgl1,
                     view,
+                    None,
                     &pipelines.linear_sampler,
                 );
                 let verts = composite_quad_verts(*origin_x, *origin_y, *layer_w, *layer_h);
@@ -472,11 +452,12 @@ pub(crate) fn prepare_all(
                     mask_rect: [0.0; 4],
                 };
                 let ub = alloc_uniform(device, arenas, bytemuck::bytes_of(&u));
-                let bg0 = mk_uniform_bg(device, &pipelines.layer_bgl0, &ub);
-                let bg1 = layer_texture_bg(
+                let bg0 = bind_groups.uniform(device, &pipelines.layer_bgl0, &ub);
+                let bg1 = bind_groups.texture(
                     device,
                     &pipelines.layer_bgl1,
                     view,
+                    None,
                     &pipelines.linear_sampler,
                 );
                 // An empty clip has no triangles: the arena still needs a
@@ -529,11 +510,12 @@ pub(crate) fn prepare_all(
                     mask_rect,
                 };
                 let ub = alloc_uniform(device, arenas, bytemuck::bytes_of(&u));
-                let bg0 = mk_uniform_bg(device, &pipelines.layer_bgl0, &ub);
-                let bg1 = layer_texture_bg(
+                let bg0 = bind_groups.uniform(device, &pipelines.layer_bgl0, &ub);
+                let bg1 = bind_groups.texture(
                     device,
                     &pipelines.layer_bgl1,
                     view,
+                    None,
                     &pipelines.linear_sampler,
                 );
                 let verts = composite_quad_verts(*origin_x, *origin_y, *layer_w, *layer_h);
@@ -583,6 +565,7 @@ pub(crate) fn prepare_all(
                     &ub,
                     *clip,
                     textures,
+                    bind_groups,
                 ));
             }
 
@@ -607,30 +590,6 @@ pub(crate) fn prepare_all(
     out
 }
 
-/// Bind group with layer texture + sampler — shared between PopLayer and
-/// CompositeLayer prepare paths.
-fn layer_texture_bg(
-    device: &wgpu::Device,
-    layout: &wgpu::BindGroupLayout,
-    view: &wgpu::TextureView,
-    sampler: &wgpu::Sampler,
-) -> wgpu::BindGroup {
-    device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: None,
-        layout,
-        entries: &[
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: wgpu::BindingResource::TextureView(view),
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: wgpu::BindingResource::Sampler(sampler),
-            },
-        ],
-    })
-}
-
 /// Composite quad in parent's Y-up local coords.  `bl=v=1, tr=v=0` mirrors the
 /// wgpu UV convention (v=0 is the top of a sampled texture).
 fn composite_quad_verts(origin_x: f32, origin_y: f32, layer_w: u32, layer_h: u32) -> [f32; 24] {
@@ -642,25 +601,6 @@ fn composite_quad_verts(origin_x: f32, origin_y: f32, layer_w: u32, layer_h: u32
         x0, y0, 0.0, 1.0, x1, y0, 1.0, 1.0, x1, y1, 1.0, 0.0, x0, y0, 0.0, 1.0, x1, y1, 1.0, 0.0,
         x0, y1, 0.0, 0.0,
     ]
-}
-
-/// Bind group with a single uniform buffer at binding 0, using `slice`'s
-/// arena buffer + offset + exact size (not `as_entire_binding` — uniforms
-/// are packed back-to-back into one chunk, so a "rest-of-buffer" binding
-/// would read past the end of our struct).
-fn mk_uniform_bg(
-    device: &wgpu::Device,
-    layout: &wgpu::BindGroupLayout,
-    slice: &PreparedSlice,
-) -> wgpu::BindGroup {
-    device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: None,
-        layout,
-        entries: &[wgpu::BindGroupEntry {
-            binding: 0,
-            resource: wgpu::BindingResource::Buffer(slice.uniform_binding()),
-        }],
-    })
 }
 
 #[inline]

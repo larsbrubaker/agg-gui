@@ -1,7 +1,8 @@
 //! 1024×1 RGBA8 alpha-step texture for the AA-texture pipeline.
 //!
 //! Direct port of `Graphics2DGpu::CheckLineImageCache` in agg-sharp.
-//! Split out of `lib.rs` to keep that file under the 800-line cap.
+//! Split out of `lib.rs` to keep that file under the 800-line cap, with the
+//! one bind group every AA-texture draw shares.
 
 /// Build the alpha-step texture and upload its pixels.
 ///
@@ -56,4 +57,32 @@ pub(crate) fn build_aa_step_texture(device: &wgpu::Device, queue: &wgpu::Queue) 
         },
     );
     tex
+}
+
+/// The group-1 bind group over the alpha-step texture. The texture never
+/// changes, so the context makes this once and every AA-texture draw binds it.
+pub(crate) fn build_aa_step_bind_group(
+    device: &wgpu::Device,
+    pipelines: &crate::pipelines::WgpuPipelines,
+    view: &wgpu::TextureView,
+    bind_groups: &mut crate::bind_group_cache::BindGroupCache,
+) -> wgpu::BindGroup {
+    bind_groups.create(
+        crate::bind_group_cache::BindGroupKind::Texture,
+        device,
+        &wgpu::BindGroupDescriptor {
+            label: Some("aa_step_bg1"),
+            layout: &pipelines.aa_texture_bgl1,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&pipelines.linear_sampler),
+                },
+            ],
+        },
+    )
 }

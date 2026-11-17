@@ -344,28 +344,34 @@ impl WgpuGfxCtx {
             }));
         self.queue
             .write_buffer(&ub, 0, bytemuck::bytes_of(&uniforms));
-        let bg0 = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("scaled_blit_bg0"),
-            layout: &blit.bgl0,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: ub.as_entire_binding(),
-            }],
-        });
-        let bg1 = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("scaled_blit_bg1"),
-            layout: &blit.bgl1,
-            entries: &[
-                wgpu::BindGroupEntry {
+        let bg0 = self.bind_groups.one_frame(
+            &device,
+            &wgpu::BindGroupDescriptor {
+                label: Some("scaled_blit_bg0"),
+                layout: &blit.bgl0,
+                entries: &[wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&src_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&blit.sampler),
-                },
-            ],
-        });
+                    resource: ub.as_entire_binding(),
+                }],
+            },
+        );
+        let bg1 = self.bind_groups.one_frame(
+            &device,
+            &wgpu::BindGroupDescriptor {
+                label: Some("scaled_blit_bg1"),
+                layout: &blit.bgl1,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&src_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(&blit.sampler),
+                    },
+                ],
+            },
+        );
 
         let padded_bpr = padded_bytes_per_row(dst_w);
         let staging =
