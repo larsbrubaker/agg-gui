@@ -9,44 +9,43 @@
 //! tumble cube, a shell's offscreen scene) must not make bind groups every
 //! frame.
 //!
-//! The uniforms: every blit of a frame takes a slot of its own in the
-//! buffer, `min_uniform_buffer_offset_alignment` apart, written through the
-//! queue (never through a mapping, so a blit on a lost device does not
-//! panic). Two blits recorded into one submission never share a slot, or
-//! the second's write would reach the first too (the queue applies writes
-//! before the submission's commands run). A new frame starts again at slot
-//! 0: the queue applies its writes after the previous submission's commands,
-//! so they still read their own. A frame is told apart by the context's
-//! submission number when the blit runs inside a custom render pass
-//! (`blit_downsample_in`; the tumble cube calls `ensure_size` before each of
-//! its draws, so that cannot mark a frame, and the window frame number stays
-//! the same over an overlay frame's submit), and otherwise by
-//! [`crate::SsaaFramebuffer::ensure_size`], which the framebuffer's
-//! documentation asks for once a frame. A frame with more blits than slots
-//! grows the buffer (doubling, up to [`MAX_SLOTS`]); the buffer it replaces
-//! goes to the blit's `retire`, since the frame's earlier blits use it.
+//! The uniforms: each blit takes a slot in the buffer,
+//! `min_uniform_buffer_offset_alignment` apart, written through the queue
+//! (never through a mapping, so a blit on a lost device does not panic). Two
+//! blits recorded into one submission must not share a slot, or the second's
+//! write would reach the first too (the queue applies writes before the
+//! submission's commands run); a later submission may reuse a slot, since
+//! the queue applies its writes after the earlier submission's commands.
+//!
+//! `blit_downsample_in` runs in a custom render pass and knows its
+//! submission: the context's submission number. (Neither `ensure_size`,
+//! which the tumble cube calls before each of its draws, nor the window
+//! frame number, the same over an overlay frame's submit, tells submissions
+//! apart.) Its blits start at slot 0 in each new submission and take the
+//! next slot after that; a submission with more blits than slots grows the
+//! buffer (doubling, up to [`MAX_SLOTS`]), and the buffer it replaces goes to
+//! the blit's `retire`, since the submission's earlier blits use it.
+//!
+//! The other blits (`blit_to`, `blit_downsample_to`, the 3x / 4x variants,
+//! `blit_downsample_retiring`) cannot tell which submission they are in: a
+//! caller may record several into one encoder, even inside a custom render
+//! pass that calls `ensure_size` before each (demo-wgpu's bar grid). They
+//! take the slots in turn round a buffer of [`MAX_SLOTS`], made at that size
+//! by their first blit (growing it later would make bind groups in later
+//! frames), so each keeps its own uniforms as long as one submission holds
+//! fewer than [`MAX_SLOTS`] blits of the framebuffer.
 
 use crate::pipelines::{TexUniforms, WgpuPipelines};
 use crate::BindGroupCounts;
 
-/// Which frame a blit belongs to, as far as the framebuffer can tell.
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(crate) enum BlitFrame {
-    /// A custom render context's submission number.
-    Context(u64),
-    /// How many times `ensure_size` had been called.
-    Sized(u64),
-}
-
-/// Uniform slots a framebuffer starts with: room for a frame's blits of
-/// every caller in this workspace.
+/// Uniform slots a framebuffer blitted with `blit_downsample_in` starts
+/// with: room for a submission's blits of every caller in this workspace.
 const FIRST_SLOTS: u64 = 4;
-/// The most uniform slots a framebuffer grows to (256 KiB at 256-byte
-/// alignment). Past this many blits in one frame, or when a caller blits
-/// outside a custom render pass without ever calling `ensure_size`, slots
-/// are taken round again: only a frame with more blits than this could see
-/// two of them share uniforms.
-pub(crate) const MAX_SLOTS: u64 = 1024;
+/// The most uniform slots a framebuffer has (64 KiB at 256-byte alignment):
+/// what `blit_downsample_in` grows to, and what the other blits take in
+/// turn. Two blits of one submission share uniforms only past this many
+/// blits of the framebuffer in that submission.
+pub(crate) const MAX_SLOTS: u64 = 256;
 
 /// The buffer of blit uniforms and the bind group over it.
 struct UniformSlots {
@@ -98,32 +97,18 @@ pub(crate) struct BlitBinds {
     /// Over the colour target and the blit sampler; `None` until the first
     /// blit and after the target is replaced.
     texture: Option<wgpu::BindGroup>,
-    /// The frame the last blit belonged to.
-    frame: Option<BlitFrame>,
-    /// The slot the next blit of `frame` takes.
+    /// The submission of the last blit when it was a `blit_downsample_in`
+    /// one; `None` after any other blit.
+    submission: Option<u64>,
+    /// The slot the next blit takes (modulo the buffer's slots).
     next_slot: u64,
-    /// `ensure_size` calls so far.
-    sized: u64,
     counts: BindGroupCounts,
 }
 
 impl BlitBinds {
-    /// `ensure_size` ran: a new frame for blits outside a custom render pass,
-    /// and, when `color_replaced`, a new colour target to bind.
-    pub(crate) fn ensure_size(&mut self, color_replaced: bool) {
-        self.sized += 1;
-        if color_replaced {
-            self.texture = None;
-        }
-    }
-
-    /// The frame of a blit run in the custom render pass of submission
-    /// `context_frame`, or outside one when `None`.
-    pub(crate) fn frame(&self, context_frame: Option<u64>) -> BlitFrame {
-        match context_frame {
-            Some(frame) => BlitFrame::Context(frame),
-            None => BlitFrame::Sized(self.sized),
-        }
+    /// A resize replaced the colour target: the next blit binds the new one.
+    pub(crate) fn color_replaced(&mut self) {
+        self.texture = None;
     }
 
     /// Group 1 over `view` (the colour target) and `sampler`.
@@ -156,30 +141,45 @@ impl BlitBinds {
         group
     }
 
-    /// Write one blit's `uniforms` of `frame` into a slot of its own and
-    /// return group 0 with that slot's dynamic offset. A buffer outgrown by
-    /// the frame goes to `retire`.
+    /// Write one blit's `uniforms` into a slot of its own and return group 0
+    /// with that slot's dynamic offset. `submission` is the context's
+    /// submission number for a `blit_downsample_in` blit and `None` for the
+    /// others (see the module docs). An outgrown buffer goes to `retire`.
     pub(crate) fn uniforms(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         pipelines: &WgpuPipelines,
-        frame: BlitFrame,
+        submission: Option<u64>,
         uniforms: &TexUniforms,
         retire: &mut dyn FnMut(wgpu::Buffer),
     ) -> (wgpu::BindGroup, u32) {
-        if self.frame != Some(frame) {
-            self.frame = Some(frame);
-            self.next_slot = 0;
+        // Back to slot 0 only for a new submission after a blit of an earlier
+        // one. After a blit of the other kind the slots run on: that blit
+        // may be in this submission.
+        if let (Some(now), Some(last)) = (submission, self.submission) {
+            if now != last {
+                self.next_slot = 0;
+            }
         }
+        self.submission = submission;
         let slot = self.next_slot;
         self.next_slot += 1;
+        // `blit_downsample_in` needs a slot for each of the submission's
+        // blits so far; the others take all of them in turn.
+        let needed = if submission.is_some() {
+            slot + 1
+        } else {
+            MAX_SLOTS
+        };
         let slots = match self.uniforms.take() {
-            Some(slots) if slot < slots.slots || slots.slots >= MAX_SLOTS => slots,
+            Some(slots) if needed <= slots.slots || slots.slots >= MAX_SLOTS => slots,
             outgrown => {
-                let count = outgrown
-                    .as_ref()
-                    .map_or(FIRST_SLOTS, |old| (old.slots * 2).min(MAX_SLOTS));
+                let count = match &outgrown {
+                    None if submission.is_some() => FIRST_SLOTS,
+                    None => MAX_SLOTS,
+                    Some(old) => (old.slots * 2).max(needed).min(MAX_SLOTS),
+                };
                 if let Some(old) = outgrown {
                     retire(old.buffer);
                 }

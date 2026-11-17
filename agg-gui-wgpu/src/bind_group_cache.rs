@@ -59,8 +59,9 @@ use crate::texture_life::TextureLedger;
 /// reused. Bind groups a custom render pass makes itself are not counted.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct BindGroupCounts {
-    /// Group-0 bind groups over a chunk of the frame's uniform buffer, one
-    /// per uniform layout and chunk.
+    /// Group-0 bind groups over uniforms: for the context, one per uniform
+    /// layout and chunk of the frame's uniform buffer; for an
+    /// `SsaaFramebuffer`, one per buffer of blit uniform slots.
     pub uniform: u64,
     /// Group-1 bind groups over textures that outlive a frame (including the
     /// one over the AA step texture, made with the context, and those over

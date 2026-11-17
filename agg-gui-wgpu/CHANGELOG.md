@@ -17,16 +17,17 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   hundred bind groups every frame (one per draw for its uniforms, one per
   textured draw) ran the heap out while it animated, and the device was
   lost with `Out of memory`. Steady frames now make bind groups only for
-  textures made for that frame: the uniform bind groups are made once per chunk of the frame's uniform buffer
-  and each draw binds its uniforms at a dynamic offset, and the bind groups
-  over textures that outlive a frame (images, LCD text, layers) are kept
-  while frames draw them and let go when a frame does not or the texture is
-  let go. An `SsaaFramebuffer` (the tumble cube, a shell's offscreen scene)
-  keeps its blit's bind groups too: one over its colour target, remade when
-  a resize replaces it, and one over a buffer of uniform slots, one slot per
-  blit of a frame. Only a texture made for one frame (a gradient's ramp, a
-  blend-mode composite's copy, an LCD mask drawn from a slice) gets a bind
-  group of its own each frame. Pictures are unchanged.
+  textures made for that frame: the uniform bind groups are made once per
+  chunk of the frame's uniform buffer and each draw binds its uniforms at a
+  dynamic offset, and the bind groups over textures that outlive a frame
+  (images, LCD text, layers) are kept while frames draw them and let go
+  when a frame does not or the texture is let go. An `SsaaFramebuffer` (the
+  tumble cube, a shell's offscreen scene) keeps its blit's bind groups too:
+  one over its colour target, remade when a resize replaces it, and one
+  over a buffer of uniform slots, a slot per blit. Only a texture made for
+  one frame (a gradient's ramp, a blend-mode composite's copy, an LCD mask
+  drawn from a slice) gets a bind group of its own each frame. Pictures are
+  unchanged.
 
 ### Added
 
@@ -45,10 +46,15 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   uniforms in `set_bind_group` (`&[0]` for a buffer of its own) instead of
   `&[]`.
 - An `SsaaFramebuffer` blit hands one per-draw buffer (its quad) to
-  `retire` instead of two: its uniforms are in slots the framebuffer keeps.
-  A frame that blits more often than any before also hands over the
-  outgrown uniform buffer once. Destroy what `retire` receives after the
-  submit, as before.
+  `retire` instead of two: its uniforms are in slots the framebuffer keeps
+  (64 KiB at most). A `blit_downsample_in` blit starts at the first slot in
+  each submission of its context and grows the slots when a submission
+  blits more often than any before, handing the outgrown uniform buffer to
+  `retire` once; destroy what `retire` receives after the submit, as before.
+  The other blits (`blit_to`, `blit_downsample_to`, the 3x / 4x variants,
+  `blit_downsample_retiring`) take 256 slots in turn, so any number of them
+  may be recorded into one encoder, `ensure_size` between them or not, as
+  long as one submission holds fewer than 256 blits of one framebuffer.
 
 ## [0.7.0] - Unreleased
 

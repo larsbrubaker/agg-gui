@@ -56,10 +56,13 @@ fn clear_red(encoder: &mut wgpu::CommandEncoder, fb: &SsaaFramebuffer) {
     });
 }
 
-/// A 3-D view's pass as the tumble cube makes it: keep the framebuffer
-/// sized, draw into it, blit it onto the pass's target.
+/// A 3-D view's pass: keep the framebuffer sized, draw into it, blit it
+/// onto the pass's target, as the tumble cube does (`blit_downsample_in`)
+/// or, when `into_encoder`, as demo-wgpu's bar grid does (`blit_to` into the
+/// pass's encoder).
 struct RedBlit {
     fb: Option<SsaaFramebuffer>,
+    into_encoder: bool,
 }
 
 impl WgpuCustomRender for RedBlit {
@@ -78,25 +81,57 @@ impl WgpuCustomRender for RedBlit {
             )),
         };
         clear_red(ctx.encoder, fb);
-        fb.blit_downsample_in(&mut ctx, 1);
+        if self.into_encoder {
+            fb.blit_to(
+                ctx.device,
+                ctx.queue,
+                ctx.encoder,
+                ctx.target_view,
+                ctx.target_size,
+                ctx.screen_rect,
+                ctx.parent_clip,
+                ctx.pipelines,
+            );
+        } else {
+            fb.blit_downsample_in(&mut ctx, 1);
+        }
     }
 }
 
-/// The same pass drawn twice a frame: once inside a 40 x 30 layer and once
-/// on the 128 x 96 frame, so the two blits' uniforms (their target's size)
-/// differ. If the second blit's uniforms reached the first, the first would
-/// map its quad by the frame's size and miss the corner it should cover.
+/// The same pass drawn several times a frame: once inside a 40 x 30 layer
+/// and four times on the 128 x 96 frame, so the blits' uniforms (their
+/// target's size) differ. If a later blit's uniforms reached the first, the
+/// first would map its quad by the frame's size and miss the corner it
+/// should cover. Five blits outgrow the four uniform slots a framebuffer
+/// starts with, so the first frame also grows them mid-frame.
 #[test]
-fn a_blit_drawn_twice_a_frame_makes_no_bind_groups_after_the_first_frame() {
+fn a_blit_drawn_several_times_a_frame_makes_no_bind_groups_after_the_first_frame() {
+    blit_several_times_a_frame(false);
+}
+
+/// The same, through `blit_to` into the pass's encoder: `ensure_size` before
+/// each draw must not hand the second blit the first one's uniform slot,
+/// both being recorded into one encoder not yet submitted.
+#[test]
+fn a_blit_to_the_pass_encoder_drawn_several_times_a_frame_keeps_its_own_uniforms() {
+    blit_several_times_a_frame(true);
+}
+
+fn blit_several_times_a_frame(into_encoder: bool) {
     let Some(gpu) = gpu() else { return };
     let (w, h) = (128u32, 96u32);
-    let blit = Rc::new(RefCell::new(RedBlit { fb: None }));
+    let blit = Rc::new(RefCell::new(RedBlit {
+        fb: None,
+        into_encoder,
+    }));
     let mut frame = HeadlessFrame::new(gpu, w, h);
     let paint = |ctx: &mut WgpuGfxCtx| {
         ctx.push_layer(40.0, 30.0);
         ctx.push_custom_render(blit.clone(), Rect::new(0.0, 0.0, 8.0, 8.0));
         ctx.pop_layer();
-        ctx.push_custom_render(blit.clone(), Rect::new(64.0, 40.0, 8.0, 8.0));
+        for x in [64.0, 80.0, 92.0, 104.0] {
+            ctx.push_custom_render(blit.clone(), Rect::new(x, 40.0, 8.0, 8.0));
+        }
     };
     frame.render(Color::white(), paint);
     let counts = |blit: &Rc<RefCell<RedBlit>>| {
@@ -127,9 +162,8 @@ fn a_blit_drawn_twice_a_frame_makes_no_bind_groups_after_the_first_frame() {
 }
 
 /// Blits into one encoder its caller submits, each onto a target of its own
-/// size, keep their own uniforms, also when a frame blits more often than
-/// the framebuffer has uniform slots (six blits, four slots: the first frame
-/// grows them); the frames after the first make no bind groups.
+/// size, keep their own uniforms (six blits, taking the slots in turn); the
+/// frames after the first make no bind groups.
 #[test]
 fn blits_recorded_into_one_encoder_keep_their_own_uniforms() {
     let Some(gpu) = gpu() else { return };

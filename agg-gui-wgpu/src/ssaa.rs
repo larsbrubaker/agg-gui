@@ -64,9 +64,10 @@
 //!
 //! A blit binds bind groups the framebuffer keeps (`ssaa_blit_binds.rs`):
 //! one over its colour target, remade when a resize replaces it, and one
-//! over a buffer of uniform slots, one slot per blit of a frame (two blits
-//! recorded into one encoder must not share a slot, or both would see the
-//! last write). A steady frame makes no bind groups: in Firefox each one
+//! over a buffer of uniform slots, a slot per blit (two blits recorded into
+//! one encoder must not share a slot, or both would see the last write; see
+//! `ssaa_blit_binds.rs` for how a blit picks its slot and the bound on blits
+//! per submission). A steady frame makes no bind groups: in Firefox each one
 //! lives until the garbage collector runs, from a fixed descriptor heap.
 //! [`SsaaFramebuffer::bind_group_counts`] counts what it made.
 //!
@@ -214,23 +215,15 @@ impl SsaaFramebuffer {
     /// collector), but not at once: the frame's encoder may not be submitted
     /// yet. They are destroyed by the next call, by when the frame that last
     /// drew them has been submitted.
-    ///
-    /// For blits outside a custom render pass, the call also starts a frame:
-    /// the blits after it take the framebuffer's uniform slots from the
-    /// first again (`ssaa_blit_binds.rs`), so the blits before a call must be
-    /// submitted before a blit after it is recorded, as a frame's are.
     pub fn ensure_size(&mut self, device: &wgpu::Device, w: u32, h: u32) {
         self.textures.destroy_retired();
         let w = w.max(1);
         let h = h.max(1);
-        let resized = (w, h) != (self.width, self.height);
-        let binds = self.blit_binds.get_mut();
-        binds
-            .unwrap_or_else(|e| e.into_inner())
-            .ensure_size(resized);
-        if !resized {
+        if (w, h) == (self.width, self.height) {
             return;
         }
+        let binds = self.blit_binds.get_mut();
+        binds.unwrap_or_else(|e| e.into_inner()).color_replaced();
         self.width = w;
         self.height = h;
         let color = alloc_color(&mut self.textures, device, w, h, self.format);
@@ -518,9 +511,9 @@ impl SsaaFramebuffer {
         );
     }
 
-    /// Blit through `pipeline`. `context_frame` is the custom render
-    /// context's submission number when the blit runs in a custom render
-    /// pass, which tells the frame's blits apart (`ssaa_blit_binds.rs`).
+    /// Blit through `pipeline`. `submission` is the custom render context's
+    /// submission number for a `blit_downsample_in` blit and `None` for the
+    /// others: how the blit picks its uniform slot (`ssaa_blit_binds.rs`).
     #[allow(clippy::too_many_arguments)]
     fn blit_to_inner(
         &self,
@@ -533,7 +526,7 @@ impl SsaaFramebuffer {
         parent_clip: Option<[i32; 4]>,
         pipeline: &wgpu::RenderPipeline,
         pipelines: &WgpuPipelines,
-        context_frame: Option<u64>,
+        submission: Option<u64>,
         retire: &mut dyn FnMut(wgpu::Buffer),
     ) {
         let [gl_x, gl_y, gl_w, gl_h] = pixel_rect(dst_rect);
@@ -568,8 +561,7 @@ impl SsaaFramebuffer {
         };
         let ((tex_bg0, offset), tex_bg1) = {
             let mut binds = self.binds();
-            let frame = binds.frame(context_frame);
-            let bg0 = binds.uniforms(device, queue, pipelines, frame, &tex_uniforms, retire);
+            let bg0 = binds.uniforms(device, queue, pipelines, submission, &tex_uniforms, retire);
             let bg1 = binds.texture(device, pipelines, &self.color.1, &self.blit_sampler);
             (bg0, bg1)
         };
