@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps.
 
+## [0.6.1] - Unreleased
+
+### Fixed
+
+- In Firefox, a WebGPU canvas no longer leaks GPU memory with every frame
+  it presents. Firefox keeps one canvas-sized texture alive per frame shown
+  on a `bgra8unorm` canvas until its GPU process exits, so an app that kept
+  drawing (orbiting a 3D view, say) ran the graphics card out of memory
+  within minutes, lost the device and hung the tab. Firefox's WebGPU
+  canvases are now configured `rgba8unorm` instead, which does not leak.
+  An app whose own pipelines are built for `GpuInfo::surface_format` needs
+  no change; one that assumed `bgra8unorm` reads the format from there.
+  Other browsers, WebGL2 canvases and the native shells keep `bgra8unorm`.
+
 ## [0.6.0] - Unreleased
 
 ### Changed

@@ -23,7 +23,10 @@ use wasm_bindgen::JsValue;
 use crate::adapter_check::{run_adapter_check, AdapterCheck};
 use crate::config::{Backend, WebShellConfig};
 use crate::dom_math::clamp_to_max_dim;
-use crate::error::{device_features, device_limits, pick_surface_format, GpuInfo, WebShellError};
+use crate::error::{
+    device_features, device_limits, pick_surface_format, prefers_rgba8_canvas, GpuInfo,
+    WebShellError,
+};
 
 /// wgpu 29's `create_surface` rejects a canvas target unless the instance
 /// has *some* display handle (canvases have none). A zero-sized `Web` display
@@ -110,7 +113,15 @@ impl WebGpu {
         .await?;
 
         let caps = surface.get_capabilities(&adapter);
-        let format = pick_surface_format(&caps.formats).ok_or(WebShellError::UnusableSurface)?;
+        // Firefox's bgra8unorm canvas leaks GPU memory every frame
+        // (`prefers_rgba8_canvas`). The format is fixed here for the page's
+        // life: `rebuild` reconfigures with the same `config`.
+        let user_agent = web_sys::window()
+            .and_then(|w| w.navigator().user_agent().ok())
+            .unwrap_or_default();
+        let prefer_rgba8 = prefers_rgba8_canvas(adapter.get_info().backend, &user_agent);
+        let format = pick_surface_format(&caps.formats, prefer_rgba8)
+            .ok_or(WebShellError::UnusableSurface)?;
         let alpha_mode = *caps
             .alpha_modes
             .first()

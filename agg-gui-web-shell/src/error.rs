@@ -111,8 +111,41 @@ pub struct GpuInfo {
 /// ([`agg_gui_wgpu::choose_surface_format`]: Bgra8Unorm, else non-sRGB, else
 /// the surface's first preference), so a browser canvas lands on the same
 /// format as a native window whichever 8-bit order it lists first.
-pub(crate) fn pick_surface_format(formats: &[wgpu::TextureFormat]) -> Option<wgpu::TextureFormat> {
+///
+/// With `prefer_rgba8` (see [`prefers_rgba8_canvas`]) `Rgba8Unorm` wins
+/// whenever the surface offers it; without it on offer the shared rule
+/// still decides.
+pub(crate) fn pick_surface_format(
+    formats: &[wgpu::TextureFormat],
+    prefer_rgba8: bool,
+) -> Option<wgpu::TextureFormat> {
+    if prefer_rgba8 && formats.contains(&wgpu::TextureFormat::Rgba8Unorm) {
+        return Some(wgpu::TextureFormat::Rgba8Unorm);
+    }
     agg_gui_wgpu::choose_surface_format(formats)
+}
+
+/// Whether a canvas on `backend` in the browser named by `user_agent` should
+/// be configured `Rgba8Unorm` rather than the shared rule's `Bgra8Unorm`.
+///
+/// Firefox's WebGPU canvas presentation leaks one canvas-sized texture of GPU
+/// memory for every frame presented on a `bgra8unorm` canvas, freed only
+/// when its GPU process exits (Firefox 160, D3D12: 300 frames of a 1280x593
+/// canvas kept about 1 GB; the same frames on `rgba8unorm` kept noise-level
+/// 46 MB), so a continuously drawing app runs the GPU out of memory within
+/// minutes. Channel order is invisible to the app: pipelines are built for
+/// the configured format and the readback paths swap only for BGRA. WebGL2
+/// canvases and every other browser keep the shared rule, and with it the
+/// same pixels as native windows and golden images.
+pub(crate) fn prefers_rgba8_canvas(backend: wgpu::Backend, user_agent: &str) -> bool {
+    backend == wgpu::Backend::BrowserWebGpu && is_firefox(user_agent)
+}
+
+/// Whether `user_agent` is Firefox's Gecko engine (desktop or Android).
+/// Chromium and Safari say `like Gecko` but never `Firefox/`; Firefox on iOS
+/// is WebKit and says `FxiOS/` instead, so it is (rightly) not Firefox here.
+pub(crate) fn is_firefox(user_agent: &str) -> bool {
+    user_agent.contains("Firefox/")
 }
 
 /// The device limits to request for `backend`, honouring an explicit override.
@@ -167,14 +200,99 @@ mod tests {
     fn prefers_non_srgb_format() {
         use wgpu::TextureFormat as F;
         assert_eq!(
-            pick_surface_format(&[F::Bgra8UnormSrgb, F::Bgra8Unorm]),
+            pick_surface_format(&[F::Bgra8UnormSrgb, F::Bgra8Unorm], false),
             Some(F::Bgra8Unorm)
         );
         assert_eq!(
-            pick_surface_format(&[F::Rgba8UnormSrgb]),
+            pick_surface_format(&[F::Rgba8UnormSrgb], false),
             Some(F::Rgba8UnormSrgb)
         );
-        assert_eq!(pick_surface_format(&[]), None);
+        assert_eq!(pick_surface_format(&[], false), None);
+    }
+
+    #[test]
+    fn a_firefox_canvas_draws_in_rgba8_whichever_order_it_is_offered() {
+        use wgpu::TextureFormat as F;
+        assert_eq!(
+            pick_surface_format(&[F::Bgra8Unorm, F::Rgba8Unorm, F::Rgba16Float], true),
+            Some(F::Rgba8Unorm)
+        );
+        assert_eq!(
+            pick_surface_format(&[F::Rgba8Unorm, F::Bgra8Unorm, F::Rgba16Float], true),
+            Some(F::Rgba8Unorm)
+        );
+    }
+
+    #[test]
+    fn other_canvases_keep_the_shared_rule() {
+        use wgpu::TextureFormat as F;
+        assert_eq!(
+            pick_surface_format(&[F::Rgba8Unorm, F::Bgra8Unorm, F::Rgba16Float], false),
+            Some(F::Bgra8Unorm)
+        );
+        // Preferring rgba8 when the surface lacks it falls back to the shared
+        // rule rather than inventing a format.
+        assert_eq!(
+            pick_surface_format(&[F::Bgra8UnormSrgb, F::Bgra8Unorm], true),
+            Some(F::Bgra8Unorm)
+        );
+        assert_eq!(pick_surface_format(&[], true), None);
+    }
+
+    const FIREFOX_WINDOWS: &str =
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:142.0) Gecko/20100101 Firefox/142.0";
+    const FIREFOX_MAC: &str =
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:142.0) Gecko/20100101 Firefox/142.0";
+    const FIREFOX_LINUX: &str =
+        "Mozilla/5.0 (X11; Linux x86_64; rv:142.0) Gecko/20100101 Firefox/142.0";
+    const FIREFOX_ANDROID: &str =
+        "Mozilla/5.0 (Android 14; Mobile; rv:142.0) Gecko/142.0 Firefox/142.0";
+    const CHROME_WINDOWS: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) \
+        AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36";
+    const EDGE_WINDOWS: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) \
+        AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36 Edg/141.0.0.0";
+    const SAFARI_MAC: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) \
+        AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15";
+    const CHROME_IOS: &str = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) \
+        AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/141.0.0.0 Mobile/15E148 Safari/604.1";
+    const FIREFOX_IOS: &str = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) \
+        AppleWebKit/605.1.15 (KHTML, like Gecko) FxiOS/142.0 Mobile/15E148 Safari/605.1.15";
+
+    #[test]
+    fn firefox_is_recognised_on_desktop_and_android() {
+        for ua in [FIREFOX_WINDOWS, FIREFOX_MAC, FIREFOX_LINUX, FIREFOX_ANDROID] {
+            assert!(is_firefox(ua), "{ua}");
+        }
+    }
+
+    #[test]
+    fn chromium_safari_and_ios_browsers_are_not_firefox() {
+        // Firefox on iOS is WebKit underneath, so its canvases are Safari's.
+        for ua in [
+            CHROME_WINDOWS,
+            EDGE_WINDOWS,
+            SAFARI_MAC,
+            CHROME_IOS,
+            FIREFOX_IOS,
+            "",
+        ] {
+            assert!(!is_firefox(ua), "{ua}");
+        }
+    }
+
+    #[test]
+    fn only_firefox_webgpu_canvases_prefer_rgba8() {
+        assert!(prefers_rgba8_canvas(
+            wgpu::Backend::BrowserWebGpu,
+            FIREFOX_WINDOWS
+        ));
+        // Firefox's WebGL2 canvas is another presentation path; it keeps the
+        // shared rule.
+        assert!(!prefers_rgba8_canvas(wgpu::Backend::Gl, FIREFOX_WINDOWS));
+        assert!(!prefers_rgba8_canvas(
+            wgpu::Backend::BrowserWebGpu,
+            CHROME_WINDOWS
+        ));
     }
 
     #[test]
