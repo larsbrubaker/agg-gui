@@ -66,10 +66,21 @@
 //! one over its colour target, remade when a resize replaces it, and one
 //! over a buffer of uniform slots, a slot per blit (two blits recorded into
 //! one encoder must not share a slot, or both would see the last write; see
-//! `ssaa_blit_binds.rs` for how a blit picks its slot and the bound on blits
-//! per submission). A steady frame makes no bind groups: in Firefox each one
-//! lives until the garbage collector runs, from a fixed descriptor heap.
+//! [Blits recorded into one encoder](#blits-recorded-into-one-encoder) for
+//! the bound on blits per submission). A steady frame makes no bind groups:
+//! in Firefox each one lives until the garbage collector runs, from a fixed
+//! descriptor heap.
 //! [`SsaaFramebuffer::bind_group_counts`] counts what it made.
+//!
+//! # Blits recorded into one encoder
+//!
+//! Any number of blits of one framebuffer may be recorded into one encoder,
+//! with [`SsaaFramebuffer::ensure_size`] between them or not, and each keeps
+//! its own uniforms as long as one submission holds fewer than 256 blits of
+//! that framebuffer: the blits take the framebuffer's 256 uniform slots in
+//! turn ([`SsaaFramebuffer::blit_downsample_in`] starts again at the first
+//! slot in each submission of its context). Past 256 blits in one
+//! submission, two of them would draw with the same uniforms.
 //!
 //! A blit's vertex buffer is made for that one draw. It and the uniform
 //! slots are filled through the queue ([`crate::create_buffer_filled`],
@@ -303,6 +314,10 @@ impl SsaaFramebuffer {
     /// `parent_clip` is intersected with `dst_rect` to set the pass scissor —
     /// pass the framework scissor that was active when the widget called
     /// `gl_paint` / pushed its draw command.
+    ///
+    /// Each blit keeps its own uniforms while one submission holds fewer
+    /// than 256 blits of this framebuffer: see
+    /// [Blits recorded into one encoder](crate::ssaa#blits-recorded-into-one-encoder).
     // Public API: the signature is shared with downstream callers.
     #[allow(clippy::too_many_arguments)]
     pub fn blit_to(
@@ -339,6 +354,10 @@ impl SsaaFramebuffer {
     /// entirely skips one row + one column — visually close to no AA at
     /// all — so 3× SSAA *needs* this dedicated pipeline to be worth its
     /// pixel cost.
+    ///
+    /// Each blit keeps its own uniforms while one submission holds fewer
+    /// than 256 blits of this framebuffer: see
+    /// [Blits recorded into one encoder](crate::ssaa#blits-recorded-into-one-encoder).
     // Public API: the signature is shared with downstream callers.
     #[allow(clippy::too_many_arguments)]
     pub fn blit_downsample_3x_to(
@@ -372,6 +391,10 @@ impl SsaaFramebuffer {
     /// runs `tex_downsample_4x_pipeline` so all 16 source texels under each
     /// output pixel contribute equally, instead of the 4-of-16 you'd get
     /// from a single bilinear tap.
+    ///
+    /// Each blit keeps its own uniforms while one submission holds fewer
+    /// than 256 blits of this framebuffer: see
+    /// [Blits recorded into one encoder](crate::ssaa#blits-recorded-into-one-encoder).
     // Public API: the signature is shared with downstream callers.
     #[allow(clippy::too_many_arguments)]
     pub fn blit_downsample_4x_to(
@@ -424,6 +447,10 @@ impl SsaaFramebuffer {
     /// Factors above 4 clamp to the 4× pipeline rather than erroring —
     /// it degrades gracefully (a partial box) instead of failing a
     /// frame, and no caller supersamples that far today.
+    ///
+    /// Each blit keeps its own uniforms while one submission holds fewer
+    /// than 256 blits of this framebuffer: see
+    /// [Blits recorded into one encoder](crate::ssaa#blits-recorded-into-one-encoder).
     #[allow(clippy::too_many_arguments)]
     pub fn blit_downsample_to(
         &self,
@@ -482,6 +509,10 @@ impl SsaaFramebuffer {
     /// encoder it submits itself: the blit's per-draw buffers go to
     /// `retire`, for the caller to destroy (`wgpu::Buffer::destroy`) once
     /// that encoder has been submitted, not before (that fails the submit).
+    ///
+    /// Each blit keeps its own uniforms while one submission holds fewer
+    /// than 256 blits of this framebuffer: see
+    /// [Blits recorded into one encoder](crate::ssaa#blits-recorded-into-one-encoder).
     #[allow(clippy::too_many_arguments)]
     pub fn blit_downsample_retiring(
         &self,
