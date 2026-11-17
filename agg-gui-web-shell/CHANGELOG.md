@@ -19,6 +19,12 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   An app whose own pipelines are built for `GpuInfo::surface_format` needs
   no change; one that assumed `bgra8unorm` reads the format from there.
   Other browsers, WebGL2 canvases and the native shells keep `bgra8unorm`.
+- In Firefox, an app on this shell no longer loses its WebGPU device with
+  `Out of memory` after a minute or two of redraws: the crate now requires
+  agg-gui-wgpu 0.7.1, which reuses its bind groups from frame to frame.
+  Firefox frees a bind group only when JavaScript's garbage collector
+  collects it, so 0.7.0's few hundred new ones per frame filled the D3D12
+  descriptor heap.
 
 ## [0.6.0] - Unreleased
 
