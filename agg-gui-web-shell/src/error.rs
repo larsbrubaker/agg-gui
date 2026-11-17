@@ -4,6 +4,12 @@
 //!
 //! Platform-neutral (plain wgpu types), so both compile natively and the
 //! builder signature documented on docs.rs is the real one.
+//!
+//! It also holds the pure choices the canvas GPU bring-up (the crate's
+//! wasm-only `web::gpu`) makes: the swap-chain format (with Firefox's
+//! `Rgba8Unorm` preference and the user-agent check behind it), the device
+//! limits and the device features. That code only runs in a browser, so its
+//! decisions live here, where `cargo test` reaches them natively.
 
 use std::sync::Arc;
 
