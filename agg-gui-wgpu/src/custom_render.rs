@@ -179,6 +179,9 @@ pub struct WgpuCustomRenderCtx<'a> {
     /// Where [`Self::retire_buffer`] hands buffers: the context's ledger,
     /// destroyed after the frame's submit.
     pub(crate) retire: &'a mut crate::texture_life::TextureLedger,
+    /// The context's submits before this flush's: the same for every pass
+    /// of one submission, unlike [`Self::frame`] for an overlay frame.
+    pub(crate) submission: u64,
 }
 
 impl WgpuCustomRenderCtx<'_> {

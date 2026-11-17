@@ -130,12 +130,13 @@ fn the_faces_are_uploaded_once_across_frames() {
     assert_eq!(shared.borrow().face_uploads, 1);
 }
 
-/// Every frame the cube blits its supersampled picture with two buffers made
-/// for that draw. In the browser a dropped buffer is freed only when the
-/// garbage collector runs, which a browser feeling no GPU-memory pressure may
-/// put off until the device runs out of memory, so each frame's pair must be
+/// Every frame the cube blits its supersampled picture with a buffer made for
+/// that draw (its quad). In the browser a dropped buffer is freed only when
+/// the garbage collector runs, which a browser feeling no GPU-memory pressure
+/// may put off until the device runs out of memory, so each frame's must be
 /// destroyed once that frame is submitted: the number alive stays flat
-/// however many frames are painted.
+/// however many frames are painted. Bind groups are freed the same way, so
+/// the blit's are made once and kept (`ssaa_blit_binds.rs`).
 #[test]
 fn painting_frames_leaves_no_buffers_or_textures_behind() {
     let Some((device, queue)) = try_device() else {
@@ -158,6 +159,7 @@ fn painting_frames_leaves_no_buffers_or_textures_behind() {
     let mut cube = TumbleCube::new(cam).with_gpu_renderer(Box::new(renderer));
     cube.layout(Size::new(SIZE as f64, SIZE as f64));
     let mut first_textures = None;
+    let mut first_bind_groups = None;
     for frame in 1..=20u64 {
         ctx.reset(SIZE as f32, SIZE as f32);
         ctx.clear(Color::rgba(0.0, 1.0, 0.0, 1.0));
@@ -166,9 +168,16 @@ fn painting_frames_leaves_no_buffers_or_textures_behind() {
         let gpu = shared.borrow();
         let fb = gpu.framebuffer.as_ref().expect("the cube drew");
         let buffers = ctx.buffer_counts();
-        // Each frame's blit handed its two buffers to the context, which
-        // destroyed them after the frame's submit.
-        assert_eq!(buffers.let_go, 2 * frame, "frame {frame}: {buffers:?}");
+        // Each frame's blit handed its quad to the context, which destroyed
+        // it after the frame's submit.
+        assert_eq!(buffers.let_go, frame, "frame {frame}: {buffers:?}");
+        let bind_groups = fb.bind_group_counts();
+        let first = *first_bind_groups.get_or_insert(bind_groups);
+        assert_eq!(
+            bind_groups.created(),
+            first.created(),
+            "frame {frame}: the blit makes no bind groups after the first frame: {bind_groups:?}"
+        );
         assert_eq!(buffers.waiting(), 0, "frame {frame}: {buffers:?}");
         let textures = (fb.texture_counts(), ctx.texture_counts().held());
         assert_eq!(

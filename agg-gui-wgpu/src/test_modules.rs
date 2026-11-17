@@ -69,6 +69,9 @@ mod screenshot_readback_lost_tests;
 #[path = "screenshot_scaled_tests.rs"]
 mod screenshot_scaled_tests;
 #[cfg(not(target_arch = "wasm32"))]
+#[path = "ssaa_blit_tests.rs"]
+mod ssaa_blit_tests;
+#[cfg(not(target_arch = "wasm32"))]
 #[path = "texture_life_tests.rs"]
 mod texture_life_tests;
 #[path = "texture_limit_readback_tests.rs"]

@@ -205,10 +205,11 @@ fn a_blend_mode_proxy_blit_destroys_its_buffer_every_frame() {
     }
 }
 
-/// An SSAA blit into an encoder its caller submits hands its two per-draw
-/// buffers to the caller, also when it blits twice into one encoder (each
-/// blit has buffers of its own, so neither sees the other's quad); destroying
-/// them after the submit leaves the frame valid.
+/// An SSAA blit into an encoder its caller submits hands its per-draw
+/// buffer (the quad) to the caller, also when it blits twice into one
+/// encoder (each blit has a quad of its own, so neither sees the other's;
+/// the uniforms are in slots the framebuffer keeps, see `ssaa_blit_binds`);
+/// destroying them after the submit leaves the frame valid.
 #[test]
 fn an_ssaa_blit_hands_its_buffers_to_the_caller_that_submits() {
     let Some(gpu) = gpu() else { return };
@@ -235,11 +236,7 @@ fn an_ssaa_blit_hands_its_buffers_to_the_caller_that_submits() {
                 &mut |buffer| buffers.push(buffer),
             );
         }
-        assert_eq!(
-            buffers.len(),
-            4,
-            "frame {frame}: two blits, two buffers each"
-        );
+        assert_eq!(buffers.len(), 2, "frame {frame}: two blits, a quad each");
         queue.submit(std::iter::once(encoder.finish()));
         for buffer in buffers {
             buffer.destroy();

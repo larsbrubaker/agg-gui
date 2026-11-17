@@ -530,6 +530,7 @@ fn execute_prepared<'a>(
                         frame: frame_info.frame,
                         last_frame_completion: frame_info.last_frame_completion,
                         retire: &mut *textures,
+                        submission: frame_info.submission,
                     };
                     renderer.borrow_mut().render(ctx);
                     i += 1;

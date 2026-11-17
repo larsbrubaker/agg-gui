@@ -8,7 +8,10 @@
 //! device. Dropping a `wgpu::BindGroup` frees nothing until the collector
 //! runs, and it feels no pressure from that heap: a UI that made a few
 //! hundred bind groups every frame lost its device ("Out of memory") after a
-//! minute or two of redraws. So a steady frame makes none.
+//! minute or two of redraws. So a steady frame makes none but the few over
+//! textures made for that frame (below). An `SsaaFramebuffer` keeps its
+//! blit's bind groups itself (`ssaa_blit_binds.rs`), counted on the
+//! framebuffer; a custom render pass's own bind groups are its own to keep.
 //!
 //! Group 0, the uniforms: each draw's uniforms are a slice of a chunk of the
 //! frame's uniform arena (`buffer_arena.rs`), and the chunks persist from
@@ -47,11 +50,13 @@ use crate::buffer_arena::GpuArena;
 use crate::end_frame::PreparedSlice;
 use crate::texture_life::TextureLedger;
 
-/// How many bind groups a [`crate::WgpuGfxCtx`] has made, by kind, and how
+/// How many bind groups a [`crate::WgpuGfxCtx`] (or an
+/// [`crate::SsaaFramebuffer`], for its blits) has made, by kind, and how
 /// many it keeps for later frames, for tests and diagnostics. After the first
 /// frames of a steady UI, only [`Self::one_frame`] grows, by the frame's
-/// one-frame textures; a `uniform` or `texture` count that grows every
-/// frame is the context making bind groups it should reuse.
+/// one-frame textures (and `texture`, by LCD masks drawn from a slice); a
+/// count that grows every frame otherwise is bind groups that should be
+/// reused. Bind groups a custom render pass makes itself are not counted.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct BindGroupCounts {
     /// Group-0 bind groups over a chunk of the frame's uniform buffer, one

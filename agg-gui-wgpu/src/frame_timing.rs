@@ -77,6 +77,10 @@ pub(crate) struct FrameTiming {
     device_generation: u64,
     /// The number of the frame begun last; 0 before the first.
     frame: u64,
+    /// Every flush's submit so far, overlay frames and flushes without
+    /// `begin_frame` included: what tells one submission's custom passes
+    /// from the next's (`ssaa_blit_binds.rs`), which `frame` cannot.
+    submits: u64,
     /// A frame was begun and its submit has not been timed yet. Only the
     /// first submit after `begin_frame` is: an overlay frame drawn on top
     /// before presenting belongs to the same window frame.
@@ -94,6 +98,7 @@ impl FrameTiming {
         Self {
             device_generation: next_device_generation(),
             frame: 0,
+            submits: 0,
             awaiting_submit: false,
             latest: Arc::new(Mutex::new(None)),
         }
@@ -110,6 +115,7 @@ impl FrameTiming {
     /// when wgpu reports the work done; never waits. Only the first submit of
     /// a begun frame is timed.
     pub(crate) fn after_submit(&mut self, queue: &wgpu::Queue, submitted: web_time::Instant) {
+        self.submits += 1;
         if !std::mem::take(&mut self.awaiting_submit) {
             return;
         }
@@ -139,6 +145,10 @@ impl FrameTiming {
         self.frame
     }
 
+    pub(crate) fn submits(&self) -> u64 {
+        self.submits
+    }
+
     pub(crate) fn last_completion(&self) -> Option<FrameCompletion> {
         self.latest.lock().ok().and_then(|l| *l)
     }
@@ -151,6 +161,8 @@ pub(crate) struct PassFrameInfo {
     pub(crate) lost_frames: u64,
     pub(crate) device_generation: u64,
     pub(crate) frame: u64,
+    /// Submits before this flush's: one number per flush.
+    pub(crate) submission: u64,
     pub(crate) last_frame_completion: Option<FrameCompletion>,
 }
 
@@ -198,6 +210,7 @@ impl WgpuGfxCtx {
             lost_frames: self.lost_frames(),
             device_generation: self.device_generation(),
             frame: self.frame_number(),
+            submission: self.frame_timing.submits(),
             last_frame_completion: self.last_frame_completion(),
         }
     }

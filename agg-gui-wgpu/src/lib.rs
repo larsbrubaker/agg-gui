@@ -113,6 +113,7 @@ pub use headless::{
 };
 
 pub mod ssaa;
+mod ssaa_blit_binds;
 pub mod tumble_cube;
 pub use ssaa::{ssaa_linear_scale, SsaaFramebuffer};
 pub use tumble_cube::WgpuTumbleCubeRenderer;

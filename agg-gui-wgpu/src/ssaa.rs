@@ -62,23 +62,32 @@
 //! [`SsaaFramebuffer::ensure_size`], and dropping the framebuffer (between
 //! frames) destroys the rest.
 //!
-//! A blit's uniform and vertex buffers are made for that one draw: they
-//! cannot be persistent buffers rewritten each frame, because two blits
-//! recorded into one encoder would both see the last write. They are filled
-//! through the queue ([`crate::create_buffer_filled`]), never through a
-//! mapping at creation, so a blit on a lost device records nothing harmful
-//! instead of panicking; that is why every blit takes the queue. The write
-//! lands before the next submission's commands, so the blit recorded into
-//! that submission reads the bytes. Only whoever submits the encoder knows
-//! when they may be destroyed (destroying one before that submit fails it), so the
-//! framebuffer does not keep them: [`SsaaFramebuffer::blit_downsample_in`]
-//! hands them to a custom render pass's context, which destroys them after
-//! the frame's submit, and [`SsaaFramebuffer::blit_downsample_retiring`]
-//! hands them to a caller that submits its own encoder. The other blit
-//! methods drop them, leaving them to the garbage collector in the browser.
+//! A blit binds bind groups the framebuffer keeps (`ssaa_blit_binds.rs`):
+//! one over its colour target, remade when a resize replaces it, and one
+//! over a buffer of uniform slots, one slot per blit of a frame (two blits
+//! recorded into one encoder must not share a slot, or both would see the
+//! last write). A steady frame makes no bind groups: in Firefox each one
+//! lives until the garbage collector runs, from a fixed descriptor heap.
+//! [`SsaaFramebuffer::bind_group_counts`] counts what it made.
+//!
+//! A blit's vertex buffer is made for that one draw. It and the uniform
+//! slots are filled through the queue ([`crate::create_buffer_filled`],
+//! `queue.write_buffer`), never through a mapping at creation, so a blit on
+//! a lost device records nothing harmful instead of panicking; that is why
+//! every blit takes the queue. The write lands before the next submission's
+//! commands, so the blit recorded into that submission reads the bytes.
+//! Only whoever submits the encoder knows when the vertex buffer (or a
+//! uniform buffer a frame's blits outgrew) may be destroyed (destroying one
+//! before that submit fails it), so the framebuffer does not keep them:
+//! [`SsaaFramebuffer::blit_downsample_in`] hands them to a custom render
+//! pass's context, which destroys them after the frame's submit, and
+//! [`SsaaFramebuffer::blit_downsample_retiring`] hands them to a caller that
+//! submits its own encoder. The other blit methods drop them, leaving them
+//! to the garbage collector in the browser.
 
 use crate::custom_render::WgpuCustomRenderCtx;
 use crate::pipelines::{TexUniforms, WgpuPipelines};
+use crate::ssaa_blit_binds::BlitBinds;
 use crate::texture_life::{TextureCounts, TextureLedger};
 use agg_gui::geometry::Rect;
 
@@ -131,6 +140,9 @@ pub struct SsaaFramebuffer {
     /// a resize retires the old pair, the next [`Self::ensure_size`]
     /// destroys it.
     textures: TextureLedger,
+    /// The blit's bind groups and uniform slots (`ssaa_blit_binds.rs`). In a
+    /// `Mutex` because the blits take `&self`; nothing contends for it.
+    blit_binds: std::sync::Mutex<BlitBinds>,
 }
 
 impl Drop for SsaaFramebuffer {
@@ -141,6 +153,10 @@ impl Drop for SsaaFramebuffer {
         self.textures.retire(&self.color.0);
         if let Some((depth, _)) = &self.depth {
             self.textures.retire(depth);
+        }
+        let binds = self.blit_binds.get_mut();
+        if let Some(buffer) = binds.unwrap_or_else(|e| e.into_inner()).take_buffer() {
+            self.textures.retire_buffer(buffer);
         }
         // `textures` destroys what it holds when it drops, after this.
     }
@@ -181,6 +197,7 @@ impl SsaaFramebuffer {
             height: h.max(1),
             blit_sampler,
             textures,
+            blit_binds: Default::default(),
         };
         if with_depth {
             fb.depth = Some(alloc_depth(&mut fb.textures, device, fb.width, fb.height));
@@ -197,11 +214,21 @@ impl SsaaFramebuffer {
     /// collector), but not at once: the frame's encoder may not be submitted
     /// yet. They are destroyed by the next call, by when the frame that last
     /// drew them has been submitted.
+    ///
+    /// For blits outside a custom render pass, the call also starts a frame:
+    /// the blits after it take the framebuffer's uniform slots from the
+    /// first again (`ssaa_blit_binds.rs`), so the blits before a call must be
+    /// submitted before a blit after it is recorded, as a frame's are.
     pub fn ensure_size(&mut self, device: &wgpu::Device, w: u32, h: u32) {
         self.textures.destroy_retired();
         let w = w.max(1);
         let h = h.max(1);
-        if w == self.width && h == self.height {
+        let resized = (w, h) != (self.width, self.height);
+        let binds = self.blit_binds.get_mut();
+        binds
+            .unwrap_or_else(|e| e.into_inner())
+            .ensure_size(resized);
+        if !resized {
             return;
         }
         self.width = w;
@@ -222,6 +249,17 @@ impl SsaaFramebuffer {
     /// made with depth) whatever its resize history.
     pub fn texture_counts(&self) -> TextureCounts {
         self.textures.counts()
+    }
+
+    /// How many bind groups this framebuffer's blits have made and how many
+    /// it keeps: after the first frame, none are made unless a resize
+    /// replaces the colour target or a frame blits more often than before.
+    pub fn bind_group_counts(&self) -> crate::BindGroupCounts {
+        self.binds().counts()
+    }
+
+    fn binds(&self) -> std::sync::MutexGuard<'_, BlitBinds> {
+        self.blit_binds.lock().unwrap_or_else(|e| e.into_inner())
     }
 
     pub fn size(&self) -> (u32, u32) {
@@ -295,6 +333,7 @@ impl SsaaFramebuffer {
             parent_clip,
             &pipelines.tex_pipeline,
             pipelines,
+            None,
             &mut drop,
         );
     }
@@ -330,6 +369,7 @@ impl SsaaFramebuffer {
             parent_clip,
             &pipelines.tex_downsample_3x_pipeline,
             pipelines,
+            None,
             &mut drop,
         );
     }
@@ -362,6 +402,7 @@ impl SsaaFramebuffer {
             parent_clip,
             &pipelines.tex_downsample_4x_pipeline,
             pipelines,
+            None,
             &mut drop,
         );
     }
@@ -414,6 +455,7 @@ impl SsaaFramebuffer {
             parent_clip,
             pipeline,
             pipelines,
+            None,
             &mut drop,
         );
     }
@@ -438,6 +480,7 @@ impl SsaaFramebuffer {
             ctx.parent_clip,
             pipeline,
             ctx.pipelines,
+            Some(ctx.submission),
             &mut |buffer| retire.retire_buffer(buffer),
         );
     }
@@ -470,10 +513,14 @@ impl SsaaFramebuffer {
             parent_clip,
             downsample_pipeline(pipelines, factor),
             pipelines,
+            None,
             retire,
         );
     }
 
+    /// Blit through `pipeline`. `context_frame` is the custom render
+    /// context's submission number when the blit runs in a custom render
+    /// pass, which tells the frame's blits apart (`ssaa_blit_binds.rs`).
     #[allow(clippy::too_many_arguments)]
     fn blit_to_inner(
         &self,
@@ -486,10 +533,31 @@ impl SsaaFramebuffer {
         parent_clip: Option<[i32; 4]>,
         pipeline: &wgpu::RenderPipeline,
         pipelines: &WgpuPipelines,
+        context_frame: Option<u64>,
         retire: &mut dyn FnMut(wgpu::Buffer),
     ) {
         let [gl_x, gl_y, gl_w, gl_h] = pixel_rect(dst_rect);
         if gl_w <= 0 || gl_h <= 0 {
+            return;
+        }
+
+        // Convert parent_clip (Y-up) ∩ dst_rect to wgpu Y-down for set_scissor.
+        let scissor = parent_clip
+            .map(|[px, py, pw, ph]| {
+                let x1 = (gl_x + gl_w).min(px + pw);
+                let y1 = (gl_y + gl_h).min(py + ph);
+                let x0c = gl_x.max(px);
+                let y0c = gl_y.max(py);
+                let w = (x1 - x0c).max(0);
+                let h = (y1 - y0c).max(0);
+                let y_down = (target_size.1 as i32 - (y0c + h)).max(0);
+                (x0c.max(0) as u32, y_down as u32, w as u32, h as u32)
+            })
+            .unwrap_or_else(|| {
+                let y_down = (target_size.1 as i32 - (gl_y + gl_h)).max(0);
+                (gl_x.max(0) as u32, y_down as u32, gl_w as u32, gl_h as u32)
+            });
+        if scissor.2 == 0 || scissor.3 == 0 {
             return;
         }
 
@@ -498,37 +566,13 @@ impl SsaaFramebuffer {
             _pad: [0.0; 2],
             tint: [1.0, 1.0, 1.0, 1.0],
         };
-        let tex_ub = crate::create_buffer_filled(
-            device,
-            queue,
-            &wgpu::util::BufferInitDescriptor {
-                label: Some("ssaa_blit_uniforms"),
-                contents: bytemuck::bytes_of(&tex_uniforms),
-                usage: wgpu::BufferUsages::UNIFORM,
-            },
-        );
-        let tex_bg0 = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("ssaa_blit_bg0"),
-            layout: &pipelines.tex_bgl0,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: tex_ub.as_entire_binding(),
-            }],
-        });
-        let tex_bg1 = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("ssaa_blit_bg1"),
-            layout: &pipelines.tex_bgl1,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&self.color.1),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&self.blit_sampler),
-                },
-            ],
-        });
+        let ((tex_bg0, offset), tex_bg1) = {
+            let mut binds = self.binds();
+            let frame = binds.frame(context_frame);
+            let bg0 = binds.uniforms(device, queue, pipelines, frame, &tex_uniforms, retire);
+            let bg1 = binds.texture(device, pipelines, &self.color.1, &self.blit_sampler);
+            (bg0, bg1)
+        };
 
         // Quad in target_view's Y-up local coords.  bl=v=1, tr=v=0 mirrors
         // the wgpu UV convention used elsewhere (e.g. `image_blit.rs`).
@@ -549,28 +593,6 @@ impl SsaaFramebuffer {
                 usage: wgpu::BufferUsages::VERTEX,
             },
         );
-
-        // Convert parent_clip (Y-up) ∩ dst_rect to wgpu Y-down for set_scissor.
-        let scissor = parent_clip
-            .map(|[px, py, pw, ph]| {
-                let x1 = (gl_x + gl_w).min(px + pw);
-                let y1 = (gl_y + gl_h).min(py + ph);
-                let x0c = gl_x.max(px);
-                let y0c = gl_y.max(py);
-                let w = (x1 - x0c).max(0);
-                let h = (y1 - y0c).max(0);
-                let y_down = (target_size.1 as i32 - (y0c + h)).max(0);
-                (x0c.max(0) as u32, y_down as u32, w as u32, h as u32)
-            })
-            .unwrap_or_else(|| {
-                let y_down = (target_size.1 as i32 - (gl_y + gl_h)).max(0);
-                (gl_x.max(0) as u32, y_down as u32, gl_w as u32, gl_h as u32)
-            });
-        if scissor.2 == 0 || scissor.3 == 0 {
-            retire(tex_ub);
-            retire(vb);
-            return;
-        }
 
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("ssaa_blit_pass"),
@@ -598,14 +620,11 @@ impl SsaaFramebuffer {
         );
         pass.set_scissor_rect(scissor.0, scissor.1, scissor.2, scissor.3);
         pass.set_pipeline(pipeline);
-        // `tex_bgl0` takes a dynamic offset; this blit's uniforms are the
-        // whole of their own buffer.
-        pass.set_bind_group(0, &tex_bg0, &[0]);
+        pass.set_bind_group(0, &tex_bg0, &[offset]);
         pass.set_bind_group(1, &tex_bg1, &[]);
         pass.set_vertex_buffer(0, vb.slice(..));
         pass.draw(0..6, 0..1);
         drop(pass);
-        retire(tex_ub);
         retire(vb);
     }
 }
