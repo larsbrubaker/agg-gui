@@ -23,11 +23,19 @@
 //! the long-press alternates and Backspace's repeat would never show, and
 //! a slide would become a pan that types nothing.
 //!
+//! The `on_touch_*_at` forms take the time the touch event happened, on the
+//! UI clock, when the shell knows it (a browser's `timeStamp`): the long
+//! press is judged by when the finger moved or lifted, not by when a slow
+//! frame let the event be handled (`touch_emulation.rs`). The plain forms
+//! use the handling time.
+//!
 //! The long press ([`crate::touch_emulation::long_press`]) needs time to
-//! pass with no input: `layout` polls the emulator every frame
-//! (`tick_long_press`), and `paint` keeps a wake-up armed for the next
-//! moment that matters, publishes the cue and draws the default ring
-//! (`paint_long_press_cue`), so an idle app still fires on time.
+//! pass with no input: `layout` polls the emulator (`tick_long_press`), and
+//! `paint` keeps a wake-up armed for the next moment that matters, publishes
+//! the cue and draws the default ring (`paint_long_press_cue`). The shells
+//! lay out only when the layout key moves or a layout is requested, so once
+//! a held finger is past its deadline `paint` requests the layout whose poll
+//! fires it, and an idle app still fires on time.
 //!
 //! `layout` also delivers a system clipboard read the touch toolbar's Paste
 //! started in a browser (`deliver_system_paste`), once the read resolves. A widget
@@ -48,6 +56,7 @@ use crate::draw_ctx::DrawCtx;
 use crate::event::{Modifiers, MouseButton};
 use crate::touch_emulation::{long_press, EmuCmd, LongPressCue, LONG_PRESS_CUE_DELAY};
 use crate::widget::App;
+use web_time::Instant;
 
 impl App {
     pub fn on_touch_start(
@@ -57,6 +66,20 @@ impl App {
         screen_x: f64,
         screen_y: f64,
         force: Option<f32>,
+    ) {
+        self.on_touch_start_at(device, id, screen_x, screen_y, force, None);
+    }
+
+    /// [`Self::on_touch_start`] for a landing that happened at `event_time`
+    /// on the UI clock (`None`: when it is handled).
+    pub fn on_touch_start_at(
+        &mut self,
+        device: crate::touch_state::TouchDeviceId,
+        id: crate::touch_state::TouchId,
+        screen_x: f64,
+        screen_y: f64,
+        force: Option<f32>,
+        event_time: Option<Instant>,
     ) {
         crate::animation::note_user_input();
         let pos = keyboard_scroll::lift_to_world(self.flip_y(screen_x, screen_y));
@@ -68,7 +91,7 @@ impl App {
         }
         let cmds = self
             .touch_mouse_emu
-            .on_start(device, id, screen_x, screen_y);
+            .on_start_at(device, id, screen_x, screen_y, event_time);
         self.apply_emu_cmds(cmds);
         // A finger on content that is still flinging stops it, and is not a
         // tap on whatever row the fling carried under it.
@@ -77,8 +100,11 @@ impl App {
         }
         // Wake an idle app when the hold's cue is due; each paint after
         // that re-arms until the long press fires or the finger lets go.
-        if self.touch_mouse_emu.long_press_deadline().is_some() {
-            crate::animation::request_draw_after(LONG_PRESS_CUE_DELAY);
+        if let Some(deadline) = self.touch_mouse_emu.long_press_deadline() {
+            let cue_at = deadline - crate::touch_emulation::LONG_PRESS_DELAY + LONG_PRESS_CUE_DELAY;
+            crate::animation::request_draw_after(
+                cue_at.saturating_duration_since(crate::clock::now()),
+            );
         }
     }
     pub fn on_touch_move(
@@ -89,6 +115,20 @@ impl App {
         screen_y: f64,
         force: Option<f32>,
     ) {
+        self.on_touch_move_at(device, id, screen_x, screen_y, force, None);
+    }
+
+    /// [`Self::on_touch_move`] for a move that happened at `event_time` on
+    /// the UI clock (`None`: when it is handled).
+    pub fn on_touch_move_at(
+        &mut self,
+        device: crate::touch_state::TouchDeviceId,
+        id: crate::touch_state::TouchId,
+        screen_x: f64,
+        screen_y: f64,
+        force: Option<f32>,
+        event_time: Option<Instant>,
+    ) {
         crate::animation::note_user_input();
         let pos = keyboard_scroll::lift_to_world(self.flip_y(screen_x, screen_y));
         self.touch_state.on_move(device, id, pos, force);
@@ -97,13 +137,26 @@ impl App {
         if self.keyboard_touch_move(device, id, screen_x, screen_y) {
             return;
         }
-        let cmds = self.touch_mouse_emu.on_move(device, id, screen_x, screen_y);
+        let cmds = self
+            .touch_mouse_emu
+            .on_move_at(device, id, screen_x, screen_y, event_time);
         self.apply_emu_cmds(cmds);
     }
     pub fn on_touch_end(
         &mut self,
         device: crate::touch_state::TouchDeviceId,
         id: crate::touch_state::TouchId,
+    ) {
+        self.on_touch_end_at(device, id, None);
+    }
+
+    /// [`Self::on_touch_end`] for a lift that happened at `event_time` on the
+    /// UI clock (`None`: when it is handled).
+    pub fn on_touch_end_at(
+        &mut self,
+        device: crate::touch_state::TouchDeviceId,
+        id: crate::touch_state::TouchId,
+        event_time: Option<Instant>,
     ) {
         crate::animation::note_user_input();
         self.touch_state.on_end_or_cancel(device, id);
@@ -112,7 +165,7 @@ impl App {
         if self.keyboard_touch_end(device, id, true) {
             return;
         }
-        let cmds = self.touch_mouse_emu.on_end(device, id);
+        let cmds = self.touch_mouse_emu.on_end_at(device, id, event_time);
         // The finger lifting is the one release that may fling a pan.
         crate::touch_emulation::fling::while_lifting(|| self.apply_emu_cmds(cmds));
     }
@@ -335,9 +388,18 @@ impl App {
 
     /// Publish the pending long press's cue, draw the default ring, and keep
     /// the frames coming: continuously while the ring fills, otherwise one
-    /// wake-up when the cue is due. Runs inside `paint`, after the draw
-    /// request was cleared and with `ctx` in logical Y-up coordinates.
+    /// wake-up when the cue is due. A hold past its deadline asks for the
+    /// next frame to lay out, since only `layout` polls the long press. Runs
+    /// inside `paint`, after the draw request was cleared and with `ctx` in
+    /// logical Y-up coordinates.
     pub(super) fn paint_long_press_cue(&mut self, ctx: &mut dyn DrawCtx) {
+        if self
+            .touch_mouse_emu
+            .long_press_deadline()
+            .is_some_and(|deadline| crate::clock::now() >= deadline)
+        {
+            crate::animation::request_layout();
+        }
         let cue = self
             .touch_mouse_emu
             .long_press_progress()

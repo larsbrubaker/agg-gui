@@ -13,6 +13,11 @@
 //! input produces the same events, so a simulated click and a real one run
 //! identical code. Shell-specific side effects (the OS cursor icon, redraw
 //! requests, the web shell's DOM `buttons` resync) stay in the shells.
+//!
+//! A shell that knows when an event happened (a browser's `timeStamp`, mapped
+//! onto the UI clock) delivers it with [`InputForwarder::platform_at`]; the
+//! touch entry points judge a long press by that time
+//! (`App::on_touch_start_at`). Without one the handling time stands in.
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -266,6 +271,19 @@ impl InputForwarder {
         self.forward(app, InputSource::Platform, event)
     }
 
+    /// [`Self::platform`] for an event that happened at `event_time` on the
+    /// UI clock (`None`: when it is handled). Touch events pass it on, so a
+    /// finger's hold is judged by when it moved or lifted
+    /// (`App::on_touch_start_at`); other events don't use it.
+    pub fn platform_at(
+        &mut self,
+        app: &mut App,
+        event: ForwarderEvent,
+        event_time: Option<Instant>,
+    ) -> bool {
+        self.forward_at(app, InputSource::Platform, event, event_time)
+    }
+
     /// Deliver a synthesised event; never gated.
     pub fn simulated(&mut self, app: &mut App, event: ForwarderEvent) {
         self.forward(app, InputSource::Simulated, event);
@@ -274,6 +292,18 @@ impl InputForwarder {
     /// Update the bookkeeping and call the matching `App` entry point.
     /// Returns `false` when the event was dropped by the real-input gate.
     pub fn forward(&mut self, app: &mut App, source: InputSource, event: ForwarderEvent) -> bool {
+        self.forward_at(app, source, event, None)
+    }
+
+    /// [`Self::forward`] for an event that happened at `event_time` on the UI
+    /// clock (`None`: when it is handled); see [`Self::platform_at`].
+    pub fn forward_at(
+        &mut self,
+        app: &mut App,
+        source: InputSource,
+        event: ForwarderEvent,
+        event_time: Option<Instant>,
+    ) -> bool {
         if source == InputSource::Platform && !self.platform_input {
             return false;
         }
@@ -366,9 +396,9 @@ impl InputForwarder {
                 y,
                 force,
             } => match phase {
-                TouchPhase::Start => app.on_touch_start(device, id, x, y, force),
-                TouchPhase::Move => app.on_touch_move(device, id, x, y, force),
-                TouchPhase::End => app.on_touch_end(device, id),
+                TouchPhase::Start => app.on_touch_start_at(device, id, x, y, force, event_time),
+                TouchPhase::Move => app.on_touch_move_at(device, id, x, y, force, event_time),
+                TouchPhase::End => app.on_touch_end_at(device, id, event_time),
                 TouchPhase::Cancel => app.on_touch_cancel(device, id),
             },
             ForwarderEvent::FileDragHover { x, y, paths } => app.on_file_drag_hover(x, y, paths),

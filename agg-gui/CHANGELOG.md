@@ -10,6 +10,17 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- Touch event times: `App::on_touch_start_at`, `App::on_touch_move_at` and `App::on_touch_end_at`
+  (the plain forms plus `event_time: Option<web_time::Instant>`), `InputForwarder::platform_at`
+  and `InputForwarder::forward_at` (which pass it to the touch entry points), and
+  `TouchMouseEmu::on_start_at`, `on_move_at` and `on_end_at`. The long press is judged by when the
+  finger landed, moved and lifted on the UI clock, not when a slow frame let the event be handled:
+  a drag or a lift inside `LONG_PRESS_DELAY` stays a drag or a tap however late it is handled.
+  A hold whose landing carried a time fires from the frame poll only once a whole frame has begun
+  after the deadline, so moves made before it have been delivered; a move stamped after the
+  deadline fires it at once. `None` (and the plain forms) use the handling time, as before
+  (0.5.15).
+
 - `animation::last_input_at() -> Option<web_time::Instant>`: when the user last made input on this
   thread, on the UI clock (`clock::now`, so virtual in tests). Every `App::on_*` entry point that
   carries the user's input records it (pointer, wheel, trackpad, keys, modifiers, text and IME,
@@ -177,6 +188,10 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   unchanged (it owns every key).
 
 ### Fixed
+
+- A finger held still on an idle app long presses: once the hold is past its deadline, `App::paint`
+  requests the layout whose poll fires it, since the shells lay out only when the layout key moves
+  or a layout is requested (0.5.15).
 
 - A widget inside a showing modal (a `ModalSheet`'s dialog) lets go of its hover when the pointer
   moves off it: a move inside the modal sends the widget the pointer left the same `(-1, -1)`

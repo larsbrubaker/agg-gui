@@ -81,7 +81,9 @@ thread_local! {
     static INPUT: RefCell<InputForwarder> = RefCell::new(InputForwarder::new());
     /// Input that arrived while the app was borrowed, waiting for it
     /// ([`forward`]).
-    static HELD_INPUT: HeldInput<ForwarderEvent> = const { HeldInput::new() };
+    /// Each event keeps the time it happened, when the DOM gave one.
+    static HELD_INPUT: HeldInput<(ForwarderEvent, Option<web_time::Instant>)> =
+        const { HeldInput::new() };
     static FIRST_PAINT: FirstPaintGate = const { FirstPaintGate::new() };
     /// Latched once any frame has been presented since boot (unlike the
     /// gate, a GPU rebuild does not reopen it).
@@ -153,7 +155,14 @@ pub fn with_app<R>(f: impl FnOnce(&mut App) -> R) -> Option<R> {
 /// ([`deliver_held_input`]); see [`crate::held_input`]. Dropped only while
 /// the app is not built yet.
 pub(crate) fn forward(event: ForwarderEvent) {
-    forward_or_hold(Some(event));
+    forward_or_hold(Some((event, None)));
+}
+
+/// [`forward`] for an event that happened at `event_time` on the UI clock
+/// (the DOM event's `timeStamp`, [`crate::event_time`]); a held event keeps
+/// it.
+pub(crate) fn forward_at(event: ForwarderEvent, event_time: Option<web_time::Instant>) {
+    forward_or_hold(Some((event, event_time)));
 }
 
 /// Deliver any input held while the app was borrowed. The frame tick calls
@@ -168,11 +177,11 @@ pub(crate) fn input_held() -> bool {
 }
 
 /// [`crate::held_input::forward_or_hold`] on the shell's app and held input.
-fn forward_or_hold(event: Option<ForwarderEvent>) {
+fn forward_or_hold(event: Option<(ForwarderEvent, Option<web_time::Instant>)>) {
     APP.with(|app| {
         HELD_INPUT.with(|held| {
-            crate::held_input::forward_or_hold(app, held, event, |app, event| {
-                INPUT.with(|f| f.borrow_mut().platform(app, event));
+            crate::held_input::forward_or_hold(app, held, event, |app, (event, event_time)| {
+                INPUT.with(|f| f.borrow_mut().platform_at(app, event, event_time));
             })
         })
     });

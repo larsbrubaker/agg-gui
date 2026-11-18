@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps.
 
+## [Unreleased]
+
+### Fixed
+
+- A one-finger drag on a touchscreen stays a drag when the app's frames are slow (seconds-long
+  frames in software rendering): each touch is delivered with when it happened (its DOM
+  `timeStamp` on agg-gui's UI clock, through `InputForwarder::platform_at`), so a move made inside
+  the long-press delay but handled after it no longer turns the drag into a long press (a right
+  click). A touch move the browser coalesced is forwarded as each of its samples
+  (`getCoalescedEvents()`), in order and with its own time, so a drag that crossed the slop early
+  in a slow frame is not judged by the frame's last sample. Input held while the app was busy
+  keeps its time. Requires agg-gui 0.5.15 (0.6.2).
+
 ## [0.6.1] - 2026-11-17
 
 The crate's first release on crates.io.

@@ -4,6 +4,10 @@
 //! `agg_gui::web_adapter` (scoped to the canvas's focus when it shares its
 //! page, `WebShellConfig::keyboard_needs_focus`). Each DOM event becomes an `agg_gui::shell_input::ForwarderEvent` carrying its own
 //! position and modifiers, handed to the shell's forwarder ([`forward`]).
+//! A touch also carries when it happened (its `timeStamp` on the UI clock,
+//! [`crate::event_time`]), so a drag handled late after a slow frame is not
+//! taken for a long press ([`forward_at`]); a touch move the browser
+//! coalesced goes as each of its samples, in order.
 //!
 //! The canvas keeps its gestures from the host page: the wheel, the context
 //! menu and the middle button's press, release and `auxclick` (autoscroll,
@@ -23,7 +27,7 @@ use agg_gui::TouchPhase;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
 
-use super::{forward, sensors};
+use super::{forward, forward_at, sensors};
 use super::{frame::input_scale, lifecycle, note_input, note_input_without_repaint};
 use crate::dom_math::{
     cancels_mouse_button_default, canvas_tabindex_to_add, client_to_physical,
@@ -160,6 +164,23 @@ fn event_mods(e: &web_sys::MouseEvent) -> agg_gui::Modifiers {
     modifiers(e.shift_key(), e.ctrl_key(), e.alt_key(), e.meta_key())
 }
 
+/// When the DOM event happened, on the UI clock; `None` (the handling time)
+/// when the page's clock can't be read.
+fn dom_event_time(e: &web_sys::Event) -> Option<web_time::Instant> {
+    let now_ms = web_sys::window()?.performance()?.now();
+    crate::event_time::event_instant(agg_gui::clock::now(), now_ms, e.time_stamp())
+}
+
+/// The moves a browser folded into `e`, oldest first, or `e` itself.
+fn coalesced_samples(e: &web_sys::PointerEvent) -> Vec<web_sys::PointerEvent> {
+    let samples = e
+        .get_coalesced_events()
+        .iter()
+        .filter_map(|s| s.dyn_into::<web_sys::PointerEvent>().ok())
+        .collect();
+    crate::event_time::samples_or_event(samples, e.clone())
+}
+
 fn touch_id(e: &web_sys::PointerEvent) -> agg_gui::TouchId {
     agg_gui::TouchId(e.pointer_id() as u64)
 }
@@ -198,7 +219,15 @@ pub(super) fn install_pointer_listeners(canvas: &web_sys::HtmlCanvasElement, nee
             let (x, y) = pos(&c, e.client_x(), e.client_y());
             let kind = PointerKind::from_dom(&e.pointer_type());
             if kind == PointerKind::Touch {
-                forward(touch(TouchPhase::Move, &e, x, y));
+                // Every sample the browser folded into this move, in order,
+                // each with its own position and time (`event_time.rs`).
+                for sample in coalesced_samples(&e) {
+                    let (x, y) = pos(&c, sample.client_x(), sample.client_y());
+                    forward_at(
+                        touch(TouchPhase::Move, &sample, x, y),
+                        dom_event_time(&sample),
+                    );
+                }
             } else {
                 // Self-healing idle guard: re-derive held buttons from the event.
                 lifecycle::sync_buttons(pressed_button_count(e.buttons()));
@@ -237,7 +266,7 @@ pub(super) fn install_pointer_listeners(canvas: &web_sys::HtmlCanvasElement, nee
             if PointerKind::from_dom(&e.pointer_type()) == PointerKind::Touch {
                 e.prevent_default();
                 lifecycle::touch_down(e.pointer_id());
-                forward(touch(TouchPhase::Start, &e, x, y));
+                forward_at(touch(TouchPhase::Start, &e, x, y), dom_event_time(&e));
             } else {
                 lifecycle::sync_buttons(pressed_button_count(e.buttons()));
                 let button = mouse_button_from_dom(e.button());
@@ -265,7 +294,7 @@ pub(super) fn install_pointer_listeners(canvas: &web_sys::HtmlCanvasElement, nee
                 } else {
                     TouchPhase::End
                 };
-                forward(touch(phase, &e, x, y));
+                forward_at(touch(phase, &e, x, y), dom_event_time(&e));
             } else {
                 lifecycle::sync_buttons(pressed_button_count(e.buttons()));
                 let button = mouse_button_from_dom(e.button());

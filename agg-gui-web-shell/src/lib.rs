@@ -109,7 +109,7 @@
 //! `web_sys` are re-exported so an app's versions always match the shell's.
 
 // The crate-internal decision modules (dom_math, pointer, recovery, fatal,
-// frames_in_flight, held_input, most of policy) are consumed only by the wasm runtime; natively they are
+// frames_in_flight, held_input, event_time, most of policy) are consumed only by the wasm runtime; natively they are
 // exercised by the unit tests alone.
 #![cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 
@@ -119,6 +119,7 @@ mod config;
 mod cursor;
 mod dom_math;
 mod error;
+mod event_time;
 mod fatal;
 // Native only: it paints on a headless GPU frame.
 #[cfg(all(test, not(target_arch = "wasm32")))]

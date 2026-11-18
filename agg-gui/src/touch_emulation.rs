@@ -41,10 +41,25 @@
 //!     RIGHT press and release at the touch-down point, so it opens the
 //!     context menu wherever a right click does. The finger is then spent:
 //!     its moves and its lift emit nothing. The emulator reads the UI clock
-//!     ([`crate::clock`]); `App` polls it every frame ([`TouchMouseEmu::poll`])
-//!     and every touch event checks the deadline first, so a late frame
-//!     never turns a hold into a tap or a drag. The cue, the touch-origin
+//!     ([`crate::clock`]); `App` polls it as each frame lays out
+//!     ([`TouchMouseEmu::poll`]), and once a held finger is past its deadline
+//!     `App`'s paint asks for the layout that polls it, because the shells
+//!     lay out only when something asks. Every touch event checks the
+//!     deadline first, so a late frame never turns a hold into a tap or a
+//!     drag. The cue, the touch-origin
 //!     flag and the listeners are in [`long_press`].
+//!   - The hold is judged by when the finger's events happened, not when
+//!     they were handled. A shell that knows an event's own time (a browser's
+//!     `timeStamp`) passes it (`on_*_at`, from `App::on_touch_*_at`); without
+//!     one the handling time stands in. When frames are slow a browser
+//!     delivers the finger's moves late, so a drag that began well inside
+//!     [`LONG_PRESS_DELAY`] is still a drag when its move is handled after
+//!     the deadline, and a lift inside it still a tap. A frame poll fires a
+//!     hold whose landing carried a time only once a whole frame has begun
+//!     after the deadline: the shell delivers the input that arrived during
+//!     that frame before the next one starts, so a move the finger made
+//!     before the deadline has been counted by then. Without event times a
+//!     poll fires as soon as the clock passes the deadline.
 //!   - A widget that wants the finger after its long press (a text field
 //!     selecting words as the finger slides) claims it while handling the
 //!     right press ([`long_press::claim_long_press_drag`]). `App` then holds
@@ -142,8 +157,14 @@ pub struct TouchMouseEmu {
     /// no further mouse events are emitted until all fingers lift.
     suppressed: bool,
     /// When the primary finger went down, while it may still long press
-    /// (no drag, no second finger, not fired yet).
+    /// (no drag, no second finger, not fired yet): the landing's own event
+    /// time when the shell gave one, else when it was handled.
     held_since: Option<Instant>,
+    /// The landing carried its own event time, so the frame poll waits for a
+    /// whole frame after the deadline before firing (see the module docs).
+    timed: bool,
+    /// When [`Self::poll`] last ran (the start of the last frame).
+    last_frame_poll: Option<Instant>,
     /// True once the long press fired: the finger's later moves and its
     /// lift emit nothing, unless the press is [`Self::held`].
     spent: bool,
@@ -169,6 +190,20 @@ impl TouchMouseEmu {
     }
 
     pub fn on_start(&mut self, device: TouchDeviceId, id: TouchId, x: f64, y: f64) -> Vec<EmuCmd> {
+        self.on_start_at(device, id, x, y, None)
+    }
+
+    /// [`Self::on_start`] for a landing that happened at `event_time` on the
+    /// UI clock (`None`: when it is handled).
+    pub fn on_start_at(
+        &mut self,
+        device: TouchDeviceId,
+        id: TouchId,
+        x: f64,
+        y: f64,
+        event_time: Option<Instant>,
+    ) -> Vec<EmuCmd> {
+        let at = event_at(event_time);
         self.active.insert((device, id));
         if self.primary.is_none() && self.active.len() == 1 {
             // First finger of a fresh gesture: becomes primary and moves
@@ -180,14 +215,15 @@ impl TouchMouseEmu {
             self.scrolling = false;
             self.pressed = false;
             self.suppressed = false;
-            self.held_since = Some(crate::clock::now());
+            self.held_since = Some(at);
+            self.timed = event_time.is_some();
             self.spent = false;
             self.held = false;
             self.caught = false;
             return vec![EmuCmd::MouseMove(x, y)];
         }
         // A hold that came due before this finger landed fires first.
-        let mut cmds = self.poll();
+        let mut cmds = self.fire_if_due_at(at);
         // Two fingers are a pinch or a pan, never a long press.
         self.held_since = None;
         // A second (or later) finger: hand the gesture over to the
@@ -214,12 +250,25 @@ impl TouchMouseEmu {
     }
 
     pub fn on_move(&mut self, device: TouchDeviceId, id: TouchId, x: f64, y: f64) -> Vec<EmuCmd> {
+        self.on_move_at(device, id, x, y, None)
+    }
+
+    /// [`Self::on_move`] for a move that happened at `event_time` on the UI
+    /// clock (`None`: when it is handled).
+    pub fn on_move_at(
+        &mut self,
+        device: TouchDeviceId,
+        id: TouchId,
+        x: f64,
+        y: f64,
+        event_time: Option<Instant>,
+    ) -> Vec<EmuCmd> {
         if self.primary != Some((device, id)) || self.suppressed {
             return Vec::new();
         }
-        // The deadline is checked against where the finger was until now,
-        // before this move counts.
-        let mut cmds = self.poll();
+        // The deadline is checked against where the finger was until this
+        // move happened, before the move counts.
+        let mut cmds = self.fire_if_due_at(event_at(event_time));
         if self.spent {
             if self.held {
                 self.last_pos = (x, y);
@@ -290,20 +339,37 @@ impl TouchMouseEmu {
     }
 
     pub fn on_end(&mut self, device: TouchDeviceId, id: TouchId) -> Vec<EmuCmd> {
-        self.finish(device, id, /*allow_tap=*/ true)
+        self.on_end_at(device, id, None)
+    }
+
+    /// [`Self::on_end`] for a lift that happened at `event_time` on the UI
+    /// clock (`None`: when it is handled).
+    pub fn on_end_at(
+        &mut self,
+        device: TouchDeviceId,
+        id: TouchId,
+        event_time: Option<Instant>,
+    ) -> Vec<EmuCmd> {
+        self.finish(device, id, /*allow_tap=*/ true, event_at(event_time))
     }
 
     /// Platform cancelled the touch (browser gesture hand-off, palm
     /// rejection, …).  Like `on_end` but a cancelled tap must NOT click.
     pub fn on_cancel(&mut self, device: TouchDeviceId, id: TouchId) -> Vec<EmuCmd> {
-        self.finish(device, id, /*allow_tap=*/ false)
+        self.finish(device, id, /*allow_tap=*/ false, crate::clock::now())
     }
 
-    fn finish(&mut self, device: TouchDeviceId, id: TouchId, allow_tap: bool) -> Vec<EmuCmd> {
+    fn finish(
+        &mut self,
+        device: TouchDeviceId,
+        id: TouchId,
+        allow_tap: bool,
+        at: Instant,
+    ) -> Vec<EmuCmd> {
         let mut cmds = Vec::new();
         if self.primary == Some((device, id)) && allow_tap {
             // A hold that came due before the lift fires, not a tap.
-            cmds = self.poll();
+            cmds = self.fire_if_due_at(at);
         }
         self.active.remove(&(device, id));
         if self.primary == Some((device, id)) {
@@ -360,16 +426,40 @@ impl TouchMouseEmu {
         cmds
     }
 
-    /// Fire the long press if it has come due on the UI clock: a right press
-    /// and release at the touch-down point. Empty otherwise. `App` calls it
-    /// every frame; every touch event calls it first.
+    /// The frame poll: fire the long press if it has come due on the UI
+    /// clock, a right press and release at the touch-down point; empty
+    /// otherwise. `App::layout` calls it as it starts; a hold past its
+    /// deadline makes `App`'s paint request that layout. A hold whose
+    /// landing carried its own event time also waits until a whole frame has
+    /// begun since the deadline, so moves the finger made before the deadline
+    /// have been delivered (see the module docs).
     pub fn poll(&mut self) -> Vec<EmuCmd> {
-        let due = self
-            .long_press_deadline()
-            .is_some_and(|deadline| crate::clock::now() >= deadline);
+        let now = crate::clock::now();
+        let previous_frame = self.last_frame_poll.replace(now);
+        let due = self.long_press_deadline().is_some_and(|deadline| {
+            now >= deadline && (!self.timed || previous_frame.is_some_and(|p| p >= deadline))
+        });
         if !due {
             return Vec::new();
         }
+        self.fire()
+    }
+
+    /// Fire the long press if it was due by `at`, the time the touch event
+    /// being handled happened.
+    fn fire_if_due_at(&mut self, at: Instant) -> Vec<EmuCmd> {
+        if !self
+            .long_press_deadline()
+            .is_some_and(|deadline| at >= deadline)
+        {
+            return Vec::new();
+        }
+        self.fire()
+    }
+
+    /// The long press fires: a right press and release at the touch-down
+    /// point, and the finger is spent.
+    fn fire(&mut self) -> Vec<EmuCmd> {
         self.held_since = None;
         self.spent = true;
         self.fired = Some(self.start_pos);
@@ -434,6 +524,13 @@ impl TouchMouseEmu {
     pub fn take_long_press(&mut self) -> Option<(f64, f64)> {
         self.fired.take()
     }
+}
+
+/// When a touch event happened: its own time on the UI clock, never later
+/// than now, or now when the shell gave none.
+fn event_at(event_time: Option<Instant>) -> Instant {
+    let now = crate::clock::now();
+    event_time.map_or(now, |t| t.min(now))
 }
 
 #[cfg(test)]
