@@ -6,7 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps.
 
-## [0.6.1] - Unreleased
+## [0.6.1] - 2026-11-17
+
+The crate's first release on crates.io.
 
 ### Fixed
 
@@ -26,7 +28,7 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   collects it, so 0.7.0's few hundred new ones per frame filled the D3D12
   descriptor heap.
 
-## [0.6.0] - Unreleased
+## [0.6.0] - Not published; first on crates.io in 0.6.1
 
 ### Changed
 
