@@ -39,6 +39,7 @@ impl App {
         magnification: f64,
         modifiers: Modifiers,
     ) {
+        crate::animation::note_user_input();
         let notches = magnification_to_notches(magnification);
         with_trackpad_pinch_mark(|| {
             self.on_mouse_wheel_xy_mods(screen_x, screen_y, 0.0, notches, modifiers)
@@ -57,6 +58,7 @@ impl App {
         phase: TrackpadGesturePhase,
         modifiers: Modifiers,
     ) {
+        crate::animation::note_user_input();
         let magnification = if magnification.is_finite() {
             magnification
         } else {
@@ -79,6 +81,7 @@ impl App {
         degrees: f64,
         phase: TrackpadGesturePhase,
     ) {
+        crate::animation::note_user_input();
         let degrees = if degrees.is_finite() { degrees } else { 0.0 };
         let pointer = self.trackpad_pointer(screen_x, screen_y);
         let frames = self.trackpad_fingers.rotate(pointer, degrees, phase);

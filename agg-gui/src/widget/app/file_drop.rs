@@ -29,6 +29,7 @@ impl App {
         screen_y: f64,
         paths: Vec<std::path::PathBuf>,
     ) {
+        crate::animation::note_user_input();
         if paths.is_empty() {
             return;
         }
@@ -46,6 +47,7 @@ impl App {
         screen_y: f64,
         files: Vec<DroppedFileData>,
     ) {
+        crate::animation::note_user_input();
         if files.is_empty() {
             return;
         }
@@ -64,6 +66,7 @@ impl App {
         screen_y: f64,
         paths: Vec<std::path::PathBuf>,
     ) {
+        crate::animation::note_user_input();
         self.file_drag_active = true;
         let pos = self.drop_pos(screen_x, screen_y);
         self.route_file_event(&Event::FileDragHover { pos, paths }, pos);
@@ -73,6 +76,7 @@ impl App {
     /// [`Event::FileDragLeave`] to every widget, once per drag: a call with
     /// no drag in progress does nothing.
     pub fn on_file_drag_leave(&mut self) {
+        crate::animation::note_user_input();
         self.end_file_drag();
     }
 

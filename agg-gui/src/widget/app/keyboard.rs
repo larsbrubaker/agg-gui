@@ -30,9 +30,12 @@ impl App {
         // Every key and button entry point starts here: follow any child
         // reorder before the focus / capture paths are used.
         self.resolve_tracked_paths();
+        // Only a change is input: platforms repeat the held set unprompted
+        // (an empty set as the window loses focus).
         if !crate::event::set_current_modifiers(mods) {
             return;
         }
+        crate::animation::note_user_input();
         let target = self.captured.clone().or_else(|| self.focus.clone());
         if let Some(path) = target {
             let event = Event::ModifiersChanged { modifiers: mods };
@@ -43,6 +46,7 @@ impl App {
     /// Key pressed. Delivered to the focused widget first, then to the visible
     /// widget tree as an unconsumed key if focus ignores it.
     pub fn on_key_down(&mut self, key: Key, mods: Modifiers) {
+        crate::animation::note_user_input();
         self.on_modifiers_changed(mods);
         // A typed key ends a dictation first, its tail committed before it.
         self.end_voice_input_for_key(&key);
@@ -126,6 +130,7 @@ impl App {
 
     /// Key released. Delivered to the focused widget.
     pub fn on_key_up(&mut self, key: Key, mods: Modifiers) {
+        crate::animation::note_user_input();
         self.on_modifiers_changed(mods);
         let event = Event::KeyUp {
             key,

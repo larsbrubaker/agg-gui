@@ -60,6 +60,8 @@ impl App {
         // is abandoned (its queue with it) before its text is taken.
         self.resolve_tracked_paths();
         let deliveries = voice_session::take_deliveries();
+        // Dictated text is the user's input, though it arrives on a poll.
+        crate::animation::note_user_input();
         for delivery in deliveries {
             // Straight to the widget: the public `on_text_input` /
             // `on_ime_preedit` are the platform's, which end a dictation.

@@ -133,6 +133,7 @@ impl App {
     /// `Event::MouseMove` carries no modifiers; widgets read
     /// [`crate::event::current_modifiers`] while handling it.
     pub fn on_mouse_move(&mut self, screen_x: f64, screen_y: f64) {
+        crate::animation::note_user_input();
         // Reset cursor so the hovered widget can set it; Default if nothing sets it.
         self.resolve_tracked_paths();
         crate::cursor::reset_cursor_icon();
@@ -204,6 +205,7 @@ impl App {
         clicks: u32,
         stated: bool,
     ) {
+        crate::animation::note_user_input();
         crate::event::begin_press(clicks, stated);
         // Held from here, whoever (if anyone) handles the press.
         crate::event::note_button_down(button);
@@ -282,6 +284,7 @@ impl App {
         button: MouseButton,
         mods: Modifiers,
     ) {
+        crate::animation::note_user_input();
         crate::event::begin_release();
         self.release(screen_x, screen_y, button, mods);
         crate::event::end_release();

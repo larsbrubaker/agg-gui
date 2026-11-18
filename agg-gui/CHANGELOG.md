@@ -10,6 +10,18 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- `animation::last_input_at() -> Option<web_time::Instant>`: when the user last made input on this
+  thread, on the UI clock (`clock::now`, so virtual in tests). Every `App::on_*` entry point that
+  carries the user's input records it (pointer, wheel, trackpad, keys, modifiers, text and IME,
+  touch, file drag and drop), as does what directly follows from it (touch-emulated mouse events,
+  the on-screen keyboard's keys, dictated text); draw requests, scheduled draws, layout, paint,
+  cursor re-evaluation and window activation do not, nor do the events a platform sends unprompted
+  (the held modifiers repeated unchanged, empty text, an empty composition with none showing). A
+  host holds expensive work between frames back until input has been quiet for a while, which the
+  draw signals cannot tell it: they move for the framework's own redraws too.
+  `animation::note_user_input()` records input from a source that doesn't go through `App`
+  (0.5.14).
+
 - `ComboBox::refresh_item_fonts()` and `ComboBox::item_font_refresh_handle() -> ComboBoxFontRefresh`
   (`ComboBoxFontRefresh::refresh()`): say that the fonts a `with_item_font_fn` resolver answers may
   have changed (a face finished downloading). Each row is asked once more the next time it paints

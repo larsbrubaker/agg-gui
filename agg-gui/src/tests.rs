@@ -140,6 +140,7 @@ mod on_screen_keyboard_longpress;
 mod on_screen_keyboard_preview;
 mod on_screen_keyboard_touch;
 mod on_screen_keyboard_voice;
+mod on_screen_keyboard_voice_last_input;
 mod on_screen_keyboard_voice_rebuild;
 mod on_screen_keyboard_voice_session;
 mod on_screen_keyboard_zoom;

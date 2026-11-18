@@ -20,6 +20,7 @@ impl App {
         if text.is_empty() {
             return false;
         }
+        crate::animation::note_user_input();
         // Text from the platform ends a dictation first, its tail committed.
         self.end_voice_input_keeping_tail();
         self.dispatch_text_event(Event::TextInput {
@@ -32,6 +33,13 @@ impl App {
     /// a byte range inside `text`, or `None` for no caret. Returns whether a
     /// widget consumed it.
     pub fn on_ime_preedit(&mut self, text: &str, cursor: Option<(usize, usize)>) -> bool {
+        // An empty preedit is input only when it ends a composition that was
+        // showing: shells also send one when the input method is switched off
+        // (focus leaving a text field), which the user didn't type.
+        let was_showing = std::mem::replace(&mut self.platform_preedit_showing, !text.is_empty());
+        if !text.is_empty() || was_showing {
+            crate::animation::note_user_input();
+        }
         if !text.is_empty() {
             // The platform's input method composing ends a dictation first.
             self.end_voice_input_keeping_tail();

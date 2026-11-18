@@ -27,7 +27,9 @@ pub use under_mouse::{under_mouse_state_of, UnderMouseState, WidgetId};
 /// Owns the widget tree, handles focus, and converts OS events to Y-up coords.
 ///
 /// Create with [`App::new`], call [`App::layout`] every frame before
-/// [`App::paint`], and feed OS events through the `on_*` methods.
+/// [`App::paint`], and feed OS events through the `on_*` methods. Each of
+/// those that carries the user's input records its time for
+/// [`crate::animation::last_input_at`].
 pub struct App {
     root: Box<dyn Widget>,
     /// Current focus path (indices from root into children vec).
@@ -70,6 +72,10 @@ pub struct App {
     /// A file drag is over the window: a `FileDragHover` was delivered and
     /// no `FileDragLeave` has ended it yet. See [`file_drop`].
     file_drag_active: bool,
+    /// The platform's last composition text was not empty: an input-method
+    /// composition is showing, so the empty preedit that ends it is the
+    /// user's input. See [`ime`].
+    platform_preedit_showing: bool,
     /// Viewport height in pixels — used for Y-down → Y-up conversion.
     viewport_height: f64,
     /// Viewport size in logical pixels from the most recent layout pass.
@@ -129,6 +135,7 @@ impl App {
             focus_visible: true,
             gesture_in_progress: false,
             file_drag_active: false,
+            platform_preedit_showing: false,
             viewport_height: 1.0,
             viewport_size: Size::new(1.0, 1.0),
             global_key_handler: None,
@@ -457,6 +464,7 @@ impl App {
         delta_y: f64,
         modifiers: Modifiers,
     ) {
+        crate::animation::note_user_input();
         self.resolve_tracked_paths();
         let pos = super::keyboard_scroll::lift_to_world(self.flip_y(screen_x, screen_y));
         set_current_mouse_world(pos);
@@ -544,6 +552,7 @@ impl App {
     /// `OutOfViewMouseCapture.IsRealPointerExit`, `dragInFlight`). The
     /// release's hover refresh clears hover once the drag ends.
     pub fn on_mouse_leave(&mut self) {
+        crate::animation::note_user_input();
         if self.captured.is_some() {
             return;
         }

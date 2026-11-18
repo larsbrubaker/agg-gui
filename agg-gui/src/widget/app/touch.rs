@@ -58,6 +58,7 @@ impl App {
         screen_y: f64,
         force: Option<f32>,
     ) {
+        crate::animation::note_user_input();
         let pos = keyboard_scroll::lift_to_world(self.flip_y(screen_x, screen_y));
         self.touch_state.on_start(device, id, pos, force);
         crate::touch_points::publish(self.touch_state.active_points());
@@ -88,6 +89,7 @@ impl App {
         screen_y: f64,
         force: Option<f32>,
     ) {
+        crate::animation::note_user_input();
         let pos = keyboard_scroll::lift_to_world(self.flip_y(screen_x, screen_y));
         self.touch_state.on_move(device, id, pos, force);
         crate::touch_points::publish(self.touch_state.active_points());
@@ -103,6 +105,7 @@ impl App {
         device: crate::touch_state::TouchDeviceId,
         id: crate::touch_state::TouchId,
     ) {
+        crate::animation::note_user_input();
         self.touch_state.on_end_or_cancel(device, id);
         crate::touch_points::publish(self.touch_state.active_points());
         crate::touch_state::note_touch_event();
@@ -118,6 +121,7 @@ impl App {
         device: crate::touch_state::TouchDeviceId,
         id: crate::touch_state::TouchId,
     ) {
+        crate::animation::note_user_input();
         self.touch_state.on_end_or_cancel(device, id);
         crate::touch_points::publish(self.touch_state.active_points());
         crate::touch_state::note_touch_event();

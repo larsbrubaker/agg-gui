@@ -48,6 +48,11 @@
 //!    request made during layout or paint stays pending for the following
 //!    frame).  [`wants_draw`] reports `true` while one is pending, and the
 //!    shells force `needs_layout` for that frame.
+//!
+//! Beside the draw signals, [`last_input_at`] tells a host when the user last
+//! made input (`animation_last_input.rs`): unlike the draw signals it never
+//! moves for the framework's own redraws, so a host can hold expensive work
+//! back until the user's input has been quiet for a while.
 
 use std::cell::Cell;
 use std::sync::{Arc, Mutex};
@@ -57,6 +62,10 @@ use web_time::Instant;
 #[path = "animation_scheduled_draw.rs"]
 mod scheduled_draw;
 pub use scheduled_draw::{schedule_draw_after, ScheduledDraw};
+
+#[path = "animation_last_input.rs"]
+mod last_input;
+pub use last_input::{last_input_at, note_user_input};
 
 // ── Draw-request provenance trace ─────────────────────────────────────────────
 //
