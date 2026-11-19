@@ -376,3 +376,7 @@ pub fn reset_for_tests() {
     bind_current_thread().clear();
     PUMPS.with(|p| p.set(false));
 }
+
+#[cfg(test)]
+#[path = "ui_thread_tests.rs"]
+mod tests;
