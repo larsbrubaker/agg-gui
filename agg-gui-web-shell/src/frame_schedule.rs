@@ -1,7 +1,8 @@
 //! When the `requestAnimationFrame` loop runs again: the end-of-tick
 //! decision ([`next_tick`]: another frame, a timer for the next deadline, or
 //! sleep) and the wake bookkeeping ([`FrameScheduler`]) that keeps a sleeping
-//! loop to exactly one requested frame per wake.
+//! loop to exactly one requested frame per wake, and to one posted work run
+//! per wake for queued work.
 //!
 //! An idle page must cost nothing: a loop that requests a frame on every
 //! tick runs its per-tick work (backing-store sizing, sensor polling, the
@@ -14,6 +15,19 @@
 //!
 //! Erring toward waking is deliberate: a wake that finds nothing to do costs
 //! one tick, a missed wake is a frozen screen.
+//!
+//! Queued work that needs no frame (`agg_gui::frame_demand::notify_work`: an
+//! executor's task a promise woke) gets a work run instead of a frame: a task
+//! posted to run soon after the wake (`web::schedule` posts a `MessageChannel`
+//! message, which browsers do not clamp the way they clamp nested
+//! `setTimeout(0)`s), even while a frame is already requested, so a load
+//! awaiting promises one after another proceeds at the speed of its work and
+//! not one display frame per await. A work run paints nothing and ends with
+//! the same decision a tick ends with, so whatever its work asked for (a
+//! layout, a draw) comes on the next animation frame. It never spins: a
+//! work wake made inside a tick posts one work run when the tick ends, and
+//! one made inside a work run posts none, the work it announces being that
+//! run's own to hand to the frames (`ui_thread::add_between_frames_hook`).
 
 use web_time::Instant;
 
@@ -99,20 +113,29 @@ pub(crate) enum TimerChange {
     Arm(Instant),
 }
 
-/// What the frame loop must do with the browser after a tick.
+/// What the frame loop must do with the browser after a tick or work run.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Schedule {
     pub request_frame: bool,
     pub timer: TimerChange,
+    /// Post a work run: queued work announced itself during the tick.
+    pub post_work: bool,
 }
 
 /// The loop's state between ticks: whether a frame is already requested, a
-/// tick is running, and which deadline the armed timer serves.
+/// work run is posted, a tick or work run is running, and which deadline the
+/// armed timer serves.
 #[derive(Debug, Default)]
 pub(crate) struct FrameScheduler {
     frame_requested: bool,
     in_tick: bool,
     timer: Option<Instant>,
+    /// A work run is posted and has not started.
+    work_posted: bool,
+    /// A work run is running.
+    in_work_run: bool,
+    /// Queued work announced itself during the running tick.
+    work_during_tick: bool,
 }
 
 impl FrameScheduler {
@@ -121,19 +144,44 @@ impl FrameScheduler {
             frame_requested: false,
             in_tick: false,
             timer: None,
+            work_posted: false,
+            in_work_run: false,
+            work_during_tick: false,
         }
     }
 
     /// Something may want a frame. Returns whether to request one now: only
-    /// when the loop is asleep. A wake during a tick is left to that tick's
-    /// own decision, which reads the same state the wake announced, and a
+    /// when the loop is asleep. A wake during a tick or work run is left to
+    /// its own decision, which reads the same state the wake announced, and a
     /// wake while a frame is already requested is that frame's.
     pub(crate) fn wake(&mut self) -> bool {
-        if self.in_tick || self.frame_requested {
+        if self.in_tick || self.in_work_run || self.frame_requested {
             return false;
         }
         self.frame_requested = true;
         true
+    }
+
+    /// Queued work that needs no frame woke the loop. Returns whether to post
+    /// a work run now: whenever none is posted, a requested frame or not, so
+    /// the work does not wait for the frame. A wake during a tick posts one
+    /// when the tick ends ([`Self::end_tick`]); one during a work run posts
+    /// none, so work that keeps waking itself never spins the page.
+    pub(crate) fn wake_for_work(&mut self) -> bool {
+        if self.in_tick {
+            self.work_during_tick = true;
+            return false;
+        }
+        if self.in_work_run || self.work_posted {
+            return false;
+        }
+        self.work_posted = true;
+        true
+    }
+
+    /// Posting the work run failed: the next work wake tries again.
+    pub(crate) fn work_not_posted(&mut self) {
+        self.work_posted = false;
     }
 
     /// The requested frame arrived and its tick starts.
@@ -145,29 +193,46 @@ impl FrameScheduler {
     /// The tick ended with decision `next`.
     pub(crate) fn end_tick(&mut self, next: NextTick) -> Schedule {
         self.in_tick = false;
-        match next {
+        let mut schedule = self.carry_out(next);
+        if std::mem::take(&mut self.work_during_tick) && !self.work_posted {
+            self.work_posted = true;
+            schedule.post_work = true;
+        }
+        schedule
+    }
+
+    /// The posted work run starts.
+    pub(crate) fn begin_work_run(&mut self) {
+        self.work_posted = false;
+        self.in_work_run = true;
+    }
+
+    /// The work run ended with decision `next`: the same decision a tick
+    /// makes, sharing a frame already requested rather than asking twice.
+    pub(crate) fn end_work_run(&mut self, next: NextTick) -> Schedule {
+        self.in_work_run = false;
+        self.carry_out(next)
+    }
+
+    /// What decision `next` does to the requested frame and the timer.
+    fn carry_out(&mut self, next: NextTick) -> Schedule {
+        let (request_frame, timer) = match next {
             NextTick::Frame => {
+                let request = !self.frame_requested;
                 self.frame_requested = true;
-                Schedule {
-                    request_frame: true,
-                    timer: self.cancel_timer(),
-                }
+                (request, self.cancel_timer())
             }
-            NextTick::Timer(at) if self.timer == Some(at) => Schedule {
-                request_frame: false,
-                timer: TimerChange::Keep,
-            },
+            NextTick::Timer(at) if self.timer == Some(at) => (false, TimerChange::Keep),
             NextTick::Timer(at) => {
                 self.timer = Some(at);
-                Schedule {
-                    request_frame: false,
-                    timer: TimerChange::Arm(at),
-                }
+                (false, TimerChange::Arm(at))
             }
-            NextTick::Sleep => Schedule {
-                request_frame: false,
-                timer: self.cancel_timer(),
-            },
+            NextTick::Sleep => (false, self.cancel_timer()),
+        };
+        Schedule {
+            request_frame,
+            timer,
+            post_work: false,
         }
     }
 
@@ -177,10 +242,17 @@ impl FrameScheduler {
         self.wake()
     }
 
-    /// Whether no frame is requested and no tick is running.
+    /// Whether no frame is requested, no work run is posted, and no tick or
+    /// work run is running.
     #[cfg(test)]
     pub(crate) fn is_asleep(&self) -> bool {
-        !self.frame_requested && !self.in_tick
+        !self.frame_requested && !self.in_tick && !self.work_posted && !self.in_work_run
+    }
+
+    /// Whether a frame is requested.
+    #[cfg(test)]
+    pub(crate) fn frame_requested(&self) -> bool {
+        self.frame_requested
     }
 
     fn cancel_timer(&mut self) -> TimerChange {

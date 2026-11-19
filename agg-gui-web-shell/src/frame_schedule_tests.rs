@@ -89,7 +89,8 @@ fn a_future_deadline_arms_a_timer_not_frames() {
         after,
         Schedule {
             request_frame: false,
-            timer: TimerChange::Arm(blink)
+            timer: TimerChange::Arm(blink),
+            post_work: false,
         }
     );
     assert!(s.is_asleep());
@@ -121,7 +122,8 @@ fn a_wake_while_asleep_requests_exactly_one_frame() {
         s.end_tick(NextTick::Sleep),
         Schedule {
             request_frame: false,
-            timer: TimerChange::Keep
+            timer: TimerChange::Keep,
+            post_work: false,
         }
     );
     assert!(s.is_asleep());
@@ -329,4 +331,109 @@ fn the_loop_sleeps_after_the_last_scheduled_draw_is_cancelled() {
         "and never wake the loop"
     );
     agg_gui::frame_demand::set_hook(None);
+}
+
+/// A promise resolving between frames woke queued work and nothing needs
+/// painting: the work runs in a posted work run, not at the next animation
+/// frame, and the page goes back to sleep without a frame.
+#[test]
+fn queued_work_woken_between_frames_runs_promptly_without_a_frame() {
+    let mut s = FrameScheduler::new();
+    assert!(s.wake_for_work(), "the wake posts a work run");
+    assert!(!s.frame_requested(), "and asks for no frame");
+    assert!(!s.wake_for_work(), "a second wake shares the posted run");
+    s.begin_work_run();
+    assert_eq!(
+        s.end_work_run(NextTick::Sleep),
+        Schedule {
+            request_frame: false,
+            timer: TimerChange::Keep,
+            post_work: false,
+        },
+        "nothing to paint: no frame"
+    );
+    assert!(s.is_asleep());
+    assert!(s.wake_for_work(), "asleep again: the next wake posts again");
+}
+
+/// The work a promise woke does not wait for a frame already on its way.
+#[test]
+fn a_work_wake_posts_a_run_even_while_a_frame_is_requested() {
+    let mut s = FrameScheduler::new();
+    assert!(s.wake());
+    assert!(s.wake_for_work());
+    s.begin_work_run();
+    let after = s.end_work_run(NextTick::Frame);
+    assert!(
+        !after.request_frame,
+        "the frame already requested serves it"
+    );
+    assert!(s.frame_requested());
+}
+
+/// What a work run's work asks for is painted on the next animation frame:
+/// a wake made inside the run is left to the run's decision.
+#[test]
+fn a_work_run_that_wants_a_paint_requests_one_frame() {
+    let mut s = FrameScheduler::new();
+    assert!(s.wake_for_work());
+    s.begin_work_run();
+    assert!(!s.wake(), "a draw request inside the run is its decision's");
+    let after = s.end_work_run(NextTick::Frame);
+    assert!(after.request_frame);
+    assert!(!after.post_work);
+    assert!(!s.wake(), "the frame is requested");
+}
+
+/// Work that wakes itself inside a work run never spins the page: the run
+/// posts no further run, and its work goes on with the frames it asks for.
+#[test]
+fn a_work_wake_inside_a_work_run_posts_no_further_run() {
+    let mut s = FrameScheduler::new();
+    assert!(s.wake_for_work());
+    s.begin_work_run();
+    assert!(!s.wake_for_work());
+    assert!(!s.wake_for_work());
+    let after = s.end_work_run(NextTick::Sleep);
+    assert!(!after.post_work);
+    assert!(s.is_asleep());
+}
+
+/// A work wake inside a frame's tick (one task waking another while the
+/// frame pumps) posts one work run when the tick ends, whatever the tick
+/// decided, and only one however many wakes came.
+#[test]
+fn a_work_wake_inside_a_tick_posts_one_run_when_the_tick_ends() {
+    let mut s = FrameScheduler::new();
+    assert!(s.wake());
+    s.begin_tick();
+    assert!(!s.wake_for_work(), "not during the tick");
+    assert!(!s.wake_for_work());
+    let after = s.end_tick(NextTick::Sleep);
+    assert!(after.post_work, "posted once the tick ends");
+    assert!(!after.request_frame);
+    assert!(!s.wake_for_work(), "the posted run serves later wakes");
+    s.begin_work_run();
+    s.end_work_run(NextTick::Sleep);
+    s.begin_tick();
+    let quiet = s.end_tick(NextTick::Sleep);
+    assert!(!quiet.post_work, "a tick with no work wake posts nothing");
+    assert!(s.is_asleep());
+}
+
+/// A deadline decided at the end of a work run arms the timer as a tick's
+/// would, and the same deadline decided again keeps it.
+#[test]
+fn a_work_run_arms_the_timer_for_a_deadline() {
+    let at = Instant::now() + Duration::from_millis(500);
+    let mut s = FrameScheduler::new();
+    assert!(s.wake_for_work());
+    s.begin_work_run();
+    assert_eq!(
+        s.end_work_run(NextTick::Timer(at)).timer,
+        TimerChange::Arm(at)
+    );
+    assert!(s.wake_for_work());
+    s.begin_work_run();
+    assert_eq!(s.end_work_run(NextTick::Timer(at)).timer, TimerChange::Keep);
 }

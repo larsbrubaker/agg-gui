@@ -45,7 +45,10 @@ The app is built by a closure that runs *after* the GPU exists
   serves the next caret blink or delayed tooltip), so a settled page uses no
   CPU; agg-gui's draw, layout and idle-queue requests wake it from anywhere,
   app exports use `mark_dirty()` / `request_tick()`, and a host that polls
-  returns `true` from `wants_tick`.
+  returns `true` from `wants_tick`. Queued work a promise woke
+  (`frame_demand::notify_work`) runs between frames, posted on a
+  `MessageChannel`, so a load awaiting promise after promise is not paced by
+  the display; it paints nothing until its work asks for a frame.
 - **Sizing** — canvas backing store = CSS size × `devicePixelRatio`, re-synced
   every tick (browser zoom changes DPR without a resize event); when that
   would exceed the GPU's texture limit the scale is reduced uniformly and

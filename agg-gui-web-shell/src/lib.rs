@@ -80,6 +80,15 @@
 //!   `agg_gui::frame_demand`; made inside one, the end-of-tick decision sees
 //!   them. A running tween or glide re-requests a draw each frame, which keeps
 //!   the loop running until it settles.
+//! - **Queued work that needs no frame** (an executor's task a promise
+//!   woke) is announced with `agg_gui::frame_demand::notify_work` and runs
+//!   in a work run: a task of its own, posted on a `MessageChannel` soon
+//!   after the wake rather than at the next animation frame, which drains
+//!   `agg_gui::ui_thread` and runs the app's between-frames pumps
+//!   (`ui_thread::add_between_frames_hook`) and paints nothing. What that
+//!   work asks for (a draw, a layout) comes on the next frame; a load
+//!   awaiting one promise after another runs at the speed of its work, not
+//!   one display frame per await.
 //! - **App exports** call [`mark_dirty`] (repaint) or [`request_tick`] (one
 //!   tick, no forced paint).
 //! - **A host that polls** something without an event in

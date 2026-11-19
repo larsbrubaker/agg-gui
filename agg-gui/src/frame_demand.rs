@@ -20,11 +20,22 @@
 //! nothing extra and never turns into a continuous loop. Cross-thread posts
 //! reach a parked native loop through [`crate::animation::set_host_waker`]
 //! instead; [`notify`] is per thread because the flags it announces are.
+//!
+//! Work that needs no frame of its own has a second hook. An app executor
+//! whose task a promise woke (a download, a storage read) wants that task run,
+//! not a frame painted: a loop that ran it only at the next animation frame
+//! would make each await of a load cost a display frame however little work
+//! it does. Such a wake calls [`notify_work`]; a shell that can run queued
+//! work between frames installs [`set_work_hook`] and answers with
+//! [`crate::ui_thread::run_between_frames`] soon after, painting nothing
+//! unless that work asks for a frame. A shell without one (every loop that
+//! keeps iterating) hears it as a plain [`notify`].
 
 use std::cell::Cell;
 
 std::thread_local! {
     static HOOK: Cell<Option<fn()>> = const { Cell::new(None) };
+    static WORK_HOOK: Cell<Option<fn()>> = const { Cell::new(None) };
 }
 
 /// Install (or, with `None`, remove) the calling thread's frame-demand hook.
@@ -42,6 +53,27 @@ pub fn set_hook(hook: Option<fn()>) {
 pub fn notify() {
     if let Some(hook) = HOOK.with(|h| h.get()) {
         hook();
+    }
+}
+
+/// Install (or, with `None`, remove) the calling thread's work hook: how a
+/// shell that runs queued work between frames hears [`notify_work`]. The
+/// same rules as [`set_hook`]: cheap, and it must not call back into any
+/// request path.
+pub fn set_work_hook(hook: Option<fn()>) {
+    WORK_HOOK.with(|h| h.set(hook));
+}
+
+/// Tell the calling thread's shell that queued work waits which needs no
+/// frame of its own (an executor's task a promise woke): the work hook when
+/// the shell installed one, which runs
+/// [`crate::ui_thread::run_between_frames`] promptly, and otherwise
+/// [`notify`]. The work's between-frames hook asks for a frame itself when
+/// what it did should show, or when it leaves work for the frames.
+pub fn notify_work() {
+    match WORK_HOOK.with(|h| h.get()) {
+        Some(hook) => hook(),
+        None => notify(),
     }
 }
 
@@ -117,6 +149,67 @@ mod tests {
             "signal_async_state_change"
         );
         queue.clear();
+        crate::animation::clear_draw_request();
+    }
+
+    std::thread_local! {
+        static WORK_CALLS: Cell<u32> = const { Cell::new(0) };
+    }
+
+    fn count_work() {
+        WORK_CALLS.with(|c| c.set(c.get() + 1));
+    }
+
+    #[test]
+    fn work_wakes_reach_the_work_hook_and_ask_for_no_frame() {
+        CALLS.with(|c| c.set(0));
+        WORK_CALLS.with(|c| c.set(0));
+        set_hook(Some(count));
+        set_work_hook(Some(count_work));
+        notify_work();
+        set_work_hook(None);
+        set_hook(None);
+        assert_eq!(WORK_CALLS.with(|c| c.get()), 1, "the work hook ran");
+        assert_eq!(CALLS.with(|c| c.get()), 0, "no frame was asked for");
+    }
+
+    #[test]
+    fn without_a_work_hook_a_work_wake_asks_for_a_frame() {
+        set_work_hook(None);
+        assert_eq!(calls_during(notify_work), 1);
+    }
+
+    std::thread_local! {
+        static BETWEEN_FRAMES_RUNS: Cell<u32> = const { Cell::new(0) };
+    }
+
+    fn between_frames_pump() {
+        BETWEEN_FRAMES_RUNS.with(|c| c.set(c.get() + 1));
+    }
+
+    /// A shell's work run drains the queue and then runs the between-frames
+    /// pumps; a frame's own drain leaves those pumps to the frame.
+    #[test]
+    fn a_run_between_frames_drains_and_runs_the_between_frames_pumps() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+        crate::ui_thread::reset_for_tests();
+        crate::ui_thread::add_between_frames_hook(between_frames_pump);
+        crate::ui_thread::add_between_frames_hook(between_frames_pump);
+        BETWEEN_FRAMES_RUNS.with(|c| c.set(0));
+        crate::ui_thread::invoke_pending_actions();
+        assert_eq!(BETWEEN_FRAMES_RUNS.with(|c| c.get()), 0, "a drain alone");
+        let ran = Arc::new(AtomicBool::new(false));
+        let flag = Arc::clone(&ran);
+        crate::ui_thread::run_on_idle(move || flag.store(true, Ordering::SeqCst));
+        crate::ui_thread::run_between_frames();
+        assert!(ran.load(Ordering::SeqCst), "the queued action ran");
+        assert_eq!(
+            BETWEEN_FRAMES_RUNS.with(|c| c.get()),
+            1,
+            "the pump ran once, added twice"
+        );
+        crate::ui_thread::reset_for_tests();
         crate::animation::clear_draw_request();
     }
 

@@ -6,8 +6,9 @@
 //!   device-loss rebuild;
 //! - [`frame`] — one tick of the frame loop: sizing, the paint decision,
 //!   one painted frame, and the end-of-tick decision to run on or sleep;
-//! - [`schedule`] — the `requestAnimationFrame` callback, the deadline timer
-//!   and [`request_tick`]: the loop sleeps while nothing needs a frame;
+//! - [`schedule`] — the `requestAnimationFrame` callback, the deadline timer,
+//!   the work runs between frames and [`request_tick`]: the loop sleeps while
+//!   nothing needs a frame;
 //! - [`wake_sources`] — browser events that only wake the loop (canvas
 //!   resize, DPR change, fullscreen change, gamepad connected);
 //! - [`haptics`] — a vibrate tick when a finger's long press fires and

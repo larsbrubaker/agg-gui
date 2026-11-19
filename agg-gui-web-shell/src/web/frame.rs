@@ -2,7 +2,9 @@
 //! decision ([`crate::policy`], held back while the GPU is busy by
 //! [`crate::frames_in_flight`]), one painted frame, the device-loss rebuild,
 //! and the end-of-tick decision to run on or sleep ([`decide`], over
-//! [`crate::frame_schedule`]); [`super::schedule`] runs the ticks.
+//! [`crate::frame_schedule`]); [`super::schedule`] runs the ticks, and the
+//! work runs between them ([`work_run`]: queued work a promise woke, run
+//! without painting, then the same decision).
 //!
 //! Owns the GPU-side state ([`Painter`]) in its own thread-local; the app and
 //! host live in [`super`]'s cells. Order per tick mirrors the native shell's
@@ -188,10 +190,25 @@ fn paint_readiness() -> PaintReadiness {
 
 /// Start the frame loop; it sleeps whenever [`decide`] finds nothing to do.
 pub(super) fn start_frame_loop() {
-    super::schedule::install(|| {
-        tick();
-        decide()
-    });
+    super::schedule::install(
+        || {
+            tick();
+            decide()
+        },
+        || {
+            work_run();
+            decide()
+        },
+    );
+}
+
+/// One work run between frames: queued work that needs no frame woke the
+/// page (`agg_gui::frame_demand::notify_work`), and it runs now, with
+/// `agg_gui::ui_thread`'s queue and the app's between-frames pumps
+/// (`ui_thread::run_between_frames`). Nothing is sized, polled or painted;
+/// what the work asks for comes on the next frame ([`decide`]).
+fn work_run() {
+    agg_gui::ui_thread::run_between_frames();
 }
 
 /// Run `f` with the app and host, skipping (`None`) when either is missing
@@ -271,8 +288,13 @@ fn tick() {
     with_app_host(|app, host| host.on_tick(app));
     // Queued UI work (`agg_gui::ui_thread`) before the paint decision, so
     // what it changes shows this tick; it runs even while the GPU is not
-    // ready to paint.
-    agg_gui::ui_thread::invoke_pending_actions();
+    // ready to paint. The between-frames work too when no work run could be
+    // posted for it.
+    if super::schedule::take_work_for_tick() {
+        agg_gui::ui_thread::run_between_frames();
+    } else {
+        agg_gui::ui_thread::invoke_pending_actions();
+    }
     // A cursor changed by code (`agg_gui::invalidate_cursor`) reaches the
     // canvas while the mouse rests and painting is idle, as agg-gui-shell
     // does on every paint.

@@ -8,6 +8,17 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ## [Unreleased]
 
+### Added
+
+- Queued work runs between frames: a task a promise woke (`agg_gui::frame_demand::notify_work`)
+  runs in a work run posted on a `MessageChannel` soon after the wake, not at the next animation
+  frame, so a load awaiting one promise after another no longer waits a display frame per await.
+  A work run drains `agg_gui::ui_thread` and runs the app's between-frames pumps
+  (`ui_thread::run_between_frames`), paints nothing, and ends with the same decision a tick ends
+  with: what its work asked for is painted on the next frame, and an idle page still sleeps. A work
+  wake inside a tick posts one run when the tick ends; one inside a work run posts none, so work
+  that wakes itself never spins the page. Requires agg-gui 0.5.16 (0.6.3).
+
 ### Fixed
 
 - A one-finger drag on a touchscreen stays a drag when the app's frames are slow (seconds-long

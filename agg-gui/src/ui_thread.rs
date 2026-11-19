@@ -17,6 +17,13 @@
 //! also asks [`next_due`] directly, so queued work keeps it awake whatever a
 //! paint in between does to the draw flags.
 //!
+//! **Between frames.** A shell that can run work outside its frames (the
+//! browser shell, woken by [`crate::frame_demand::notify_work`]) calls
+//! [`run_between_frames`]: the same drain, then the hooks an app added with
+//! [`add_between_frames_hook`] for work it otherwise runs only inside a frame
+//! (from layout, paced by the frames), so a task a promise woke runs as soon
+//! as the promise resolves.
+//!
 //! **Wakeups are per queue, so per UI thread.** Each queue counts the wakeups
 //! aimed at it, and [`crate::animation`] merges only the calling thread's
 //! bound queue's count into its draw request and epochs ([`current_wakeups`]);
@@ -72,6 +79,9 @@ static MAIN: Mutex<Option<Main>> = Mutex::new(None);
 
 /// Functions every drain runs after the queued actions.
 static DRAIN_HOOKS: Mutex<Vec<fn()>> = Mutex::new(Vec::new());
+
+/// Functions [`run_between_frames`] runs after its drain.
+static BETWEEN_FRAMES_HOOKS: Mutex<Vec<fn()>> = Mutex::new(Vec::new());
 
 /// Releases the main queue when the thread that owns it ends, so the next UI
 /// thread adopts it instead of the work landing on a queue nobody drains.
@@ -316,6 +326,38 @@ pub fn add_drain_hook(hook: fn()) {
 
 fn drain_hooks() -> Vec<fn()> {
     lock(&DRAIN_HOOKS).clone()
+}
+
+/// Run `hook` in every [`run_between_frames`], after its drain: an app's pump
+/// for work its frames otherwise run (from layout), with a bounded budget. The
+/// hook asks for a frame (`animation::request_draw` or `request_layout`) when
+/// what it ran should show or when it leaves work, since a shell runs no
+/// further work for wakes made inside it. Adding a hook twice adds it once.
+pub fn add_between_frames_hook(hook: fn()) {
+    let mut hooks = lock(&BETWEEN_FRAMES_HOOKS);
+    if !hooks.iter().any(|h| *h as usize == hook as usize) {
+        hooks.push(hook);
+    }
+}
+
+/// What a shell runs when queued work woke it between frames
+/// ([`crate::frame_demand::notify_work`]): [`invoke_pending_actions`], then
+/// every between-frames hook ([`add_between_frames_hook`]), each under the
+/// same panic containment as the drain's.
+pub fn run_between_frames() {
+    invoke_pending_actions();
+    let hooks = lock(&BETWEEN_FRAMES_HOOKS).clone();
+    let mut unreported = None;
+    for hook in hooks {
+        unreported = unreported.or(crate::unhandled::run_contained(
+            crate::unhandled::UnhandledOrigin::IdleAction,
+            hook,
+        ));
+    }
+    if let Some(payload) = unreported {
+        // As the drain does: an unhandled failure must not vanish.
+        std::panic::resume_unwind(payload);
+    }
 }
 
 /// C# `InvokePendingActions`: run everything queued and due on this thread's

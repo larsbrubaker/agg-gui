@@ -10,6 +10,14 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- Work that needs no frame: `frame_demand::notify_work()` says queued work waits (an executor's task
+  a promise woke) without asking for a frame, and `frame_demand::set_work_hook` is how a shell that
+  can run such work between frames hears it; without a work hook it is a plain `notify()`.
+  `ui_thread::run_between_frames()` is what that shell runs: the drain (`invoke_pending_actions`),
+  then the hooks an app added with `ui_thread::add_between_frames_hook` for work it otherwise runs
+  only inside a frame, so a load awaiting many promises in turn no longer waits a display frame
+  per await (0.5.16).
+
 - Touch event times: `App::on_touch_start_at`, `App::on_touch_move_at` and `App::on_touch_end_at`
   (the plain forms plus `event_time: Option<web_time::Instant>`), `InputForwarder::platform_at`
   and `InputForwarder::forward_at` (which pass it to the touch entry points), and
