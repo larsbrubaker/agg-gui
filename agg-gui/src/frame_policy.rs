@@ -3,6 +3,16 @@
 //! paints at all ([`wants_frame`]), and the reactive tick a headless driver
 //! runs ([`LayoutTracker::tick`]).
 //!
+//! A frame lays out when its key changed, when a widget requested a layout,
+//! or when a widget in the tree asked to be drawn ([`Widget::needs_draw`]):
+//! a widget may step what it shows in `layout` (an animation, a status read
+//! from a model), and the frame it asks for has to reach it there. That last
+//! case leaves the invalidation epoch alone, so retained layers stay valid
+//! and a widget that tells a change of its view alone from any other (a node
+//! editor's pan) still can.
+//!
+//! [`Widget::needs_draw`]: crate::widget::Widget::needs_draw
+//!
 //! `agg-gui-shell` (winit + wgpu), `agg-gui-web-shell` (rAF + wgpu) and
 //! headless drivers (agg-gui-automation's `HeadlessDriver`, MatterCAD's UI
 //! test harness) all make the same decisions around `App::layout` and
@@ -113,6 +123,13 @@ impl LayoutTracker {
         frame_needs_layout(self.last, next)
     }
 
+    /// Whether a frame keyed `next` must lay `app` out: [`Self::needs_layout`],
+    /// or a widget in its tree asked to be drawn (see the module docs). What
+    /// the shells and [`Self::layout_if_needed`] decide by.
+    pub fn needs_layout_for(&self, app: &App, next: LayoutKey) -> bool {
+        self.needs_layout(next) || app.root().needs_draw()
+    }
+
     /// Record that the frame keyed `key` was laid out and painted. Record the
     /// key computed *before* layout and paint: an invalidation during either
     /// moves the epoch, so the next frame lays out again.
@@ -135,7 +152,7 @@ impl LayoutTracker {
     /// record the key. Returns whether layout ran.
     pub fn layout_if_needed(&mut self, app: &mut App, viewport: Size) -> bool {
         let key = LayoutKey::for_viewport(viewport);
-        let needed = self.needs_layout(key);
+        let needed = self.needs_layout_for(app, key);
         if needed {
             app.layout(viewport);
             self.record(key);

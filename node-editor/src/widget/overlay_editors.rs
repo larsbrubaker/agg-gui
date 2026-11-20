@@ -130,7 +130,7 @@ impl NodeEditor {
             self.overlay = Some(dialog);
             self.overlay_close_flag = Some(close_flag);
         }
-        self.backbuffer.invalidate();
+        self.invalidate_canvas();
         agg_gui::animation::request_draw();
     }
 
@@ -233,7 +233,7 @@ impl NodeEditor {
             self.overlay_close_flag = Some(close_flag);
         }
         agg_gui::focus::request_focus(focus_id);
-        self.backbuffer.invalidate();
+        self.invalidate_canvas();
         agg_gui::animation::request_draw();
     }
 
@@ -352,7 +352,7 @@ impl NodeEditor {
             self.overlay_close_flag = Some(close_flag);
         }
         agg_gui::focus::request_focus(focus_id);
-        self.backbuffer.invalidate();
+        self.invalidate_canvas();
         agg_gui::animation::request_draw();
     }
 

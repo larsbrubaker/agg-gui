@@ -147,7 +147,8 @@ impl Painter {
             .create_view(&wgpu::TextureViewDescriptor::default());
 
         // Skip layout when nothing that feeds it changed (same surface size,
-        // same DPI, same invalidation epoch) and no widget asked for one.
+        // same DPI, same invalidation epoch) and no widget asked for one or to
+        // be drawn (`LayoutTracker::needs_layout_for`).
         let next_layout_key = LayoutKey::for_surface(win_w, win_h);
         self.frames_painted += 1;
         let frame = Frame {
@@ -156,7 +157,7 @@ impl Painter {
             device_scale: agg_gui::device_scale(),
             duration: self.last_duration,
             index: self.frames_painted,
-            needs_layout: self.layout.needs_layout(next_layout_key),
+            needs_layout: self.layout.needs_layout_for(app, next_layout_key),
             input_since_last_frame,
         };
 

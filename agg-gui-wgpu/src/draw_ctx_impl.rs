@@ -522,6 +522,16 @@ impl DrawCtx for WgpuGfxCtx {
         self.composite_retained_layer_impl(key, width, height, alpha)
     }
 
+    fn composite_retained_layer_scaled(
+        &mut self,
+        key: u64,
+        width: f64,
+        height: f64,
+        alpha: f64,
+    ) -> bool {
+        self.composite_retained_layer_scaled_impl(key, width, height, alpha)
+    }
+
     fn push_retained_layer_with_alpha(&mut self, key: u64, width: f64, height: f64, alpha: f64) {
         self.push_layer_with_alpha_impl(width, height, alpha, Some(key));
     }

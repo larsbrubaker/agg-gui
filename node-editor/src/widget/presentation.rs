@@ -96,7 +96,7 @@ impl NodeEditor {
             // `layout()`; the simplified cards rebuild from the fingerprint.
             self.set_cards_draw_sockets(show);
             self.last_paint_fingerprint = None;
-            self.backbuffer.invalidate();
+            self.invalidate_canvas();
             // A layout too, which rebuilds the simplified cards' sockets.
             agg_gui::animation::request_layout();
         }
@@ -191,7 +191,7 @@ impl NodeEditor {
     pub(super) fn set_hovered_socket(&mut self, hit: Option<(NodeId, SocketSide, String)>) {
         if self.presentation.hovered != hit {
             self.presentation.hovered = hit;
-            self.backbuffer.invalidate();
+            self.invalidate_canvas();
             agg_gui::animation::request_draw();
         }
     }

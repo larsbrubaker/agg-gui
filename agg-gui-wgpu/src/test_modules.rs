@@ -57,6 +57,8 @@ mod opacity_headless_tests;
 mod outline_text_baseline_tests;
 #[path = "radial_gradient_readback_tests.rs"]
 mod radial_gradient_readback_tests;
+#[path = "retained_stretch_readback_tests.rs"]
+mod retained_stretch_readback_tests;
 #[path = "root_transform_readback_tests.rs"]
 mod root_transform_readback_tests;
 #[path = "rotated_text_readback_tests.rs"]

@@ -253,7 +253,7 @@ impl NodeEditor {
             self.view_anim = None;
             false
         } else {
-            agg_gui::animation::request_draw();
+            self.request_view_draw();
             true
         }
     }
@@ -270,7 +270,6 @@ impl NodeEditor {
             model.on_canvas_pan_changed(pan);
             model.on_canvas_zoom_changed(scale);
         }
-        self.backbuffer.invalidate();
-        agg_gui::animation::request_draw();
+        self.request_view_draw();
     }
 }

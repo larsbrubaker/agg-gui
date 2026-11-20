@@ -75,7 +75,7 @@ impl NodeEditor {
             if let Some(command) = command {
                 self.apply_command(command);
             }
-            self.backbuffer.invalidate();
+            self.invalidate_canvas();
             agg_gui::animation::request_draw();
             return;
         }
@@ -86,7 +86,7 @@ impl NodeEditor {
             if let Some(command) = command {
                 self.apply_command(command);
             }
-            self.backbuffer.invalidate();
+            self.invalidate_canvas();
             agg_gui::animation::request_draw();
             return;
         }
@@ -104,7 +104,7 @@ impl NodeEditor {
                         let mut model = self.model.lock().unwrap();
                         let _ = model.add_node(type_id, pos);
                     }
-                    self.backbuffer.invalidate();
+                    self.invalidate_canvas();
                     agg_gui::animation::request_draw();
                 }
             }

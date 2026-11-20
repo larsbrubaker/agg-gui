@@ -15,8 +15,6 @@ use crate::draw::draw_canvas_grid;
 use crate::socket_style::{draw_noodle, draw_socket_ring, NoodleStyle};
 
 use super::connect;
-use super::hover;
-use super::presentation;
 use super::snap_guides::paint_snap_guides_canvas;
 use super::{CanvasState, NodeEditor, SocketSide};
 
@@ -111,16 +109,15 @@ impl NodeEditor {
             ctx.scale(self.canvas_scale, self.canvas_scale);
         }
 
-        // Edges (under nodes).  Re-snapshot here rather than caching the
-        // `layouts` from `layout()` so paint doesn't carry a hidden
-        // dependency on layout-time data — the backbuffer caches the
-        // result anyway, so paint runs once per real change.
-        let layouts = self.snapshot_layouts();
-        let model = self.model.lock().unwrap();
-        let noodles = model.noodles();
+        // Edges (under nodes), from the model read this canvas content was
+        // last painted with (`paint_cache.rs`): a pan or zoom paints again
+        // without reading the model again.
+        let read = self.paint_read();
+        let layouts = &read.layouts;
         let style = self.presentation.noodle_style;
         let picked_up = self.picked_up_noodle();
-        for noodle in &noodles {
+        for n in &read.noodles {
+            let noodle = &n.noodle;
             // A noodle being moved by a deferred pick-up follows the
             // pointer instead of drawing in its place.
             if picked_up.is_some_and(|p| {
@@ -131,14 +128,9 @@ impl NodeEditor {
             }) {
                 continue;
             }
-            if let Some((f, t)) = hover::resolve_noodle_endpoints(&layouts, noodle) {
-                let col = model
-                    .noodle_color(noodle)
-                    .unwrap_or_else(|| model.socket_color(f.socket_type));
-                let end = presentation::landing_point(&noodles, noodle, t);
-                draw_noodle(ctx, f.center, end, col, model.noodle_dashed(noodle), style);
-            }
+            draw_noodle(ctx, n.from, n.to, n.color, n.dashed, style);
         }
+        let model = self.model.lock().unwrap();
 
         // Live in-progress connection — the dangling end snaps to a
         // compatible socket under the cursor when one is in reach. The
@@ -167,7 +159,7 @@ impl NodeEditor {
                 socket_type: *from_socket_type,
             };
             let hover = connect::find_target_near(
-                &layouts,
+                layouts,
                 &*model,
                 *cursor_canvas,
                 &fixed,

@@ -147,7 +147,7 @@ impl NodeEditor {
     pub fn set_drop_feedback(&mut self, on: bool) {
         if self.view.drop_feedback != on {
             self.view.drop_feedback = on;
-            self.backbuffer.invalidate();
+            self.invalidate_canvas();
             agg_gui::animation::request_draw();
         }
     }
@@ -312,7 +312,7 @@ impl NodeEditor {
         {
             self.canvas_offset[0] += (available.width - old.width) * 0.5;
             self.canvas_offset[1] += (available.height - old.height) * 0.5;
-            self.backbuffer.invalidate();
+            self.invalidate_canvas();
         }
     }
 

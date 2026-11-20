@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps.
 
+## [0.7.1] - 2026-11-19
+
+### Changed
+
+- A frame lays the tree out when a widget in it asked to be drawn (`Widget::needs_draw`), as well
+  as when its layout key changed or a layout was requested (agg-gui 0.5.17,
+  `LayoutTracker::needs_layout_for`): a widget that steps an animation or a status in `layout`
+  keeps moving now that a layout no longer asks for the next frame itself. Such a frame leaves the
+  invalidation epoch alone.
+
 ## [0.7.0] - Unreleased
 
 ### Changed

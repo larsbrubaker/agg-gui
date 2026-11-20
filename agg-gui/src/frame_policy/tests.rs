@@ -152,6 +152,80 @@ fn tracker_skips_an_unchanged_key() {
     assert!(tracker.needs_layout(key), "reset forgets the last layout");
 }
 
+/// A child that asks to be drawn while its flag is set, as a widget whose
+/// animation steps in `layout` does.
+struct AsksToBeDrawn {
+    bounds: Rect,
+    asks: Rc<Cell<bool>>,
+    children: Vec<Box<dyn Widget>>,
+}
+
+impl Widget for AsksToBeDrawn {
+    fn bounds(&self) -> Rect {
+        self.bounds
+    }
+    fn set_bounds(&mut self, b: Rect) {
+        self.bounds = b;
+    }
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.children
+    }
+    fn children_mut(&mut self) -> &mut Vec<Box<dyn Widget>> {
+        &mut self.children
+    }
+    fn layout(&mut self, available: Size) -> Size {
+        available
+    }
+    fn paint(&mut self, _ctx: &mut dyn DrawCtx) {}
+    fn on_event(&mut self, _event: &Event) -> EventResult {
+        EventResult::Ignored
+    }
+    fn needs_draw(&self) -> bool {
+        self.asks.get()
+    }
+}
+
+#[test]
+fn a_frame_a_widget_asks_for_lays_the_tree_out_and_leaves_the_epoch_alone() {
+    quiet();
+    let (mut app, layouts) = counting_app();
+    let asks = Rc::new(Cell::new(false));
+    app.root_mut().children_mut().push(Box::new(AsksToBeDrawn {
+        bounds: Rect::default(),
+        asks: Rc::clone(&asks),
+        children: Vec::new(),
+    }));
+    let viewport = Size::new(50.0, 40.0);
+    let key = || LayoutKey::for_viewport(viewport);
+    let mut tracker = LayoutTracker::new();
+    assert!(tracker.layout_if_needed(&mut app, viewport));
+    quiet();
+    assert!(!tracker.needs_layout_for(&app, key()), "nothing asks");
+    assert!(!tracker.layout_if_needed(&mut app, viewport));
+
+    asks.set(true);
+    let epoch = animation::invalidation_epoch();
+    let before = layouts.get();
+    assert!(
+        tracker.needs_layout_for(&app, key()),
+        "a widget asking to be drawn is laid out with its frame"
+    );
+    assert!(tracker.layout_if_needed(&mut app, viewport));
+    assert_eq!(layouts.get(), before + 1);
+    assert_eq!(
+        animation::invalidation_epoch(),
+        epoch,
+        "such a frame leaves the invalidation epoch, and so every retained layer, alone"
+    );
+    assert!(
+        !tracker.needs_layout(key()),
+        "the layout key alone does not ask for it"
+    );
+
+    asks.set(false);
+    assert!(!tracker.layout_if_needed(&mut app, viewport));
+}
+
 #[test]
 fn tracker_lays_out_when_the_key_changes() {
     quiet();

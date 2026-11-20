@@ -38,6 +38,7 @@ pub mod node_parts;
 pub mod nodes;
 mod overlay_editors;
 mod paint;
+mod paint_cache;
 mod palette_source;
 mod popup;
 mod presentation;
@@ -45,6 +46,7 @@ mod rubber_band;
 mod snap_guides;
 mod value_editor_widget;
 mod view_anchor;
+mod view_frames;
 pub mod view_nav;
 
 pub use add_menu::AddMenuRequest;
@@ -52,7 +54,7 @@ pub use commands::{NodeEditorCommand, NodeEditorHandle};
 pub use hosted::{
     HostedNodeBody, NodeBodyFactory, SocketAnchor, SocketAnchorFn, MIN_HOSTED_CARD_WIDTH,
 };
-pub use hosted_card::{CardShadow, HostedCard};
+pub use hosted_card::{CardShadow, HostedCard, ZOOM_SETTLE};
 pub use palette_source::PaletteFn;
 pub use view_anchor::ViewAnchor;
 pub use view_nav::InteractionMode;
@@ -126,6 +128,8 @@ mod tests_title_tint;
 mod tests_value;
 #[cfg(test)]
 mod tests_view_anchor;
+#[cfg(test)]
+mod tests_view_frames;
 #[cfg(test)]
 mod tests_view_nav;
 
@@ -295,6 +299,10 @@ pub struct NodeEditor {
     /// The primary selection this editor last reported to the host, for a
     /// host whose `primary_selection` keeps the trait's `None` default.
     reported_primary: Cell<Option<NodeId>>,
+    /// Telling a pan or zoom frame from any other (see [`view_frames`]).
+    view_frames: view_frames::ViewFrames,
+    /// The canvas paint's model read (see [`paint_cache`]).
+    paint_cache: paint_cache::PaintCache,
 }
 
 impl NodeEditor {
@@ -340,6 +348,8 @@ impl NodeEditor {
             add_menu: add_menu::AddMenuState::default(),
             view: view_anchor::ViewState::default(),
             reported_primary: Cell::new(None),
+            view_frames: view_frames::ViewFrames::default(),
+            paint_cache: paint_cache::PaintCache::default(),
         }
     }
 
@@ -349,7 +359,7 @@ impl NodeEditor {
     pub(crate) fn close_overlay(&mut self) {
         self.overlay = None;
         self.overlay_close_flag = None;
-        self.backbuffer.invalidate();
+        self.invalidate_canvas();
         agg_gui::animation::request_draw();
     }
 
@@ -591,6 +601,12 @@ impl Widget for NodeEditor {
     }
 
     fn layout(&mut self, available: Size) -> Size {
+        // A pan or zoom step re-lays out nothing but the view.
+        if self.begin_layout(available) {
+            self.layout_view_only(available);
+            self.end_layout(available);
+            return available;
+        }
         self.view_resized(available);
         self.bounds = Rect::new(0.0, 0.0, available.width, available.height);
 
@@ -624,7 +640,7 @@ impl Widget for NodeEditor {
         if self.last_paint_fingerprint != Some(sig) {
             self.rebuild_children(&layouts, ext_sel);
             self.last_paint_fingerprint = Some(sig);
-            self.backbuffer.invalidate();
+            self.invalidate_canvas();
         }
 
         // Floating overlay (e.g. ColorWheelPicker dialog).  Drain its
@@ -646,6 +662,7 @@ impl Widget for NodeEditor {
             }
         }
 
+        self.end_layout(available);
         available
     }
 

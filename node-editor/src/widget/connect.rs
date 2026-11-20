@@ -162,7 +162,7 @@ impl NodeEditor {
                 if let Some(src) = source {
                     fixed = (noodle.from_node, src);
                     picked_up = self.deferred_pickup.then_some(noodle);
-                    self.backbuffer.invalidate();
+                    self.invalidate_canvas();
                     agg_gui::animation::request_draw();
                 }
             }
@@ -226,6 +226,7 @@ impl NodeEditor {
         });
         if *refusal != now {
             *refusal = now;
+            // The refusal note is the editor's own paint, over the cards.
             self.backbuffer.invalidate();
         }
     }
@@ -368,7 +369,7 @@ impl NodeEditor {
 
     /// Whether the drop landed or not, the in-flight noodle has to go.
     fn connection_ended(&mut self) {
-        self.backbuffer.invalidate();
+        self.invalidate_canvas();
         agg_gui::animation::request_draw();
     }
 

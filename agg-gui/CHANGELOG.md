@@ -10,6 +10,13 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- A retained layer that may stretch: `Widget::retained_layer_may_stretch` (default `false`) lets
+  a widget whose clean `GlFbo` layer is drawn under another scale than it was rastered at (a zoom
+  in progress) have it composited stretched through the new
+  `DrawCtx::composite_retained_layer_scaled` instead of rastered again; a backend without it
+  (the default answers `false`) rasters as before. A node editor's cards use it so each step of a
+  zoom is a composite, and raster crisply once the zoom settles (0.5.17).
+
 - Work that needs no frame: `frame_demand::notify_work()` says queued work waits (an executor's task
   a promise woke) without asking for a frame, and `frame_demand::set_work_hook` is how a shell that
   can run such work between frames hears it; without a work hook it is a plain `notify()`.
@@ -196,6 +203,20 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   unchanged (it owns every key).
 
 ### Fixed
+
+- A frame lays the tree out when a widget in it asked to be drawn (`Widget::needs_draw`), not only
+  when its layout key changed or a layout was requested: `LayoutTracker::needs_layout_for` (which
+  `layout_if_needed` and the shells now decide by). A widget that steps an animation or a status
+  in `layout` and asks for its frames through `needs_draw` relied on every layout asking for the
+  next frame (below); without that it would be drawn forever and never laid out. Such a frame
+  leaves the invalidation epoch alone (0.5.17).
+
+- An app laid out in the room above the on-screen keyboard
+  (`on_screen_keyboard::set_resizes_layout(true)`) no longer lays its whole tree out again on
+  every painted frame: the end of each layout sets the keyboard lift again, and
+  `keyboard_scroll::request_lift` now asks for a draw only when the lift's target changes, so a
+  layout that changed nothing leaves the invalidation epoch, and the next frame's layout key,
+  where they were (0.5.17).
 
 - A finger held still on an idle app long presses: once the hold is past its deadline, `App::paint`
   requests the layout whose poll fires it, since the shells lay out only when the layout key moves

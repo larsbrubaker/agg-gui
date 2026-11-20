@@ -278,6 +278,24 @@ pub trait DrawCtx {
         false
     }
 
+    /// Composite the retained layer `key` stretched to the size a
+    /// `width × height` layer has under the current transform, when it was
+    /// rasterised at another scale. Returns `true` when the backend had a
+    /// retained surface for `key` and drew it, sampled (so softer than a
+    /// fresh raster); `false` (the default, for backends without retained
+    /// layers) leaves the caller to rasterise afresh. For a widget being
+    /// zoomed, which rasterises again once the zoom settles
+    /// ([`Widget::retained_layer_may_stretch`](crate::widget::Widget::retained_layer_may_stretch)).
+    fn composite_retained_layer_scaled(
+        &mut self,
+        _key: u64,
+        _width: f64,
+        _height: f64,
+        _alpha: f64,
+    ) -> bool {
+        false
+    }
+
     /// Begin rendering into a retained backend layer identified by `key`.
     /// Backends that do not retain layers may fall back to a transient layer.
     fn push_retained_layer_with_alpha(&mut self, _key: u64, width: f64, height: f64, alpha: f64) {

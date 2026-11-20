@@ -153,6 +153,10 @@ pub(crate) enum DrawCommand {
         origin_y: f32,
         layer_w: u32,
         layer_h: u32,
+        /// The quad the texture is drawn into, in target pixels: the
+        /// texture's own size, or another for a stretched composite.
+        dst_w: f32,
+        dst_h: f32,
         alpha: f32,
         rounded_clip: Option<LayerRoundedClip>,
         /// Scissor active on the target when the composite is requested.

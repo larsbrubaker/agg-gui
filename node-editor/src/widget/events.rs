@@ -373,9 +373,18 @@ impl NodeEditor {
         // targets.  Grab it BEFORE the match's mutable borrow of
         // `self.interaction` — the snapshot helper takes `&self` and
         // borrow-checker can't see that the immutable read finishes
-        // before the closure body runs otherwise.  Cheap to take
-        // unconditionally (matches the snap-disabled path below).
-        let layouts_snapshot = self.snapshot_layouts();
+        // before the closure body runs otherwise. A pan or zoom drag reads
+        // no card, and its moves come every frame, so it skips the snapshot
+        // (which reads every node and socket from the model).
+        let view_drag = matches!(
+            self.interaction,
+            CanvasState::PanningCanvas { .. } | CanvasState::ZoomingCanvas { .. }
+        );
+        let layouts_snapshot = if view_drag {
+            Vec::new()
+        } else {
+            self.snapshot_layouts()
+        };
         let snap_on = agg_gui::snap::is_enabled() && self.hosted.snap_guides;
         // A pan / zoom drag in flight owns the view for as long as it
         // lasts. The presses above already cancelled the tween; this
@@ -388,6 +397,9 @@ impl NodeEditor {
         ) {
             self.cancel_view_animation();
         }
+        // A pan or zoom step changes the view alone: its frame keeps the
+        // cards as they are (`view_frames.rs`).
+        let mut view_step = false;
         let result = match &mut self.interaction {
             CanvasState::PanningCanvas {
                 start_offset,
@@ -405,7 +417,8 @@ impl NodeEditor {
                     .lock()
                     .unwrap()
                     .on_canvas_pan_changed(self.reported_pan());
-                EventResult::Consumed
+                view_step = true;
+                EventResult::ConsumedQuiet
             }
             CanvasState::ZoomingCanvas {
                 start_scale,
@@ -428,8 +441,8 @@ impl NodeEditor {
                     model.on_canvas_pan_changed(self.reported_pan());
                     model.on_canvas_zoom_changed(scale);
                 }
-                self.backbuffer.invalidate();
-                EventResult::Consumed
+                view_step = true;
+                EventResult::ConsumedQuiet
             }
             CanvasState::DraggingNode {
                 ids,
@@ -517,7 +530,9 @@ impl NodeEditor {
             }
             CanvasState::Idle => EventResult::Ignored,
         };
-        if result.is_consumed() {
+        if view_step {
+            self.request_view_draw();
+        } else if result.is_consumed() {
             agg_gui::animation::request_draw();
         }
         if matches!(self.interaction, CanvasState::Idle) {
@@ -658,8 +673,10 @@ impl NodeEditor {
             model.on_canvas_pan_changed(self.reported_pan());
             model.on_canvas_zoom_changed(new_scale);
         }
-        agg_gui::animation::request_draw();
-        EventResult::Consumed
+        // The view alone changed (`view_frames.rs`); quiet, so the
+        // dispatcher asks for no other draw.
+        self.request_view_draw();
+        EventResult::ConsumedQuiet
     }
 
     pub(super) fn on_key_down(&mut self, key: &Key, mods: Modifiers) -> EventResult {

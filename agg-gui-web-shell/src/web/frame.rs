@@ -544,6 +544,10 @@ fn paint(w: u32, h: u32) -> bool {
             .create_view(&wgpu::TextureViewDescriptor::default());
 
         let next_key = LayoutKey::for_surface(w, h);
+        // Lay out when the key changed, a layout was asked for, or a widget
+        // asked to be drawn (`LayoutTracker::needs_layout_for`).
+        let needs_layout = super::with_app(|app| p.layout.needs_layout_for(app, next_key))
+            .unwrap_or_else(|| p.layout.needs_layout(next_key));
         p.frames += 1;
         let frame = Frame {
             width: w,
@@ -551,7 +555,7 @@ fn paint(w: u32, h: u32) -> bool {
             device_scale: agg_gui::device_scale(),
             duration: p.last_duration,
             index: p.frames,
-            needs_layout: p.layout.needs_layout(next_key),
+            needs_layout,
             input_since_last_frame: INPUT_SINCE_FRAME.with(|c| c.replace(false)),
         };
         DIRTY.with(|d| d.set(false));

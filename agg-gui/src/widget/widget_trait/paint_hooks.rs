@@ -92,6 +92,20 @@ macro_rules! widget_paint_hooks {
             BackbufferSpec::default_for(mode, self.backbuffer_cache_mut().is_some())
         }
 
+        /// Whether this widget's retained `GlFbo` layer, when it is clean
+        /// but was rasterised at another scale than the one it is drawn at
+        /// now, may be composited stretched to the new size
+        /// ([`DrawCtx::composite_retained_layer_scaled`]) rather than
+        /// rasterised again. A widget under a zoom gesture (a node editor's
+        /// cards) says yes while the zoom moves, so each step of it is a
+        /// composite, and no once it settles, invalidating its layer so it
+        /// rasterises crisply at the scale it came to rest at.
+        ///
+        /// Default `false`: a scale change rasterises the layer again.
+        fn retained_layer_may_stretch(&self) -> bool {
+            false
+        }
+
         /// Mutable retained backbuffer state for widgets that request a
         /// [`BackbufferSpec`] other than [`BackbufferKind::None`].
         fn backbuffer_state_mut(&mut self) -> Option<&mut BackbufferState> {

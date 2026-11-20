@@ -129,7 +129,7 @@ impl NodeEditor {
             .map(|l| l.node_id)
             .collect();
         self.selected = mode.combine(base, &touched);
-        self.backbuffer.invalidate();
+        self.invalidate_canvas();
         true
     }
 
@@ -170,7 +170,7 @@ impl NodeEditor {
         if primary != current {
             self.notify_primary_selection(primary);
         }
-        self.backbuffer.invalidate();
+        self.invalidate_canvas();
         agg_gui::animation::request_draw();
     }
 
@@ -185,7 +185,7 @@ impl NodeEditor {
         {
             self.selected = base;
         }
-        self.backbuffer.invalidate();
+        self.invalidate_canvas();
         agg_gui::animation::request_draw();
         true
     }

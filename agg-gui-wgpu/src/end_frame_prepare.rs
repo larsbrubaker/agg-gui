@@ -418,7 +418,8 @@ pub(crate) fn prepare_all(
                     None,
                     &pipelines.linear_sampler,
                 );
-                let verts = composite_quad_verts(*origin_x, *origin_y, *layer_w, *layer_h);
+                let verts =
+                    composite_quad_verts(*origin_x, *origin_y, *layer_w as f32, *layer_h as f32);
                 let vb = alloc_vertex(device, arenas, bytemuck::cast_slice(&verts));
                 out.push(Prepared::PopLayer {
                     _texture: Arc::clone(texture),
@@ -492,6 +493,8 @@ pub(crate) fn prepare_all(
                 origin_y,
                 layer_w,
                 layer_h,
+                dst_w,
+                dst_h,
                 alpha,
                 rounded_clip,
                 parent_clip,
@@ -518,7 +521,7 @@ pub(crate) fn prepare_all(
                     None,
                     &pipelines.linear_sampler,
                 );
-                let verts = composite_quad_verts(*origin_x, *origin_y, *layer_w, *layer_h);
+                let verts = composite_quad_verts(*origin_x, *origin_y, *dst_w, *dst_h);
                 let vb = alloc_vertex(device, arenas, bytemuck::cast_slice(&verts));
                 out.push(Prepared::CompositeLayer {
                     _texture: Arc::clone(texture),
@@ -590,13 +593,15 @@ pub(crate) fn prepare_all(
     out
 }
 
-/// Composite quad in parent's Y-up local coords.  `bl=v=1, tr=v=0` mirrors the
-/// wgpu UV convention (v=0 is the top of a sampled texture).
-fn composite_quad_verts(origin_x: f32, origin_y: f32, layer_w: u32, layer_h: u32) -> [f32; 24] {
+/// Composite quad in parent's Y-up local coords, `dst_w × dst_h` target
+/// pixels (the layer's own size, or another for a stretched composite).
+/// `bl=v=1, tr=v=0` mirrors the wgpu UV convention (v=0 is the top of a
+/// sampled texture).
+fn composite_quad_verts(origin_x: f32, origin_y: f32, dst_w: f32, dst_h: f32) -> [f32; 24] {
     let x0 = origin_x;
     let y0 = origin_y;
-    let x1 = x0 + layer_w as f32;
-    let y1 = y0 + layer_h as f32;
+    let x1 = x0 + dst_w;
+    let y1 = y0 + dst_h;
     [
         x0, y0, 0.0, 1.0, x1, y0, 1.0, 1.0, x1, y1, 1.0, 0.0, x0, y0, 0.0, 1.0, x1, y1, 1.0, 0.0,
         x0, y1, 0.0, 0.0,

@@ -6,7 +6,10 @@
 //! screen), a field the shorter layout clipped is scrolled into view by its
 //! scroll view, a scroll the user makes afterwards is left alone, and hiding
 //! the keyboard gives the root the whole viewport back. With the mode off the
-//! root keeps the whole viewport while the keyboard is up.
+//! root keeps the whole viewport while the keyboard is up. A layout that
+//! changes nothing asks for no other frame: the mode's lift is set again on
+//! every layout, and only a change of it may move the invalidation epoch, or
+//! every frame would lay the whole tree out again.
 
 use super::*;
 use crate::geometry::Rect;
@@ -174,4 +177,27 @@ fn without_the_mode_the_root_keeps_the_whole_viewport_under_the_keyboard() {
     focus(&mut app, index);
     assert!(on_screen_keyboard::target_panel_height(VP.0) > 0.0);
     assert_eq!(app.root().bounds().height, VP.1);
+}
+
+#[test]
+fn a_layout_that_changes_nothing_leaves_the_invalidation_epoch_alone() {
+    for keyboard_up in [false, true] {
+        let _fixture = Fixture::new(true);
+        let (mut app, _) = build_app();
+        app.layout(size());
+        if keyboard_up {
+            focus(&mut app, 0);
+        }
+        // Settled: the lift reached its target and nothing else is pending.
+        app.layout(size());
+        crate::animation::clear_draw_request();
+        let epoch = crate::animation::invalidation_epoch();
+        app.layout(size());
+        assert_eq!(
+            crate::animation::invalidation_epoch(),
+            epoch,
+            "a layout with nothing to change (keyboard up: {keyboard_up}) moved the \
+             invalidation epoch, so the next frame would lay out again"
+        );
+    }
 }

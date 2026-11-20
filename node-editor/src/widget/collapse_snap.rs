@@ -21,7 +21,7 @@ impl NodeEditor {
         if !self.collapsed_nodes.insert(id) {
             self.collapsed_nodes.remove(&id);
         }
-        self.backbuffer.invalidate();
+        self.invalidate_canvas();
         agg_gui::animation::request_draw();
     }
 }

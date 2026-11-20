@@ -125,6 +125,11 @@ impl NodeEditorHandle {
 
     /// Take everything queued so far, leaving the channel empty. Yields
     /// an empty `Vec` on a poisoned lock (module header).
+    /// Whether no command is waiting for the editor.
+    pub(crate) fn is_empty(&self) -> bool {
+        self.queue.lock().map_or(true, |queue| queue.is_empty())
+    }
+
     pub fn take(&self) -> Vec<NodeEditorCommand> {
         self.queue
             .lock()
@@ -186,7 +191,7 @@ impl NodeEditor {
         // Removing a node invalidates the cached child widget tree and
         // the GL backbuffer — neither will update without an explicit
         // request.
-        self.backbuffer.invalidate();
+        self.invalidate_canvas();
         agg_gui::animation::request_draw();
         true
     }
@@ -211,7 +216,7 @@ impl NodeEditor {
             return false;
         }
         self.selected = ids.into_iter().collect();
-        self.backbuffer.invalidate();
+        self.invalidate_canvas();
         agg_gui::animation::request_draw();
         true
     }
@@ -279,7 +284,7 @@ impl NodeEditor {
         if reveal {
             self.reveal_layout(layout.top_left, layout.size);
         }
-        self.backbuffer.invalidate();
+        self.invalidate_canvas();
         agg_gui::animation::request_draw();
         true
     }
@@ -336,7 +341,7 @@ impl NodeEditor {
             }
             self.reveal_layout([left, top], [right - left, top - bottom]);
         }
-        self.backbuffer.invalidate();
+        self.invalidate_canvas();
         agg_gui::animation::request_draw();
         found.len()
     }

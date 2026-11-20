@@ -123,7 +123,7 @@ impl NodeEditor {
         }
         // Opening a menu must invalidate or it won't paint until the next
         // unrelated event triggers a redraw.
-        self.backbuffer.invalidate();
+        self.invalidate_canvas();
         agg_gui::animation::request_draw();
     }
 
@@ -141,7 +141,7 @@ impl NodeEditor {
         self.add_menu.close = None;
         if self.popup.is_open() && self.add_menu.in_popup {
             self.popup.close();
-            self.backbuffer.invalidate();
+            self.invalidate_canvas();
             agg_gui::animation::request_draw();
         }
     }
@@ -193,7 +193,7 @@ impl NodeEditor {
             self.overlay_close_flag = Some(Rc::clone(&close));
             self.add_menu.close = Some(close);
         }
-        self.backbuffer.invalidate();
+        self.invalidate_canvas();
         agg_gui::animation::request_draw();
     }
 

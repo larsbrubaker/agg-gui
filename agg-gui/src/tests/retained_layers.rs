@@ -2,7 +2,10 @@
 //!
 //! These cover the shared widget paint traversal rather than a particular
 //! window implementation, so both FBO-backed windows and future retained
-//! backbuffer widgets inherit the same invalidation rules.
+//! backbuffer widgets inherit the same invalidation rules. The test context
+//! keeps a layer only for the scale it was rastered at, as a GPU backend's
+//! texture is, so a clean layer drawn at another scale is rastered again
+//! unless its widget lets it stretch (`Widget::retained_layer_may_stretch`).
 
 use super::*;
 
@@ -22,6 +25,7 @@ struct RetainedProbe {
     children: Vec<Box<dyn Widget>>,
     backbuffer: BackbufferState,
     paints: Rc<Cell<usize>>,
+    stretch: bool,
 }
 
 impl Widget for RetainedProbe {
@@ -67,12 +71,20 @@ impl Widget for RetainedProbe {
     fn backbuffer_state_mut(&mut self) -> Option<&mut BackbufferState> {
         Some(&mut self.backbuffer)
     }
+
+    fn retained_layer_may_stretch(&self) -> bool {
+        self.stretch
+    }
 }
 
 pub(super) struct RetainedLayerCtx {
     transform: TransAffine,
     stack: Vec<TransAffine>,
     has_retained_layer: bool,
+    /// The scale the retained layer was rastered at.
+    raster_scale: f64,
+    /// Composites of a layer stretched from another scale.
+    stretched: usize,
     /// The alpha of the most recent retained-layer composite or push.
     pub(super) last_alpha: f64,
 }
@@ -83,6 +95,8 @@ impl RetainedLayerCtx {
             transform: TransAffine::new(),
             stack: Vec::new(),
             has_retained_layer: false,
+            raster_scale: 1.0,
+            stretched: 0,
             last_alpha: 1.0,
         }
     }
@@ -177,11 +191,25 @@ impl DrawCtx for RetainedLayerCtx {
         alpha: f64,
     ) -> bool {
         self.last_alpha = alpha;
+        self.has_retained_layer && self.transform.scaling_abs().0 == self.raster_scale
+    }
+    fn composite_retained_layer_scaled(
+        &mut self,
+        _key: u64,
+        _width: f64,
+        _height: f64,
+        alpha: f64,
+    ) -> bool {
+        self.last_alpha = alpha;
+        if self.has_retained_layer {
+            self.stretched += 1;
+        }
         self.has_retained_layer
     }
     fn push_retained_layer_with_alpha(&mut self, _key: u64, _width: f64, _height: f64, alpha: f64) {
         self.last_alpha = alpha;
         self.has_retained_layer = true;
+        self.raster_scale = self.transform.scaling_abs().0;
     }
     fn pop_layer(&mut self) {}
     fn gl_paint(&mut self, _screen_rect: Rect, _painter: &mut dyn GlPaint) {}
@@ -195,6 +223,7 @@ fn test_theme_change_invalidates_retained_widget_layer() {
         children: Vec::new(),
         backbuffer: BackbufferState::new(),
         paints: Rc::clone(&paints),
+        stretch: false,
     };
     let mut ctx = RetainedLayerCtx::new();
 
@@ -251,6 +280,7 @@ fn rust_only_foreign_main_queue_wakeup_keeps_retained_layer() {
         children: Vec::new(),
         backbuffer: BackbufferState::new(),
         paints: Rc::clone(&paints),
+        stretch: false,
     };
     let mut ctx = RetainedLayerCtx::new();
     paint_subtree(&mut widget, &mut ctx);
@@ -266,4 +296,43 @@ fn rust_only_foreign_main_queue_wakeup_keeps_retained_layer() {
         1,
         "another thread's main-queue wakeup must not re-raster this thread's layer"
     );
+}
+
+#[test]
+fn a_clean_layer_drawn_at_another_scale_stretches_only_when_its_widget_lets_it() {
+    for stretch in [false, true] {
+        let paints = Rc::new(Cell::new(0));
+        let mut widget = RetainedProbe {
+            bounds: Rect::new(0.0, 0.0, 20.0, 20.0),
+            children: Vec::new(),
+            backbuffer: BackbufferState::new(),
+            paints: Rc::clone(&paints),
+            stretch,
+        };
+        let mut ctx = RetainedLayerCtx::new();
+        paint_subtree(&mut widget, &mut ctx);
+        assert_eq!(paints.get(), 1);
+
+        // The same clean layer under a zoom.
+        ctx.scale(2.0, 2.0);
+        paint_subtree(&mut widget, &mut ctx);
+        if stretch {
+            assert_eq!(paints.get(), 1, "a stretching layer is not rastered again");
+            assert_eq!(ctx.stretched, 1, "it is composited stretched");
+        } else {
+            assert_eq!(
+                paints.get(),
+                2,
+                "a layer at another scale is rastered again"
+            );
+            assert_eq!(ctx.stretched, 0);
+        }
+
+        // Back at the scale it was rastered at, a stretching layer composites
+        // as it is; the other, rastered again at the zoom, is rastered again.
+        ctx.scale(0.5, 0.5);
+        paint_subtree(&mut widget, &mut ctx);
+        assert_eq!(paints.get(), if stretch { 1 } else { 3 });
+        assert_eq!(ctx.stretched, usize::from(stretch));
+    }
 }

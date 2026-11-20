@@ -86,7 +86,7 @@ impl NodeEditor {
     fn palette_changed(&mut self) {
         self.palette = self.resolve_palette(&agg_gui::current_visuals());
         self.last_paint_fingerprint = None;
-        self.backbuffer.invalidate();
+        self.invalidate_canvas();
         // A layout too: it rebuilds the cards' chrome in the new colours.
         agg_gui::animation::request_layout();
     }

@@ -348,6 +348,10 @@ pub(crate) struct RetainedWgpuLayer {
     /// Sub-pixel translation the content was rastered with
     /// (`layers::LayerPlacement`).
     pub(crate) frac: (f64, f64),
+    /// Scale (physical pixels per layer unit) the content was rastered at,
+    /// so a stretched composite (`composite_retained_layer_scaled`) can map
+    /// it to another.
+    pub(crate) scale: (f64, f64),
     pub(crate) rounded_clip: Option<LayerRoundedClip>,
 }
 

@@ -217,7 +217,7 @@ impl NodeEditor {
         self.hosted.snap_guides = enabled;
         if !enabled && matches!(self.interaction, super::CanvasState::DraggingNode { .. }) {
             agg_gui::snap::clear_guides();
-            self.backbuffer.invalidate();
+            self.invalidate_canvas();
             agg_gui::animation::request_draw();
         }
     }
@@ -256,7 +256,7 @@ impl NodeEditor {
     pub fn set_card_title_height(&mut self, height: f64) {
         if self.hosted.title_height != height {
             self.hosted.title_height = height;
-            self.backbuffer.invalidate();
+            self.invalidate_canvas();
             agg_gui::animation::request_layout();
         }
     }
@@ -280,7 +280,7 @@ impl NodeEditor {
     pub fn set_min_card_width(&mut self, width: f64) {
         if self.hosted.min_width != width {
             self.hosted.min_width = width;
-            self.backbuffer.invalidate();
+            self.invalidate_canvas();
             agg_gui::animation::request_layout();
         }
     }
@@ -316,7 +316,7 @@ impl NodeEditor {
         }
         self.hosted.order.retain(|n| *n != id);
         self.hosted.order.push(id);
-        self.backbuffer.invalidate();
+        self.invalidate_canvas();
         agg_gui::animation::request_draw();
     }
 
@@ -329,7 +329,7 @@ impl NodeEditor {
         };
         for id in ids {
             if let Some(card) = layer.card_mut(id) {
-                card.chrome.draw_sockets = show;
+                card.set_draw_sockets(show);
             }
         }
     }
@@ -444,7 +444,7 @@ impl NodeEditor {
                     stretch: crate::socket_style::multi_input_stretch(look.landed),
                 })
                 .collect();
-            card.chrome = CardChrome {
+            card.set_chrome(CardChrome {
                 title: n.display_name.clone(),
                 title_color,
                 body: palette.node_body,
@@ -457,7 +457,7 @@ impl NodeEditor {
                 draw_sockets: self.presentation.show_sockets,
                 socket_hit,
                 shadow: self.presentation.card_shadow,
-            };
+            });
             card.set_bounds(Rect::new(
                 n.position[0],
                 n.position[1] - geom.height,
@@ -488,7 +488,7 @@ impl NodeEditor {
         self.report_measured_heights();
         let inval = agg_gui::animation::invalidation_epoch();
         if geometry_changed || inval != self.hosted.seen_invalidation {
-            self.backbuffer.invalidate();
+            self.invalidate_canvas();
         }
         self.hosted.seen_invalidation = inval;
     }
@@ -596,7 +596,12 @@ fn hosted_layout(n: &NodeView, g: &CardGeom) -> NodeLayoutInfo {
 }
 
 /// The hosted layer at the end of the editor's children, if any.
-fn layer_in(children: &mut [Box<dyn Widget>]) -> Option<&mut HostedLayer> {
+pub(super) fn layer_in_ref(children: &[Box<dyn Widget>]) -> Option<&HostedLayer> {
+    children.last()?.as_any()?.downcast_ref::<HostedLayer>()
+}
+
+/// The hosted layer at the end of the editor's children, if any, to change.
+pub(super) fn layer_in(children: &mut [Box<dyn Widget>]) -> Option<&mut HostedLayer> {
     children
         .last_mut()?
         .as_any_mut()?

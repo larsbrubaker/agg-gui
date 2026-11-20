@@ -112,7 +112,12 @@ fn paint_subtree_gl_backbuffer(
     if spec.cached && !needs_draw {
         ctx.save();
         ctx.translate(-spec.outsets.left, -spec.outsets.bottom);
-        let composited = ctx.composite_retained_layer(key, layer_w, layer_h, spec.alpha);
+        // A layer rasterised at another scale composites as it is only when
+        // the widget accepts it stretched (a zoom in progress); otherwise it
+        // rasterises again below.
+        let composited = ctx.composite_retained_layer(key, layer_w, layer_h, spec.alpha)
+            || (widget.retained_layer_may_stretch()
+                && ctx.composite_retained_layer_scaled(key, layer_w, layer_h, spec.alpha));
         ctx.restore();
         if composited {
             if let Some(state) = widget.backbuffer_state_mut() {

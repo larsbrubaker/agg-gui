@@ -16,11 +16,30 @@
 //! editor, which owns selection, node drags, noodles and menus. A press the
 //! body does take still selects and raises its card, through the editor's
 //! `Widget::preview_event` (`hosted_events.rs`).
+//!
+//! Each card paints into a retained layer of its own (agg-gui's cached
+//! `GlFbo` backbuffer, rasterised at the zoom it is shown at), grown past
+//! the card by its shadow, selection ring and sockets. A pan composites the
+//! layers at their new places instead of painting every card's widgets again
+//! (`view_frames.rs`). While a zoom moves, the layers are composited stretched
+//! from the scale they were rasterised at (agg-gui's
+//! `Widget::retained_layer_may_stretch`), softer but at a composite's cost;
+//! [`ZOOM_SETTLE`] after the zoom last changed the layer drops them, so each
+//! card rasterises once more, crisp at the scale the zoom came to rest at. The
+//! editor drops every card's layer whenever it would have drawn its whole
+//! canvas again (`NodeEditor::invalidate_canvas`), a card's own events drop
+//! its layer through agg-gui's dispatch, and a card whose chrome changes
+//! drops its own.
 
+use agg_gui::widget::{BackbufferKind, BackbufferSpec, BackbufferState};
 use agg_gui::widgets::window::{
     paint_chrome_border, paint_chrome_shadow, paint_chrome_title_bar, ChromeStyle,
 };
-use agg_gui::{Color, DrawCtx, Event, EventResult, Point, Rect, Size, TransAffine, Widget};
+use agg_gui::{Color, DrawCtx, Event, EventResult, Insets, Point, Rect, Size, TransAffine, Widget};
+
+use std::time::Duration;
+
+use web_time::Instant;
 
 use crate::draw::{SocketSide, NODE_BOTTOM_PAD, NODE_RADIUS, ROW_HEIGHT, TITLE_HEIGHT};
 use crate::model::{BadgeSeverity, NodeId, NodeView};
@@ -32,12 +51,22 @@ use super::hosted_resize::edge_at;
 pub(crate) const LAYER_TYPE_NAME: &str = "NodeEditorHostedLayer";
 const TITLE_FONT_SIZE: f64 = 13.0;
 
+/// How long after the zoom last changed the cards are rasterised again at
+/// the new scale (see the module docs): past the gap between a wheel's
+/// notches, so a zoom in progress stays a composite per frame.
+pub const ZOOM_SETTLE: Duration = Duration::from_millis(150);
+
 /// The canvas layer: editor-sized, applying the pan/zoom to every card.
 pub(crate) struct HostedLayer {
     bounds: Rect,
     children: Vec<Box<dyn Widget>>,
     offset: [f64; 2],
     scale: f64,
+    /// The zoom the cards' layers were last rasterised at.
+    raster_scale: f64,
+    /// When the stretched cards are rasterised again ([`ZOOM_SETTLE`]
+    /// after the zoom last changed); `None` while none is stretched.
+    settle_at: Option<Instant>,
 }
 
 impl HostedLayer {
@@ -47,14 +76,39 @@ impl HostedLayer {
             children: Vec::new(),
             offset: [0.0, 0.0],
             scale: 1.0,
+            raster_scale: 1.0,
+            settle_at: None,
         }
     }
 
-    /// Match the editor's size and its current pan/zoom.
+    /// Match the editor's size and its current pan/zoom. A zoom away from
+    /// the scale the cards were rasterised at stretches their layers until
+    /// it settles (see the module docs).
     pub fn set_view(&mut self, size: Size, offset: [f64; 2], scale: f64) {
         self.bounds = Rect::new(0.0, 0.0, size.width, size.height);
         self.offset = offset;
+        if scale != self.scale {
+            let stretch = scale != self.raster_scale;
+            self.for_each_card(|card| card.stretch = stretch);
+            self.settle_at = stretch.then(|| agg_gui::clock::now() + ZOOM_SETTLE);
+        }
         self.scale = scale;
+    }
+
+    /// Whether the stretched cards are due to be rasterised again.
+    pub fn settle_due(&self) -> bool {
+        self.settle_at.is_some_and(|at| agg_gui::clock::now() >= at)
+    }
+
+    /// Run `f` on every card.
+    fn for_each_card(&mut self, mut f: impl FnMut(&mut HostedCard)) {
+        for card in self
+            .children
+            .iter_mut()
+            .filter_map(|c| c.as_any_mut()?.downcast_mut::<HostedCard>())
+        {
+            f(card);
+        }
     }
 
     pub fn clear(&mut self) {
@@ -84,6 +138,17 @@ impl HostedLayer {
             .iter_mut()
             .filter_map(|c| c.as_any_mut()?.downcast_mut::<HostedCard>())
             .find(|k| k.node_id == id)
+    }
+
+    /// Drop every card's retained layer, so each paints afresh, crisp at
+    /// the current zoom.
+    pub fn invalidate_cards(&mut self) {
+        self.for_each_card(|card| {
+            card.backbuffer.invalidate();
+            card.stretch = false;
+        });
+        self.raster_scale = self.scale;
+        self.settle_at = None;
     }
 
     /// Order the cards bottom → top as `order` lists them.
@@ -136,7 +201,29 @@ impl Widget for HostedLayer {
     fn layout(&mut self, _available: Size) -> Size {
         Size::new(self.bounds.width, self.bounds.height)
     }
-    fn paint(&mut self, _ctx: &mut dyn DrawCtx) {}
+    /// A settled zoom rasterises the stretched cards again, before they
+    /// paint (the layer paints nothing of its own).
+    fn paint(&mut self, _ctx: &mut dyn DrawCtx) {
+        if self.settle_due() {
+            self.invalidate_cards();
+        }
+    }
+    /// The settling zoom's frame asks to be drawn, which re-rasterises the
+    /// editor's layer and so reaches [`Widget::paint`] above.
+    fn needs_draw(&self) -> bool {
+        self.settle_due() || self.children.iter().any(|c| c.needs_draw())
+    }
+    fn next_draw_deadline(&self) -> Option<Instant> {
+        let children = self
+            .children
+            .iter()
+            .filter_map(|c| c.next_draw_deadline())
+            .min();
+        match (self.settle_at, children) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        }
+    }
     /// Only a point over a card belongs to the layer, so empty canvas
     /// reaches the editor directly. So does a card's resize band (outside
     /// the drawn card), even where it lies over a card beneath: the cards
@@ -187,8 +274,15 @@ fn paint_selection_ring(ctx: &mut dyn DrawCtx, w: f64, h: f64, color: Color) {
     ctx.stroke();
 }
 
+/// How far past the card's left or right edge a socket on it reaches, and
+/// above and below its centre (less a multi-input's stretch): the field
+/// diamond's half size and its outline, the largest of the shapes
+/// (`socket_style::draw_socket`), with a unit to spare.
+const SOCKET_REACH: f64 =
+    crate::socket_style::DIAMOND_HALF_SIZE + 2.0 * crate::socket_style::SOCKET_OUTLINE_WIDTH;
+
 /// One socket as the card paints it.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct CardSocket {
     pub side: SocketSide,
     /// Distance from the card's top edge.
@@ -209,7 +303,7 @@ pub struct CardShadow {
     pub color: Option<Color>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct CardChrome {
     pub title: String,
     pub title_color: Color,
@@ -241,6 +335,10 @@ pub struct HostedCard {
     pub(crate) resize_vertically: bool,
     /// Height of the title bar, set by every `layout_card`.
     pub(crate) title_height: f64,
+    /// The card's retained layer (see the module docs).
+    backbuffer: BackbufferState,
+    /// The layer may be composited stretched: a zoom has not settled yet.
+    stretch: bool,
 }
 
 impl HostedCard {
@@ -266,6 +364,60 @@ impl HostedCard {
             },
             resize_vertically: false,
             title_height: TITLE_HEIGHT,
+            backbuffer: BackbufferState::new(),
+            stretch: false,
+        }
+    }
+
+    /// Show `chrome`, painting the card afresh if it changed.
+    pub(crate) fn set_chrome(&mut self, chrome: CardChrome) {
+        if self.chrome != chrome {
+            self.chrome = chrome;
+            self.backbuffer.invalidate();
+        }
+    }
+
+    /// Draw or hide the sockets, painting the card afresh if that changed.
+    pub(crate) fn set_draw_sockets(&mut self, show: bool) {
+        if self.chrome.draw_sockets != show {
+            self.chrome.draw_sockets = show;
+            self.backbuffer.invalidate();
+        }
+    }
+
+    /// How far the card's paint reaches past its bounds, in card units: its
+    /// shadow, its selection ring and its sockets, each with a unit to spare
+    /// for anti-aliasing. The retained layer is grown by this much.
+    fn paint_outsets(&self) -> Insets {
+        let style = self.style(&agg_gui::current_visuals());
+        let blur = style.shadow_blur.max(0.0);
+        // `ChromeStyle`'s shadow offset is Y down.
+        let (dx, dy) = (style.shadow_dx, style.shadow_dy);
+        let ring = SELECTION_RING_WIDTH + SELECTION_RING_GAP;
+        let mut out = Insets {
+            left: (blur - dx).max(ring),
+            right: (blur + dx).max(ring),
+            top: (blur - dy).max(ring),
+            bottom: (blur + dy).max(ring),
+        };
+        if self.chrome.draw_sockets {
+            let h = self.bounds.height;
+            for s in &self.chrome.sockets {
+                match s.side {
+                    SocketSide::Input => out.left = out.left.max(SOCKET_REACH),
+                    SocketSide::Output => out.right = out.right.max(SOCKET_REACH),
+                }
+                let reach = SOCKET_REACH + s.stretch.max(0.0);
+                let cy = h - s.from_top;
+                out.top = out.top.max(cy + reach - h);
+                out.bottom = out.bottom.max(reach - cy);
+            }
+        }
+        Insets {
+            left: out.left + 1.0,
+            right: out.right + 1.0,
+            top: out.top + 1.0,
+            bottom: out.bottom + 1.0,
         }
     }
 
@@ -371,6 +523,24 @@ impl Widget for HostedCard {
     /// The editor lays the card out (`layout_card`); keep its size.
     fn layout(&mut self, _available: Size) -> Size {
         Size::new(self.bounds.width, self.bounds.height)
+    }
+
+    fn backbuffer_spec(&mut self) -> BackbufferSpec {
+        BackbufferSpec {
+            kind: BackbufferKind::GlFbo,
+            cached: true,
+            alpha: 1.0,
+            outsets: self.paint_outsets(),
+            rounded_clip: None,
+        }
+    }
+
+    fn backbuffer_state_mut(&mut self) -> Option<&mut BackbufferState> {
+        Some(&mut self.backbuffer)
+    }
+
+    fn retained_layer_may_stretch(&self) -> bool {
+        self.stretch
     }
 
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {

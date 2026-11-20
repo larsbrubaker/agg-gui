@@ -8,6 +8,24 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ## [Unreleased]
 
+## [0.0.4] - 2026-11-19
+
+### Changed
+
+- Panning and zooming a graph of hosted cards no longer lays out, re-reads or repaints every card
+  each frame. A frame whose only change is the editor's own view (a pan or zoom drag, the wheel,
+  the fit tween) lays out only the view: the cards keep their bodies, measured geometry and
+  cached layers (`view_frames.rs`). Each hosted card paints into a retained layer of its own, so a
+  pan composites the cards at their new places; a zoom composites them stretched while it moves
+  and rasterises them again, crisp, `ZOOM_SETTLE` (150 ms) after the zoom last changed
+  (`hosted_card.rs`). The canvas's noodles paint from one model read per change of the canvas's
+  content (`paint_cache.rs`), and a pan or zoom drag's moves take no snapshot of the model. Any
+  other draw request in between makes the next layout a full one, which lays everything out and
+  draws every card again, as before. On MatterCAD's Image Converter graph a pan frame went from
+  about 160 ms to 14 ms and a wheel-zoom frame from about 175 ms to 15 ms.
+- A pan or zoom drag's move and the wheel return `EventResult::ConsumedQuiet`: the editor asks for
+  its own frame (`NodeEditor::request_view_draw`), so the dispatcher asks for no other.
+
 ## [0.0.3] - 2026-10-30
 
 ### Added

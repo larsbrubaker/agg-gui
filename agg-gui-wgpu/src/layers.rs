@@ -271,6 +271,7 @@ impl WgpuGfxCtx {
                         width: w,
                         height: h,
                         frac: placement.frac,
+                        scale: placement.scale,
                         rounded_clip: None,
                     },
                 );
@@ -279,7 +280,12 @@ impl WgpuGfxCtx {
                 }
                 (tex, vw)
             } else {
-                let entry = &self.retained_layers[&key];
+                let entry = self
+                    .retained_layers
+                    .get_mut(&key)
+                    .expect("checked above: the retained layer exists");
+                // The same texture size can hold a slightly different scale.
+                entry.scale = placement.scale;
                 (Arc::clone(&entry.texture), entry.view.clone())
             }
         } else {
@@ -412,8 +418,56 @@ impl WgpuGfxCtx {
             origin_y: placement.origin.1 as f32,
             layer_w: w,
             layer_h: h,
+            dst_w: w as f32,
+            dst_h: h as f32,
             alpha: alpha.clamp(0.0, 1.0) as f32,
             rounded_clip,
+            parent_clip,
+        });
+        true
+    }
+
+    /// Composite the retained layer `key` stretched from the scale it was
+    /// rastered at to the one a `width × height` layer has under the current
+    /// transform (`DrawCtx::composite_retained_layer_scaled`): the texture
+    /// is sampled into the quad the content now covers. A layer with a
+    /// rounded clip (its mask is in texture pixels) is not stretched.
+    pub(crate) fn composite_retained_layer_scaled_impl(
+        &mut self,
+        key: u64,
+        width: f64,
+        height: f64,
+        alpha: f64,
+    ) -> bool {
+        let t = *self.ctm();
+        let placement = layer_placement(&t, width, height, self.max_texture_dim);
+        let Some(retained) = self.retained_layers.get(&key) else {
+            return false;
+        };
+        if retained.rounded_clip.is_some() {
+            return false;
+        }
+        let kx = placement.scale.0 / retained.scale.0.max(1e-6);
+        let ky = placement.scale.1 / retained.scale.1.max(1e-6);
+        // Texture pixel `p` holds layer point `(p - frac) / old scale`, which
+        // now lands at `translation + (p - frac) * k`.
+        let origin_x = t.tx - retained.frac.0 * kx;
+        let origin_y = t.ty - retained.frac.1 * ky;
+        let texture = Arc::clone(&retained.texture);
+        let view = retained.view.clone();
+        let (layer_w, layer_h) = (retained.width, retained.height);
+        let parent_clip = self.current_clip();
+        self.commands.push(DrawCommand::CompositeLayer {
+            texture,
+            view,
+            origin_x: origin_x as f32,
+            origin_y: origin_y as f32,
+            layer_w,
+            layer_h,
+            dst_w: (f64::from(layer_w) * kx) as f32,
+            dst_h: (f64::from(layer_h) * ky) as f32,
+            alpha: alpha.clamp(0.0, 1.0) as f32,
+            rounded_clip: None,
             parent_clip,
         });
         true

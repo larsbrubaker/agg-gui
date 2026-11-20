@@ -64,13 +64,19 @@
 //!   gets the tree laid out above the keyboard instead: focus changes and
 //!   layouts hand over to `keyboard_resize.rs`, which sets the lift to the
 //!   keyboard's room and scrolls the focused field into view.
+//! * The lift's state (its tween, the lift the paint is under) is
+//!   `keyboard_lift.rs`; this module re-exports its API.
 //! * While lifted, the on-screen part of root space is
 //!   [`visible_root_rect`](crate::widget::visible_root_rect)
 //!   `= (0, −L, w, h)`; viewport clamps and flips done in root space use it.
 
-use std::cell::{Cell, RefCell};
+use std::cell::Cell;
 
-use crate::animation::Tween;
+use super::keyboard_lift::PaintLiftGuard;
+pub use super::keyboard_lift::{current_lift, is_lift_animating, request_lift, tick_lift};
+#[cfg(test)]
+pub use super::keyboard_lift::{lift_target_for_test, set_lift_for_test};
+pub(crate) use super::keyboard_lift::{paint_lift, with_paint_lift_cleared};
 use crate::geometry::Rect;
 use crate::widget::Widget;
 
@@ -79,26 +85,7 @@ use crate::widget::Widget;
 /// field's outline isn't kissing the keyboard chrome.
 pub(crate) const SAFETY_MARGIN: f64 = 8.0;
 
-/// Slide duration for the global keyboard-driven lift, in seconds.
-/// Matches the keyboard's own slide animation so the lift and the
-/// keyboard panel travel together — no visible "the field jumps,
-/// THEN the keyboard slides" stagger.
-const LIFT_DURATION_SECS: f64 = 0.22;
-
 thread_local! {
-    /// Active "lift" applied to the entire widget tree (Y-up pixels)
-    /// to keep the focused field above the on-screen keyboard panel.
-    /// Animated via [`Tween`] so the raise / lower reads as a smooth
-    /// slide rather than a snap.  Updated by [`request_lift`] when
-    /// focus changes and ticked by `App::paint`.
-    static LIFT: RefCell<Tween> = const { RefCell::new(Tween::new(0.0, LIFT_DURATION_SECS)) };
-
-    /// The lift translate [`paint_lifted_tree`] has applied to the paint
-    /// ctx right now — 0 outside it. Lets
-    /// [`logical_root_transform`](crate::widget::logical_root_transform)
-    /// take it back out, so paint-time root coordinates are unlifted.
-    static PAINT_LIFT: Cell<f64> = const { Cell::new(0.0) };
-
     /// Root logical (unlifted) rect of the focused text field while it sits
     /// inside the active modal AND needs a positive global lift to clear the
     /// keyboard; `None` otherwise. See [`lifted_modal_focus_rect`].
@@ -130,99 +117,11 @@ fn record_lifted_modal_focus(root: &dyn Widget, path: &[usize], rect: Option<Rec
     LIFTED_MODAL_FOCUS.with(|c| c.set(if in_modal { rect } else { None }));
 }
 
-/// The keyboard lift translate currently applied to the paint ctx by
-/// [`paint_lifted_tree`]; 0 outside it (event time, direct test paints).
-pub(crate) fn paint_lift() -> f64 {
-    PAINT_LIFT.with(|c| c.get())
-}
-
-/// Sets [`PAINT_LIFT`] for the duration of a lifted paint and restores the
-/// previous value on drop, so a panicking paint can't leak it.
-struct PaintLiftGuard {
-    prev: f64,
-}
-
-impl PaintLiftGuard {
-    fn set(lift: f64) -> Self {
-        PaintLiftGuard {
-            prev: PAINT_LIFT.with(|c| c.replace(lift)),
-        }
-    }
-}
-
-impl Drop for PaintLiftGuard {
-    fn drop(&mut self) {
-        PAINT_LIFT.with(|c| c.set(self.prev));
-    }
-}
-
-/// Run `f` — a raster into a FRESH offscreen ctx (CPU backbuffer
-/// `GfxCtx` / `LcdGfxCtx`) — with [`paint_lift`] reading 0, restoring it
-/// afterwards (even on panic). The paint lift describes the translate on
-/// App's own ctx; a fresh sub ctx's `root_transform` is bitmap-relative and
-/// never carried it. Compositing layers pushed onto App's ctx must NOT use
-/// this: their `root_transform` includes the lift through the layer origins.
-pub(crate) fn with_paint_lift_cleared<R>(f: impl FnOnce() -> R) -> R {
-    let _cleared = PaintLiftGuard::set(0.0);
-    f()
-}
-
-/// Set the lift target.  No-op when the new target matches the
-/// current target (Tween's `set_target` already guards this); when it
-/// differs the animation re-anchors at the current interpolated
-/// value, so a focus change that walks the target up then back down
-/// reverses smoothly.
-pub fn request_lift(target: f64) {
-    LIFT.with(|c| c.borrow_mut().set_target(target.max(0.0)));
-    crate::animation::request_draw();
-}
-
-/// Current interpolated lift in Y-up pixels, without advancing the
-/// tween.  Mouse handlers call this to translate on-screen positions into
-/// root logical (unlifted layout) coordinates; the keyboard panel itself
-/// sits in screen space so its hit-tests use the on-screen position.
-/// During `App::paint` it equals the lift the tree is painted under (the
-/// paint ticks the tween first), so it is valid at event and paint time.
-pub fn current_lift() -> f64 {
-    LIFT.with(|c| c.borrow().value())
-}
-
-/// Advance the animation by one frame and return the new lift.  Call
-/// exactly once per paint — Tween auto-requests another draw while
-/// the animation is in flight.
-pub fn tick_lift() -> f64 {
-    LIFT.with(|c| c.borrow_mut().tick())
-}
-
-/// `true` while the lift tween is still travelling toward its target.
-/// `App::wants_draw` honours this so the host event loop keeps
-/// pumping frames until the slide completes.
-pub fn is_lift_animating() -> bool {
-    LIFT.with(|c| c.borrow().is_animating())
-}
-
 /// Reset the lift state — for tests that need a clean slate.
 #[cfg(test)]
 pub fn reset_lift_for_test() {
-    LIFT.with(|c| *c.borrow_mut() = Tween::new(0.0, LIFT_DURATION_SECS));
+    super::keyboard_lift::reset_for_test();
     LIFTED_MODAL_FOCUS.with(|c| c.set(None));
-}
-
-/// Pin the lift at a settled `v` (no animation in flight), so
-/// [`current_lift`] and [`tick_lift`] both read exactly `v` — for tests
-/// that check where things land while the tree is lifted. Pair with
-/// [`reset_lift_for_test`] (the thread-local outlives the test).
-#[cfg(test)]
-pub fn set_lift_for_test(v: f64) {
-    LIFT.with(|c| *c.borrow_mut() = Tween::new(v, LIFT_DURATION_SECS));
-}
-
-/// Where the lift tween is travelling toward (last value passed to
-/// `request_lift`).  Useful for asserting that focus loss did in fact
-/// retarget the lift back to 0 without waiting on the animation.
-#[cfg(test)]
-pub fn lift_target_for_test() -> f64 {
-    LIFT.with(|c| c.borrow().target())
 }
 
 /// Map an on-screen logical position into root logical space — the

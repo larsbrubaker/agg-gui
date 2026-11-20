@@ -30,7 +30,7 @@ impl super::NodeEditor {
         }
         self.interaction = CanvasState::Idle;
         agg_gui::snap::clear_guides();
-        self.backbuffer.invalidate();
+        self.invalidate_canvas();
         agg_gui::animation::request_draw();
     }
 }

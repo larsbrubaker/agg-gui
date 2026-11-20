@@ -94,7 +94,7 @@ impl NodeEditor {
         self.selected.insert(id);
         if self.selected != before {
             self.notify_primary_selection(Some(id));
-            self.backbuffer.invalidate();
+            self.invalidate_canvas();
             agg_gui::animation::request_draw();
         }
         self.raise_card(id);
