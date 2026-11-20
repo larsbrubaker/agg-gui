@@ -98,6 +98,19 @@ pub fn is_local_rect_in_paint_clip(ctx: &dyn DrawCtx, x: f64, y: f64, w: f64, h:
 /// too high; the keyboard lift is never subtracted there (the sub ctx never
 /// had it). Inside an `LcdGfxCtx` layer the effective scale is not included
 /// either.
+///
+/// A position a widget keeps for use outside paint (to place a drop, a popup
+/// or a dialog at event time) is recorded from
+/// [`Widget::paint_global_overlay`](crate::widget::Widget::paint_global_overlay),
+/// not from `paint`: [`paint_global_overlays`] calls it every painted frame
+/// on the App's own context, outside every offscreen layer, so this transform
+/// is root space there. `paint` does not run while a cached retained layer of
+/// the widget or an ancestor (a floating `Window`) is clean: the layer is only
+/// composited, wherever it now sits, so a position taken in `paint` goes stale
+/// when the window moves. The pass reaches only visible widgets listed in
+/// their parent's `children()`, and only under `App::paint`: a widget a parent
+/// paints by hand (forward the call yourself, as a parent does for a combo it
+/// paints) or a host painting with bare [`paint_subtree`] never records.
 pub fn logical_root_transform(ctx: &dyn DrawCtx) -> crate::TransAffine {
     let s = crate::ux_scale::effective_scale().max(1e-6);
     let t = ctx.root_transform();

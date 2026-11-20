@@ -128,7 +128,9 @@ impl NodeEditor {
     }
 
     /// The editor's bottom-left in app-absolute logical coordinates, as of
-    /// its last paint (so at worst one frame stale).
+    /// the last painted frame (so at worst one frame stale), wherever the
+    /// editor sits: docked, or inside a floating `Window` moved since its
+    /// content last re-rasterised.
     pub fn app_origin(&self) -> Point {
         let (x, y) = self.last_abs_origin.get();
         Point::new(x, y)

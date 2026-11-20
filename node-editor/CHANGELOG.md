@@ -8,6 +8,16 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ## [Unreleased]
 
+## [0.0.5] - 2026-11-20
+
+### Fixed
+
+- `NodeEditor::app_origin` and `app_to_canvas` are right for an editor inside a floating
+  `Window` that was moved: a drop maps to the canvas point under the pointer, and the add menu
+  and inline value editors handed to an `overlay_sink` open over the editor. The origin is
+  recorded in the global-overlay pass every painted frame instead of in `paint`, which is
+  skipped while the window's retained layer is only composited at its new place.
+
 ## [0.0.4] - 2026-11-19
 
 ### Changed

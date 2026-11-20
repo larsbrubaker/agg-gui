@@ -4,9 +4,11 @@
 //! guardrail. As a submodule of `widget`, this file retains direct
 //! access to `NodeEditor`'s private fields and helper methods.
 //!
-//! Two entry points:
+//! Three entry points:
 //! - [`NodeEditor::paint_canvas`] — body of the `Widget::paint` impl.
 //! - [`NodeEditor::finish_paint_canvas`] — body of the `Widget::finish_paint` impl.
+//! - [`NodeEditor::record_app_origin`] — body of the
+//!   `Widget::paint_global_overlay` impl.
 
 use agg_gui::widget::{logical_root_transform, paint_subtree};
 use agg_gui::{DrawCtx, Size};
@@ -19,6 +21,24 @@ use super::snap_guides::paint_snap_guides_canvas;
 use super::{CanvasState, NodeEditor, SocketSide};
 
 impl NodeEditor {
+    /// Record the editor's app-absolute origin in root logical units
+    /// (`logical_root_transform` divides out the device × UX zoom and the
+    /// on-screen keyboard lift the App baked in — the unlifted space a
+    /// root-level overlay host lays its children out in). Drops
+    /// (`app_to_canvas`), the add menu and an inline editor handed to a
+    /// screen-level `overlay_sink` place themselves through it.
+    ///
+    /// Body of the `Widget::paint_global_overlay` impl: that pass runs every
+    /// painted frame on the App's own context, outside every offscreen layer.
+    /// `paint` does not: while the editor's or an ancestor's retained layer
+    /// (a floating `Window`) is clean it is only composited, wherever it now
+    /// sits, so an origin taken there goes stale when the window moves.
+    pub(super) fn record_app_origin(&self, ctx: &dyn DrawCtx) {
+        let (mut ox, mut oy) = (0.0, 0.0);
+        logical_root_transform(ctx).transform(&mut ox, &mut oy);
+        self.last_abs_origin.set((ox, oy));
+    }
+
     pub(super) fn paint_canvas(&mut self, ctx: &mut dyn DrawCtx) {
         let w = self.bounds.width;
         let h = self.bounds.height;
@@ -30,19 +50,6 @@ impl NodeEditor {
         // palette or palette function included; see `palette_source`).
         let visuals = ctx.visuals();
         self.palette = self.resolve_palette(&visuals);
-
-        // Capture our app-absolute origin in root logical units
-        // (`logical_root_transform` divides out the device × UX zoom and the
-        // on-screen keyboard lift the App baked in — the unlifted space a
-        // root-level overlay host lays its children out in). An inline
-        // editor handed to a screen-level `overlay_sink` uses this to convert
-        // its pill rect from editor-local to app-absolute so the host places
-        // it exactly over the pill rather than at the pane-relative offset.
-        {
-            let (mut ox, mut oy) = (0.0, 0.0);
-            logical_root_transform(ctx).transform(&mut ox, &mut oy);
-            self.last_abs_origin.set((ox, oy));
-        }
 
         if let Some(f) = agg_gui::font_settings::current_system_font() {
             ctx.set_font(f);

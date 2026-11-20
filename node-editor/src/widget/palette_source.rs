@@ -3,7 +3,7 @@
 //! derives one from the visuals on every layout and paint.
 //!
 //! The palette is resolved afresh by `paint.rs` (canvas, noodles), by
-//! `rebuild_children` in `widget/mod.rs` (simplified node cards) and by
+//! `rebuild_children` in `layout_snapshot.rs` (simplified node cards) and by
 //! `hosted.rs` (hosted card chrome); each asks [`NodeEditor::resolve_palette`]
 //! so a host override survives both repaint and relayout. A derived palette
 //! takes part in the paint fingerprint (`fingerprint.rs`), so a change in

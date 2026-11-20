@@ -14,7 +14,8 @@
 //! [`hosted`], [`hosted_card`], [`hosted_resize`] and [`hosted_events`].
 //! Which card, socket or row a point lands on — the one painted on top —
 //! is [`hit_test`]; selecting cards with a dragged rectangle is
-//! [`rubber_band`].
+//! [`rubber_band`]. Reading the nodes' layouts from the model and building
+//! the card widgets from them is [`layout_snapshot`].
 
 mod add_menu;
 mod arrange_plan;
@@ -33,6 +34,7 @@ mod hosted_card;
 mod hosted_events;
 mod hosted_resize;
 mod hover;
+mod layout_snapshot;
 mod node_paint_context;
 pub mod node_parts;
 pub mod nodes;
@@ -68,6 +70,8 @@ mod nodes_tests;
 mod tests;
 #[cfg(test)]
 mod tests_add_menu;
+#[cfg(test)]
+mod tests_app_origin;
 #[cfg(test)]
 mod tests_axes;
 #[cfg(test)]
@@ -144,12 +148,10 @@ use agg_gui::{
     Widget, WidgetBase,
 };
 
-use crate::draw::{layout_node_with_state, CanvasPalette, NodeLayoutInfo, SocketSide};
+use crate::draw::{CanvasPalette, SocketSide};
 #[cfg(test)]
 use crate::model::SocketTypeId;
 use crate::model::{NodeGraphModel, NodeId};
-
-use crate::widget::nodes::{NodePaintContext, NodeWidget};
 
 const ZOOM_MIN: f64 = 0.15;
 const ZOOM_MAX: f64 = 3.0;
@@ -272,8 +274,10 @@ pub struct NodeEditor {
     /// drops into `MeshNode`s. Hosts that don't care about file drops
     /// leave the field `None` and the event is simply ignored.
     pub(crate) file_drop_handler: Option<FileDropHandler>,
-    /// The editor's own top-left origin in **app-absolute** logical
-    /// coordinates, captured every paint from the `DrawCtx` root transform.
+    /// The editor's own bottom-left origin in **app-absolute** logical
+    /// coordinates, recorded every painted frame by the global-overlay pass
+    /// (`record_app_origin`), which also runs when a retained layer is only
+    /// composited.
     /// Used to hoist an inline editor's pill rect from editor-local space up
     /// to the screen-level coordinate space a host `overlay_sink` places
     /// dialogs in — the sink's `FloatingOverlayHost` lives at the app root,
@@ -427,85 +431,6 @@ impl NodeEditor {
         let local = self.pill_local_rect(pill);
         let (ox, oy) = self.last_abs_origin.get();
         Rect::new(local.x + ox, local.y + oy, local.width, local.height)
-    }
-
-    /// Compute layouts for every node currently in the model. Layouts
-    /// are returned in a deterministic order (selected last so they
-    /// paint on top). Bound-input editors are suppressed for sockets
-    /// that already have an incoming edge — that's the "data flowing
-    /// in" rule from NodeDesigner's row layout.
-    fn snapshot_layouts(&self) -> Vec<NodeLayoutInfo> {
-        let model = self.model.lock().unwrap();
-        let nodes = model.nodes();
-        let noodles = model.noodles();
-        let ext_sel = model.primary_selection();
-        drop(model);
-        // Index of connected input sockets keyed by `(node_id, socket_name)`.
-        let connected: std::collections::HashSet<(NodeId, String)> = noodles
-            .iter()
-            .map(|e| (e.to_node, e.to_socket.clone()))
-            .collect();
-        let mut layouts: Vec<NodeLayoutInfo> = nodes
-            .iter()
-            .map(|n| {
-                let collapsed = self.collapsed_nodes.contains(&n.id);
-                layout_node_with_state(
-                    n,
-                    |sock| connected.contains(&(n.id, sock.to_string())),
-                    collapsed,
-                )
-            })
-            .collect();
-        self.order_layouts(&nodes, &mut layouts, ext_sel);
-        let model = self.model.lock().unwrap();
-        presentation::apply_socket_styles(&*model, &noodles, &mut layouts);
-        layouts
-    }
-
-    /// Tear down `self.children` and build a fresh `Vec<NodeWidget>`
-    /// from `layouts`.  Bounds are in **screen-space** — the canvas
-    /// pan/zoom is baked into each NodeWidget's position and size so
-    /// the framework's per-child translate (which adds bounds in
-    /// screen-space, not in pre-transform space) lands at the right
-    /// pixels AND `collect_inspector_nodes` sees the on-screen rect.
-    fn rebuild_children(&mut self, layouts: &[NodeLayoutInfo], ext_sel: Option<NodeId>) {
-        let visuals = agg_gui::current_visuals();
-        let palette = self.resolve_palette(&visuals);
-        let model = self.model.lock().unwrap();
-        let mut node_ctx = NodePaintContext::from_model(palette, &*model);
-        node_ctx.noodle_style = self.presentation.noodle_style;
-        drop(model);
-
-        let scale = self.canvas_scale;
-        let offset = self.canvas_offset;
-        // Sockets off: draw the dots of a copy marked hidden; hit-testing
-        // reads the live layouts, so the sockets still take presses.
-        let undrawn;
-        let layouts = if self.presentation.show_sockets {
-            layouts
-        } else {
-            undrawn = presentation::undrawn_sockets(layouts);
-            &undrawn[..]
-        };
-        let layer = self.take_hosted_layer();
-        let mut new_children: Vec<Box<dyn Widget>> = Vec::with_capacity(layouts.len() + 1);
-        for l in layouts
-            .iter()
-            .filter(|l| !self.hosted.cards.contains_key(&l.node_id))
-        {
-            let selected = self.shows_ring(l.node_id, ext_sel);
-            let nw = NodeWidget::from_layout_transformed(
-                l,
-                selected,
-                node_ctx.clone(),
-                scale,
-                offset,
-                Rc::clone(&self.pending_collapse),
-            );
-            new_children.push(Box::new(nw));
-        }
-        new_children.extend(layer);
-        self.children = new_children;
     }
 
     fn begin_drag_node(&mut self, id: NodeId, canvas_start: [f64; 2]) {
@@ -672,6 +597,10 @@ impl Widget for NodeEditor {
 
     fn finish_paint(&mut self, ctx: &mut dyn DrawCtx) {
         self.finish_paint_canvas(ctx);
+    }
+
+    fn paint_global_overlay(&mut self, ctx: &mut dyn DrawCtx) {
+        self.record_app_origin(ctx);
     }
 
     fn backbuffer_spec(&mut self) -> BackbufferSpec {

@@ -241,6 +241,15 @@ macro_rules! widget_paint_hooks {
         /// clips and retained parent redraw requirements. Use this for portal-style
         /// UI that draws outside normal bounds while still participating in the
         /// widget tree's Z order.
+        ///
+        /// It is also where a widget records its app-absolute position for
+        /// use at event time ([`logical_root_transform`](crate::widget::logical_root_transform)
+        /// of the local origin): the pass runs every painted frame, even when a
+        /// retained ancestor layer (a moved `Window`) is only composited and
+        /// `paint` is skipped. It reaches only visible widgets listed in their
+        /// parent's `children()`, and only under `App::paint`: a widget a
+        /// parent paints by hand (unless the parent forwards this call) or a
+        /// host painting with bare `paint_subtree` never records.
         fn paint_global_overlay(&mut self, _ctx: &mut dyn DrawCtx) {}
 
         /// Opt this widget's *entire subtree* out of the normal inline paint pass so

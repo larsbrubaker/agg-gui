@@ -308,6 +308,13 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Changed
 
+- `logical_root_transform` and `Widget::paint_global_overlay` document where a widget records
+  its app-absolute position for use at event time: in `paint_global_overlay`, which runs every
+  painted frame on the App's own context. `paint` is skipped while a cached retained layer of the
+  widget or an ancestor (a floating `Window`) is clean, also after the window moved, so a
+  position taken there goes stale; a widget recording in `paint` moves the recording to
+  `paint_global_overlay` (0.5.18).
+
 - **Breaking for apps that build agg-gui with `default-features = false` and draw SVG text:** SVG
   `<text>` is drawn only with the new `svg-text` feature, which is a default feature. Such an app
   (agg-gui-wgpu, agg-gui-shell and the other workspace crates that turn the defaults off leave it
