@@ -328,3 +328,116 @@ fn number_row_without_kind_defaults_to_drag_contract() {
         "a kind-less numeric row must follow the click-to-edit default"
     );
 }
+
+/// Escape during a scrub puts the value back to the one at the press and
+/// ends the gesture: the release scrubs nothing and opens no editor, and
+/// the host's own Escape handler is not called. Escape on a NumberDrag
+/// press that never passed the threshold writes nothing.
+#[test]
+fn escape_during_a_scrub_restores_the_value_at_the_press() {
+    install_test_font_once();
+    for kind in [
+        EditorKind::NumberDrag(NumberAttrs::with_range(0.0, 100.0)),
+        EditorKind::Slider(NumberAttrs::with_range(0.0, 100.0)),
+    ] {
+        let (model, memory) = fixture_with_typed_handle();
+        let mut editor = NodeEditor::new(model);
+        editor.set_bounds(Rect::new(0.0, 0.0, 400.0, 400.0));
+        seed(
+            &mut editor,
+            &memory,
+            vec![mk_number_node(1, "N", [40.0, 200.0], 10.0, Some(kind))],
+        );
+        let escape = Event::KeyDown {
+            key: agg_gui::Key::Escape,
+            modifiers: Modifiers::default(),
+        };
+        let p = number_row_local(&editor, NodeId(1));
+        editor.on_mouse_down(p, MouseButton::Left, Modifiers::default());
+        editor.on_mouse_move(Point::new(p.x + 20.0, p.y));
+        assert_eq!(last_number(&memory), Some(30.0), "the scrub ran");
+        assert!(editor.on_event(&escape).is_consumed());
+        assert_eq!(last_number(&memory), Some(10.0), "back at the press");
+        assert!(matches!(editor.interaction, CanvasState::Idle));
+        memory.lock().unwrap().last_property = None;
+        editor.on_mouse_move(Point::new(p.x + 40.0, p.y));
+        editor.on_mouse_up(
+            Point::new(p.x + 40.0, p.y),
+            MouseButton::Left,
+            Modifiers::default(),
+        );
+        assert!(last_number(&memory).is_none(), "nothing after the Escape");
+        assert!(editor.overlay.is_none(), "no inline editor");
+        assert_eq!(memory.lock().unwrap().escapes, 0, "the scrub used it");
+    }
+
+    // A NumberDrag click that Escape ends before the threshold.
+    let (model, memory) = fixture_with_typed_handle();
+    let mut editor = NodeEditor::new(model);
+    editor.set_bounds(Rect::new(0.0, 0.0, 400.0, 400.0));
+    seed(
+        &mut editor,
+        &memory,
+        vec![mk_number_node(
+            1,
+            "N",
+            [40.0, 200.0],
+            10.0,
+            Some(EditorKind::NumberDrag(NumberAttrs::with_range(0.0, 100.0))),
+        )],
+    );
+    let p = number_row_local(&editor, NodeId(1));
+    editor.on_mouse_down(p, MouseButton::Left, Modifiers::default());
+    editor.on_event(&Event::KeyDown {
+        key: agg_gui::Key::Escape,
+        modifiers: Modifiers::default(),
+    });
+    editor.on_mouse_up(p, MouseButton::Left, Modifiers::default());
+    assert!(last_number(&memory).is_none(), "nothing written");
+    assert!(editor.overlay.is_none(), "the click was cancelled");
+    assert_eq!(memory.lock().unwrap().escapes, 0);
+}
+
+/// A Slider row scrubs from its press but writes only when moved, so
+/// press, Escape, release writes nothing; a scrub reports its start, its
+/// live writes and its cancel (after the restore write) or end in order.
+#[test]
+fn a_scrub_reports_its_start_and_its_cancel_or_end_in_order() {
+    install_test_font_once();
+    let (model, memory) = fixture_with_typed_handle();
+    let mut editor = NodeEditor::new(model);
+    editor.set_bounds(Rect::new(0.0, 0.0, 400.0, 400.0));
+    let slider = EditorKind::Slider(NumberAttrs::with_range(0.0, 100.0));
+    seed(
+        &mut editor,
+        &memory,
+        vec![mk_number_node(1, "N", [40.0, 200.0], 10.0, Some(slider))],
+    );
+    let escape = Event::KeyDown {
+        key: agg_gui::Key::Escape,
+        modifiers: Modifiers::default(),
+    };
+    let p = number_row_local(&editor, NodeId(1));
+    editor.on_mouse_down(p, MouseButton::Left, Modifiers::default());
+    assert!(editor.on_event(&escape).is_consumed());
+    editor.on_mouse_up(p, MouseButton::Left, Modifiers::default());
+    assert!(
+        last_number(&memory).is_none(),
+        "the press wrote nothing back"
+    );
+    let log = std::mem::take(&mut memory.lock().unwrap().hook_log);
+    assert_eq!(log, ["started", "cancelled"]);
+
+    editor.on_mouse_down(p, MouseButton::Left, Modifiers::default());
+    editor.on_mouse_move(Point::new(p.x + 20.0, p.y));
+    editor.on_event(&escape);
+    editor.on_mouse_up(p, MouseButton::Left, Modifiers::default());
+    let log = std::mem::take(&mut memory.lock().unwrap().hook_log);
+    assert_eq!(log, ["started", "property", "property", "cancelled"]);
+
+    editor.on_mouse_down(p, MouseButton::Left, Modifiers::default());
+    editor.on_mouse_move(Point::new(p.x + 20.0, p.y));
+    editor.on_mouse_up(p, MouseButton::Left, Modifiers::default());
+    let log = std::mem::take(&mut memory.lock().unwrap().hook_log);
+    assert_eq!(log, ["started", "property", "ended"]);
+}

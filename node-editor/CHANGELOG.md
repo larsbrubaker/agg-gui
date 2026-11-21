@@ -8,6 +8,45 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ## [Unreleased]
 
+## [0.0.6] - 2026-11-20
+
+### Changed
+
+- Escape cancels every drag in the editor, as it already cancelled a noodle drag and a rubber
+  band. During a card drag every dragged card goes back exactly where it was at the press and
+  the snap guides go; during a hosted card's edge resize the card goes back to its size and
+  position at the press; during a numeric row's scrub the value goes back to the one at the
+  press, and a NumberDrag press Escape ends before it scrubbed opens no inline editor. The rest
+  of the gesture, until the button comes up, moves and writes nothing, and the host's
+  `on_escape` is not called. A selection the press made stays.
+- The host learns of the cancel through the same calls the drag made live: one more
+  `set_node_position` per card that moved, `set_node_width` / `set_node_height` with the size at
+  the press (none if the pointer never moved), or `set_property` with the value at the press.
+  The contract is on each of those `NodeGraphModel` methods. A Slider row pressed and cancelled
+  before it moved writes nothing.
+- Another press during a card drag or value scrub (a second button, say) ends it where it is, as
+  a release would.
+- A press on a card's body beside an edge socket reaches the body's own widget at any zoom. A
+  socket's hit area still grows as the graph is zoomed out (NodeDesigner style), but on the card
+  a press, hover or `NodeEditor::socket_at` takes the socket only closer in than
+  `draw::SOCKET_INNER_REACH` (8.5 units) from it; outside the card's edge the whole grown area stays the socket's. A
+  hosted card's own claim and the editor's press test draw the same line. A noodle being dropped
+  still lands anywhere in the grown area. Hosts keep pressable body widgets at least
+  `SOCKET_INNER_REACH` in from an edge that carries sockets; one may start exactly there.
+
+### Added
+
+- `draw::SOCKET_INNER_REACH` (8.5): how far in from an edge socket a press on the card still
+  takes the socket, covering the widest drawn socket (the outlined field diamond's point).
+- `NodeGraphModel::on_drag_started`, `on_drag_ended` and `on_drag_cancelled` (default no-ops):
+  a card drag, a hosted card's edge resize or a value scrub is announced at its press, before
+  any live write, and answered exactly once: `on_drag_cancelled` after Escape's restore writes,
+  or `on_drag_ended` after the drag's last live write (the release, another press, a lost
+  pointer capture, a deactivated window or a mode switch). A click on a card's title bar or a
+  numeric row is a drag that wrote nothing (started, then ended); the second press of a
+  double-click starts no drag. A host that keeps its own exact state from `on_drag_started`
+  restores it in `on_drag_cancelled`.
+
 ## [0.0.5] - 2026-11-20
 
 ### Fixed

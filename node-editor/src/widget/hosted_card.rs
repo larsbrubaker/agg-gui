@@ -618,16 +618,22 @@ impl Widget for HostedCard {
     /// A socket (half of which lies over the body) belongs to the editor,
     /// not to whatever body widget sits under it: the card claims the point
     /// and, ignoring the event, lets it bubble up to the editor's socket
-    /// handling. The resize bands lie outside the card, so the drawn card
-    /// up to its edge is the body's.
+    /// handling. On the card the claim reaches no further in than
+    /// [`crate::draw::SOCKET_INNER_REACH`] however far the graph is zoomed
+    /// out, so a body widget beside an edge socket keeps its press; the
+    /// editor's own press test (`NodeEditor::press_socket`) draws the same
+    /// line. The resize bands lie outside the card, so the drawn card up to
+    /// its edge is the body's.
     fn claims_pointer_exclusively(&self, p: Point) -> bool {
         let (w, h) = (self.bounds.width, self.bounds.height);
+        let inside = (0.0..=w).contains(&p.x) && (0.0..=h).contains(&p.y);
         self.chrome.sockets.iter().any(|s| {
             let cx = match s.side {
                 SocketSide::Input => 0.0,
                 SocketSide::Output => w,
             };
-            crate::draw::socket_hit([cx, h - s.from_top], [p.x, p.y], self.chrome.socket_hit)
+            let center = [cx, h - s.from_top];
+            crate::draw::socket_press_hit(center, [p.x, p.y], self.chrome.socket_hit, inside)
         })
     }
 

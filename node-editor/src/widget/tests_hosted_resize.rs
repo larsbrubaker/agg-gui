@@ -87,12 +87,23 @@ impl NodeGraphModel for SizingModel {
     }
     fn set_node_width(&mut self, id: NodeId, width: f64) {
         self.widths.push((id, width));
+        self.inner.hook_log.push("width");
+    }
+    fn on_drag_started(&mut self) {
+        self.inner.on_drag_started()
+    }
+    fn on_drag_ended(&mut self) {
+        self.inner.on_drag_ended()
+    }
+    fn on_drag_cancelled(&mut self) {
+        self.inner.on_drag_cancelled()
     }
     fn node_vertical_resize(&self, _id: NodeId) -> Option<f64> {
         self.vertical
     }
     fn set_node_height(&mut self, id: NodeId, height: f64, top: f64) {
         self.height_calls.push((id, height, top));
+        self.inner.hook_log.push("height");
         self.heights.push((id, height));
         if let Some(n) = self.inner.nodes.iter_mut().find(|n| n.id == id) {
             n.position[1] = top;
@@ -371,4 +382,178 @@ fn hosted_card_hit_test_leaves_the_band_to_the_editor() {
     assert!(!layer.hit_test(Point::new(b.x + b.width + 2.0, b.y + 20.0)));
     assert!(!layer.hit_test(Point::new(b.x + 50.0, b.y - 2.0)));
     assert!(layer.hit_test(Point::new(b.x + b.width - 2.0, b.y + 20.0)));
+}
+
+fn escape() -> Event {
+    Event::KeyDown {
+        key: agg_gui::Key::Escape,
+        modifiers: agg_gui::Modifiers::default(),
+    }
+}
+
+/// Press at `from`, move by `by`, press Escape, then move on and release:
+/// the gesture a user cancels part-way.
+fn drag_then_escape(f: &mut Fixture, from: Point, by: [f64; 2]) {
+    dispatch(&mut f.editor, press(from), from);
+    let to = Point::new(from.x + by[0], from.y + by[1]);
+    f.editor.on_event(&Event::MouseMove { pos: to });
+    f.editor.layout(VIEW);
+    assert!(f.editor.on_event(&escape()).is_consumed());
+    assert!(!f.editor.hosted_resizing(), "the resize ended");
+    let on = Point::new(to.x + by[0], to.y + by[1]);
+    f.editor.on_event(&Event::MouseMove { pos: on });
+    f.editor.on_event(&release(on));
+    f.editor.layout(VIEW);
+}
+
+#[test]
+fn escape_during_a_width_drag_puts_the_card_back() {
+    let mut f = fixture(&[[100.0, 400.0]], None);
+    let before = card_rect(&f.editor, 1);
+    let p = screen(&f.editor, [before.x + before.width + 2.0, before.y + 20.0]);
+    drag_then_escape(&mut f, p, [40.0, 0.0]);
+    assert_eq!(card_rect(&f.editor, 1), before);
+    let m = f.model.lock().unwrap();
+    assert_eq!(
+        m.widths,
+        vec![(NodeId(1), NODE_WIDTH + 40.0), (NodeId(1), NODE_WIDTH)],
+        "the drag, then its width at the press, and nothing after"
+    );
+    assert_eq!(m.inner.escapes, 0, "the resize used the Escape");
+}
+
+#[test]
+fn escape_during_a_height_drag_puts_the_card_back() {
+    for top in [false, true] {
+        let mut f = fixture(&[[100.0, 400.0]], Some(MIN_HEIGHT));
+        let before = card_rect(&f.editor, 1);
+        let y = if top {
+            before.y + before.height + 2.0
+        } else {
+            before.y - 2.0
+        };
+        let p = screen(&f.editor, [before.x + 50.0, y]);
+        drag_then_escape(&mut f, p, [0.0, 30.0]);
+        assert_eq!(card_rect(&f.editor, 1), before, "top edge {top}");
+        let m = f.model.lock().unwrap();
+        assert_eq!(m.height_calls.len(), 2, "top edge {top}");
+        assert_eq!(
+            m.height_calls.last(),
+            Some(&(NodeId(1), START_HEIGHT, 400.0))
+        );
+        assert_eq!(m.inner.position_writes, vec![], "no move reported");
+        assert_eq!(m.inner.escapes, 0);
+    }
+}
+
+#[test]
+fn escape_before_a_resize_moved_writes_nothing() {
+    let mut f = fixture(&[[100.0, 400.0]], Some(MIN_HEIGHT));
+    let b = card_rect(&f.editor, 1);
+    let p = screen(&f.editor, [b.x + b.width + 2.0, b.y + 20.0]);
+    dispatch(&mut f.editor, press(p), p);
+    assert!(f.editor.hosted_resizing());
+    assert!(f.editor.on_event(&escape()).is_consumed());
+    f.editor.on_event(&release(p));
+    let m = f.model.lock().unwrap();
+    assert!(m.widths.is_empty() && m.height_calls.is_empty());
+}
+
+/// The host hears a resize begin at its press, then its live writes, then
+/// `on_drag_cancelled` after Escape's restore write, or `on_drag_ended`
+/// after a release.
+#[test]
+fn a_resize_reports_its_start_and_its_cancel_or_end_in_order() {
+    let mut f = fixture(&[[100.0, 400.0]], Some(MIN_HEIGHT));
+    let b = card_rect(&f.editor, 1);
+    let p = screen(&f.editor, [b.x + b.width + 2.0, b.y + 20.0]);
+    drag_then_escape(&mut f, p, [40.0, 0.0]);
+    let log = std::mem::take(&mut f.model.lock().unwrap().inner.hook_log);
+    assert_eq!(log, ["started", "width", "width", "cancelled"]);
+
+    let p = screen(&f.editor, [b.x + 50.0, b.y - 2.0]);
+    drag(&mut f.editor, p, [0.0, -20.0]);
+    let log = std::mem::take(&mut f.model.lock().unwrap().inner.hook_log);
+    assert_eq!(log, ["started", "height", "ended"]);
+
+    // A lost pointer capture ends it where it is.
+    let b = card_rect(&f.editor, 1);
+    let p = screen(&f.editor, [b.x + 50.0, b.y - 2.0]);
+    dispatch(&mut f.editor, press(p), p);
+    f.editor.on_event(&Event::MouseCaptureLost);
+    assert!(!f.editor.hosted_resizing());
+    let log = std::mem::take(&mut f.model.lock().unwrap().inner.hook_log);
+    assert_eq!(log, ["started", "ended"]);
+}
+
+/// Switching the interaction mode mid-resize ends the resize where it is:
+/// the host hears `on_drag_ended` at the switch and later moves size
+/// nothing.
+#[test]
+fn a_mode_switch_ends_a_resize_where_it_is() {
+    let mut f = fixture(&[[100.0, 400.0]], None);
+    let b = card_rect(&f.editor, 1);
+    let p = screen(&f.editor, [b.x + b.width + 2.0, b.y + 20.0]);
+    dispatch(&mut f.editor, press(p), p);
+    let to = Point::new(p.x + 30.0, p.y);
+    f.editor.on_event(&Event::MouseMove { pos: to });
+    f.editor.set_interaction_mode(InteractionMode::Pan);
+    assert!(!f.editor.hosted_resizing(), "the resize ended");
+    let log = std::mem::take(&mut f.model.lock().unwrap().inner.hook_log);
+    assert_eq!(log, ["started", "width", "ended"]);
+    f.editor.on_event(&Event::MouseMove {
+        pos: Point::new(to.x + 30.0, to.y),
+    });
+    f.editor.on_event(&release(to));
+    let m = f.model.lock().unwrap();
+    assert_eq!(
+        m.widths,
+        vec![(NodeId(1), NODE_WIDTH + 30.0)],
+        "kept, no more"
+    );
+    assert!(m.inner.hook_log.is_empty(), "{:?}", m.inner.hook_log);
+}
+
+/// Escape's restore of a card's size is a content change: right after it,
+/// before any layout, the editor's layer, every card's retained layer and
+/// the paint's model read are all dropped, so no frame can show the card
+/// at the size the drag gave it.
+#[test]
+fn escape_during_a_resize_drops_the_cached_canvas() {
+    let mut f = fixture(&[[100.0, 400.0], [400.0, 400.0]], None);
+    let b = card_rect(&f.editor, 1);
+    let p = screen(&f.editor, [b.x + b.width + 2.0, b.y + 20.0]);
+    dispatch(&mut f.editor, press(p), p);
+    f.editor.on_event(&Event::MouseMove {
+        pos: Point::new(p.x + 40.0, p.y),
+    });
+    f.editor.layout(VIEW);
+    // As a paint that rasterised everything leaves it.
+    f.editor.backbuffer.dirty = false;
+    let layer = f
+        .editor
+        .children_mut()
+        .last_mut()
+        .expect("the hosted layer");
+    for card in layer.children_mut() {
+        card.backbuffer_state_mut()
+            .expect("a card has a layer")
+            .dirty = false;
+    }
+    let generation = f.editor.paint_cache.generation;
+
+    assert!(f.editor.on_event(&escape()).is_consumed());
+    assert!(f.editor.backbuffer.dirty, "the editor's layer is dropped");
+    assert_ne!(
+        f.editor.paint_cache.generation, generation,
+        "the paint reads the model again"
+    );
+    let layer = f
+        .editor
+        .children_mut()
+        .last_mut()
+        .expect("the hosted layer");
+    for card in layer.children_mut() {
+        assert!(card.backbuffer_state_mut().expect("a layer").dirty);
+    }
 }

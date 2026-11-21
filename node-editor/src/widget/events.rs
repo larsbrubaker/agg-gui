@@ -47,8 +47,10 @@ impl NodeEditor {
         let canvas_pos = self.local_to_canvas(pos);
         let layouts = self.snapshot_layouts();
         // Another press (middle, right) during a band ends the band first,
-        // so the selection is never left half-previewed.
+        // so the selection is never left half-previewed; one during a card
+        // drag or scrub ends it where it is (`canvas_state.rs`).
         self.cancel_rubber_band();
+        self.end_drag_for_press();
 
         match button {
             MouseButton::Left => {
@@ -117,7 +119,7 @@ impl NodeEditor {
                     };
                     return EventResult::Consumed;
                 }
-                if let Some((node_id, socket)) = self.hit_socket(&layouts, canvas_pos) {
+                if let Some((node_id, socket)) = self.press_socket(&layouts, canvas_pos) {
                     // A press on an output starts a noodle; on an empty
                     // input it drags backwards; on a connected input it
                     // picks that input's noodle up, dragged from its
@@ -198,6 +200,7 @@ impl NodeEditor {
                             // waits for the 3px threshold so a plain click
                             // can open the inline editor instead.
                             dragging: is_slider,
+                            scrubbed: false,
                             click_to_edit: !is_slider,
                             // Canvas-space editor pill rect, so a click-to-edit
                             // release drops the inline editor exactly over it.
@@ -208,6 +211,7 @@ impl NodeEditor {
                                 prop.size[1],
                             ],
                         };
+                        self.model.lock().unwrap().on_drag_started();
                         return EventResult::Consumed;
                     }
                     if let PropertyValue::Bool(b) = prop.current {
@@ -292,6 +296,7 @@ impl NodeEditor {
                     self.selected.insert(node_id);
                     self.notify_primary_selection(Some(node_id));
                     self.begin_drag_node(node_id, canvas_pos);
+                    self.model.lock().unwrap().on_drag_started();
                     return EventResult::Consumed;
                 }
                 // Empty canvas: a click clears the selection (unless
@@ -485,6 +490,7 @@ impl NodeEditor {
                 max,
                 step,
                 dragging,
+                scrubbed,
                 ..
             } => {
                 let dx = pos.x - *start_local_x;
@@ -498,6 +504,7 @@ impl NodeEditor {
                         EventResult::Consumed
                     } else {
                         *dragging = true;
+                        *scrubbed = true;
                         let value = scrub_value(*start_value, dx, *step, *min, *max);
                         let id = *node_id;
                         let name = prop_name.clone();
@@ -509,6 +516,7 @@ impl NodeEditor {
                         EventResult::Consumed
                     }
                 } else {
+                    *scrubbed = true;
                     let value = scrub_value(*start_value, dx, *step, *min, *max);
                     let id = *node_id;
                     let name = prop_name.clone();
@@ -548,10 +556,11 @@ impl NodeEditor {
         _modifiers: Modifiers,
     ) -> EventResult {
         let canvas_pos = self.local_to_canvas(pos);
-        match (
-            button,
-            std::mem::replace(&mut self.interaction, CanvasState::Idle),
-        ) {
+        let state = std::mem::replace(&mut self.interaction, CanvasState::Idle);
+        if state.reports_drag() {
+            self.model.lock().unwrap().on_drag_ended();
+        }
+        match (button, state) {
             (
                 MouseButton::Left | MouseButton::Middle,
                 state @ CanvasState::DrawingConnection { .. },
@@ -680,7 +689,13 @@ impl NodeEditor {
     }
 
     pub(super) fn on_key_down(&mut self, key: &Key, mods: Modifiers) -> EventResult {
-        if *key == Key::Escape && (self.cancel_rubber_band() || self.cancel_connection()) {
+        // Escape cancels whichever drag is in flight before the host sees it.
+        if *key == Key::Escape
+            && (self.cancel_rubber_band()
+                || self.cancel_connection()
+                || self.cancel_hosted_resize()
+                || self.cancel_drag())
+        {
             return EventResult::Consumed;
         }
         if let Some(result) = self.add_menu_key_down(key, mods) {

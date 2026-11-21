@@ -65,6 +65,12 @@ pub(super) struct Memory {
     /// Calls of `on_escape`, and what it answers.
     pub escapes: usize,
     pub escape_handled: bool,
+    /// Every `set_node_position` call, in order.
+    pub position_writes: Vec<(NodeId, [f64; 2])>,
+    /// The drag hooks (`started`, `ended`, `cancelled`) and the live
+    /// writes (`position`, `property`; a wrapping model adds its own) in
+    /// the order they came.
+    pub hook_log: Vec<&'static str>,
     /// What `node_types_by_category` answers (the built-in add menu).
     pub node_types: Vec<(String, Vec<NodeTypeView>)>,
 }
@@ -80,6 +86,8 @@ impl NodeGraphModel for Memory {
         self.node_types.clone()
     }
     fn set_node_position(&mut self, id: NodeId, pos: [f64; 2]) {
+        self.position_writes.push((id, pos));
+        self.hook_log.push("position");
         if let Some(n) = self.nodes.iter_mut().find(|n| n.id == id) {
             n.position = pos;
         }
@@ -129,6 +137,7 @@ impl NodeGraphModel for Memory {
     }
     fn set_property(&mut self, id: NodeId, name: &str, value: PropertyValue) {
         self.last_property = Some((id, name.to_string(), value));
+        self.hook_log.push("property");
     }
     fn on_canvas_zoom_changed(&mut self, zoom: f64) {
         self.zoom = zoom;
@@ -222,6 +231,15 @@ impl NodeGraphModel for Memory {
     fn on_escape(&mut self) -> bool {
         self.escapes += 1;
         self.escape_handled
+    }
+    fn on_drag_started(&mut self) {
+        self.hook_log.push("started");
+    }
+    fn on_drag_ended(&mut self) {
+        self.hook_log.push("ended");
+    }
+    fn on_drag_cancelled(&mut self) {
+        self.hook_log.push("cancelled");
     }
 }
 

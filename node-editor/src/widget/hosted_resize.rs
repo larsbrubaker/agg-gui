@@ -14,6 +14,8 @@
 //! A drag places the card absolutely from where it was at the press, as
 //! `WindowWidget`'s handles do: each edge moves only itself, and a drag
 //! past the minimum stops the moving edge instead of sliding the other.
+//! Escape puts the card back to its size and top at the press
+//! ([`ResizeDrag::restore`]).
 //! The gesture's event plumbing is in `hosted_events.rs`; the layer's
 //! hit-test that leaves the bands to the editor is in `hosted_card.rs`.
 
@@ -71,6 +73,9 @@ pub(crate) struct ResizeDrag {
     /// The card's title-bar height: a card is never shorter than its
     /// title bar and bottom pad.
     pub title_height: f64,
+    /// True once a pointer move has sized the card, so Escape before
+    /// any move writes nothing.
+    pub moved: bool,
 }
 
 impl ResizeDrag {
@@ -94,6 +99,17 @@ impl ResizeDrag {
                 let height = (self.start_height + dy).max(min_height);
                 let top = self.start_top - self.start_height + height;
                 model.set_node_height(self.node, height, top);
+            }
+        }
+    }
+
+    /// Put the card back to its size and top at the press: the cancel
+    /// Escape gives a drag that has [`Self::moved`] the card.
+    pub fn restore(&self, model: &mut dyn NodeGraphModel) {
+        match self.edge {
+            ResizeEdge::Right => model.set_node_width(self.node, self.start_width),
+            ResizeEdge::Top | ResizeEdge::Bottom => {
+                model.set_node_height(self.node, self.start_height, self.start_top)
             }
         }
     }

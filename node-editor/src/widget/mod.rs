@@ -89,6 +89,8 @@ mod tests_connect;
 #[cfg(test)]
 mod tests_context_menu;
 #[cfg(test)]
+mod tests_drag_cancel;
+#[cfg(test)]
 mod tests_enum;
 #[cfg(test)]
 mod tests_error_badge;
@@ -632,7 +634,7 @@ impl Widget for NodeEditor {
         // The press ended with no release to follow (`canvas_state.rs`).
         if matches!(event, Event::MouseCaptureLost | Event::WindowDeactivated) {
             self.abandon_interaction();
-            self.hosted.resize = None;
+            self.end_hosted_resize();
         }
         self.add_menu_preview(event);
         // Overlay (color-picker dialog) consumes events first while it's

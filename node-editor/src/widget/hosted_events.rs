@@ -14,6 +14,9 @@
 //! `on_event`, before the regular handlers in `events.rs`; it consumes
 //! only the resize gesture and otherwise lets the event continue, so a
 //! press on a card still selects and drags it as on a simplified card.
+//!
+//! [`NodeEditor::cancel_hosted_resize`] is Escape during a resize, called
+//! from `events.rs` `on_key_down` beside the editor's other drag cancels.
 
 use agg_gui::{Event, EventResult, MouseButton};
 
@@ -26,6 +29,45 @@ impl NodeEditor {
     /// True while a card's edge is being dragged.
     pub(super) fn hosted_resizing(&self) -> bool {
         self.hosted.resize.is_some()
+    }
+
+    /// Escape during a card's edge resize: the card goes back to its size
+    /// and top at the press ([`super::hosted_resize::ResizeDrag::restore`],
+    /// skipped when the pointer never moved) and the resize ends, so the
+    /// rest of the gesture sizes nothing. False when no resize is in
+    /// flight.
+    ///
+    /// The restore is a content change, so it drops the whole cached
+    /// canvas at once ([`NodeEditor::invalidate_canvas`]) rather than
+    /// leaving it to the full layout the draw request brings, as a live
+    /// resize move does.
+    pub(super) fn cancel_hosted_resize(&mut self) -> bool {
+        let Some(drag) = self.hosted.resize.take() else {
+            return false;
+        };
+        let mut model = self.model.lock().unwrap();
+        if drag.moved {
+            drag.restore(&mut *model);
+        }
+        model.on_drag_cancelled();
+        drop(model);
+        if drag.moved {
+            self.invalidate_canvas();
+        }
+        agg_gui::animation::request_draw();
+        true
+    }
+
+    /// End a resize where it is, keeping the size it gave the card: the
+    /// release, another press or a lost pointer capture. Tells the host
+    /// `on_drag_ended`. False when no resize is in flight.
+    pub(super) fn end_hosted_resize(&mut self) -> bool {
+        if self.hosted.resize.take().is_none() {
+            return false;
+        }
+        self.model.lock().unwrap().on_drag_ended();
+        agg_gui::animation::request_draw();
+        true
     }
 
     /// The card a press at `canvas` lands on, top first, and the resize
@@ -80,7 +122,7 @@ impl NodeEditor {
         let Some((id, None)) = self.hosted_hit(&layouts, canvas) else {
             return EventResult::Ignored;
         };
-        if !self.hosted.cards.contains_key(&id) || self.hit_socket(&layouts, canvas).is_some() {
+        if !self.hosted.cards.contains_key(&id) || self.press_socket(&layouts, canvas).is_some() {
             return EventResult::Ignored;
         }
         if *button == MouseButton::Right {
@@ -111,6 +153,7 @@ impl NodeEditor {
                 button: MouseButton::Left,
                 ..
             } => {
+                self.end_drag_for_press();
                 let canvas = self.local_to_canvas(*pos);
                 let layouts = self.snapshot_layouts();
                 let (id, edge) = self.hosted_hit(&layouts, canvas)?;
@@ -120,7 +163,7 @@ impl NodeEditor {
                 let (start_height, start_top) = (layout.size[1], layout.top_left[1]);
                 self.raise_card(id);
                 // A socket straddling the edge keeps its outer half.
-                let edge = edge.filter(|_| self.hit_socket(&layouts, canvas).is_none())?;
+                let edge = edge.filter(|_| self.press_socket(&layouts, canvas).is_none())?;
                 let start_width = self.model.lock().unwrap().node_width(id);
                 self.hosted.resize = Some(ResizeDrag {
                     node: id,
@@ -132,21 +175,21 @@ impl NodeEditor {
                     min_height,
                     min_width: self.hosted.min_width,
                     title_height: self.hosted.title_height,
+                    moved: false,
                 });
+                self.model.lock().unwrap().on_drag_started();
                 Some(EventResult::Consumed)
             }
             Event::MouseMove { pos } => {
-                let drag = self.hosted.resize?;
+                let drag = self.hosted.resize.as_mut()?;
+                drag.moved = true;
+                let drag = *drag;
                 let canvas = self.local_to_canvas(*pos);
                 drag.apply(&mut *self.model.lock().unwrap(), canvas);
                 agg_gui::animation::request_draw();
                 Some(EventResult::Consumed)
             }
-            Event::MouseUp { .. } => {
-                self.hosted.resize.take()?;
-                agg_gui::animation::request_draw();
-                Some(EventResult::Consumed)
-            }
+            Event::MouseUp { .. } => self.end_hosted_resize().then_some(EventResult::Consumed),
             _ => None,
         }
     }

@@ -415,7 +415,46 @@ pub trait NodeGraphModel {
 
     // ── Mutation ────────────────────────────────────────────────────────
 
+    /// A card drag, a hosted card's edge resize or a numeric row's scrub
+    /// begins: called once at the press that starts it, before any live
+    /// write ([`Self::set_node_position`], [`Self::set_node_width`],
+    /// [`Self::set_node_height`], [`Self::set_property`]), so a host can
+    /// note its own state as it was. A press that turns out to be a click
+    /// (released without moving) is still a drag that wrote nothing: it
+    /// gets this call and then [`Self::on_drag_ended`]; the second press
+    /// of a title-bar double-click starts no drag and gets neither.
+    ///
+    /// Every call is answered by exactly one of [`Self::on_drag_ended`] or
+    /// [`Self::on_drag_cancelled`]. Called with the model locked: don't
+    /// re-lock the same model `Arc`.
+    fn on_drag_started(&mut self) {}
+
+    /// The drag [`Self::on_drag_started`] announced ended where it is,
+    /// keeping what it wrote live: the button came up, another press came,
+    /// or the pointer capture was lost, the window deactivated or the
+    /// interaction mode switched. Called after the drag's last live write.
+    /// Called with the model locked: don't re-lock the same model `Arc`.
+    fn on_drag_ended(&mut self) {}
+
+    /// Escape cancelled the drag [`Self::on_drag_started`] announced.
+    /// Called once, after the editor's restore writes (the calls the
+    /// mutation methods below describe), and nothing follows until the
+    /// next press: a host that keeps its own exact state from
+    /// `on_drag_started` restores it here. Called with the model locked:
+    /// don't re-lock the same model `Arc`.
+    fn on_drag_cancelled(&mut self) {}
+
     /// Move a node. `pos` is canvas-space top-left.
+    ///
+    /// A card drag calls this live, on every pointer move, for each card
+    /// it carries, between [`Self::on_drag_started`] and the call that
+    /// ends it. [`Self::on_drag_ended`] follows its last write: the last
+    /// position written is where the card stays. Escape during the drag
+    /// cancels it: the editor writes each card that moved back to the
+    /// position it had at the press (one more call per card, none for a
+    /// card still there), then calls [`Self::on_drag_cancelled`], and
+    /// nothing more until the next press, so a cancelled drag leaves every
+    /// card where it was before the press.
     fn set_node_position(&mut self, id: NodeId, pos: [f64; 2]);
 
     /// Insert a node of `type_id` at canvas-space `pos`.  Returns the
@@ -480,6 +519,13 @@ pub trait NodeGraphModel {
     }
 
     /// Update a property value (only invoked for `Number` / `Bool`).
+    ///
+    /// A numeric row's scrub calls this live, on every pointer move.
+    /// Escape during the scrub cancels it with one more call carrying the
+    /// value at the press, then [`Self::on_drag_cancelled`], and nothing
+    /// more until the next press; Escape on a press whose scrub has
+    /// written nothing yet writes nothing. A scrub that ends any other way
+    /// is followed by [`Self::on_drag_ended`].
     fn set_property(&mut self, id: NodeId, name: &str, value: PropertyValue);
 
     // ── Notification hooks ──────────────────────────────────────────────
@@ -595,7 +641,9 @@ pub trait NodeGraphModel {
     }
 
     /// Escape reached the editor with no menu of its own open (an open add
-    /// or context menu closes first). Return `true` when the host acted on
+    /// or context menu closes first) and no drag in flight: Escape during a
+    /// noodle drag, rubber band, card drag, card resize or value scrub
+    /// cancels that instead and is not offered here. Return `true` when the host acted on
     /// it — MatterCAD steps back out of a nested graph — so the key is
     /// consumed; the default `false` leaves it unconsumed for the window.
     ///
@@ -634,6 +682,14 @@ pub trait NodeGraphModel {
 
     /// The user dragged the hosted card's right edge to `width`. Hosts
     /// store it and answer it from [`Self::node_width`].
+    ///
+    /// Called live on every pointer move of the drag. Escape during it
+    /// cancels it with one more call carrying the width at the press
+    /// ([`crate::draw::NODE_WIDTH`] when [`Self::node_width`] answered
+    /// `None`), unless the pointer never moved, then
+    /// [`Self::on_drag_cancelled`]; nothing follows until the next press.
+    /// A resize that ends any other way is followed by
+    /// [`Self::on_drag_ended`].
     fn set_node_width(&mut self, _id: NodeId, _width: f64) {}
 
     /// Opt-in vertical resizing of a hosted card: `Some(min_height)` gives
@@ -653,6 +709,13 @@ pub trait NodeGraphModel {
     /// (`top - height`). Hosts store both, move the node to `top` and lay
     /// the body out at `height`: the card's height is still its body's
     /// measured height, reported through [`Self::on_node_measured`].
+    ///
+    /// Called live on every pointer move of the drag. Escape during it
+    /// cancels it with one more call carrying the card's height and top
+    /// at the press, unless the pointer never moved, then
+    /// [`Self::on_drag_cancelled`]; nothing follows until the next press.
+    /// A resize that ends any other way is followed by
+    /// [`Self::on_drag_ended`].
     fn set_node_height(&mut self, _id: NodeId, _height: f64, _top: f64) {}
 
     /// The hosted card's height, measured from its body, changed to

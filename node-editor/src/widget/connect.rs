@@ -70,7 +70,7 @@ pub(super) fn find_target_near<'a>(
     let snap_r = crate::draw::SOCKET_HIT_RADIUS * 1.6;
     let mut best: Option<(&SocketLayout, f64)> = None;
     // The pointer over a card's body cannot reach the sockets of the cards
-    // under it, by the same rule as a press (`hit_socket`).
+    // under it, by the same rule as a press (`press_socket`).
     let lowest = top_body_at(layouts, cursor).unwrap_or(0);
     for l in &layouts[lowest.min(layouts.len())..] {
         // A socket the host hides takes no drop.

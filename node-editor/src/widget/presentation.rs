@@ -108,8 +108,10 @@ impl NodeEditor {
     }
 
     /// The socket under `local` (editor-local coordinates at the current
-    /// pan and zoom), `(node, side, socket name)`: the same hit area a
-    /// press, hover or drop uses. Sockets the host hides take no hit.
+    /// pan and zoom), `(node, side, socket name)`: the socket a press there
+    /// takes, the same one hover rings ([`crate::draw::SOCKET_INNER_REACH`]
+    /// limits it on the card's own body; a noodle drop's area is the whole
+    /// one). Sockets the host hides take no hit.
     /// Locks the model, so call it without holding the model lock.
     pub fn socket_at(&self, local: agg_gui::Point) -> Option<(NodeId, SocketSide, String)> {
         let layouts = self.snapshot_layouts();
@@ -117,7 +119,7 @@ impl NodeEditor {
             (local.x - self.canvas_offset[0]) / self.canvas_scale,
             (local.y - self.canvas_offset[1]) / self.canvas_scale,
         ];
-        self.hit_socket(&layouts, canvas)
+        self.press_socket(&layouts, canvas)
             .map(|(node, s)| (node, s.side, s.name))
     }
 
@@ -183,7 +185,7 @@ impl NodeEditor {
             return;
         }
         let hit = self
-            .hit_socket(layouts, canvas_pos)
+            .press_socket(layouts, canvas_pos)
             .map(|(n, s)| (n, s.side, s.name));
         self.set_hovered_socket(hit);
     }

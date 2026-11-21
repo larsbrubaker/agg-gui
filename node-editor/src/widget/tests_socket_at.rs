@@ -1,6 +1,7 @@
 //! Tests for `NodeEditor::socket_at` (the public socket hit test, the
-//! same area a press, hover or drop uses) and `set_show_sockets` (sockets
-//! drawn or not, hit-tested either way), both in `presentation.rs`.
+//! area a press or hover uses: a drop's is wider on a card zoomed out)
+//! and `set_show_sockets` (sockets drawn or not, hit-tested either way),
+//! both in `presentation.rs`.
 
 use agg_gui::{Point, Size};
 
@@ -228,4 +229,23 @@ fn toggling_sockets_reaches_a_hosted_card_before_the_next_layout() {
     // ... and back.
     editor.set_show_sockets(true);
     assert_eq!(overlay_shots(&mut editor), shown);
+}
+
+/// On a simplified card too, a press zoomed out takes an edge socket from
+/// anywhere in its grown box outside the card but only
+/// `SOCKET_INNER_REACH` in on the card, so the press path sees the same
+/// socket a hosted card's claim does.
+#[test]
+fn zoomed_out_a_socket_reaches_only_its_inner_reach_into_the_card() {
+    let mut editor = editor_with(NoodleStyle::NodeDesigner);
+    assert!(editor.set_view(0.5, [0.0, 0.0]));
+    let c = editor
+        .socket_position(NodeId(2), SocketSide::Input, "In")
+        .unwrap();
+    let reach = crate::draw::SOCKET_INNER_REACH * 0.5;
+    let input = Some((NodeId(2), SocketSide::Input, "In".to_string()));
+    assert_eq!(editor.socket_at(Point::new(c.x + reach - 0.25, c.y)), input);
+    assert_eq!(editor.socket_at(Point::new(c.x + reach + 0.25, c.y)), None);
+    // 15 of the box's 16 units outside the card's edge.
+    assert_eq!(editor.socket_at(Point::new(c.x - 7.5, c.y)), input);
 }

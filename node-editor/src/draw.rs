@@ -44,9 +44,26 @@ pub const NODE_BOTTOM_PAD: f64 = 6.0;
 pub const SOCKET_RADIUS: f64 = 5.5;
 pub const SOCKET_HIT_RADIUS: f64 = 9.0;
 
+/// How far (canvas units, so card units on a hosted card) a press inside a
+/// card reaches in from a socket on its edge and still takes the socket:
+/// the inner half of the widest socket drawn, outline included, so a press
+/// anywhere on a drawn socket takes it. That is the field diamond: its
+/// 7-unit half size plus its 1-unit outline, which reaches sqrt 2 further
+/// at the diamond's point (about 8.41); `socket_style_tests` checks this
+/// covers every shape in both noodle styles.
+///
+/// Outside the card a socket's hit area is the full [`socket_hit`] one,
+/// which grows as the graph is zoomed out so a tiny socket stays easy to
+/// grab; inside, everything this far in or further is the card's own, so
+/// a press on a body widget beside an edge socket reaches the widget at
+/// any zoom. Hosts inset pressable body widgets by at least this constant
+/// from an edge that carries sockets; a widget may start exactly at it.
+pub const SOCKET_INNER_REACH: f64 = 8.5;
+
 /// Whether `p` lands on the socket centred at `center`: inside the box of
 /// `half` extents either side when given (MatterCAD's NodeDesigner hit
-/// area), otherwise within [`SOCKET_HIT_RADIUS`].
+/// area), otherwise within [`SOCKET_HIT_RADIUS`]. A noodle drop uses this
+/// whole area; a press uses [`socket_press_hit`].
 pub fn socket_hit(center: [f64; 2], p: [f64; 2], half: Option<[f64; 2]>) -> bool {
     let dx = center[0] - p[0];
     let dy = center[1] - p[1];
@@ -54,6 +71,20 @@ pub fn socket_hit(center: [f64; 2], p: [f64; 2], half: Option<[f64; 2]>) -> bool
         Some([hw, hh]) => dx.abs() <= hw && dy.abs() <= hh,
         None => dx * dx + dy * dy <= SOCKET_HIT_RADIUS * SOCKET_HIT_RADIUS,
     }
+}
+
+/// Whether a press at `p` takes the socket centred at `center` (a press,
+/// hover or [`crate::NodeEditor::socket_at`]): the [`socket_hit`] area,
+/// but where `p` lies on the card the socket sits on the edge of
+/// (`inside_card`), only closer in than [`SOCKET_INNER_REACH`] (strictly,
+/// so a body widget whose edge sits exactly at the reach keeps the press).
+pub(crate) fn socket_press_hit(
+    center: [f64; 2],
+    p: [f64; 2],
+    half: Option<[f64; 2]>,
+    inside_card: bool,
+) -> bool {
+    socket_hit(center, p, half) && (!inside_card || (center[0] - p[0]).abs() < SOCKET_INNER_REACH)
 }
 pub const NODE_RADIUS: f64 = 6.0;
 /// Right-side reserved width for an inline editor on an input row.
@@ -293,6 +324,20 @@ impl NodeLayoutInfo {
     /// radius contains `canvas_pos`.
     pub fn socket_at(&self, canvas_pos: [f64; 2]) -> Option<&SocketLayout> {
         self.socket_within(canvas_pos, None)
+    }
+
+    /// Find a visible socket a press at `canvas_pos` takes (see
+    /// [`socket_press_hit`]): within `half` of it, and no further in than
+    /// [`SOCKET_INNER_REACH`] where the press is on this card.
+    pub(crate) fn socket_pressed_at(
+        &self,
+        canvas_pos: [f64; 2],
+        half: Option<[f64; 2]>,
+    ) -> Option<&SocketLayout> {
+        let inside = self.body_contains(canvas_pos);
+        self.sockets()
+            .filter(|s| !s.hidden)
+            .find(|s| socket_press_hit(s.center, canvas_pos, half, inside))
     }
 
     /// Find a visible socket whose hit area (see [`socket_hit`]) contains

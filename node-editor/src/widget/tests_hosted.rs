@@ -3,7 +3,8 @@
 //! receives a click at the right place under pan and zoom through the
 //! framework's own hit-test and dispatch, is rebuilt only when the body
 //! epoch changes, and sizes the card (measured height reported back,
-//! width from the model and its right-edge drag).
+//! width from the model and its right-edge drag), and keeps a press on the
+//! body beside an edge socket at any zoom (`draw::SOCKET_INNER_REACH`).
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -15,8 +16,9 @@ use super::hosted::{HostedNodeBody, SocketAnchor};
 use super::hosted_card::HostedCard;
 use super::tests_common::{mk_node, Memory};
 use super::*;
-use crate::draw::{NODE_BOTTOM_PAD, NODE_WIDTH, TITLE_HEIGHT};
+use crate::draw::{NODE_BOTTOM_PAD, NODE_WIDTH, SOCKET_INNER_REACH, TITLE_HEIGHT};
 use crate::model::{NodeTypeView, NodeView, NoodleResult, NoodleView, PropertyValue, SocketView};
+use crate::socket_style::NoodleStyle;
 
 const VIEW: Size = Size {
     width: 800.0,
@@ -152,27 +154,38 @@ pub(super) fn node_with_sockets(id: u64, pos: [f64; 2]) -> NodeView {
 /// One node at canvas top-left `(100, 400)` with a hosted `ClickBody`;
 /// its `Width` input is anchored 30 units below the body's top.
 fn fixture() -> Fixture {
+    fixture_with(
+        NoodleStyle::Simple,
+        vec![node_with_sockets(1, [100.0, 400.0])],
+    )
+}
+
+/// `nodes` as hosted `ClickBody` cards drawn in `style`, each with its
+/// `Width` input anchored 30 units below the body's top.
+fn fixture_with(style: NoodleStyle, nodes: Vec<NodeView>) -> Fixture {
     let model = Arc::new(Mutex::new(HostedModel::default()));
-    model.lock().unwrap().inner.nodes = vec![node_with_sockets(1, [100.0, 400.0])];
+    model.lock().unwrap().inner.nodes = nodes;
     let shared: SharedModel = model.clone();
     let builds = Rc::new(Cell::new(0));
     let height = Rc::new(Cell::new(BODY_H));
     let clicks = Rc::new(RefCell::new(Vec::new()));
     let (b, h, c) = (builds.clone(), height.clone(), clicks.clone());
-    let editor = NodeEditor::new(shared).with_body_factory(move |_n: &NodeView| {
-        b.set(b.get() + 1);
-        let body = ClickBody {
-            bounds: Rect::new(0.0, 0.0, 0.0, 0.0),
-            children: Vec::new(),
-            height: h.clone(),
-            clicks: c.clone(),
-        };
-        Some(HostedNodeBody::new(Box::new(body)).with_socket_anchor(
-            |_w: &dyn Widget, name: &str| -> Option<SocketAnchor> {
-                (name == "Width").then_some((crate::draw::SocketSide::Input, 30.0))
-            },
-        ))
-    });
+    let editor = NodeEditor::new(shared)
+        .with_noodle_style(style)
+        .with_body_factory(move |_n: &NodeView| {
+            b.set(b.get() + 1);
+            let body = ClickBody {
+                bounds: Rect::new(0.0, 0.0, 0.0, 0.0),
+                children: Vec::new(),
+                height: h.clone(),
+                clicks: c.clone(),
+            };
+            Some(HostedNodeBody::new(Box::new(body)).with_socket_anchor(
+                |_w: &dyn Widget, name: &str| -> Option<SocketAnchor> {
+                    (name == "Width").then_some((crate::draw::SocketSide::Input, 30.0))
+                },
+            ))
+        });
     let mut f = Fixture {
         editor,
         model,
@@ -423,4 +436,123 @@ fn collapse_can_be_turned_off() {
     editor.layout(VIEW);
     editor.toggle_collapsed(NodeId(1));
     assert!(editor.collapsed_nodes.is_empty());
+}
+
+/// Editor-local point `by` canvas units right of node `id`'s socket.
+fn beside(f: &Fixture, id: u64, side: SocketSide, name: &str, by: f64) -> Point {
+    let c = f
+        .editor
+        .socket_position(NodeId(id), side, name)
+        .expect("the socket is laid out");
+    Point::new(c.x + by * f.editor.canvas_scale, c.y)
+}
+
+/// Zoomed out, the NodeDesigner socket's hit box grows (16 units either
+/// side at zoom 0.5), but on the card it reaches only
+/// `SOCKET_INNER_REACH` in: a press further in reaches the body widget
+/// beside the socket, one within it or outside the card's edge starts a
+/// noodle, and `socket_at` agrees, at zoom 0.5 and 1 and device scale 1
+/// and 2.
+#[test]
+fn a_press_on_the_body_beside_an_edge_socket_reaches_the_body_at_any_zoom() {
+    for device in [1.0, 2.0] {
+        for scale in [1.0, 0.5] {
+            agg_gui::set_device_scale(device);
+            let mut f = fixture_with(
+                NoodleStyle::NodeDesigner,
+                vec![node_with_sockets(1, [100.0, 400.0])],
+            );
+            assert!(f.editor.set_view(scale, [0.0, 0.0]));
+            f.editor.layout(VIEW);
+            let at = format!("zoom {scale}, device scale {device}");
+            // In from the left-edge `Width` input: positive is into the card.
+            for (by, socket) in [
+                // A widget starting exactly at the reach keeps the press.
+                (SOCKET_INNER_REACH, false),
+                (SOCKET_INNER_REACH + 0.5, false),
+                (SOCKET_INNER_REACH + 1.0, false),
+                // The NodeDesigner box is never under 6 units either side.
+                (6.0, true),
+                (1.0, true),
+                (-3.0, true),
+            ] {
+                let p = beside(&f, 1, SocketSide::Input, "Width", by);
+                f.clicks.borrow_mut().clear();
+                assert_eq!(f.editor.socket_at(p).is_some(), socket, "{at}, {by}");
+                assert!(dispatch(&mut f.editor, press(p), p).is_consumed());
+                let noodle = matches!(f.editor.interaction, CanvasState::DrawingConnection { .. });
+                assert_eq!(noodle, socket, "{at}, {by}: a noodle");
+                assert_eq!(f.clicks.borrow().len(), usize::from(!socket), "{at}, {by}");
+                f.editor.on_event(&release(p));
+            }
+            agg_gui::set_device_scale(1.0);
+        }
+    }
+}
+
+/// Zoomed out, a press outside the card's edge still takes the socket
+/// anywhere in the grown hit box.
+#[test]
+fn zoomed_out_a_press_outside_the_edge_takes_the_socket_in_the_grown_box() {
+    let mut f = fixture_with(
+        NoodleStyle::NodeDesigner,
+        vec![node_with_sockets(1, [100.0, 400.0])],
+    );
+    assert!(f.editor.set_view(0.5, [0.0, 0.0]));
+    f.editor.layout(VIEW);
+    let p = beside(&f, 1, SocketSide::Input, "Width", -15.0);
+    assert!(dispatch(&mut f.editor, press(p), p).is_consumed());
+    assert!(matches!(
+        f.editor.interaction,
+        CanvasState::DrawingConnection { .. }
+    ));
+}
+
+/// A noodle dropped zoomed out lands on a socket anywhere in its grown hit
+/// box, on the card's body too: the inner reach limits only a press.
+#[test]
+fn zoomed_out_a_noodle_drop_lands_anywhere_in_the_grown_box() {
+    let mut f = fixture_with(
+        NoodleStyle::NodeDesigner,
+        vec![
+            node_with_sockets(1, [100.0, 400.0]),
+            node_with_sockets(2, [500.0, 400.0]),
+        ],
+    );
+    assert!(f.editor.set_view(0.5, [0.0, 0.0]));
+    f.editor.layout(VIEW);
+    let from = beside(&f, 2, SocketSide::Output, "Result", 0.0);
+    assert!(dispatch(&mut f.editor, press(from), from).is_consumed());
+    // 15 units into card 1 from its `Width` input: past the inner reach
+    // and the drop's snap radius, inside the 16-unit box.
+    let to = beside(&f, 1, SocketSide::Input, "Width", 15.0);
+    assert!(
+        f.editor.socket_at(to).is_none(),
+        "a press there is the body's"
+    );
+    f.editor.on_event(&Event::MouseMove { pos: to });
+    f.editor.on_event(&release(to));
+    let noodles: Vec<_> = f
+        .model
+        .lock()
+        .unwrap()
+        .inner
+        .noodles
+        .iter()
+        .map(|n| {
+            (
+                n.from_node,
+                n.from_socket.clone(),
+                n.to_node,
+                n.to_socket.clone(),
+            )
+        })
+        .collect();
+    let want = (
+        NodeId(2),
+        "Result".to_string(),
+        NodeId(1),
+        "Width".to_string(),
+    );
+    assert_eq!(noodles, vec![want]);
 }

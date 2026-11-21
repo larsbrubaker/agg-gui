@@ -251,3 +251,57 @@ fn a_dashed_noodle_shows_its_gaps_in_pixels() {
         assert_eq!(alpha(x, 20), 0, "gap pixel x = {x} is painted");
     }
 }
+
+/// How far the shapes recorded in `r` reach from x = 0 either way, stroke
+/// half-widths included (a cubic's control points bound its curve).
+fn half_width(r: &Recorder) -> f64 {
+    let mut reach: f64 = 0.0;
+    for shot in &r.shots {
+        let pad = if shot.fill { 0.0 } else { shot.width / 2.0 };
+        for op in &shot.path {
+            let xs: Vec<f64> = match op {
+                Op::Circle(c, rad) => vec![c[0] - rad, c[0] + rad],
+                Op::Rect(p, s) | Op::RoundedRect(p, s, _) => vec![p[0], p[0] + s[0]],
+                Op::MoveTo(p) | Op::LineTo(p) => vec![p[0]],
+                Op::Cubic(a, b, c) => vec![a[0], b[0], c[0]],
+                Op::Close => vec![],
+            };
+            for x in xs {
+                reach = reach.max(x.abs() + pad);
+            }
+        }
+    }
+    reach
+}
+
+/// A press anywhere on a drawn socket on a card's edge takes it
+/// (`draw::SOCKET_INNER_REACH`): the reach covers the inner half of every
+/// shape in both styles, outline included, stretched or not.
+#[test]
+fn the_inner_reach_covers_every_drawn_socket() {
+    let mut widest: f64 = 0.0;
+    for style in [NoodleStyle::Simple, NoodleStyle::NodeDesigner] {
+        for shape in [
+            SocketShape::Circle,
+            SocketShape::Bar,
+            SocketShape::Diamond,
+            SocketShape::DiamondDot,
+        ] {
+            for stretch in [0.0, 12.0] {
+                let mut r = Recorder::default();
+                draw_socket(&mut r, [0.0, 0.0], &paint(shape, stretch, style));
+                let w = half_width(&r);
+                assert!(
+                    w <= crate::draw::SOCKET_INNER_REACH,
+                    "{style:?} {shape:?} stretch {stretch}: {w}"
+                );
+                widest = widest.max(w);
+            }
+        }
+    }
+    // The field diamond's outlined point is the widest.
+    assert!(
+        (widest - (DIAMOND_HALF_SIZE + 2f64.sqrt())).abs() < 1e-9,
+        "{widest}"
+    );
+}

@@ -29,16 +29,46 @@ impl NodeEditor {
             .map(|l| l.node_id)
     }
 
-    /// The visible socket at `canvas_pos`, of the top-most card that has
-    /// one there; `None` where a card above covers it.
+    /// The visible socket a noodle dropped at `canvas_pos` lands on, of
+    /// the top-most card that has one there; `None` where a card above
+    /// covers it. The whole hit area, zoom-grown, on either side of the
+    /// card's edge ([`crate::draw::socket_hit`]).
     pub(super) fn hit_socket(
         &self,
         layouts: &[NodeLayoutInfo],
         canvas_pos: [f64; 2],
     ) -> Option<(NodeId, SocketLayout)> {
+        self.socket_hit_by(layouts, canvas_pos, false)
+    }
+
+    /// The visible socket a press (or hover) at `canvas_pos` takes: as
+    /// [`Self::hit_socket`], but on the card's own body no further in from
+    /// the socket than [`crate::draw::SOCKET_INNER_REACH`], so a body
+    /// widget there gets the press. The hosted card's own claim
+    /// (`HostedCard::claims_pointer_exclusively`) follows the same rule, so
+    /// a press resolves the same whichever path sees it first.
+    pub(super) fn press_socket(
+        &self,
+        layouts: &[NodeLayoutInfo],
+        canvas_pos: [f64; 2],
+    ) -> Option<(NodeId, SocketLayout)> {
+        self.socket_hit_by(layouts, canvas_pos, true)
+    }
+
+    fn socket_hit_by(
+        &self,
+        layouts: &[NodeLayoutInfo],
+        canvas_pos: [f64; 2],
+        press: bool,
+    ) -> Option<(NodeId, SocketLayout)> {
         let half = self.socket_hit_half();
         for l in layouts.iter().rev() {
-            if let Some(s) = l.socket_within(canvas_pos, half) {
+            let hit = if press {
+                l.socket_pressed_at(canvas_pos, half)
+            } else {
+                l.socket_within(canvas_pos, half)
+            };
+            if let Some(s) = hit {
                 return Some((l.node_id, s.clone()));
             }
             if l.body_contains(canvas_pos) {
@@ -82,7 +112,7 @@ impl NodeEditor {
 }
 
 /// Index in the paint-ordered `layouts` of the top-most card whose body
-/// contains `p`. As in [`NodeEditor::hit_socket`], a press at `p` can reach
+/// contains `p`. As in [`NodeEditor::press_socket`], a press at `p` can reach
 /// the sockets of that card and of the cards above it, never those below.
 pub(super) fn top_body_at(layouts: &[NodeLayoutInfo], p: [f64; 2]) -> Option<usize> {
     layouts.iter().rposition(|l| l.body_contains(p))

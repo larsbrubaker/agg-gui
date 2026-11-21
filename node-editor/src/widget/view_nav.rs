@@ -146,13 +146,15 @@ impl NodeEditor {
     /// backbuffer's fingerprint — without the invalidate the next paint
     /// blits an image still showing them. A rubber band is cancelled,
     /// restoring the selection held at its press
-    /// (`NodeEditor::abandon_interaction`).
+    /// (`NodeEditor::abandon_interaction`). A card drag, card resize or
+    /// value scrub ends where it is and the host hears `on_drag_ended`.
     pub fn set_interaction_mode(&mut self, mode: InteractionMode) {
         if self.mode == mode {
             return;
         }
         self.mode = mode;
         self.abandon_interaction();
+        self.end_hosted_resize();
         agg_gui::animation::request_draw();
     }
 
