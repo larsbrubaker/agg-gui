@@ -8,6 +8,24 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ## [Unreleased]
 
+## [0.0.15] - 2026-11-20
+
+### Added
+
+- `PlaceRules::app_drop` and `PlaceRules::run_app_drop`: an app takes a drop on one of its
+  folders itself, in place of a move or copy. `app_drop` answers `AppDrop::Accepts { label }`
+  (the folder is a target even when read-only, the drag showing the app's label, and a release
+  runs `run_app_drop`, its error reported), `AppDrop::Refuses { reason }` (the folder is never a
+  target; `DropManager::refusal` holds the reason while the drag is over it and a release there
+  reports it) or `AppDrop::NotApp`, the default, which leaves the drop to the move-or-copy rule
+  as before. The app is asked once per folder per drag, with no browser state borrowed.
+
+### Fixed
+
+- A drop or copy that fails in a browser without the app's report keeps its message on the
+  browser's status line. The browser listed its folders again after reporting the failure, which
+  cleared the status line; it now lists again first, then reports.
+
 ## [0.0.14] - 2026-11-13
 
 ### Fixed

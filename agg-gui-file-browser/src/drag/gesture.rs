@@ -8,6 +8,13 @@
 //! nothing. A drag held over a folder waits to open it (`spring.rs`); in a folder the list opened
 //! that way, a release on the list's empty space drops into it.
 //!
+//! Each move first asks the app, with the state let go, what it does with a drop on the folders
+//! under the pointer it has not been asked about this drag (`PlaceRules::app_drop`). A folder the
+//! app accepts the drop on is highlighted with the app's label, and a release there runs the
+//! app's drop (`execute::run_app_drop`) instead of a move or copy; over a folder the app refuses,
+//! nothing is highlighted, the drop manager holds the reason (`DropManager::refusal`), and a
+//! release there reports it.
+//!
 //! Outside the browser (neither over the list nor over the folder tree) the drag asks the app's
 //! `OutsideDrops` hook what is under it, with the state let go: a view of the app's may take the
 //! items, and may show them itself, which hides the drag's picture. A release there hands the
@@ -21,6 +28,8 @@ use std::rc::Rc;
 
 use agg_gui::{Modifiers, Point};
 use agg_gui_files::{tr, Item};
+
+use crate::places::AppDrop;
 
 use super::{DropLabel, LIST_DROP_KEY};
 
@@ -59,6 +68,27 @@ fn outside_over(state: &Rc<RefCell<BrowserState>>, at: Point) {
     s.drop.outside = over;
     s.drop.app_view_kept = kept;
 }
+/// Asks the app, with the state let go, what it does with a drop on each folder at `at` it has
+/// not been asked about this drag, and records the answers.
+fn ask_app_drops(state: &Rc<RefCell<BrowserState>>, at: Point) {
+    let (places, items, unasked) = {
+        let s = state.borrow();
+        let showing = s.depth().saturating_sub(1);
+        let unasked: Vec<_> = s
+            .drop
+            .folders_at(at, showing)
+            .into_iter()
+            .filter(|link| !s.drop.app_drop_asked(link.as_ref()))
+            .collect();
+        let items = s.drop.dragged_items().to_vec();
+        (Rc::clone(&s.config().places), items, unasked)
+    };
+    for link in unasked {
+        let drop = places.app_drop(link.as_ref(), &items);
+        state.borrow_mut().drop.record_app_drop(link, drop);
+    }
+}
+
 use crate::move_dialog::plan::FolderKey;
 use crate::places::copy_modifier_held;
 use crate::state::BrowserState;
@@ -94,6 +124,7 @@ pub fn drag_over(state: &Rc<RefCell<BrowserState>>, at: Point) {
         }
     }
     outside_over(state, at);
+    ask_app_drops(state, at);
     let modifier = copy_modifier_held(agg_gui::event::current_modifiers());
     let target = {
         let mut s = state.borrow_mut();
@@ -113,9 +144,29 @@ pub fn drag_over(state: &Rc<RefCell<BrowserState>>, at: Point) {
         })
     };
     let Some((key, link, place)) = target else {
-        state.borrow_mut().drop.set_highlight(None, None);
+        let mut s = state.borrow_mut();
+        let showing = s.depth().saturating_sub(1);
+        let refusal = s.drop.refusal_at(at, showing);
+        s.drop.set_refusal(refusal);
+        s.drop.set_highlight(None, None);
         return;
     };
+    let app = {
+        let mut s = state.borrow_mut();
+        s.drop.set_refusal(None);
+        s.drop.app_drop(link.as_ref())
+    };
+    if let AppDrop::Accepts { label } = app {
+        let label = DropLabel {
+            copies: false,
+            text: label,
+        };
+        state
+            .borrow_mut()
+            .drop
+            .set_highlight(Some(key), Some(label));
+        return;
+    }
     let (places, source) = {
         let s = state.borrow();
         let source = s.open_path().get(s.drop.source_depth()).cloned();
@@ -153,7 +204,10 @@ pub fn drag_over(state: &Rc<RefCell<BrowserState>>, at: Point) {
 /// The drag of a press was released at `at` with `modifiers`: the items drop on the folder there,
 /// if one takes them. True when the move completed or the copy started.
 pub fn drag_end(state: &Rc<RefCell<BrowserState>>, at: Point, modifiers: Modifiers) -> bool {
-    let (target, items, source_depth, places, source, outside) = {
+    if state.borrow().drop.is_dragging() {
+        ask_app_drops(state, at);
+    }
+    let (target, items, source_depth, places, source, outside, app) = {
         let mut s = state.borrow_mut();
         if !s.drop.is_dragging() {
             return false;
@@ -164,6 +218,13 @@ pub fn drag_end(state: &Rc<RefCell<BrowserState>>, at: Point, modifiers: Modifie
             .drop
             .target_link_at(at)
             .or_else(|| into_showing.map(|link| (LIST_DROP_KEY, link)));
+        let app = match &target {
+            Some((_, link)) => s.drop.app_drop(link.as_ref()),
+            None => match s.drop.refusal_at(at, showing) {
+                Some(reason) => AppDrop::Refuses { reason },
+                None => AppDrop::NotApp,
+            },
+        };
         let outside = s.drop.outside.is_some() && !s.drop.browser_contains(at);
         let kept = s.drop.app_view_kept && !outside;
         let source_depth = s.drop.source_depth();
@@ -177,6 +238,7 @@ pub fn drag_end(state: &Rc<RefCell<BrowserState>>, at: Point, modifiers: Modifie
             Rc::clone(&s.config().places),
             source,
             (outside || kept).then_some(drops).flatten(),
+            app,
         )
     };
     agg_gui::animation::request_layout();
@@ -189,8 +251,20 @@ pub fn drag_end(state: &Rc<RefCell<BrowserState>>, at: Point, modifiers: Modifie
         other => other,
     };
     let Some((_, link)) = target else {
+        if let AppDrop::Refuses { reason } = app {
+            crate::trace(|| format!("drop refused by the app: {reason}"));
+            let report = state.borrow().report();
+            report(&reason);
+        }
         return false;
     };
+    if let AppDrop::Accepts { .. } = app {
+        let ran = super::execute::run_app_drop(state, &link, &items, source_depth);
+        if let Some(drops) = kept_view {
+            drops.cancel();
+        }
+        return ran;
+    }
     // The copy the drag itself asks for (the modifier, a source that keeps its items); a drop
     // between places copies too, decided once the target is open.
     let copy_wanted = match &source {

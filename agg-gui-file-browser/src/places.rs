@@ -26,6 +26,14 @@
 //! word: by default a folder is inside only itself (the dialog sees the rest on its path), and an
 //! app whose folders a root of their own can reach (a library folder on disk inside a moved
 //! folder) answers by their locations.
+//!
+//! A folder may stand for something other than a place to keep items (a group of shortcuts the
+//! app makes from what is dropped there): [`PlaceRules::app_drop`] answers, for the folder under
+//! a drag and the items it carries, whether the app takes the drop itself ([`AppDrop::Accepts`],
+//! with the label the drag shows, even on a read-only folder), refuses it with a reason the user
+//! reads ([`AppDrop::Refuses`]: the folder is not highlighted, and a release there reports the
+//! reason), or leaves it to the move-or-copy rule ([`AppDrop::NotApp`], the default). A drop the
+//! app accepts runs through [`PlaceRules::run_app_drop`]: nothing is moved or copied.
 
 use std::rc::Rc;
 
@@ -138,6 +146,26 @@ pub enum MoveTakeover<'a> {
     Declined(MoveCx<'a>),
 }
 
+/// What the app does with a drop on one of its folders ([`PlaceRules::app_drop`]).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum AppDrop {
+    /// The folder is an ordinary one: the drop moves or copies by the module header's rule.
+    #[default]
+    NotApp,
+    /// The app takes the drop itself ([`PlaceRules::run_app_drop`]); `label` is what the drag
+    /// shows over the folder ("Add to Deform"), already translated.
+    Accepts {
+        /// What a drop there does, as the user reads it.
+        label: String,
+    },
+    /// The folder takes none of these items; `reason` (already translated) is reported when they
+    /// are released there.
+    Refuses {
+        /// Why the folder takes none of them, as the user reads it.
+        reason: String,
+    },
+}
+
 /// How a browser decides between moving and copying, and who runs a copy. Every method has the
 /// default the module header describes; an app overrides only what its places need.
 pub trait PlaceRules {
@@ -204,6 +232,22 @@ pub trait PlaceRules {
     /// answers only `inner == outer`, the dialog's open folders standing for the rest.
     fn folder_inside(&self, inner: &FolderKey, outer: &FolderKey) -> bool {
         inner == outer
+    }
+
+    /// What the app does with `items` dropped on the folder `link` opens (see the module
+    /// header). Asked once per folder per drag, with no browser state borrowed. The default
+    /// leaves every drop to the move-or-copy rule.
+    fn app_drop(&self, link: &dyn FolderLink, items: &[Rc<dyn Item>]) -> AppDrop {
+        let _ = (link, items);
+        AppDrop::NotApp
+    }
+
+    /// Runs a drop [`PlaceRules::app_drop`] accepted: `items` released on the folder `link`
+    /// opens. An error (already translated) is reported. Called only for a drop the app accepted,
+    /// with no browser state borrowed; the browser lists its open folders again after it.
+    fn run_app_drop(&self, link: &dyn FolderLink, items: &[Rc<dyn Item>]) -> Result<(), String> {
+        let _ = (link, items);
+        Ok(())
     }
 }
 

@@ -23,7 +23,13 @@
 //! browser runs it: through the target's own copy (`WritableFolder::copy_in`) on the config's
 //! spawner, its step recorded when it lands through the recorder, or, for a folder without one,
 //! by adding the items (`WritableFolder::add`), recorded when the folder records it. A failure is
-//! reported as "Couldn't copy to ...". No hook runs while the browser's state is borrowed.
+//! reported as "Couldn't copy to ...". No hook runs while the browser's state is borrowed. A
+//! failure is reported after the browser lists again (`BrowserState::after_write`), which clears
+//! the status line where a browser without the app's report shows it.
+//!
+//! A drop the app accepted (`PlaceRules::app_drop`) neither moves nor copies: [`run_app_drop`]
+//! hands it to `PlaceRules::run_app_drop`, reports its error, and lists again the folder the
+//! items came from and the folder showing, which the app's drop may have changed.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -146,18 +152,58 @@ pub fn drop_into(
         }
     };
     source.borrow_mut().load();
-    if let Err(e) = &result {
+    let failure = result.as_ref().err().map(|e| {
         let gone = names_of_items_gone_from_source(items, &**source.borrow());
         let mut message = couldnt_move_to(target_name, e);
         if !gone.is_empty() {
             message.push(' ');
             message += &fill(&tr("(Moved: {0})"), &[&gone.join(", ")]);
         }
+        message
+    });
+    reload_open_target(state, target.as_ref(), source_depth);
+    // Listed again first: the write clears the status line, where a browser without the app's
+    // report shows the failure.
+    state.borrow_mut().after_write(String::new());
+    if let Some(message) = failure {
         report(&message);
     }
-    reload_open_target(state, target.as_ref(), source_depth);
-    state.borrow_mut().after_write(String::new());
     crate::trace(|| format!("drop moved {} items to {target_name}", items.len()));
+    result.is_ok()
+}
+
+/// Runs a drop the app accepted: `items`, from the folder at `source_depth`, released on the
+/// folder `link` opens (see the module header). True when the app's drop succeeded.
+pub(crate) fn run_app_drop(
+    state: &Rc<RefCell<BrowserState>>,
+    link: &Rc<dyn FolderLink>,
+    items: &[Rc<dyn Item>],
+    source_depth: usize,
+) -> bool {
+    let (places, report) = {
+        let s = state.borrow();
+        (Rc::clone(&s.config().places), s.report())
+    };
+    let result = places.run_app_drop(link.as_ref(), items);
+    let (path, showing) = {
+        let s = state.borrow();
+        (s.open_path(), s.depth().saturating_sub(1))
+    };
+    let mut depths = vec![source_depth];
+    if showing != source_depth {
+        depths.push(showing);
+    }
+    for depth in depths {
+        if let Some(folder) = path.get(depth) {
+            folder.borrow_mut().load();
+        }
+    }
+    // Listed again before the failure is reported: the write clears the status line.
+    state.borrow_mut().after_write(String::new());
+    if let Err(e) = &result {
+        report(e);
+    }
+    crate::trace(|| format!("drop on {} run by the app", link.name()));
     result.is_ok()
 }
 
@@ -243,11 +289,12 @@ fn copy_into(
             Rc::downgrade(state),
         );
         Box::new(move |recorded: Recorded| {
-            if let Err(e) = recorder.keep(recorded) {
-                report(&couldnt_copy_to(&name, &e));
-            }
+            let kept = recorder.keep(recorded);
             if let Some(state) = state.upgrade() {
                 state.borrow_mut().after_write(String::new());
+            }
+            if let Err(e) = kept {
+                report(&couldnt_copy_to(&name, &e));
             }
         })
     };
@@ -260,9 +307,9 @@ fn copy_into(
         Some(writable) => writable.add(&items),
         None => Err(tr("This folder can't be changed")),
     };
+    state.borrow_mut().after_write(String::new());
     if let Err(e) = &result {
         report(&couldnt_copy_to(&target_name, e));
     }
-    state.borrow_mut().after_write(String::new());
     result.is_ok()
 }

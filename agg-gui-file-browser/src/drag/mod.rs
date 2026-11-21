@@ -15,6 +15,11 @@
 //! drop can't land on (read-only, one of the dragged items, or the folder the items are already
 //! in, told apart by place and location key as Move does, `FolderKey`) is never highlighted.
 //!
+//! A folder the app takes drops on itself (`PlaceRules::app_drop`, asked once per folder per drag
+//! by the gesture with no state borrowed, `gesture::ask_app_drops`, and told by its link's
+//! allocation) is a target even when read-only, labelled as the app says; one the app refuses is
+//! never a target, and its reason is [`DropManager::refusal`] while the drag is over it.
+//!
 //! Whether a drop moves or copies is the config's `PlaceRules` (the copy modifier, a source that
 //! keeps its items, two places); the drop itself is `execute.rs`, which records its history step.
 //! The press that becomes a drag, and its release, are `gesture.rs`.
@@ -33,6 +38,7 @@ use agg_gui_files::{FolderLink, Item, PlaceId};
 
 use crate::drops::OutsideOver;
 use crate::move_dialog::plan::FolderKey;
+use crate::places::AppDrop;
 use crate::state::BrowserState;
 
 /// Which painter recorded a drop target, so each forgets only its own.
@@ -76,6 +82,11 @@ struct DropTarget {
     key: DropKey,
 }
 
+/// Whether `link` is the very link `held` (the same allocation).
+fn same_link(held: &Rc<dyn FolderLink>, link: &dyn FolderLink) -> bool {
+    std::ptr::addr_eq(Rc::as_ptr(held), link as *const dyn FolderLink)
+}
+
 fn contains(rect: &Rect, at: Point) -> bool {
     at.x >= rect.x && at.y >= rect.y && at.x <= rect.x + rect.width && at.y <= rect.y + rect.height
 }
@@ -100,6 +111,13 @@ pub struct DropManager {
     source_key: Option<FolderKey>,
     /// The key of each folder the drag has been over, by its ID, asked once per drag.
     target_keys: RefCell<Vec<(String, Option<FolderKey>)>>,
+    /// What the app does with the drop on each folder the drag has been over
+    /// (`PlaceRules::app_drop`), asked once per drag. A folder is told by its link's allocation,
+    /// not its ID, as an app's folders may all answer the same empty ID; the link is held so its
+    /// allocation is not reused by another folder while the drag lasts.
+    app_drops: Vec<(Rc<dyn FolderLink>, AppDrop)>,
+    /// Why the folder under the drag refuses it, while it is over one the app refuses.
+    refusal: Option<String>,
     /// The folder the drag waits over to open, and the ones it opened (`spring.rs`).
     pub(crate) spring: spring::SpringOpen,
     /// What the app said is under the drag outside the browser, while it is there.
@@ -204,6 +222,8 @@ impl DropManager {
         self.source_key = None;
         self.target_places.clear();
         self.target_keys.borrow_mut().clear();
+        self.app_drops.clear();
+        self.refusal = None;
     }
 
     /// Names the folder the drag came from (its place and location key), which then takes no
@@ -224,6 +244,8 @@ impl DropManager {
         self.target_places.clear();
         self.target_keys.borrow_mut().clear();
         self.source_key = None;
+        self.app_drops.clear();
+        self.refusal = None;
         self.spring.clear();
         self.outside = None;
         self.app_view_kept = false;
@@ -240,12 +262,105 @@ impl DropManager {
         self.label = label;
     }
 
-    /// Whether a folder can take the drop: not read-only, not one of the dragged items, and not
-    /// the folder they came from.
+    /// Whether a folder can take the drop: not one of the dragged items, not the folder they came
+    /// from, and either one the app takes the drop on or, left to the move-or-copy rule, not
+    /// read-only.
+    /// Read-only is asked first: telling a folder from the items' own may make it (a dynamic
+    /// folder's key), which a read-only folder left to the rule never needs.
     fn takes_drop(&self, link: &dyn FolderLink) -> bool {
-        !link.is_read_only()
-            && !self.dragged_items().iter().any(|i| i.id() == link.id())
-            && !self.is_source(link)
+        match self.app_drop(link) {
+            AppDrop::NotApp => !link.is_read_only() && self.offered(link),
+            AppDrop::Accepts { .. } => self.offered(link),
+            AppDrop::Refuses { .. } => false,
+        }
+    }
+
+    /// Whether a drop on `link` is one to ask about at all: it is not one of the dragged items
+    /// and not the folder they came from.
+    fn offered(&self, link: &dyn FolderLink) -> bool {
+        !self.dragged_items().iter().any(|i| i.id() == link.id()) && !self.is_source(link)
+    }
+
+    /// What the app said it does with the drop on `link` ([`AppDrop::NotApp`] until asked).
+    pub fn app_drop(&self, link: &dyn FolderLink) -> AppDrop {
+        self.app_drops
+            .iter()
+            .find(|(asked, _)| same_link(asked, link))
+            .map_or(AppDrop::NotApp, |(_, drop)| drop.clone())
+    }
+
+    /// Whether the app has been asked about the drop on `link` this drag.
+    pub(crate) fn app_drop_asked(&self, link: &dyn FolderLink) -> bool {
+        self.app_drops
+            .iter()
+            .any(|(asked, _)| same_link(asked, link))
+    }
+
+    /// Records what the app does with the drop on `link`.
+    pub(crate) fn record_app_drop(&mut self, link: Rc<dyn FolderLink>, drop: AppDrop) {
+        if !self.app_drop_asked(link.as_ref()) {
+            self.app_drops.push((link, drop));
+        }
+    }
+
+    /// Why the folder under the drag refuses it, while it is over one the app refuses.
+    pub fn refusal(&self) -> Option<&str> {
+        self.refusal.as_deref()
+    }
+
+    pub(crate) fn set_refusal(&mut self, refusal: Option<String>) {
+        if refusal != self.refusal {
+            agg_gui::animation::request_draw();
+        }
+        self.refusal = refusal;
+    }
+
+    /// The folders a drop at `at` could ask the app about: the tree row or listed folder there,
+    /// and the folder showing (path depth `showing`) when the list opened it for this drag.
+    pub(crate) fn folders_at(&self, at: Point, showing: usize) -> Vec<Rc<dyn FolderLink>> {
+        let tree = self.tree_target_at(at);
+        let mut links: Vec<Rc<dyn FolderLink>> = match tree {
+            Some(tree) => vec![Rc::clone(&tree.link)],
+            None => self
+                .targets
+                .iter()
+                .filter(|t| t.key.kind == DropTargetKind::Content && contains(&t.rect, at))
+                .filter(|_| self.list_rect.is_none() || self.list_contains(at))
+                .map(|t| Rc::clone(&t.link))
+                .collect(),
+        };
+        if self.source_depth != showing && self.list_contains(at) {
+            links.extend(self.spring.showing_folder(showing));
+        }
+        links
+    }
+
+    /// Why the folder a drop at `at` lands on refuses it, when the app refuses it there: the
+    /// tree row or listed folder there, else the folder showing when the list opened it for this
+    /// drag and `at` is on its empty space.
+    pub(crate) fn refusal_at(&self, at: Point, showing: usize) -> Option<String> {
+        let refused = |link: &dyn FolderLink| match self.app_drop(link) {
+            AppDrop::Refuses { reason } if self.offered(link) => Some(reason),
+            _ => None,
+        };
+        if let Some(tree) = self.tree_target_at(at) {
+            return refused(tree.link.as_ref());
+        }
+        if self.list_rect.is_some() && !self.list_contains(at) {
+            return None;
+        }
+        let listed = self
+            .targets
+            .iter()
+            .find(|t| t.key.kind == DropTargetKind::Content && contains(&t.rect, at));
+        match listed {
+            Some(t) => refused(t.link.as_ref()),
+            None if self.source_depth != showing => self
+                .spring
+                .showing_folder(showing)
+                .and_then(|link| refused(link.as_ref())),
+            None => None,
+        }
     }
 
     /// Whether `link` opens the folder the drag came from, its key asked once per drag.
@@ -325,7 +440,9 @@ impl DropManager {
         {
             return None;
         }
-        self.spring.showing_folder(showing)
+        self.spring
+            .showing_folder(showing)
+            .filter(|link| !matches!(self.app_drop(link.as_ref()), AppDrop::Refuses { .. }))
     }
 
     /// The link and key of the target at `at`.

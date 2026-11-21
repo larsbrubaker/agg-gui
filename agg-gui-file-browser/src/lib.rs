@@ -28,7 +28,8 @@
 //!   (who shows the right-click menus: the app's own menu host, or the browser's), [`OutsideDrops`]
 //!   (drags onto the app's other views), [`PlaceRules`] (move or copy, and copies the app runs:
 //!   items move within a place and are copied between places, out of folders that keep their
-//!   items, or with the copy modifier held), [`BrowserMemory`] (views per folder, the tree's
+//!   items, or with the copy modifier held; and drops the app takes or refuses on its own
+//!   folders, [`AppDrop`]), [`BrowserMemory`] (views per folder, the tree's
 //!   width, last locations, in the app's own store and keys) and [`BrowserDialogs`]; plus a
 //!   report for errors (without one, errors show on the browser's own status line,
 //!   [`BrowserState::status`]) and its [`BrowserOptions`]. Every hook has a default ([`OwnPictures`],
@@ -191,8 +192,8 @@ pub use pictures::{
     FolderPicture, ItemPictures, NoPictures, OverlayFrame, PictureCx, PictureKind, PictureState,
 };
 pub use places::{
-    copy_modifier_held, default_crosses_places, default_drop_copies, places_differ, CopyCx,
-    CopyTakeover, DefaultPlaces, MoveCx, MoveTakeover, PlaceRules,
+    copy_modifier_held, default_crosses_places, default_drop_copies, places_differ, AppDrop,
+    CopyCx, CopyTakeover, DefaultPlaces, MoveCx, MoveTakeover, PlaceRules,
 };
 pub use save_dialog::{
     QuestionHost, SaveAnswers, SaveController, SaveFolderRule, SaveMode, SavePage, SAVE_AS_WINDOW,
