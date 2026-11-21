@@ -64,9 +64,10 @@
 //! The loop runs a tick for every animation frame only while something needs
 //! one; otherwise it sleeps until a wake, or until a single timer for the
 //! earliest scheduled draw (`agg_gui::animation::peek_next_draw_owner` names
-//! the call that asked for an `animation` deadline, for a host that reports
-//! what keeps an idle page waking). Nothing an app already does needs to
-//! change:
+//! the call that asked for an `animation` deadline, and
+//! `agg_gui::ui_thread::next_due_owner` the call that queued the delayed
+//! action or interval the timer waits for, for a host that reports what
+//! keeps an idle page waking). Nothing an app already does needs to change:
 //!
 //! - **Input** (pointer, wheel, keys, touch, IME composition, paste, file
 //!   drop, window focus and blur) wakes it; the tick paints if the event

@@ -53,6 +53,7 @@ pub(crate) struct LoopDemand {
     /// a delayed action, an interval) needs a drain. Read from the queue, not
     /// from the draw flags a post raises, because a paint later in the same
     /// tick consumes those. Counts with or without a GPU: every tick drains.
+    /// `agg_gui::ui_thread::next_due_owner()` names the call that queued it.
     pub idle_work_at: Option<Instant>,
     /// A mouse button or touch contact is held.
     pub pointer_held: bool,

@@ -16,7 +16,15 @@
 //! when it is queued; one queued from any other thread (a worker, whose clock
 //! is not the UI's) is stamped by the next drain, so a virtual UI clock
 //! governs it either way.
+//!
+//! **Who queued it.** [`UiQueue::run_on_idle_after`] and
+//! [`UiQueue::set_interval`] are `#[track_caller]`: each deferred action and
+//! each [`RunningInterval`] keeps the source location of the call that queued
+//! it (on whichever thread), and [`UiQueue::next_due_owner`] reads it beside
+//! the time [`UiQueue::next_due`] reports, so a host can name the job its
+//! idle loop wakes for.
 
+use std::panic::Location;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
 use std::time::Duration;
@@ -31,6 +39,11 @@ type RepeatAction = Box<dyn FnMut() + Send>;
 pub(super) fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|p| p.into_inner())
 }
+
+/// The source location of the call that queued a delayed action or an
+/// interval: the line that called `run_on_idle_after` or `set_interval`, or
+/// the line that called a `#[track_caller]` helper forwarding to one of them.
+pub type WorkOwner = &'static Location<'static>;
 
 /// When deferred work is due: a UI-clock instant, or a delay still waiting for
 /// the next drain to stamp it (queued from a thread with another clock).
@@ -66,6 +79,8 @@ pub struct RunningInterval {
     cleared: AtomicBool,
     interval: Duration,
     next_run: Mutex<DueAt>,
+    /// The call that set the interval up.
+    owner: WorkOwner,
     queue: Weak<Shared>,
 }
 
@@ -118,11 +133,36 @@ impl RunningInterval {
     }
 }
 
+/// A delayed action waiting for its time, with the call that queued it.
+struct Deferred {
+    due: DueAt,
+    owner: WorkOwner,
+    action: Action,
+}
+
 #[derive(Default)]
 struct Pending {
     call_later: Vec<Action>,
-    deferred: Vec<(DueAt, Action)>,
+    deferred: Vec<Deferred>,
     intervals: Vec<Arc<RunningInterval>>,
+}
+
+impl Pending {
+    /// The earliest delayed action or interval and the call that queued it,
+    /// work not yet stamped by a drain counting as due `now`. Among entries
+    /// due at the same instant, delayed actions before intervals, each in the
+    /// order queued.
+    fn earliest_timed(&self, now: Instant) -> Option<(Instant, WorkOwner)> {
+        self.deferred
+            .iter()
+            .map(|d| (d.due, d.owner))
+            .chain(self.intervals.iter().map(|i| (*lock(&i.next_run), i.owner)))
+            .map(|(due, owner)| match due {
+                DueAt::At(at) => (at, owner),
+                DueAt::After(_) => (now, owner),
+            })
+            .min_by_key(|(at, _)| *at)
+    }
 }
 
 #[derive(Default)]
@@ -183,18 +223,25 @@ impl UiQueue {
         self.signal_async_state_change();
     }
 
-    /// C# `RunOnIdle(action, delayInSeconds)`.
+    /// C# `RunOnIdle(action, delayInSeconds)`. `#[track_caller]`: the
+    /// calling line is the action's owner ([`Self::next_due_owner`]).
+    #[track_caller]
     pub fn run_on_idle_after(&self, delay: Duration, action: impl FnOnce() + Send + 'static) {
         let due = self.due_after(delay);
-        lock(&self.shared.pending)
-            .deferred
-            .push((due, Box::new(action)));
+        let owner = Location::caller();
+        lock(&self.shared.pending).deferred.push(Deferred {
+            due,
+            owner,
+            action: Box::new(action),
+        });
         // Wake once so the drain arms a timed redraw for it.
         self.signal_async_state_change();
     }
 
     /// C# `SetInterval`: run `action` every `interval`, first after one
-    /// interval.
+    /// interval. `#[track_caller]`: the calling line is the interval's owner
+    /// for as long as it runs ([`Self::next_due_owner`]).
+    #[track_caller]
     pub fn set_interval(
         &self,
         action: impl FnMut() + Send + 'static,
@@ -205,6 +252,7 @@ impl UiQueue {
             cleared: AtomicBool::new(false),
             interval,
             next_run: Mutex::new(self.due_after(interval)),
+            owner: Location::caller(),
             queue: Arc::downgrade(&self.shared),
         });
         lock(&self.shared.pending)
@@ -270,7 +318,7 @@ impl UiQueue {
         lock(&self.shared.pending)
             .deferred
             .iter()
-            .filter(|(due, _)| due.is_due(now))
+            .filter(|d| d.due.is_due(now))
             .count()
     }
 
@@ -288,16 +336,27 @@ impl UiQueue {
         if !pending.call_later.is_empty() {
             return Some(now);
         }
-        pending
-            .deferred
-            .iter()
-            .map(|(due, _)| *due)
-            .chain(pending.intervals.iter().map(|i| *lock(&i.next_run)))
-            .map(|due| match due {
-                DueAt::At(at) => at,
-                DueAt::After(_) => now,
-            })
-            .min()
+        pending.earliest_timed(now).map(|(at, _)| at)
+    }
+
+    /// The time [`Self::next_due`] reports with the call that queued that
+    /// work: the line that called [`Self::run_on_idle_after`] or
+    /// [`Self::set_interval`] (or a `#[track_caller]` helper forwarding to
+    /// one), on whichever thread. Among entries due at the same instant, the
+    /// first delayed action queued, then the first interval.
+    ///
+    /// `None` when nothing is queued, and also while an immediate action
+    /// ([`Self::run_on_idle`]) waits: `next_due` then reports now for work
+    /// that carries no owner, and the next drain runs it at once, so it never
+    /// holds a sleeping loop's timer. Reading it changes nothing: it runs,
+    /// stamps and arms nothing.
+    pub fn next_due_owner(&self) -> Option<(Instant, WorkOwner)> {
+        let now = crate::clock::now();
+        let pending = lock(&self.shared.pending);
+        if !pending.call_later.is_empty() {
+            return None;
+        }
+        pending.earliest_timed(now)
     }
 
     /// Drop everything queued and stop every interval.
@@ -320,11 +379,11 @@ impl UiQueue {
             let mut pending = lock(&self.shared.pending);
             let mut call_now: Vec<Due> = pending.call_later.drain(..).map(Due::Once).collect();
             let deferred = std::mem::take(&mut pending.deferred);
-            for (mut due, action) in deferred {
-                if due.stamp(now) <= now {
-                    call_now.push(Due::Once(action));
+            for mut entry in deferred {
+                if entry.due.stamp(now) <= now {
+                    call_now.push(Due::Once(entry.action));
                 } else {
-                    pending.deferred.push((due, action));
+                    pending.deferred.push(entry);
                 }
             }
             for interval in &pending.intervals {
@@ -339,7 +398,7 @@ impl UiQueue {
             let next_due = pending
                 .deferred
                 .iter()
-                .map(|(due, _)| *due)
+                .map(|d| d.due)
                 .chain(pending.intervals.iter().map(|i| *lock(&i.next_run)))
                 .filter_map(|due| match due {
                     DueAt::At(at) => Some(at),

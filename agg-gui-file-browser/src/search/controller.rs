@@ -281,7 +281,9 @@ impl Drop for SearchController {
 /// Queues a laid-out frame `delay` from now, for `poll` to run the pending query in, and answers
 /// when it comes due on agg-gui's UI clock: the query's deadline. A timed draw would not do: a
 /// shell lays a frame out only when asked to, and a delayed idle action runs at the start of the
-/// frame it comes due in, before the shell decides on layout.
+/// frame it comes due in, before the shell decides on layout. `#[track_caller]`, so the queued
+/// wake names the search step that asked for it (`agg_gui::ui_thread::next_due_owner`).
+#[track_caller]
 fn wake_layout_after(delay: Duration) -> Instant {
     let at = agg_gui::clock::now() + delay;
     agg_gui::ui_thread::run_on_idle_after(delay, agg_gui::animation::request_layout);

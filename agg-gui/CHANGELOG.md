@@ -10,6 +10,15 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- Who queued the idle work: `ui_thread::next_due_owner()` (and `UiQueue::next_due_owner`) returns
+  the time `next_due` reports with the `&'static Location` of the call that queued that delayed
+  action or interval, its type named `ui_thread::WorkOwner`. `run_on_idle_after` and
+  `set_interval`, free functions and `UiQueue` methods, are `#[track_caller]`, so an app's own
+  `#[track_caller]` helper reports its caller's line; work queued from another thread names that
+  thread's call site, and an interval keeps its setup line across runs. An immediate action
+  (`run_on_idle`) has no owner: the read answers `None` while one waits. The read changes nothing;
+  a host that arms its idle timer from `next_due` reads it beside (0.5.20).
+
 - Who armed the wake: `animation::peek_next_draw_owner()` returns the earliest scheduled-draw
   deadline (the one `peek_next_draw_deadline` returns) with the `&'static Location` of the call that
   asked for it, its type named `animation::DrawOwner`. `request_draw_after`,

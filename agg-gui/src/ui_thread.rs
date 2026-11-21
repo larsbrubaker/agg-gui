@@ -17,6 +17,16 @@
 //! also asks [`next_due`] directly, so queued work keeps it awake whatever a
 //! paint in between does to the draw flags.
 //!
+//! **Naming the job a loop wakes for.** [`run_on_idle_after`] and
+//! [`set_interval`] (and their [`UiQueue`] methods) are `#[track_caller]`, so
+//! each delayed action and interval remembers the line that queued it, from
+//! whichever thread; a helper that is itself `#[track_caller]` passes its own
+//! caller's line through. [`next_due_owner`] returns the time [`next_due`]
+//! reports with that line, reading as non-destructively as `next_due`, so a
+//! host that arms its timer from `next_due` can say whose work it will wake
+//! for. Immediate actions ([`run_on_idle`]) carry no owner: they run at the
+//! next drain and never hold a sleeping loop's timer.
+//!
 //! **Between frames.** A shell that can run work outside its frames (the
 //! browser shell, woken by [`crate::frame_demand::notify_work`]) calls
 //! [`run_between_frames`]: the same drain, then the hooks an app added with
@@ -67,7 +77,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use queue::lock;
-pub use queue::{clear_interval, RunningInterval, UiQueue};
+pub use queue::{clear_interval, RunningInterval, UiQueue, WorkOwner};
 
 /// The process's main queue and whether a live UI thread owns it.
 struct Main {
@@ -222,7 +232,9 @@ pub fn run_on_idle(action: impl FnOnce() + Send + 'static) {
     current_queue().run_on_idle(action);
 }
 
-/// C# `RunOnIdle(action, delayInSeconds)`.
+/// C# `RunOnIdle(action, delayInSeconds)`. `#[track_caller]`: the calling
+/// line is the action's owner ([`next_due_owner`]).
+#[track_caller]
 pub fn run_on_idle_after(delay: Duration, action: impl FnOnce() + Send + 'static) {
     current_queue().run_on_idle_after(delay, action);
 }
@@ -237,6 +249,9 @@ pub fn run_on_ui_thread(action: impl FnOnce() + Send + 'static) {
 }
 
 /// C# `SetInterval`: run `action` every `interval`, first after one interval.
+/// `#[track_caller]`: the calling line is the interval's owner
+/// ([`next_due_owner`]).
+#[track_caller]
 pub fn set_interval(
     action: impl FnMut() + Send + 'static,
     interval: Duration,
@@ -313,6 +328,14 @@ pub fn count_expired() -> usize {
 /// bound to no queue (nothing it could drain).
 pub fn next_due() -> Option<web_time::Instant> {
     bound().and_then(|queue| queue.next_due())
+}
+
+/// [`next_due`]'s time with the call that queued that work (see
+/// [`UiQueue::next_due_owner`]); `None` when nothing is queued, when an
+/// immediate action is waiting (it has no owner), or when the thread is bound
+/// to no queue.
+pub fn next_due_owner() -> Option<(web_time::Instant, WorkOwner)> {
+    bound().and_then(|queue| queue.next_due_owner())
 }
 
 /// Run `hook` on every drain, after the queued actions (an app's own
