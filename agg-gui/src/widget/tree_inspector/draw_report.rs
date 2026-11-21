@@ -49,7 +49,8 @@ fn collect_needs_draw(
 ///    [`crate::animation::peek_draw_signals`], which unlike `wants_draw`
 ///    neither pumps async wakeups nor clears a due deadline),
 /// 2. the next scheduled-draw deadline with remaining time (and a `DUE`
-///    marker when already past),
+///    marker when already past) and the source line that asked for it
+///    ([`crate::animation::peek_next_draw_owner`]),
 /// 3. the drained draw-request provenance tags, deduplicated with counts
 ///    (always empty in release builds — the trace is debug-only), and
 /// 4. every visible widget whose `needs_draw()` is `true`, as `[path] Type`,
@@ -72,9 +73,13 @@ pub fn debug_draw_report(root: &dyn Widget) -> String {
         Some(when) => {
             let remaining_ms = when.saturating_duration_since(now).as_secs_f64() * 1000.0;
             let due = now >= when;
+            let owner = crate::animation::peek_next_draw_owner()
+                .filter(|&(at, _)| at == when)
+                .map(|(_, owner)| format!(", asked at {owner}"))
+                .unwrap_or_default();
             let _ = writeln!(
                 s,
-                "next scheduled deadline: {remaining_ms:.1} ms{}",
+                "next scheduled deadline: {remaining_ms:.1} ms{}{owner}",
                 if due { " (DUE)" } else { "" }
             );
         }

@@ -10,6 +10,14 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- Who armed the wake: `animation::peek_next_draw_owner()` returns the earliest scheduled-draw
+  deadline (the one `peek_next_draw_deadline` returns) with the `&'static Location` of the call that
+  asked for it, its type named `animation::DrawOwner`. `request_draw_after`,
+  `request_draw_after_tagged` and `schedule_draw_after` are `#[track_caller]`, so an app's own
+  `#[track_caller]` helper reports its caller's line. The read never perturbs the signals; a host
+  compares it where it arms its wake timer. `debug_draw_report` names the owner beside the
+  deadline (0.5.19).
+
 - A retained layer that may stretch: `Widget::retained_layer_may_stretch` (default `false`) lets
   a widget whose clean `GlFbo` layer is drawn under another scale than it was rastered at (a zoom
   in progress) have it composited stretched through the new

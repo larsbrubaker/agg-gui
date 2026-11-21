@@ -25,22 +25,28 @@
 //! handle is not `Send`: it is cancelled on the thread that scheduled it.
 //! A handle a thread-local owns may be dropped while its thread exits, after
 //! the pending set is gone; withdrawing then does nothing and never panics.
+//!
+//! Each pending deadline keeps its owner, the call that scheduled it
+//! (`#[track_caller]`), for [`super::peek_next_draw_owner`].
 
 use std::cell::RefCell;
 use std::marker::PhantomData;
+use std::panic::Location;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use web_time::Instant;
+
+use super::DrawOwner;
 
 /// Ids for [`ScheduledDraw`] handles, unique across threads so a handle can
 /// never withdraw another thread's draw.
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
 std::thread_local! {
-    /// The pending cancellable deadlines: `(id, deadline)`, in scheduling
-    /// order. A handful at most, so a plain vector serves.
-    static PENDING: RefCell<Vec<(u64, Instant)>> = const { RefCell::new(Vec::new()) };
+    /// The pending cancellable deadlines: `(id, deadline, owner)`, in
+    /// scheduling order. A handful at most, so a plain vector serves.
+    static PENDING: RefCell<Vec<(u64, Instant, DrawOwner)>> = const { RefCell::new(Vec::new()) };
 }
 
 /// A draw scheduled with [`schedule_draw_after`] that can still be
@@ -58,11 +64,15 @@ pub struct ScheduledDraw {
 /// Schedule a draw `delay` from now (UI clock, [`crate::clock`]) that the
 /// returned handle can withdraw. Wakes a sleeping host the same way
 /// [`super::request_draw_after`] does ([`crate::frame_demand::notify`]).
+/// `#[track_caller]`: the calling line is the draw's owner
+/// ([`super::peek_next_draw_owner`]).
+#[track_caller]
 pub fn schedule_draw_after(delay: Duration) -> ScheduledDraw {
     let at = crate::clock::now() + delay;
+    let owner = Location::caller();
     // Relaxed: the counter orders nothing else; a u64 never wraps here.
     let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
-    PENDING.with(|p| p.borrow_mut().push((id, at)));
+    PENDING.with(|p| p.borrow_mut().push((id, at, owner)));
     crate::frame_demand::notify();
     ScheduledDraw {
         id,
@@ -81,7 +91,7 @@ impl ScheduledDraw {
     /// asked for, and not withdrawn by [`super::reset_draw_signals`].
     pub fn is_pending(&self) -> bool {
         PENDING
-            .try_with(|p| p.borrow().iter().any(|&(id, _)| id == self.id))
+            .try_with(|p| p.borrow().iter().any(|&(id, _, _)| id == self.id))
             .unwrap_or(false)
     }
 
@@ -105,7 +115,7 @@ impl ScheduledDraw {
                 let mut p = p.borrow_mut();
                 let before = earliest_of(&p);
                 let len = p.len();
-                p.retain(|&(id, _)| id != self.id);
+                p.retain(|&(id, _, _)| id != self.id);
                 (p.len() != len).then(|| (before, earliest_of(&p)))
             })
             .ok()
@@ -133,8 +143,23 @@ pub(super) fn earliest() -> Option<Instant> {
     PENDING.with(|p| earliest_of(&p.borrow()))
 }
 
-fn earliest_of(pending: &[(u64, Instant)]) -> Option<Instant> {
-    pending.iter().map(|&(_, at)| at).min()
+fn earliest_of(pending: &[(u64, Instant, DrawOwner)]) -> Option<Instant> {
+    pending.iter().map(|&(_, at, _)| at).min()
+}
+
+/// The earliest pending cancellable deadline with its owner; among equal
+/// deadlines, the one scheduled first.
+pub(super) fn earliest_owned() -> Option<(Instant, DrawOwner)> {
+    PENDING.with(|p| {
+        let mut best: Option<(Instant, DrawOwner)> = None;
+        for &(_, at, owner) in p.borrow().iter() {
+            // strictly earlier only, so the first scheduled wins a tie
+            if best.is_none_or(|(best_at, _)| at < best_at) {
+                best = Some((at, owner));
+            }
+        }
+        best
+    })
 }
 
 /// The earlier of two optional deadlines.
@@ -150,7 +175,7 @@ pub(super) fn take_due(now: Instant) -> bool {
     PENDING.with(|p| {
         let mut p = p.borrow_mut();
         let len = p.len();
-        p.retain(|&(_, at)| at > now);
+        p.retain(|&(_, at, _)| at > now);
         p.len() != len
     })
 }

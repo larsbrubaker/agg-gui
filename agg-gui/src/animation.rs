@@ -49,12 +49,30 @@
 //!    frame).  [`wants_draw`] reports `true` while one is pending, and the
 //!    shells force `needs_layout` for that frame.
 //!
+//! **Who asked.**  Each scheduled deadline remembers the source location of
+//! the call that set it: [`request_draw_after`], [`request_draw_after_tagged`]
+//! and [`schedule_draw_after`] are `#[track_caller]`, so a helper that is
+//! itself `#[track_caller]` passes its own caller's line through.
+//! [`peek_next_draw_owner`] names the deadline the host would wake for and
+//! where it was asked from, reading as non-destructively as
+//! [`peek_next_draw_deadline`].  An earlier request takes the deadline and
+//! its owner; a later or equal one leaves both; the owner goes whenever its
+//! deadline does (served, cleared by a paint once due, reset).  There is no
+//! change hook: a host reads the owner where it arms its wake timer (or after
+//! each frame) and compares it with the last one it saw.  That is two
+//! thread-local reads and a scan of the few pending handles, so reading it
+//! every frame costs nothing a hook would save.  `App::next_draw_deadline`
+//! also folds in each widget's own `Widget::next_draw_deadline`, which
+//! carries no owner: a host whose armed deadline is earlier than the owner's
+//! instant woke for a widget's deadline instead.
+//!
 //! Beside the draw signals, [`last_input_at`] tells a host when the user last
 //! made input (`animation_last_input.rs`): unlike the draw signals it never
 //! moves for the framework's own redraws, so a host can hold expensive work
 //! back until the user's input has been quiet for a while.
 
 use std::cell::Cell;
+use std::panic::Location;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use web_time::Instant;
@@ -130,6 +148,9 @@ pub fn request_draw_tagged(reason: &'static str) {
 }
 
 /// [`request_draw_after`] with a provenance tag — see the trace module docs.
+/// `#[track_caller]`, so the deadline's owner ([`peek_next_draw_owner`]) is
+/// the line that called this, not this helper.
+#[track_caller]
 pub fn request_draw_after_tagged(delay: Duration, reason: &'static str) {
     record_draw_trace(reason);
     crate::draw_trace_log::record(reason);
@@ -138,7 +159,9 @@ pub fn request_draw_after_tagged(delay: Duration, reason: &'static str) {
 
 std::thread_local! {
     static NEEDS_DRAW:        Cell<bool>            = const { Cell::new(false) };
-    static NEXT_DRAW_AT:      Cell<Option<Instant>> = const { Cell::new(None) };
+    /// The [`request_draw_after`] deadline and the call that set it: one
+    /// cell, so the owner is cleared exactly when the deadline is.
+    static NEXT_DRAW_AT:      Cell<Option<(Instant, DrawOwner)>> = const { Cell::new(None) };
     /// Pending [`request_layout`]; consumed only by `App::layout`.
     static LAYOUT_REQUESTED:  Cell<bool>            = const { Cell::new(false) };
     static INVALIDATION_EPOCH: Cell<u64>             = const { Cell::new(0) };
@@ -424,7 +447,7 @@ pub fn wants_draw() -> bool {
     }
     let now = crate::clock::now();
     let due = NEXT_DRAW_AT.with(|c| match c.get() {
-        Some(when) if now >= when => {
+        Some((when, _)) if now >= when => {
             c.set(None);
             true
         }
@@ -513,7 +536,7 @@ pub fn clear_draw_request() {
     NEEDS_DRAW.with(|c| c.set(false));
     let now = crate::clock::now();
     NEXT_DRAW_AT.with(|c| {
-        if c.get().is_some_and(|at| at <= now) {
+        if c.get().is_some_and(|(at, _)| at <= now) {
             c.set(None);
         }
     });
@@ -558,11 +581,16 @@ pub fn clear_immediate_draw_request() {
 /// reason went away. A draw that may become unnecessary (a watchdog for work
 /// that can finish early) uses [`schedule_draw_after`], whose handle cancels
 /// it.
+///
+/// `#[track_caller]`: a call that moves the deadline earlier becomes its
+/// owner ([`peek_next_draw_owner`]); a later or equal one leaves the owner.
+#[track_caller]
 pub fn request_draw_after(delay: Duration) {
     let when = crate::clock::now() + delay;
+    let owner = Location::caller();
     NEXT_DRAW_AT.with(|c| match c.get() {
-        Some(existing) if existing <= when => {}
-        _ => c.set(Some(when)),
+        Some((existing, _)) if existing <= when => {}
+        _ => c.set(Some((when, owner))),
     });
     crate::frame_demand::notify();
 }
@@ -596,14 +624,41 @@ pub fn peek_draw_signals() -> (bool, Option<Instant>) {
 /// Covers both scheduled channels: the [`request_draw_after`] deadline and
 /// every pending [`ScheduledDraw`].
 pub fn peek_next_draw_deadline() -> Option<Instant> {
-    let fire_and_forget = NEXT_DRAW_AT.with(|c| c.get());
+    let fire_and_forget = NEXT_DRAW_AT.with(|c| c.get()).map(|(at, _)| at);
     scheduled_draw::min_deadline(fire_and_forget, scheduled_draw::earliest())
+}
+
+/// The source location of the call that asked for a scheduled draw: the line
+/// that called [`request_draw_after`], [`request_draw_after_tagged`] or
+/// [`schedule_draw_after`], or the line that called a `#[track_caller]`
+/// helper forwarding to one of them.
+pub type DrawOwner = &'static Location<'static>;
+
+/// The earliest pending scheduled-draw deadline (the one
+/// [`peek_next_draw_deadline`] returns) with the call that asked for it.
+///
+/// Non-destructive like [`peek_draw_signals`]: it pumps nothing and never
+/// promotes or clears a deadline, so reading it cannot change what a host
+/// wakes for.  When both channels hold the same instant, the
+/// [`request_draw_after`] owner is reported; among [`ScheduledDraw`]s due at
+/// the same instant, the one scheduled first.  See the module docs for how a
+/// host notices the owner changing.
+pub fn peek_next_draw_owner() -> Option<(Instant, DrawOwner)> {
+    let fire_and_forget = NEXT_DRAW_AT.with(|c| c.get());
+    match (fire_and_forget, scheduled_draw::earliest_owned()) {
+        (Some(a), Some(b)) => Some(if b.0 < a.0 { b } else { a }),
+        (one, None) | (None, one) => one,
+    }
 }
 
 /// The [`request_draw_after`] deadline, read so it never panics during thread
 /// teardown (`None` then), for a [`ScheduledDraw`] withdrawn by a destructor.
 fn try_fire_and_forget_deadline() -> Option<Instant> {
-    NEXT_DRAW_AT.try_with(|c| c.get()).ok().flatten()
+    NEXT_DRAW_AT
+        .try_with(|c| c.get())
+        .ok()
+        .flatten()
+        .map(|(at, _)| at)
 }
 
 // ── Tween ────────────────────────────────────────────────────────────────────
