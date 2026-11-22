@@ -195,7 +195,7 @@ impl Painter {
         // or read back.
         host.after_paint(&mut self.ctx, &frame);
         if capturing {
-            self.capture.finish_frame(&self.ctx, &view, (win_w, win_h));
+            self.capture.finish_frame(&mut self.ctx, &view);
         }
 
         if let Some(cfg) = capture {

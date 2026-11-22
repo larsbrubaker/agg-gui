@@ -11,7 +11,8 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 ### Added
 
 - `FrameCaptureService` serves `agg_gui::frame_capture` requests for a shell: the asked-for frame
-  alone renders into an offscreen target (`target_view`), is blitted onto the window's surface and
+  alone renders into an offscreen target (`target_view`), is copied onto the window's surface
+  texel for texel (no blending, so it looks exactly as an ordinary frame would) and
   has each requested region copied out (`finish_frame`, or `read_from` for a host already
   rendering offscreen), and `poll` delivers the pixels on later frames without blocking. Frames
   nobody asked to capture are untouched; a lost device (`poll`, `device_lost`) delivers

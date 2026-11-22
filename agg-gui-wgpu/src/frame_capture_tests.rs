@@ -65,7 +65,7 @@ fn captured_frame(
     assert!(svc.begin_frame(), "the asked-for frame is armed");
     let view = svc.target_view(ctx, W, H);
     paint_frame(ctx, view);
-    svc.finish_frame(ctx, surface_view, (W, H));
+    svc.finish_frame(ctx, surface_view);
     ctx.release_frame_texture();
 }
 
@@ -256,4 +256,64 @@ fn a_rebuild_fails_the_captures_the_old_device_held() {
         seen.borrow().as_slice(),
         [Err(FrameCaptureError::DeviceLost(_))]
     ));
+}
+
+/// Fill `view` with opaque green, standing in for a swap-chain texture's
+/// leftover content from an earlier frame.
+fn fill_green(device: &wgpu::Device, queue: &wgpu::Queue, view: &wgpu::TextureView) {
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("frame_capture_test_green"),
+    });
+    drop(encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+        label: Some("frame_capture_test_green"),
+        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+            view,
+            resolve_target: None,
+            depth_slice: None,
+            ops: wgpu::Operations {
+                load: wgpu::LoadOp::Clear(wgpu::Color::GREEN),
+                store: wgpu::StoreOp::Store,
+            },
+        })],
+        depth_stencil_attachment: None,
+        timestamp_writes: None,
+        occlusion_query_set: None,
+        multiview_mask: None,
+    }));
+    queue.submit(std::iter::once(encoder.finish()));
+}
+
+#[test]
+fn the_window_shows_a_translucent_captured_frame_exactly_not_blended_over_old_content() {
+    let Some((device, queue)) = try_device() else {
+        eprintln!("SKIP: no GPU adapter");
+        return;
+    };
+    let surface = Target::new(Arc::clone(&device), Arc::clone(&queue), W, H);
+    fill_green(&device, &queue, &surface.view);
+    let mut ctx = ctx_for(&device, &queue, wgpu::TextureFormat::Rgba8Unorm);
+    let mut svc = FrameCaptureService::new();
+    let seen = ask(None);
+
+    assert!(svc.begin_frame());
+    let view = svc.target_view(&mut ctx, W, H);
+    // A translucent frame: an ordinary frame's clear replaces the surface's
+    // old pixels with these, so the captured frame must too.
+    ctx.begin_frame_cleared(view, Color::rgba(0.5, 0.0, 0.0, 0.5));
+    ctx.reset(W as f32, H as f32);
+    ctx.end_frame();
+    svc.finish_frame(&mut ctx, &surface.view);
+    ctx.release_frame_texture();
+    poll_until_delivered(&mut svc, &ctx);
+
+    let (rgba, w, _) = frame_pixels(&seen);
+    let captured = px(&rgba, w, 5, 5);
+    assert!(captured[3] < 255, "the frame is translucent: {captured:?}");
+    assert_eq!(captured[1], 0, "the frame has no green: {captured:?}");
+    let shown = surface.read();
+    assert_eq!(
+        px(&shown, W, 5, 5),
+        captured,
+        "the window shows the frame's own texels, with nothing of the old content"
+    );
 }

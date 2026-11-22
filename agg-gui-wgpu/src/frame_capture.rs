@@ -6,8 +6,8 @@
 //! advertises `COPY_SRC`, and a native surface configured with it loses the
 //! framebuffer-only fast path on Metal. So [`FrameCaptureService`] renders
 //! only the asked-for frame into an offscreen [`SsaaFramebuffer`] at the
-//! surface's size, blits it onto the surface (the same factor-1 blit the web
-//! shell's `offscreen_scene` uses every frame), and copies each requested
+//! surface's size, copies it onto the surface texel for texel (the composite
+//! shader's copy mode, no blending), and copies each requested
 //! region of it into a `MAP_READ` buffer. The frame after, the offscreen
 //! texture is destroyed; frames nobody asked to capture never touch any of
 //! this. A host already rendering offscreen hands its own texture to
@@ -108,49 +108,36 @@ impl FrameCaptureService {
         fb.render_view().clone()
     }
 
-    /// After an armed frame's render was submitted: blit the offscreen frame
-    /// onto `surface_view` (`surface_size` pixels) so the window shows it,
+    /// After an armed frame's render was submitted: copy the offscreen frame
+    /// onto `surface_view` texel for texel (no blending, so the window shows
+    /// exactly what an ordinary frame would have, translucent pixels too),
     /// and start the reads of the requested regions.
-    pub fn finish_frame(
-        &mut self,
-        ctx: &WgpuGfxCtx,
-        surface_view: &wgpu::TextureView,
-        surface_size: (u32, u32),
-    ) {
+    pub fn finish_frame(&mut self, ctx: &mut WgpuGfxCtx, surface_view: &wgpu::TextureView) {
         let Some(fb) = self.target.take() else {
             self.fail_armed(|| {
                 FrameCaptureError::Unavailable("the frame had no capture target".to_string())
             });
             return;
         };
-        let (device, queue) = (ctx.device(), ctx.queue());
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("frame_capture_blit"),
-        });
-        let mut blit_buffers = Vec::new();
-        fb.blit_downsample_retiring(
-            device,
-            queue,
+        let mut encoder = ctx
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("frame_capture_blit"),
+            });
+        // The composite shader's copy mode, as `end_frame` copies its
+        // blend-mode proxy onto the surface. Its uniform buffer is retired
+        // with the frame's and destroyed after the next frame's submit.
+        crate::comp_op::blit_proxy(
+            &ctx.device,
+            &ctx.queue,
+            &mut ctx.textures,
+            &mut ctx.bind_groups,
             &mut encoder,
+            &ctx.comp_op,
+            fb.render_view(),
             surface_view,
-            surface_size,
-            agg_gui::Rect::new(
-                0.0,
-                0.0,
-                f64::from(surface_size.0),
-                f64::from(surface_size.1),
-            ),
-            None,
-            ctx.pipelines(),
-            1,
-            &mut |buffer| blit_buffers.push(buffer),
         );
-        queue.submit(std::iter::once(encoder.finish()));
-        // Destroyed once submitted: dropped, the browser frees them only when
-        // its garbage collector runs.
-        for buffer in blit_buffers {
-            buffer.destroy();
-        }
+        ctx.queue.submit(std::iter::once(encoder.finish()));
         self.read_from(ctx, fb.resolve_texture());
         self.spent = Some(fb);
     }
@@ -179,6 +166,12 @@ impl FrameCaptureService {
                     continue;
                 }
             };
+            // `region_in_pixels` never yields an empty region; an empty
+            // staging buffer could not be mapped (wgpu refuses empty slices).
+            if region.width == 0 || region.height == 0 {
+                request.deliver(Err(FrameCaptureError::RegionEmpty));
+                continue;
+            }
             let padded_bpr = (region.width * 4).div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT)
                 * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
             let staging = DestroyOnDrop(ctx.device().create_buffer(&wgpu::BufferDescriptor {

@@ -17,7 +17,8 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   thread on a later frame, as a `CapturedFrame` (tight RGBA8, top row first, with its pixel width
   and height) or a `FrameCaptureError` (`DeviceLost`, `Unavailable`, `RegionEmpty`). Shells take
   the queue with `take_frame_capture_requests` and convert regions with `region_in_pixels`; a
-  request dropped undelivered reports `Unavailable` (0.5.21).
+  request dropped undelivered reports `Unavailable`, and a region with a non-finite field is
+  `RegionEmpty` (0.5.21).
 
 - Who queued the idle work: `ui_thread::next_due_owner()` (and `UiQueue::next_due_owner`) returns
   the time `next_due` reports with the `&'static Location` of the call that queued that delayed

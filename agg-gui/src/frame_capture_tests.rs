@@ -127,6 +127,11 @@ fn an_empty_or_off_screen_region_is_an_error() {
         Rect::new(100.0, 0.0, 10.0, 10.0),
         Rect::new(0.0, -20.0, 10.0, 10.0),
         Rect::new(f64::NAN, 0.0, 10.0, 10.0),
+        // Infinite edges whose sum is NaN.
+        Rect::new(f64::NEG_INFINITY, 0.0, f64::INFINITY, 10.0),
+        Rect::new(0.0, f64::NEG_INFINITY, 10.0, f64::INFINITY),
+        Rect::new(0.0, 0.0, f64::INFINITY, 10.0),
+        Rect::new(0.0, 0.0, 10.0, f64::NAN),
     ] {
         assert_eq!(
             region_in_pixels(Some(r), 1.0, 50, 50),

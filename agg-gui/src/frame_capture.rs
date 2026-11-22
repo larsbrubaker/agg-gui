@@ -26,6 +26,17 @@
 //! Frames nobody asked to capture take the shell's ordinary path: nothing here
 //! costs anything while the queue is empty ([`has_pending_frame_capture`]).
 //!
+//! # What "the frame" is
+//!
+//! The first frame the shell paints after the request: everything the host
+//! paints into it (the widget tree, by default) and whatever its after-paint
+//! hook draws into the context, exactly as the window shows it. Not part of
+//! it: the native shell's presented-only overlay
+//! (`ShellHost::paint_presented_overlay`, such as a simulated pointer), drawn
+//! onto the window after the frame is read, and anything the operating system
+//! or browser draws over the window. A frame the surface refuses (minimized,
+//! occluded) is not painted, so the request waits for the next one that is.
+//!
 //! The GPU side lives in `agg-gui-wgpu` (`FrameCaptureService`), shared by the
 //! native shell (`agg-gui-shell`) and the browser shell (`agg-gui-web-shell`).
 //! This module is deliberately GPU-free so app crates can ask without
@@ -170,7 +181,7 @@ pub struct PixelRegion {
 /// frame) to framebuffer pixels of a `frame_w` x `frame_h` frame drawn at
 /// `scale` physical pixels per logical unit, clipped to the frame. Partly
 /// covered pixels at the edges are included. A region with no pixels on the
-/// frame is [`FrameCaptureError::RegionEmpty`].
+/// frame, or with a non-finite field, is [`FrameCaptureError::RegionEmpty`].
 pub fn region_in_pixels(
     region: Option<Rect>,
     scale: f64,
@@ -188,17 +199,23 @@ pub fn region_in_pixels(
             height: frame_h,
         });
     };
+    // A rect with a non-finite field names no pixels: an infinite edge would
+    // clamp onto the frame, but an infinite width beside it sums to NaN.
+    let finite = [r.x, r.y, r.width, r.height, scale]
+        .iter()
+        .all(|v| v.is_finite());
+    if !finite || r.width <= 0.0 || r.height <= 0.0 || scale <= 0.0 {
+        return Err(FrameCaptureError::RegionEmpty);
+    }
     let (fw, fh) = (f64::from(frame_w), f64::from(frame_h));
-    // Pixel edges in a Y-up frame, clipped to it. `clamp` also maps NaN-free
-    // infinities onto the frame edges.
+    // Pixel edges in a Y-up frame, clipped to it. Finite inputs can still
+    // overflow a product to infinity, which the clamp maps onto an edge; a
+    // NaN edge (none is reachable from finite inputs, but checked) is empty.
     let left = (r.x * scale).floor().clamp(0.0, fw);
     let right = ((r.x + r.width) * scale).ceil().clamp(0.0, fw);
     let bottom = (r.y * scale).floor().clamp(0.0, fh);
     let top = ((r.y + r.height) * scale).ceil().clamp(0.0, fh);
-    if r.width.is_nan() || r.height.is_nan() || r.width <= 0.0 || r.height <= 0.0 {
-        return Err(FrameCaptureError::RegionEmpty);
-    }
-    if right <= left || top <= bottom || left.is_nan() || bottom.is_nan() {
+    if [left, right, bottom, top].iter().any(|v| v.is_nan()) || right <= left || top <= bottom {
         return Err(FrameCaptureError::RegionEmpty);
     }
     // In range [0, frame size] after the clamps, so the casts are exact.

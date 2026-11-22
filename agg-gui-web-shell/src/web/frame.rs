@@ -644,7 +644,7 @@ fn paint(w: u32, h: u32) -> bool {
         if capturing {
             match (offscreen, p.scene.as_ref()) {
                 (true, Some(fb)) => p.capture.read_from(&p.ctx, fb.resolve_texture()),
-                _ => p.capture.finish_frame(&p.ctx, &surface_view, (w, h)),
+                _ => p.capture.finish_frame(&mut p.ctx, &surface_view),
             }
         }
 
