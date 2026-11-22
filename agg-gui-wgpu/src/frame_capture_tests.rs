@@ -11,7 +11,9 @@ use std::sync::Arc;
 
 use agg_gui::color::Color;
 use agg_gui::draw_ctx::DrawCtx;
-use agg_gui::frame_capture::{request_frame_capture, FrameCaptureError, FrameCaptureResult};
+use agg_gui::frame_capture::{
+    request_frame_capture, FrameCaptureError, FrameCaptureRequestHandle, FrameCaptureResult,
+};
 use agg_gui::Rect;
 
 use crate::layer_text_readback_tests::{px, try_device, Target};
@@ -24,12 +26,12 @@ const BLUE: [u8; 4] = [0, 0, 255, 255];
 
 type Seen = Rc<RefCell<Vec<FrameCaptureResult>>>;
 
-fn ask(region: Option<Rect>) -> Seen {
+fn ask(region: Option<Rect>) -> (Seen, FrameCaptureRequestHandle) {
     let _ = agg_gui::frame_capture::take_frame_capture_requests();
     let seen: Seen = Rc::new(RefCell::new(Vec::new()));
     let sink = Rc::clone(&seen);
-    request_frame_capture(region, move |r| sink.borrow_mut().push(r));
-    seen
+    let handle = request_frame_capture(region, move |r| sink.borrow_mut().push(r));
+    (seen, handle)
 }
 
 fn ctx_for(
@@ -98,7 +100,7 @@ fn a_capture_asked_for_is_delivered_once_with_the_frame_and_the_window_shows_it(
     let surface = Target::new(Arc::clone(&device), Arc::clone(&queue), W, H);
     let mut ctx = ctx_for(&device, &queue, wgpu::TextureFormat::Rgba8Unorm);
     let mut svc = FrameCaptureService::new();
-    let seen = ask(None);
+    let (seen, _handle) = ask(None);
 
     captured_frame(&mut svc, &mut ctx, &surface.view);
     assert!(
@@ -135,7 +137,7 @@ fn a_region_delivers_that_region_top_row_first() {
     let mut svc = FrameCaptureService::new();
     // Window coordinates (Y-up, scale 1): straddles the colour split, in the
     // top quarter of the window.
-    let seen = ask(Some(Rect::new(28.0, 24.0, 8.0, 8.0)));
+    let (seen, _handle) = ask(Some(Rect::new(28.0, 24.0, 8.0, 8.0)));
 
     captured_frame(&mut svc, &mut ctx, &surface.view);
     poll_until_delivered(&mut svc, &ctx);
@@ -172,7 +174,7 @@ fn a_bgra_window_still_delivers_rgba() {
     let view = surface.create_view(&wgpu::TextureViewDescriptor::default());
     let mut ctx = ctx_for(&device, &queue, format);
     let mut svc = FrameCaptureService::new();
-    let seen = ask(None);
+    let (seen, _handle) = ask(None);
 
     captured_frame(&mut svc, &mut ctx, &view);
     poll_until_delivered(&mut svc, &ctx);
@@ -206,7 +208,7 @@ fn an_off_screen_region_is_an_error_not_a_read() {
     let surface = Target::new(Arc::clone(&device), Arc::clone(&queue), W, H);
     let mut ctx = ctx_for(&device, &queue, wgpu::TextureFormat::Rgba8Unorm);
     let mut svc = FrameCaptureService::new();
-    let seen = ask(Some(Rect::new(500.0, 0.0, 10.0, 10.0)));
+    let (seen, _handle) = ask(Some(Rect::new(500.0, 0.0, 10.0, 10.0)));
 
     captured_frame(&mut svc, &mut ctx, &surface.view);
     assert!(!svc.has_reads_in_flight());
@@ -223,7 +225,7 @@ fn a_lost_device_delivers_an_error_instead_of_waiting() {
     let lost = DeviceLostFlag::default();
     let mut ctx = ctx_for(&device, &queue, wgpu::TextureFormat::Rgba8Unorm).with_device_lost(&lost);
     let mut svc = FrameCaptureService::new();
-    let seen = ask(None);
+    let (seen, _handle) = ask(None);
 
     captured_frame(&mut svc, &mut ctx, &surface.view);
     lost.record_for_test("Destroyed");
@@ -247,7 +249,7 @@ fn a_rebuild_fails_the_captures_the_old_device_held() {
     let surface = Target::new(Arc::clone(&device), Arc::clone(&queue), W, H);
     let mut ctx = ctx_for(&device, &queue, wgpu::TextureFormat::Rgba8Unorm);
     let mut svc = FrameCaptureService::new();
-    let seen = ask(None);
+    let (seen, _handle) = ask(None);
     captured_frame(&mut svc, &mut ctx, &surface.view);
 
     svc.device_lost("the device was rebuilt");
@@ -293,7 +295,7 @@ fn the_window_shows_a_translucent_captured_frame_exactly_not_blended_over_old_co
     fill_green(&device, &queue, &surface.view);
     let mut ctx = ctx_for(&device, &queue, wgpu::TextureFormat::Rgba8Unorm);
     let mut svc = FrameCaptureService::new();
-    let seen = ask(None);
+    let (seen, _handle) = ask(None);
 
     assert!(svc.begin_frame());
     let view = svc.target_view(&mut ctx, W, H);
@@ -315,5 +317,74 @@ fn the_window_shows_a_translucent_captured_frame_exactly_not_blended_over_old_co
         px(&shown, W, 5, 5),
         captured,
         "the window shows the frame's own texels, with nothing of the old content"
+    );
+}
+
+#[test]
+fn a_handle_dropped_before_the_frame_arms_nothing() {
+    let Some((device, queue)) = try_device() else {
+        eprintln!("SKIP: no GPU adapter");
+        return;
+    };
+    let ctx = ctx_for(&device, &queue, wgpu::TextureFormat::Rgba8Unorm);
+    let mut svc = FrameCaptureService::new();
+    let (seen, handle) = ask(None);
+    drop(handle);
+    assert!(!svc.begin_frame(), "a withdrawn request arms no frame");
+    assert!(!svc.poll(&ctx));
+    assert!(seen.borrow().is_empty());
+}
+
+#[test]
+fn a_handle_dropped_while_its_read_is_in_flight_abandons_it() {
+    // A device of its own: no other test's poll can finish this read's map
+    // before it is abandoned.
+    let Ok(gpu) = crate::HeadlessGpu::create() else {
+        eprintln!("SKIP: no GPU adapter");
+        return;
+    };
+    let (device, queue) = (Arc::clone(gpu.device()), Arc::clone(gpu.queue()));
+    let surface = Target::new(Arc::clone(&device), Arc::clone(&queue), W, H);
+    let mut ctx = ctx_for(&device, &queue, wgpu::TextureFormat::Rgba8Unorm);
+    let mut svc = FrameCaptureService::new();
+    let (seen, handle) = ask(None);
+    captured_frame(&mut svc, &mut ctx, &surface.view);
+    assert!(svc.has_reads_in_flight());
+    // Keep the read's map result to look at after it is abandoned.
+    let (_unused, stand_in) = std::sync::mpsc::channel();
+    let map_result = std::mem::replace(&mut svc.reads[0].done, stand_in);
+
+    drop(handle);
+    assert!(!svc.poll(&ctx), "the abandoned read is no longer in flight");
+    assert!(svc.reads.is_empty());
+    let _ = device.poll(wgpu::PollType::wait_indefinitely());
+    // A buffer only dropped would still finish its map; a destroyed one
+    // aborts it.
+    match map_result.try_recv() {
+        Ok(Err(_)) | Err(std::sync::mpsc::TryRecvError::Disconnected) => {}
+        other => panic!("the staging buffer was not released: its map gave {other:?}"),
+    }
+    assert!(seen.borrow().is_empty(), "no callback after a withdrawal");
+}
+
+#[test]
+fn a_kept_handle_is_delivered_as_before() {
+    let Some((device, queue)) = try_device() else {
+        eprintln!("SKIP: no GPU adapter");
+        return;
+    };
+    let surface = Target::new(Arc::clone(&device), Arc::clone(&queue), W, H);
+    let mut ctx = ctx_for(&device, &queue, wgpu::TextureFormat::Rgba8Unorm);
+    let mut svc = FrameCaptureService::new();
+    let (seen, handle) = ask(None);
+    captured_frame(&mut svc, &mut ctx, &surface.view);
+    poll_until_delivered(&mut svc, &ctx);
+    let (_, w, h) = frame_pixels(&seen);
+    assert_eq!((w, h), (W, H));
+    drop(handle);
+    assert_eq!(
+        seen.borrow().len(),
+        1,
+        "withdrawing after delivery changes nothing"
     );
 }

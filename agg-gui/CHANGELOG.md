@@ -26,7 +26,10 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   and height) or a `FrameCaptureError` (`DeviceLost`, `Unavailable`, `RegionEmpty`). Shells take
   the queue with `take_frame_capture_requests` and convert regions with `region_in_pixels`; a
   request dropped undelivered reports `Unavailable`, and a region with a non-finite field is
-  `RegionEmpty` (0.5.21).
+  `RegionEmpty`. The call returns a `#[must_use]` `FrameCaptureRequestHandle`: keep it while
+  waiting; dropping it (or `withdraw()`) withdraws the request, so an app that stops waiting
+  (no frame painted in its time limit) leaves nothing queued, a read already started is
+  abandoned with its buffer released, and the callback never runs (0.5.21).
 
 - Who queued the idle work: `ui_thread::next_due_owner()` (and `UiQueue::next_due_owner`) returns
   the time `next_due` reports with the `&'static Location` of the call that queued that delayed

@@ -5,12 +5,13 @@
 //! asks for a layout with [`crate::animation::request_layout`]:
 //!
 //! ```ignore
-//! agg_gui::frame_capture::request_frame_capture(Some(view_rect), |result| {
+//! let handle = agg_gui::frame_capture::request_frame_capture(Some(view_rect), |result| {
 //!     match result {
 //!         Ok(frame) => attach_screenshot(frame.rgba, frame.width, frame.height),
 //!         Err(e) => show_message(&e.to_string()),
 //!     }
 //! });
+//! self.pending_capture = Some(handle); // dropped when the app stops waiting
 //! ```
 //!
 //! The request is queued in this thread's list and asks for a frame
@@ -22,6 +23,11 @@
 //! cannot (device lost, capture unavailable, region empty or off screen).
 //! The callback runs on the UI thread, inside the shell's frame, after the
 //! frame has been presented.
+//!
+//! The call returns a [`FrameCaptureRequestHandle`]. An app that stops
+//! waiting (its own time limit ran out: a window with no working GPU, or
+//! minimized, paints no frame) drops it, which withdraws the request: no
+//! read-back is done for it and its callback never runs.
 //!
 //! Frames nobody asked to capture take the shell's ordinary path: nothing here
 //! costs anything while the queue is empty ([`has_pending_frame_capture`]).
@@ -51,8 +57,9 @@
 //! [`crate::ux_scale::effective_scale`] ([`region_in_pixels`]). The delivered
 //! pixels are tight RGBA8, top row first.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::fmt;
+use std::rc::Rc;
 
 use crate::geometry::Rect;
 
@@ -98,10 +105,13 @@ type Callback = Box<dyn FnOnce(FrameCaptureResult)>;
 /// One queued capture, as the shell takes it. Delivering consumes it, so a
 /// callback runs at most once; dropping it undelivered delivers
 /// [`FrameCaptureError::Unavailable`], so a request never waits forever on a
-/// shell that went away.
+/// shell that went away. A request its app withdrew
+/// ([`FrameCaptureRequestHandle`]) delivers nothing, either way.
 pub struct FrameCaptureRequest {
     region: Option<Rect>,
     on_done: Option<Callback>,
+    /// Shared with the app's handle; set when the app withdraws.
+    withdrawn: Rc<Cell<bool>>,
 }
 
 impl FrameCaptureRequest {
@@ -110,8 +120,17 @@ impl FrameCaptureRequest {
         self.region
     }
 
-    /// Call the request's callback with `result`.
+    /// Whether the app has withdrawn the request: a shell drops it, and
+    /// abandons a read already started for it, instead of delivering.
+    pub fn is_withdrawn(&self) -> bool {
+        self.withdrawn.get()
+    }
+
+    /// Call the request's callback with `result`, unless the app withdrew it.
     pub fn deliver(mut self, result: FrameCaptureResult) {
+        if self.withdrawn.get() {
+            return;
+        }
         if let Some(cb) = self.on_done.take() {
             cb(result);
         }
@@ -120,6 +139,9 @@ impl FrameCaptureRequest {
 
 impl Drop for FrameCaptureRequest {
     fn drop(&mut self) {
+        if self.withdrawn.get() {
+            return;
+        }
         if let Some(cb) = self.on_done.take() {
             cb(Err(FrameCaptureError::Unavailable(
                 "the window stopped drawing before the capture was taken".to_string(),
@@ -140,32 +162,73 @@ thread_local! {
     static QUEUE: RefCell<Vec<FrameCaptureRequest>> = const { RefCell::new(Vec::new()) };
 }
 
+/// The app's hold on a capture it asked for ([`request_frame_capture`]).
+/// While it is kept, nothing changes. Dropping it, or calling
+/// [`withdraw`](Self::withdraw), withdraws the request: one not yet taken by
+/// a frame leaves the queue, and one already taken has its read abandoned at
+/// the shell's next poll (its buffers released). The callback never runs
+/// after the withdrawal. Once the callback has run, withdrawing does nothing.
+#[must_use = "dropping the handle withdraws the capture; keep it until the callback runs or the app stops waiting"]
+#[derive(Debug)]
+pub struct FrameCaptureRequestHandle {
+    withdrawn: Rc<Cell<bool>>,
+}
+
+impl FrameCaptureRequestHandle {
+    /// Withdraw the request now (dropping the handle does the same).
+    pub fn withdraw(self) {}
+}
+
+impl Drop for FrameCaptureRequestHandle {
+    fn drop(&mut self) {
+        self.withdrawn.set(true);
+        // Taken out under the borrow, dropped after it: the request's
+        // callback may own other handles whose drop reaches the queue too.
+        // A queue already borrowed (a withdrawal from inside a shell's take)
+        // leaves the request to be dropped by its withdrawn flag.
+        let removed = QUEUE.with(|q| {
+            let mut q = q.try_borrow_mut().ok()?;
+            let at = q
+                .iter()
+                .position(|r| Rc::ptr_eq(&r.withdrawn, &self.withdrawn))?;
+            Some(q.remove(at))
+        });
+        drop(removed);
+    }
+}
+
 /// Ask for the next drawn frame (or `region` of it, in window coordinates —
 /// see the module docs) to be delivered once to `on_done`. Makes a frame get
 /// drawn even when the app is idle. Call on the UI thread; `on_done` runs
-/// there too, on a later frame.
+/// there too, on a later frame. Keep the returned handle while waiting:
+/// dropping it withdraws the request ([`FrameCaptureRequestHandle`]).
 pub fn request_frame_capture(
     region: Option<Rect>,
     on_done: impl FnOnce(FrameCaptureResult) + 'static,
-) {
+) -> FrameCaptureRequestHandle {
+    let withdrawn = Rc::new(Cell::new(false));
     QUEUE.with(|q| {
         q.borrow_mut().push(FrameCaptureRequest {
             region,
             on_done: Some(Box::new(on_done)),
+            withdrawn: Rc::clone(&withdrawn),
         })
     });
     crate::animation::request_draw();
+    FrameCaptureRequestHandle { withdrawn }
 }
 
 /// Whether a capture is waiting for the shell's next frame.
 pub fn has_pending_frame_capture() -> bool {
-    QUEUE.with(|q| !q.borrow().is_empty())
+    QUEUE.with(|q| q.borrow().iter().any(|r| !r.is_withdrawn()))
 }
 
-/// Take every queued capture, oldest first. For shells: the frame that takes
-/// them is the frame they capture.
+/// Take every queued capture still wanted, oldest first. For shells: the
+/// frame that takes them is the frame they capture.
 pub fn take_frame_capture_requests() -> Vec<FrameCaptureRequest> {
-    QUEUE.with(|q| std::mem::take(&mut *q.borrow_mut()))
+    let mut taken = QUEUE.with(|q| std::mem::take(&mut *q.borrow_mut()));
+    taken.retain(|r| !r.is_withdrawn());
+    taken
 }
 
 /// A rectangle in framebuffer pixels: origin at the frame's top-left, +Y down.

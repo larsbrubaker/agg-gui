@@ -16,7 +16,8 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   has each requested region copied out (`finish_frame`, or `read_from` for a host already
   rendering offscreen), and `poll` delivers the pixels on later frames without blocking. Frames
   nobody asked to capture are untouched; a lost device (`poll`, `device_lost`) delivers
-  `FrameCaptureError::DeviceLost` instead of waiting.
+  `FrameCaptureError::DeviceLost` instead of waiting. A request the app withdrew is not read,
+  and its read in flight is abandoned at the next `poll` (staging buffer destroyed, no callback).
 
 ## [0.7.2] - 2026-11-19
 

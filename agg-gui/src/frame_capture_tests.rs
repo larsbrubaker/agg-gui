@@ -23,7 +23,7 @@ fn asking_for_a_capture_asks_an_idle_app_for_a_frame() {
     assert!(!animation::peek_draw_signals().0);
 
     let (_seen, cb) = recorder();
-    request_frame_capture(None, cb);
+    let _handle = request_frame_capture(None, cb);
 
     assert!(
         animation::peek_draw_signals().0,
@@ -38,7 +38,7 @@ fn requests_are_taken_once_and_delivered_once() {
     let _ = take_frame_capture_requests();
     let (seen, cb) = recorder();
     let region = Rect::new(1.0, 2.0, 3.0, 4.0);
-    request_frame_capture(Some(region), cb);
+    let _handle = request_frame_capture(Some(region), cb);
 
     let taken = take_frame_capture_requests();
     assert_eq!(taken.len(), 1);
@@ -61,11 +61,65 @@ fn requests_are_taken_once_and_delivered_once() {
 fn a_request_dropped_undelivered_reports_unavailable() {
     let _ = take_frame_capture_requests();
     let (seen, cb) = recorder();
-    request_frame_capture(None, cb);
+    let _handle = request_frame_capture(None, cb);
     drop(take_frame_capture_requests());
     let seen = seen.borrow();
     assert_eq!(seen.len(), 1, "the callback runs exactly once");
     assert!(matches!(seen[0], Err(FrameCaptureError::Unavailable(_))));
+}
+
+#[test]
+fn a_dropped_handle_withdraws_a_request_not_yet_taken() {
+    let _ = take_frame_capture_requests();
+    let (seen, cb) = recorder();
+    let (kept_seen, kept_cb) = recorder();
+    let dropped = request_frame_capture(None, cb);
+    let kept = request_frame_capture(None, kept_cb);
+    drop(dropped);
+
+    let taken = take_frame_capture_requests();
+    assert_eq!(taken.len(), 1, "only the kept request is taken");
+    drop(taken);
+    assert!(
+        seen.borrow().is_empty(),
+        "a withdrawn request never calls back"
+    );
+    assert_eq!(kept_seen.borrow().len(), 1, "the kept one still reports");
+    drop(kept);
+
+    // Withdrawing explicitly leaves nothing queued, and nothing pending.
+    let (seen, cb) = recorder();
+    request_frame_capture(None, cb).withdraw();
+    assert!(!has_pending_frame_capture());
+    assert!(take_frame_capture_requests().is_empty());
+    assert!(seen.borrow().is_empty());
+}
+
+#[test]
+fn a_request_withdrawn_after_it_was_taken_delivers_nothing() {
+    let _ = take_frame_capture_requests();
+    let (seen, cb) = recorder();
+    let handle = request_frame_capture(None, cb);
+    let taken = take_frame_capture_requests();
+    assert!(!taken[0].is_withdrawn());
+    drop(handle);
+    assert!(taken[0].is_withdrawn());
+    for req in taken {
+        req.deliver(Err(FrameCaptureError::RegionEmpty));
+    }
+    assert!(seen.borrow().is_empty());
+}
+
+#[test]
+fn withdrawing_after_delivery_changes_nothing() {
+    let _ = take_frame_capture_requests();
+    let (seen, cb) = recorder();
+    let handle = request_frame_capture(None, cb);
+    for req in take_frame_capture_requests() {
+        req.deliver(Err(FrameCaptureError::RegionEmpty));
+    }
+    drop(handle);
+    assert_eq!(*seen.borrow(), vec![Err(FrameCaptureError::RegionEmpty)]);
 }
 
 #[test]

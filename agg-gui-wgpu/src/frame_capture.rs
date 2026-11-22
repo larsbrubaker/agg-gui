@@ -18,7 +18,9 @@
 //! harvest-later split as `screenshot_capture.rs`'s
 //! `begin_capture_readback`). Each is checked against the context's loss
 //! record right before its mapped range is read (`crate::device_lost_flag`),
-//! and a lost device delivers [`FrameCaptureError::DeviceLost`].
+//! and a lost device delivers [`FrameCaptureError::DeviceLost`]. A request
+//! the app withdraws is skipped if not yet read, and its read is abandoned
+//! (buffer destroyed, nothing delivered) at the next poll if one is in flight.
 //!
 //! Shell order per frame: [`FrameCaptureService::begin_frame`] →
 //! (armed: [`FrameCaptureService::target_view`] as the frame's colour target)
@@ -159,6 +161,11 @@ impl FrameCaptureService {
             });
         let mut started = Vec::new();
         for request in std::mem::take(&mut self.armed) {
+            // Withdrawn during the frame: no read, and dropping it delivers
+            // nothing.
+            if request.is_withdrawn() {
+                continue;
+            }
             let region = match region_in_pixels(request.region(), scale, fw, fh) {
                 Ok(r) => r,
                 Err(e) => {
@@ -230,11 +237,15 @@ impl FrameCaptureService {
     }
 
     /// Deliver every read whose pixels have arrived (each callback runs here,
-    /// on this thread). Never blocks. While reads are still in flight it asks
+    /// on this thread), and abandon every read whose request was withdrawn
+    /// (`agg_gui::frame_capture::FrameCaptureRequestHandle`). Never blocks. While reads are still in flight it asks
     /// for another frame, so an idle app keeps polling until they land; call
     /// it after the frame's paint (`App::paint` clears draw requests).
     /// Returns whether reads are still in flight.
     pub fn poll(&mut self, ctx: &WgpuGfxCtx) -> bool {
+        // Reads the app withdrew are abandoned: dropping one destroys its
+        // staging buffer (mapped or not) and delivers nothing.
+        self.reads.retain(|read| !read.request.is_withdrawn());
         if self.reads.is_empty() {
             return false;
         }
