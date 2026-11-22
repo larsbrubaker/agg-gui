@@ -133,7 +133,8 @@ impl WebGpu {
         let config = wgpu::SurfaceConfiguration {
             // Browser surfaces advertise only RENDER_ATTACHMENT; asking for
             // COPY_SRC fails validation. Read-back goes through
-            // `WebShellConfig::offscreen_scene` instead.
+            // `WebShellConfig::offscreen_scene`, or for one frame through
+            // `agg_gui::frame_capture`, instead.
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format,
             width: w,

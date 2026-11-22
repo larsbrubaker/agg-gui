@@ -121,6 +121,10 @@ pub use tumble_cube::WgpuTumbleCubeRenderer;
 /// Screenshot read-back methods on [`WgpuGfxCtx`] (GPU→CPU frame copy).
 mod screenshot_readback;
 
+/// One-shot frame capture for `agg_gui::frame_capture` requests.
+mod frame_capture;
+pub use frame_capture::FrameCaptureService;
+
 /// GPU handle passed to widgets via `DrawCtx::gl_paint` on the wgpu backend.
 ///
 /// All fields are owned (cloned `Arc<...>` for device/queue, `wgpu::TextureView`

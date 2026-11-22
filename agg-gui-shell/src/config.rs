@@ -112,7 +112,10 @@ pub struct ShellConfig {
     /// runtime through [`crate::ShellControl::set_redraw_policy`].
     pub redraw_policy: RedrawPolicy,
     /// Surface read-back requirement, passed through to `agg_gui_wgpu::Gpu`.
-    /// Forced to [`CopySrc::Required`] when a screenshot is configured.
+    /// Forced to [`CopySrc::Required`] when a screenshot is configured. An app
+    /// that needs an occasional frame's pixels asks with
+    /// `agg_gui::frame_capture::request_frame_capture`, which needs no
+    /// `COPY_SRC` surface.
     pub copy_src: CopySrc,
     /// Swap-chain present mode, passed through to `agg_gui_wgpu::Gpu` (which
     /// falls back to `Fifo` if the surface does not support it).

@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps.
 
+## [0.7.2] - Unreleased
+
+### Added
+
+- The native shell serves `agg_gui::frame_capture`: an app can ask for the next frame (or a
+  region of it) as RGBA pixels from any widget, with no `--screenshot` flag and no `COPY_SRC`
+  window surface. Only the asked-for frame renders offscreen and is blitted to the window
+  (agg-gui-wgpu's `FrameCaptureService`); a device rebuild fails the captures in flight.
+
 ## [0.7.1] - 2026-11-19
 
 ### Changed

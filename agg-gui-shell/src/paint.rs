@@ -4,14 +4,20 @@
 //!
 //! Split out of `run.rs` so the event loop file is about events. The state
 //! that only the paint path cares about — the render context, the layout-skip
-//! key, the frame counter — lives in [`Painter`].
+//! key, the frame counter, the app's frame captures — lives in [`Painter`].
+//!
+//! A frame an app asked to capture (`agg_gui::frame_capture`) is the one
+//! frame rendered offscreen and blitted onto the surface, so its pixels can
+//! be read without configuring the surface `COPY_SRC` (which costs Metal its
+//! framebuffer-only surfaces); every other frame renders straight into the
+//! surface (`agg_gui_wgpu::FrameCaptureService`).
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use agg_gui::frame_policy::{LayoutKey, LayoutTracker};
 use agg_gui::App;
-use agg_gui_wgpu::{FrameAcquire, Gpu, RetryWake, WgpuGfxCtx};
+use agg_gui_wgpu::{FrameAcquire, FrameCaptureService, Gpu, RetryWake, WgpuGfxCtx};
 use winit::window::Window;
 
 use crate::config::ScreenshotConfig;
@@ -52,6 +58,8 @@ pub(crate) struct Painter {
     layout: LayoutTracker,
     frames_painted: u64,
     last_duration: Duration,
+    /// The app's one-shot frame captures (`agg_gui::frame_capture`).
+    capture: FrameCaptureService,
 }
 
 impl Painter {
@@ -61,6 +69,7 @@ impl Painter {
             layout: LayoutTracker::new(),
             frames_painted: 0,
             last_duration: Duration::ZERO,
+            capture: FrameCaptureService::new(),
         }
     }
 
@@ -89,6 +98,10 @@ impl Painter {
     /// so the context is replaced wholesale; the layout key is dropped too so
     /// the next frame lays out from scratch.
     pub(crate) fn rebuild(&mut self, gpu: &Gpu) {
+        // Captures read from the lost device's buffers fail; ones not yet
+        // taken are served by the rebuilt device's next frame.
+        self.capture
+            .device_lost("the graphics device was reset before the frame was read");
         self.ctx = Self::make_ctx(gpu);
         self.layout.reset();
     }
@@ -163,8 +176,16 @@ impl Painter {
 
         host.on_frame(app, &frame);
 
-        self.ctx.set_surface_texture(surface_frame.texture.clone());
-        self.ctx.begin_frame(view);
+        // Taken after the surface handed out a texture, so a refused frame
+        // leaves the app's capture requests queued for the next one.
+        let capturing = self.capture.begin_frame();
+        if capturing {
+            let target = self.capture.target_view(&mut self.ctx, win_w, win_h);
+            self.ctx.begin_frame(target);
+        } else {
+            self.ctx.set_surface_texture(surface_frame.texture.clone());
+            self.ctx.begin_frame(view.clone());
+        }
         host.paint(app, &mut self.ctx, &frame);
         self.layout.record(next_layout_key);
         self.ctx.end_frame();
@@ -173,6 +194,9 @@ impl Painter {
         // to the compositor: the only window in which the frame can be copied
         // or read back.
         host.after_paint(&mut self.ctx, &frame);
+        if capturing {
+            self.capture.finish_frame(&self.ctx, &view, (win_w, win_h));
+        }
 
         if let Some(cfg) = capture {
             if should_capture(self.frames_painted, cfg.settle_frames) {
@@ -180,6 +204,7 @@ impl Painter {
                 let result = write_png(&cfg.path, &rgba, w, h);
                 self.paint_presented_overlay(&surface_frame.texture, app, host, &frame);
                 self.ctx.present(surface_frame);
+                self.capture.poll(&self.ctx);
                 result.map_err(ShellError::Screenshot)?;
                 self.last_duration = started.elapsed();
                 return Ok(PaintOutcome {
@@ -194,6 +219,9 @@ impl Painter {
         // Drops the ctx's back-buffer clone before presenting (DX12 resize
         // fails otherwise) — see `WgpuGfxCtx::present`.
         self.ctx.present(surface_frame);
+        // After `App::paint`, which clears draw requests: a read still in
+        // flight asks for the frame that polls it again.
+        self.capture.poll(&self.ctx);
         self.last_duration = started.elapsed();
         Ok(PaintOutcome {
             painted: true,

@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps.
 
+## [0.7.3] - Unreleased
+
+### Added
+
+- `FrameCaptureService` serves `agg_gui::frame_capture` requests for a shell: the asked-for frame
+  alone renders into an offscreen target (`target_view`), is blitted onto the window's surface and
+  has each requested region copied out (`finish_frame`, or `read_from` for a host already
+  rendering offscreen), and `poll` delivers the pixels on later frames without blocking. Frames
+  nobody asked to capture are untouched; a lost device (`poll`, `device_lost`) delivers
+  `FrameCaptureError::DeviceLost` instead of waiting.
+
 ## [0.7.2] - 2026-11-19
 
 ### Added

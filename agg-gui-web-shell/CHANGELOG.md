@@ -8,6 +8,13 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ## [Unreleased]
 
+### Added (0.6.5)
+
+- The browser shell serves `agg_gui::frame_capture` on WebGPU and its WebGL2 fallback: an app can
+  ask for the next frame (or a region of it) as RGBA pixels without turning on `offscreen_scene`.
+  Only the asked-for frame renders offscreen and is blitted to the canvas; the frames after render
+  straight into the canvas again. With `offscreen_scene` on, the capture reads its scene target.
+
 ### Changed (0.6.4)
 
 - A frame lays the tree out when a widget in it asked to be drawn (`Widget::needs_draw`), as well

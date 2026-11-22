@@ -156,6 +156,9 @@ pub struct WebShellConfig {
     /// canvas, so `WgpuGfxCtx::capture_screenshot` / `read_screenshot` work.
     /// The web counterpart of `CopySrc::Required`: browser surfaces only
     /// advertise `RENDER_ATTACHMENT`, so the surface itself can't be copied.
+    /// An app that needs only an occasional frame asks for it with
+    /// `agg_gui::frame_capture::request_frame_capture` instead, which renders
+    /// just that frame offscreen.
     pub offscreen_scene: bool,
     /// Detect the client platform (`navigator.userAgent`, `(pointer: coarse)`,
     /// `?agg_input=mobile|desktop`) at boot and apply agg-gui's platform,

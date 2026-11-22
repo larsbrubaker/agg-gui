@@ -41,6 +41,8 @@
 //!   [`App`] entry points ([`shell_input::InputForwarder`]);
 //!   [`frame_demand`] is how a shell whose loop sleeps while idle hears that
 //!   a request was made outside its loop.
+//! - [`frame_capture`] — a one-shot capture of the next drawn frame (or a
+//!   region of it) that app code asks for and every shell serves.
 //! - [`theme`] — dark / light / system visuals read via `ctx.visuals()`.
 //! - [`overlay_insets`] + [`widgets::ReserveInset`] + [`card`] — safe-area
 //!   overlay placement: reserved screen edges (the on-screen keyboard
@@ -116,6 +118,7 @@ pub mod event;
 pub mod focus;
 pub mod font_settings;
 pub mod fonts;
+pub mod frame_capture;
 pub mod frame_demand;
 pub mod frame_policy;
 pub mod framebuffer;

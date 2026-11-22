@@ -15,13 +15,19 @@
 //! to a platform-neutral module (`dom_math::fit_backing`, `backing_resize`,
 //! `policy`, `frames_in_flight`, `recovery`, `frame_schedule`) that is unit
 //! tested.
+//!
+//! A frame the app asked to capture (`agg_gui::frame_capture`) is the one
+//! frame rendered offscreen (the canvas can never be copied from) and blitted
+//! onto the canvas; the frames after render straight into the canvas again
+//! (`agg_gui_wgpu::FrameCaptureService`). With `offscreen_scene` on, the
+//! capture reads the scene target every frame already renders into.
 
 use std::cell::RefCell;
 use std::sync::Arc;
 use std::time::Duration;
 
 use agg_gui::App;
-use agg_gui_wgpu::{SsaaFramebuffer, WgpuGfxCtx};
+use agg_gui_wgpu::{FrameCaptureService, SsaaFramebuffer, WgpuGfxCtx};
 use wasm_bindgen::JsValue;
 
 use super::gpu::{Acquire, WebGpu};
@@ -51,6 +57,8 @@ struct Painter {
     layout: LayoutTracker,
     frames: u64,
     last_duration: Duration,
+    /// The app's one-shot frame captures (`agg_gui::frame_capture`).
+    capture: FrameCaptureService,
 }
 
 enum GpuState {
@@ -119,6 +127,7 @@ pub(super) fn install_gpu(gpu: WebGpu) {
             layout: LayoutTracker::new(),
             frames: 0,
             last_duration: Duration::ZERO,
+            capture: FrameCaptureService::new(),
         }))
     });
 }
@@ -404,9 +413,14 @@ fn service_device_loss() -> bool {
                 return false;
             }
             let old = GPU.with(|g| std::mem::replace(&mut *g.borrow_mut(), GpuState::Rebuilding));
-            let GpuState::Ready(painter) = old else {
+            let GpuState::Ready(mut painter) = old else {
                 return false;
             };
+            // Captures read from the lost device's buffers fail; ones not yet
+            // taken are served by the rebuilt device's first frame.
+            painter
+                .capture
+                .device_lost("the graphics device was lost before the frame was read");
             wasm_bindgen_futures::spawn_local(async move {
                 match painter.gpu.rebuild().await {
                     Ok(gpu) => {
@@ -560,6 +574,9 @@ fn paint(w: u32, h: u32) -> bool {
         };
         DIRTY.with(|d| d.set(false));
 
+        // Taken after the canvas handed out a texture, so a refused frame
+        // leaves the app's capture requests queued for the next one.
+        let capturing = p.capture.begin_frame();
         if offscreen {
             let device = Arc::clone(&p.gpu.device);
             match p.scene.as_mut() {
@@ -580,6 +597,7 @@ fn paint(w: u32, h: u32) -> bool {
                 p.ctx.set_surface_texture(fb.resolve_texture().clone());
                 fb.render_view().clone()
             }
+            _ if capturing => p.capture.target_view(&mut p.ctx, w, h),
             _ => {
                 p.ctx.set_surface_texture(surface_frame.texture.clone());
                 surface_view.clone()
@@ -623,6 +641,12 @@ fn paint(w: u32, h: u32) -> bool {
                 buffer.destroy();
             }
         }
+        if capturing {
+            match (offscreen, p.scene.as_ref()) {
+                (true, Some(fb)) => p.capture.read_from(&p.ctx, fb.resolve_texture()),
+                _ => p.capture.finish_frame(&p.ctx, &surface_view, (w, h)),
+            }
+        }
 
         // Releases the stashed texture (surface or SSAA resolve) before
         // presenting — see `WgpuGfxCtx::present`.
@@ -631,6 +655,9 @@ fn paint(w: u32, h: u32) -> bool {
         p.last_duration = started.elapsed();
         PRESENTED.with(|c| c.set(true));
         with_app_host(|app, host| host.after_present(app, &frame));
+        // After `App::paint`, which clears draw requests: a read still in
+        // flight asks for the frame that polls it again.
+        p.capture.poll(&p.ctx);
         true
     })
 }

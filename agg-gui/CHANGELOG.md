@@ -10,6 +10,15 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- A one-shot capture of the next drawn frame: `frame_capture::request_frame_capture(region,
+  on_done)`, callable from a click handler with no access to the shell, makes a frame get drawn
+  even when the app is idle and delivers that frame (or `region` of it, a `Rect` in window
+  coordinates: logical, Y-up, as the root's children's bounds are) once to `on_done`, on the UI
+  thread on a later frame, as a `CapturedFrame` (tight RGBA8, top row first, with its pixel width
+  and height) or a `FrameCaptureError` (`DeviceLost`, `Unavailable`, `RegionEmpty`). Shells take
+  the queue with `take_frame_capture_requests` and convert regions with `region_in_pixels`; a
+  request dropped undelivered reports `Unavailable` (0.5.21).
+
 - Who queued the idle work: `ui_thread::next_due_owner()` (and `UiQueue::next_due_owner`) returns
   the time `next_due` reports with the `&'static Location` of the call that queued that delayed
   action or interval, its type named `ui_thread::WorkOwner`. `run_on_idle_after` and
