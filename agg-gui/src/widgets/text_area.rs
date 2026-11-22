@@ -32,6 +32,8 @@
 //!   * a programmatic focus id + cursor-to-start/end helpers;
 //!   * a pre-default key-chord interceptor ([`with_key_intercept`](TextArea::with_key_intercept)),
 //!     used by the demo for the Ctrl/Cmd+Y "toggle case of selection" shortcut.
+//!   * a whole-edit judge ([`with_text_filter`](TextArea::with_text_filter),
+//!     `text_filter.rs`) that refuses an insertion or cuts it to what fits.
 //!   * change and edit-complete callbacks ([`on_change`](TextArea::on_change) /
 //!     [`on_edit_complete`](TextArea::on_edit_complete)), mirroring `TextField`.
 //!   * agg-sharp `InternalTextEditWidget`'s caret API (`caret_api.rs`): line
@@ -215,6 +217,9 @@ pub struct TextArea {
     /// built-in key handling is skipped.
     on_key_chord: Option<Rc<RefCell<KeyIntercept>>>,
 
+    /// Whole-edit judge. See [`with_text_filter`](TextArea::with_text_filter).
+    text_filter: Option<Rc<text_filter::TextFilter>>,
+
     /// Optional per-line syntax highlighter (see [`LineHighlighter`]). When
     /// present, each wrapped line is painted as coloured runs instead of a
     /// single ambient-colour string.
@@ -374,6 +379,7 @@ impl TextArea {
             v_align_cell: None,
             focus_request_id: None,
             on_key_chord: None,
+            text_filter: None,
             highlighter: None,
             muted: None,
             on_change: None,
@@ -538,35 +544,6 @@ impl TextArea {
         Rc::clone(&self.edit)
     }
 
-    /// Current selection as a sorted `[start, end)` byte range, or `None` when
-    /// nothing is selected.
-    pub fn selection(&self) -> Option<(usize, usize)> {
-        self.edit.borrow().selection_range()
-    }
-
-    /// The currently-selected substring (empty when there is no selection).
-    pub fn selected_text(&self) -> String {
-        let st = self.edit.borrow();
-        match st.selection_range() {
-            Some((lo, hi)) => st.text[lo..hi].to_string(),
-            None => String::new(),
-        }
-    }
-
-    /// Collapse the selection and place the cursor at the very start.
-    pub fn set_cursor_to_start(&mut self) {
-        let mut st = self.edit.borrow_mut();
-        st.cursor = 0;
-        st.anchor = 0;
-    }
-
-    /// Collapse the selection and place the cursor at the very end.
-    pub fn set_cursor_to_end(&mut self) {
-        let mut st = self.edit.borrow_mut();
-        let end = st.text.len();
-        st.cursor = end;
-        st.anchor = end;
-    }
     pub fn with_font_size(mut self, size: f64) -> Self {
         self.font_size = size;
         self
@@ -751,6 +728,7 @@ mod ime;
 mod muted;
 mod no_wrap;
 mod scroll;
+mod text_filter;
 mod touch_select;
 mod undo;
 mod widget_impl;
@@ -784,6 +762,8 @@ mod segment_highlight_tests;
 mod selection_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod text_filter_tests;
 #[cfg(test)]
 mod theme_tests;
 #[cfg(test)]

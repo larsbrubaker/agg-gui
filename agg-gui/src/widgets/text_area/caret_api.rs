@@ -3,7 +3,8 @@
 //! `TypeFacePrinter.LineSpacing`), the caret's offset from the start of the
 //! text (`InsertBarPosition`), the caret and selection-start character indices
 //! with C#'s out-of-range-tolerant setters (`CharIndexToInsertBefore`,
-//! `SelectionIndexToStartBefore`) and `CopySelection`; and the raw byte
+//! `SelectionIndexToStartBefore`) and `CopySelection`; the byte selection,
+//! its text and the caret-to-start/end helpers; and the raw byte
 //! selection the on-screen keyboard's caret gestures read and put back
 //! ([`Widget::text_selection`](crate::widget::Widget::text_selection)). The laid-out content
 //! height (C#'s auto-sized `Height`) is `content_height` in `scroll.rs`.
@@ -143,5 +144,37 @@ impl TextArea {
         }
         self.ensure_cursor_visible();
         crate::animation::request_draw();
+    }
+}
+
+impl TextArea {
+    /// Current selection as a sorted `[start, end)` byte range, or `None` when
+    /// nothing is selected.
+    pub fn selection(&self) -> Option<(usize, usize)> {
+        self.edit.borrow().selection_range()
+    }
+
+    /// The currently-selected substring (empty when there is no selection).
+    pub fn selected_text(&self) -> String {
+        let st = self.edit.borrow();
+        match st.selection_range() {
+            Some((lo, hi)) => st.text[lo..hi].to_string(),
+            None => String::new(),
+        }
+    }
+
+    /// Collapse the selection and place the cursor at the very start.
+    pub fn set_cursor_to_start(&mut self) {
+        let mut st = self.edit.borrow_mut();
+        st.cursor = 0;
+        st.anchor = 0;
+    }
+
+    /// Collapse the selection and place the cursor at the very end.
+    pub fn set_cursor_to_end(&mut self) {
+        let mut st = self.edit.borrow_mut();
+        let end = st.text.len();
+        st.cursor = end;
+        st.anchor = end;
     }
 }

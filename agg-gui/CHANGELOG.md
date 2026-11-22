@@ -10,6 +10,14 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ### Added
 
+- A length limit (or any other judge) on a multi-line text area: `TextArea::with_text_filter`,
+  the same `Fn(inserted, resulting_text) -> bool` as `TextField::with_text_filter`, judges every
+  insertion (typing, Enter, Tab, paste, the context menu's Paste, an IME commit, a multi-line
+  indent) before it lands. A refused edit leaves the text, caret and undo history as they were; a
+  refused insertion of several characters is first cut to its longest leading part the filter
+  accepts, at a character boundary, and inserted as one undo step, so a paste fills the area up
+  to its limit. A multi-line indent is refused whole (0.5.21).
+
 - A one-shot capture of the next drawn frame: `frame_capture::request_frame_capture(region,
   on_done)`, callable from a click handler with no access to the shell, makes a frame get drawn
   even when the app is idle and delivers that frame (or `region` of it, a `Rect` in window

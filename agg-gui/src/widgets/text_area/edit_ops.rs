@@ -12,10 +12,13 @@ use super::*;
 impl TextArea {
     /// Insert a string at the cursor, replacing any active selection.
     /// Line ends are normalised to `'\n'` (C#'s paste and typed `'\r'`), and
-    /// the edit is one undo step (`undo.rs`).
+    /// the edit is one undo step (`undo.rs`). The text filter judges it first
+    /// and may refuse it or cut it short (`text_filter.rs`).
     pub(super) fn insert_str(&mut self, s: &str) {
         let (normalized, _) = normalize_line_endings(s, 0);
-        let s = normalized.as_str();
+        let Some(s) = self.text_filter_cut(normalized.as_str()) else {
+            return;
+        };
         self.begin_undoable_edit();
         let mut st = self.edit.borrow_mut();
         let (lo, hi) = (st.cursor.min(st.anchor), st.cursor.max(st.anchor));
@@ -151,6 +154,20 @@ impl TextArea {
     /// line start does not move, so the fresh indent falls *inside* the
     /// selection (matching common code editors). Drives the multi-line Tab.
     pub(super) fn indent_selection(&mut self) {
+        if self.text_filter.is_some() {
+            let st = self.edit.borrow();
+            let (lo, hi) = (st.cursor.min(st.anchor), st.cursor.max(st.anchor));
+            let starts = touched_line_starts(&st.text, lo, hi);
+            let mut result = st.text.clone();
+            for &s in starts.iter().rev() {
+                result.insert_str(s, INDENT);
+            }
+            let inserted = INDENT.repeat(starts.len());
+            drop(st);
+            if !self.text_filter_accepts(&inserted, &result) {
+                return;
+            }
+        }
         self.begin_undoable_edit();
         let mut st = self.edit.borrow_mut();
         let (lo, hi) = (st.cursor.min(st.anchor), st.cursor.max(st.anchor));
