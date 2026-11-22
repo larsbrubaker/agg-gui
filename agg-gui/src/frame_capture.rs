@@ -168,7 +168,11 @@ thread_local! {
 /// a frame leaves the queue, and one already taken has its read abandoned at
 /// the shell's next poll (its buffers released). The callback never runs
 /// after the withdrawal. Once the callback has run, withdrawing does nothing.
-#[must_use = "dropping the handle withdraws the capture; keep it until the callback runs or the app stops waiting"]
+///
+/// `let _ = request_frame_capture(..)` drops the handle at once and cancels
+/// the capture; bind it to a named variable or store it until the callback
+/// runs.
+#[must_use = "dropping the handle withdraws the capture: `let _ = request_frame_capture(..)` drops the handle at once and cancels the capture; bind it to a named variable or store it until the callback runs"]
 #[derive(Debug)]
 pub struct FrameCaptureRequestHandle {
     withdrawn: Rc<Cell<bool>>,
@@ -202,6 +206,9 @@ impl Drop for FrameCaptureRequestHandle {
 /// drawn even when the app is idle. Call on the UI thread; `on_done` runs
 /// there too, on a later frame. Keep the returned handle while waiting:
 /// dropping it withdraws the request ([`FrameCaptureRequestHandle`]).
+/// `let _ = request_frame_capture(..)` drops the handle at once and cancels
+/// the capture; bind it to a named variable or store it until the callback
+/// runs.
 pub fn request_frame_capture(
     region: Option<Rect>,
     on_done: impl FnOnce(FrameCaptureResult) + 'static,

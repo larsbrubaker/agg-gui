@@ -260,6 +260,11 @@ impl FrameCaptureService {
         }
         let mut still = Vec::new();
         for read in std::mem::take(&mut self.reads) {
+            // Withdrawn by a callback earlier in this same poll: abandoned
+            // (dropped, buffer destroyed) rather than copied out.
+            if read.request.is_withdrawn() {
+                continue;
+            }
             match read.done.try_recv() {
                 Err(std::sync::mpsc::TryRecvError::Empty) => still.push(read),
                 Ok(Ok(())) => {
