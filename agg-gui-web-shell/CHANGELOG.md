@@ -8,6 +8,11 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ## [Unreleased]
 
+## [0.6.5] - 2026-11-22
+
+The first release on crates.io since 0.6.1: it also carries 0.6.2 to 0.6.4, which were not
+published on their own.
+
 ### Added (0.6.5)
 
 - The browser shell serves `agg_gui::frame_capture` on WebGPU and its WebGL2 fallback: an app can

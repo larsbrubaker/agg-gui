@@ -8,6 +8,11 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ## [Unreleased]
 
+## [0.5.21] - 2026-11-22
+
+Every change since 0.5.1. Of the versions between, 0.5.5, 0.5.6 and 0.5.13 were published,
+each with the changes made up to it; the others were not published on their own.
+
 ### Added
 
 - A length limit (or any other judge) on a multi-line text area: `TextArea::with_text_filter`,
