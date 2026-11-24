@@ -30,6 +30,16 @@
 //! hide-on-leave. It reuses [`super::timings`] wholesale rather than
 //! duplicating the delays.
 //!
+//! # Waking a reactive shell
+//!
+//! The state machine runs only in a paint, and a reactive shell paints only
+//! when the app asks for it. A pointer move that changes which widget would
+//! supply the tip therefore asks for a frame itself ([`note_hover_target`],
+//! called by the App on every move): without it, moving between widgets that
+//! repaint nothing on hover (disabled toolbar buttons) leaves the last tip up
+//! over the wrong widget and never arms the new one. A move that keeps the
+//! same tipped widget asks for nothing, so a still window stays idle.
+//!
 //! # Content
 //!
 //! By default a tip paints as plain text lines. A host can install a content
@@ -352,6 +362,21 @@ struct FrameInputs {
 thread_local! {
     static FRAME: std::cell::RefCell<FrameInputs> =
         std::cell::RefCell::new(FrameInputs::default());
+    /// The widget tip identity the last tooltip pass ([`begin_frame`]) saw,
+    /// which [`note_hover_target`] compares a pointer move's against.
+    static LAST_WIDGET_TARGET: std::cell::RefCell<Option<Vec<usize>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// A pointer move found `identity` as the widget that would supply the tip
+/// (`None`: no tipped widget under the pointer). When that differs from what
+/// the last tooltip pass saw, ask for the frame that shows, hides or re-arms
+/// the tip; see the module docs.
+pub(crate) fn note_hover_target(identity: Option<&[usize]>) {
+    let changed = LAST_WIDGET_TARGET.with(|t| t.borrow().as_deref() != identity);
+    if changed {
+        crate::animation::request_draw_tagged("tooltip.controller.hover_target_changed");
+    }
 }
 
 /// Overlay identities start with this marker so they can never equal a
@@ -367,6 +392,7 @@ pub(crate) fn begin_frame(
     widget_owner: Option<Rect>,
     anchor: Option<Point>,
 ) {
+    LAST_WIDGET_TARGET.with(|t| *t.borrow_mut() = widget_target.as_ref().map(|(id, _)| id.clone()));
     FRAME.with(|f| {
         *f.borrow_mut() = FrameInputs {
             open: true,
@@ -479,6 +505,7 @@ pub fn reset() {
     super::content::clear();
     dispatch_pending();
     FRAME.with(|f| *f.borrow_mut() = FrameInputs::default());
+    LAST_WIDGET_TARGET.with(|t| *t.borrow_mut() = None);
 }
 
 #[cfg(test)]

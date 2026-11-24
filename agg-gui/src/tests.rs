@@ -195,6 +195,7 @@ mod toast;
 mod tool_tip_activation;
 mod tool_tip_device_scale;
 mod tool_tip_placement;
+mod tooltip_hover_redraw;
 mod tooltip_lines_keys;
 mod tooltip_window_hover;
 mod touch_long_press;

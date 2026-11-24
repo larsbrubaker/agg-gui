@@ -8,6 +8,13 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ## [Unreleased]
 
+### Fixed
+
+- Tooltips show for the widget under the pointer in a reactive shell: a pointer move that
+  changes which widget supplies the tip asks for a frame, so moving between widgets that repaint
+  nothing on hover (disabled buttons) no longer leaves the last tip up over the wrong widget or
+  shows no tip at all. A move that keeps the same tipped widget still asks for nothing.
+
 ## [0.5.21] - 2026-11-22
 
 Every change since 0.5.1. Of the versions between, 0.5.5, 0.5.6 and 0.5.13 were published,

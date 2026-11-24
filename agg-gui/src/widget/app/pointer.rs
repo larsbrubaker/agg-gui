@@ -154,6 +154,7 @@ impl App {
             let target = self.captured.clone().unwrap_or_else(|| path.clone());
             dispatch_event(&mut self.root, &target, &event, pos);
             self.store_hovered(Some(path));
+            self.note_tooltip_hover();
             return;
         }
         self.dispatch_mouse_move(pos);

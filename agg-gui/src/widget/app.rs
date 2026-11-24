@@ -680,6 +680,17 @@ impl App {
         crate::widgets::tooltip::controller::begin_frame(target, owner, current_mouse_world());
     }
 
+    /// After a pointer move: tell the tooltip controller which widget would
+    /// now supply the tip, so it asks a reactive shell for a frame when that
+    /// changed (`controller::note_hover_target`).
+    fn note_tooltip_hover(&self) {
+        let identity = self.hovered.as_deref().and_then(|path| {
+            tooltip_target::deepest_tipped(self.root.as_ref(), path, current_mouse_world())
+                .map(|(identity, ..)| identity)
+        });
+        crate::widgets::tooltip::controller::note_hover_target(identity.as_deref());
+    }
+
     /// Test hook: run the central tooltip pass without a full paint (no
     /// `DrawCtx` needed, so no popup-row offers). Mirrors what
     /// [`paint`](Self::paint) does around the tree paint, so a test can drive
@@ -708,6 +719,7 @@ impl App {
         if hover_changed {
             self.store_hovered(new_hit.clone());
         }
+        self.note_tooltip_hover();
 
         let event = Event::MouseMove { pos };
         if let Some(ref cap_path) = self.captured.clone() {
