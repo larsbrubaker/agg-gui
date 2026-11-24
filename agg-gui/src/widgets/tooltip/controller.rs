@@ -35,7 +35,9 @@
 //! The state machine runs only in a paint, and a reactive shell paints only
 //! when the app asks for it. A pointer move that changes which widget would
 //! supply the tip therefore asks for a frame itself ([`note_hover_target`],
-//! called by the App on every move): without it, moving between widgets that
+//! called by the App on every move once the move has reached the widget, so
+//! a widget that tips the item under the pointer has updated which item that
+//! is): without it, moving between widgets that
 //! repaint nothing on hover (disabled toolbar buttons) leaves the last tip up
 //! over the wrong widget and never arms the new one. A move that keeps the
 //! same tipped widget asks for nothing, so a still window stays idle.

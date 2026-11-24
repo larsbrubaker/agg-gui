@@ -719,7 +719,6 @@ impl App {
         if hover_changed {
             self.store_hovered(new_hit.clone());
         }
-        self.note_tooltip_hover();
 
         let event = Event::MouseMove { pos };
         if let Some(ref cap_path) = self.captured.clone() {
@@ -732,6 +731,9 @@ impl App {
         } else if let Some(path) = new_hit {
             dispatch_event(&mut self.root, &path, &event, pos);
         }
+        // After the move reached the widget: one that tips the item under the
+        // pointer (a tree view's rows) updates which item that is on this move.
+        self.note_tooltip_hover();
     }
 
     /// Lift the focused widget above the on-screen keyboard panel so

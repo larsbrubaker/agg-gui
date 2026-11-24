@@ -124,3 +124,41 @@ fn moving_onto_or_off_a_tipped_widget_asks_for_a_frame() {
     frame(&app);
     assert_eq!(controller::current_text(), "");
 }
+
+/// A widget that tips the item under the pointer learns which item that is
+/// from the move itself: a tree view that repaints nothing on hover, with a
+/// tip on each row, still asks for a frame when the pointer moves to another
+/// row, and the tip becomes that row's.
+#[test]
+fn moving_to_another_row_of_a_tree_that_tips_its_rows_asks_for_a_frame() {
+    use crate::widgets::tree_view::{NodeIcon, TreeView};
+    const ROW: f64 = 20.0;
+    let _restore = pin();
+    let font = std::sync::Arc::new(crate::text::Font::from_slice(super::TEST_FONT).expect("font"));
+    let mut tree = TreeView::new(font)
+        .with_row_height(ROW)
+        .with_hover_repaint(false);
+    let first = tree.add_root("First", NodeIcon::File);
+    let second = tree.add_root("Second", NodeIcon::File);
+    tree.set_node_tooltip(first, Some("first row".into()));
+    tree.set_node_tooltip(second, Some("second row".into()));
+    let mut app = App::new(Box::new(tree));
+    app.layout(Size::new(200.0, 200.0));
+    // Row `i`'s middle, Y-up.
+    let row = |i: f64| Point::new(30.0, 200.0 - (i + 0.5) * ROW);
+
+    move_asks_for_frame(&mut app, row(0.0));
+    frame(&app);
+    crate::clock::advance(tooltip_timings().initial_delay);
+    frame(&app);
+    assert_eq!(controller::current_text(), "first row");
+
+    assert!(
+        move_asks_for_frame(&mut app, row(1.0)),
+        "moving to the second row asks for the frame that changes the tip"
+    );
+    frame(&app);
+    crate::clock::advance(tooltip_timings().initial_delay);
+    frame(&app);
+    assert_eq!(controller::current_text(), "second row");
+}
