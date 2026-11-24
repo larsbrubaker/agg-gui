@@ -8,6 +8,8 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ## [Unreleased]
 
+## [0.5.22]
+
 ### Added
 
 - `Button::disabled_colors(&Visuals)`, the `(fill, stroke, text)` a disabled text button is
