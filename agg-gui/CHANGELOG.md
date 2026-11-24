@@ -8,6 +8,11 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ## [Unreleased]
 
+### Added
+
+- `Button::disabled_colors(&Visuals)`, the `(fill, stroke, text)` a disabled text button is
+  drawn in, is public, so a widget that paints its own button can look disabled the same way.
+
 ### Fixed
 
 - Tooltips show for the widget under the pointer in a reactive shell: a pointer move that

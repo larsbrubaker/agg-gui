@@ -357,7 +357,11 @@ impl Button {
         ));
     }
 
-    fn disabled_colors(v: &crate::theme::Visuals) -> (Color, Color, Color) {
+    /// The colours a disabled text button is drawn in over `v`: `(fill, stroke, text)`. A dark
+    /// theme gets the window fill, a faint white outline and dimmed text; a light one the track
+    /// colour, a soft outline and the dim text colour. Public so a widget that paints its own
+    /// button (a picture's overlay button) looks disabled the same way.
+    pub fn disabled_colors(v: &crate::theme::Visuals) -> (Color, Color, Color) {
         let luma = v.bg_color.r * 0.299 + v.bg_color.g * 0.587 + v.bg_color.b * 0.114;
         if luma < 0.5 {
             (
