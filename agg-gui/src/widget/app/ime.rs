@@ -6,12 +6,21 @@
 //! key routing it mirrors (modal subtree first, then the focus path) minus the
 //! accelerator and default-action fallbacks, which only make sense for keys.
 
+use std::cell::Cell;
+
 use super::tree_paths::widget_at_path_ref;
 use crate::event::{Event, EventResult};
 use crate::geometry::{Point, Rect};
 use crate::widget::keyboard_scroll::{current_lift, widget_rect_in_root};
 use crate::widget::tree::{active_modal_path, dispatch_event};
 use crate::widget::App;
+
+thread_local! {
+    /// Whether the active modal layer's text entry had the focus at the last
+    /// layout ([`App::sync_modal_text_entry`]), per thread as the on-screen
+    /// keyboard's state is.
+    static MODAL_TEXT_ENTRY: Cell<bool> = const { Cell::new(false) };
+}
 
 impl App {
     /// Text the platform committed for the focused widget (an IME finished a
@@ -58,10 +67,40 @@ impl App {
     /// field). Shells enable IME (winit `set_ime_allowed`, the web shell's
     /// hidden input) exactly while this is true.
     pub fn wants_ime(&self) -> bool {
-        self.focused_is_text_input()
-            || active_modal_path(self.root.as_ref())
-                .and_then(|path| widget_at_path_ref(self.root.as_ref(), &path))
-                .is_some_and(|w| w.modal_text_input_active())
+        self.focused_is_text_input() || self.modal_text_entry_active()
+    }
+
+    /// Whether the active modal layer is taking typed text itself
+    /// ([`crate::Widget::modal_text_input_active`], an open menu's search
+    /// field).
+    fn modal_text_entry_active(&self) -> bool {
+        active_modal_path(self.root.as_ref())
+            .and_then(|path| widget_at_path_ref(self.root.as_ref(), &path))
+            .is_some_and(|w| w.modal_text_input_active())
+    }
+
+    /// Raises the on-screen keyboard while the active modal layer's text
+    /// entry has the menu's focus, and lowers it when that ends, as a focus
+    /// change into or out of a text field does
+    /// (`keyboard_scroll::notify_focus_change`). A focused text field
+    /// already holds the keyboard up, so then this leaves it alone. Runs at
+    /// the end of each layout: a menu's focus moves inside the menu, not
+    /// through the App's focus.
+    pub(super) fn sync_modal_text_entry(&mut self) {
+        let active = self.modal_text_entry_active();
+        if MODAL_TEXT_ENTRY.with(|c| c.replace(active)) == active || self.focused_is_text_input() {
+            return;
+        }
+        use crate::widgets::on_screen_keyboard::{
+            set_text_input_focused_with_hints, EnterAction, KeyboardInputMode, TextInputHints,
+        };
+        // A menu's text entry is a search: lower case, Enter picks a result.
+        let hints = TextInputHints {
+            enter_action: EnterAction::Search,
+            auto_capitalize: false,
+            ..TextInputHints::default()
+        };
+        set_text_input_focused_with_hints(active, None, KeyboardInputMode::Text, hints);
     }
 
     /// Where the OS candidate window belongs: the caret rectangle of the

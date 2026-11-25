@@ -598,6 +598,14 @@ impl Widget for MenuBar {
         self.popup.text_entry_focused()
     }
 
+    fn needs_draw(&self) -> bool {
+        self.subtree_needs_draw()
+    }
+
+    fn next_draw_deadline(&self) -> Option<web_time::Instant> {
+        self.subtree_draw_deadline()
+    }
+
     /// Opening a menu from the bar and choosing a row leave keyboard focus
     /// on the field that had it, so Edit > Paste pastes there.
     fn keeps_focus_on_press(&self) -> bool {

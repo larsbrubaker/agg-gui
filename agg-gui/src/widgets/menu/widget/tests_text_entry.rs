@@ -5,7 +5,8 @@
 //! (`PopupMenu::replace_items`), Enter the entry leaves to the menu picks the
 //! first row under it, Space on another focusable row is that row's, the
 //! field gets the focus afresh on every open, an open field makes the App
-//! want the input method, and a `MenuBar` installs its widget, opens
+//! want the input method and raise the on-screen keyboard, the bar passes
+//! the field's caret blink on, and a `MenuBar` installs its widget, opens
 //! on it and swaps in rows from a `MenuItemsUpdate` (`bar_text_entry.rs`).
 
 use std::cell::RefCell;
@@ -75,6 +76,16 @@ impl Widget for Field {
         available
     }
     fn paint(&mut self, _ctx: &mut dyn DrawCtx) {}
+    /// A focused field blinks its caret, as a `TextField` does.
+    fn needs_draw(&self) -> bool {
+        self.log.borrow().focused
+    }
+    fn next_draw_deadline(&self) -> Option<web_time::Instant> {
+        self.log
+            .borrow()
+            .focused
+            .then(|| crate::clock::now() + std::time::Duration::from_millis(500))
+    }
     fn on_event(&mut self, event: &Event) -> EventResult {
         let mut log = self.log.borrow_mut();
         match event {
@@ -514,4 +525,46 @@ fn an_open_field_makes_the_app_want_the_input_method_and_takes_composition() {
     assert_eq!(logs.borrow()[0].borrow().preedit, "に");
     app.on_text_input("日");
     assert_eq!(logs.borrow()[0].borrow().text, "日");
+}
+
+#[test]
+fn the_bar_passes_its_open_fields_caret_blink_on() {
+    let _guard = crate::input_profile::profile_test_lock();
+    reset_env();
+    crate::widget::set_current_viewport(Size::new(300.0, 300.0));
+    let (mut bar, _logs) = field_and_plain_bar();
+    assert!(!bar.needs_draw());
+    assert!(bar.next_draw_deadline().is_none());
+    let a = centre(bar.menus()[0].rect);
+    press(&mut bar, a);
+    assert!(bar.needs_draw(), "the focused field's caret blinks");
+    assert!(bar.next_draw_deadline().is_some());
+    bar.on_event(&key(Key::Escape));
+    assert!(!bar.popup.is_open());
+    assert!(!bar.needs_draw(), "a closed menu's field asks for nothing");
+    assert!(bar.next_draw_deadline().is_none());
+}
+
+#[test]
+fn an_open_field_raises_the_on_screen_keyboard_and_closing_lowers_it() {
+    use crate::widgets::on_screen_keyboard::{self, state::with_state_ref, test_hook};
+    let _guard = crate::input_profile::profile_test_lock();
+    reset_env();
+    test_hook::reset();
+    on_screen_keyboard::set_enabled(true);
+    let keyboard_up = || with_state_ref(|s| s.text_input_focused && s.slide.target() > 0.5);
+    crate::widget::set_current_viewport(Size::new(300.0, 300.0));
+    let (mut bar, _logs) = field_and_plain_bar();
+    let a = centre(bar.menus()[0].rect);
+    press(&mut bar, a);
+    let mut app = crate::App::new(Box::new(bar));
+    assert!(!keyboard_up());
+    app.layout(Size::new(300.0, 300.0));
+    assert!(app.wants_ime());
+    assert!(keyboard_up(), "the field raises the on-screen keyboard");
+    app.on_key_down(Key::Escape, Modifiers::default());
+    app.layout(Size::new(300.0, 300.0));
+    assert!(!app.wants_ime());
+    assert!(!keyboard_up(), "closing the menu lowers it");
+    test_hook::reset();
 }

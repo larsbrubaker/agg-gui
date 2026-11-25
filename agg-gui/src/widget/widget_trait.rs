@@ -161,10 +161,15 @@ pub trait Widget {
 
     /// Whether this widget's active modal layer is taking typed text now,
     /// though no widget in the tree has the focus for it (an open menu whose
-    /// search field has the menu's focus). [`App::wants_ime`](crate::App::wants_ime)
-    /// asks the active modal, so the platform input method and on-screen
-    /// keyboard come up for it; its text and composition events reach the
-    /// modal subtree as keys do.
+    /// search field has the menu's focus). The App asks the active modal:
+    /// [`App::wants_ime`](crate::App::wants_ime) is true while it answers
+    /// true (the native IME, the web shell's hidden input), and each
+    /// [`App::layout`](crate::App::layout) raises the library's on-screen
+    /// keyboard when it starts answering true and lowers it when it stops,
+    /// unless a focused text field holds the keyboard. Text, composition and
+    /// keys reach the modal subtree. [`App::ime_cursor_area`](crate::App::ime_cursor_area)
+    /// does not cover it: it stays `None` with no focused text field, so the
+    /// IME candidate window and the web input are not placed at its caret.
     fn modal_text_input_active(&self) -> bool {
         false
     }

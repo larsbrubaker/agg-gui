@@ -184,6 +184,23 @@ impl PopupMenu {
         }
     }
 
+    /// Whether a widget in the open menu's rows has an ongoing draw need (a
+    /// search field's caret blink). A host widget ORs this into its own
+    /// [`Widget::needs_draw`](crate::widget::Widget::needs_draw): the row
+    /// widgets live outside the widget tree.
+    pub fn row_widgets_need_draw(&self) -> bool {
+        self.state.open && self.row_widgets.needs_draw(&self.items)
+    }
+
+    /// The earliest next draw a widget in the open menu's rows asks for, for
+    /// its host's [`Widget::next_draw_deadline`](crate::widget::Widget::next_draw_deadline).
+    pub fn row_widgets_draw_deadline(&self) -> Option<web_time::Instant> {
+        if !self.state.open {
+            return None;
+        }
+        self.row_widgets.next_draw_deadline(&self.items)
+    }
+
     /// Whether the open menu's text entry has the focus, so typed text and the
     /// input method go to it.
     pub fn text_entry_focused(&self) -> bool {

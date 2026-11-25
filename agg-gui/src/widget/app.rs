@@ -260,6 +260,7 @@ impl App {
         self.resolve_tracked_paths();
         self.apply_pending_focus();
         self.drop_unreachable_focus();
+        self.sync_modal_text_entry();
         // Re-evaluate the keyboard-avoidance lift against FRESH bounds
         // (see `keyboard_scroll::relift_after_layout` for the why).
         crate::widget::keyboard_scroll::relift_after_layout(

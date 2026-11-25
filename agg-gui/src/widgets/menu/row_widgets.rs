@@ -193,6 +193,27 @@ impl RowWidgets {
         crate::animation::request_draw();
     }
 
+    /// Whether a widget in a row of `items` has an ongoing draw need (a
+    /// focused field's caret blink).
+    pub(super) fn needs_draw(&self, items: &[MenuEntry]) -> bool {
+        let shown = row_ids(items);
+        self.rows
+            .borrow()
+            .iter()
+            .any(|r| shown.contains(&r.id) && r.widget.needs_draw())
+    }
+
+    /// The earliest next draw a widget in a row of `items` asks for.
+    pub(super) fn next_draw_deadline(&self, items: &[MenuEntry]) -> Option<web_time::Instant> {
+        let shown = row_ids(items);
+        self.rows
+            .borrow()
+            .iter()
+            .filter(|r| shown.contains(&r.id))
+            .filter_map(|r| r.widget.next_draw_deadline())
+            .min()
+    }
+
     /// Whether the menu's text entry has the focus.
     pub(super) fn text_entry_focused(&self, items: &[MenuEntry]) -> bool {
         text_row(items).is_some_and(|(_, id)| self.focused.get() == Some(id))
@@ -350,6 +371,18 @@ pub(super) fn text_row(items: &[MenuEntry]) -> Option<(usize, usize)> {
                 .map(|row| (index, row.id)),
             _ => None,
         })
+}
+
+/// The ids of the widget rows in `items` and their submenus.
+fn row_ids(items: &[MenuEntry]) -> Vec<usize> {
+    let mut ids = Vec::new();
+    for entry in items {
+        if let MenuEntry::Item(item) = entry {
+            ids.extend(item.widget_row.map(|row| row.id));
+            ids.extend(row_ids(&item.submenu));
+        }
+    }
+    ids
 }
 
 /// Whether `key` is typing for a text entry: a character (Space included)

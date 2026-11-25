@@ -27,10 +27,17 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   it opens, and `TopMenu::with_items_update` with a shared `MenuItemsUpdate` lets something
   inside the open menu (its search field) replace the menu's rows.
 - `Widget::modal_text_input_active` lets an active modal layer say it is taking typed text with no
-  focused widget for it; `App::wants_ime` asks it, so the input method and on-screen keyboard come
-  up for an open menu's search field (`MenuBar` answers it, from `PopupMenu::text_entry_focused`),
-  and `Event::ImePreedit` reaches the field as `Event::TextInput` does. Space on another
+  focused widget for it (`MenuBar` answers it from `PopupMenu::text_entry_focused`). While it is
+  true, `App::wants_ime` is true, so the native IME and the web shell's hidden input switch on, and
+  `App::layout` raises the on-screen keyboard (search hints: lower case, a search Enter key),
+  lowering it again when the menu closes unless a focused text field holds it. `Event::ImePreedit`
+  reaches the field as `Event::TextInput` does. `App::ime_cursor_area` stays `None` for it, so the
+  candidate window and the web input are not placed at the field's caret. Space on another
   highlighted keyboard-focusable row stays that row's.
+- A `MenuBar` passes its open menu's row widgets' draw needs on (`Widget::needs_draw`,
+  `Widget::next_draw_deadline`, through `PopupMenu::row_widgets_need_draw` and
+  `PopupMenu::row_widgets_draw_deadline`), so a search field's caret blinks. Another host of a
+  `PopupMenu` with row widgets ORs those two into its own.
 - `PopupMenuState::forget_rows` drops the submenu path, scroll, aim and highlight that indexed
   rows which have been replaced.
 
