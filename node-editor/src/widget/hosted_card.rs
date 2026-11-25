@@ -251,21 +251,35 @@ impl Widget for HostedLayer {
 }
 
 /// Width of a selected card's ring, in card units.
-const SELECTION_RING_WIDTH: f64 = 2.0;
+const SELECTION_RING_WIDTH: f64 = 3.0;
 /// Gap between the card's edge and the ring's inside, in card units.
 const SELECTION_RING_GAP: f64 = 0.5;
+/// The soft glow round a selected card's ring: one band per entry, each a
+/// unit wide and further out than the last, in the ring's colour at that
+/// opacity, so the ring fades into the canvas rather than stopping hard.
+const SELECTION_GLOW: [f32; 4] = [0.35, 0.22, 0.12, 0.05];
 
-/// A selected card's ring (MatterCAD's `NodeCardSelection.DrawRing`): a
-/// 2 unit outline just outside the card, its inside half a unit beyond the
-/// card's edge, so it covers neither the card's border nor its content.
-/// Drawn on the edge, half of it would cover the title bar's and body's
-/// outer pixels; 2 units, not 1, because the card's edge can fall between
-/// pixels, where a 1 unit line anti-aliased across two of them reads as a
-/// faint smudge. In card units, so the ring scales with the zoom as the
-/// card does. It follows the card's corners (concentric, its radius grown
-/// by the same distance), where MatterCAD strokes a square-cornered
-/// rectangle round its rounded card.
+/// How far a selected card's ring and glow reach past its edge, in card units.
+const SELECTION_REACH: f64 =
+    SELECTION_RING_GAP + SELECTION_RING_WIDTH + SELECTION_GLOW.len() as f64;
+
+/// A selected card's ring: a 3 unit outline in the theme's accent just
+/// outside the card, its inside half a unit beyond the card's edge, so it
+/// covers neither the card's border nor its content, wide enough to read at
+/// a glance among unselected cards; round it a soft glow of the same colour
+/// fades out over four units. In card units, so ring and glow scale with
+/// the zoom as the card does. Both follow the card's corners (concentric,
+/// the radius grown by the same distance).
 fn paint_selection_ring(ctx: &mut dyn DrawCtx, w: f64, h: f64, color: Color) {
+    let ring_out = SELECTION_RING_GAP + SELECTION_RING_WIDTH;
+    for (i, alpha) in SELECTION_GLOW.iter().enumerate() {
+        let out = ring_out + i as f64 + 0.5;
+        ctx.set_stroke_color(Color::rgba(color.r, color.g, color.b, color.a * alpha));
+        ctx.set_line_width(1.0);
+        ctx.begin_path();
+        ctx.rounded_rect(-out, -out, w + 2.0 * out, h + 2.0 * out, NODE_RADIUS + out);
+        ctx.stroke();
+    }
     let out = SELECTION_RING_WIDTH * 0.5 + SELECTION_RING_GAP;
     ctx.set_stroke_color(color);
     ctx.set_line_width(SELECTION_RING_WIDTH);
@@ -393,7 +407,7 @@ impl HostedCard {
         let blur = style.shadow_blur.max(0.0);
         // `ChromeStyle`'s shadow offset is Y down.
         let (dx, dy) = (style.shadow_dx, style.shadow_dy);
-        let ring = SELECTION_RING_WIDTH + SELECTION_RING_GAP;
+        let ring = SELECTION_REACH;
         let mut out = Insets {
             left: (blur - dx).max(ring),
             right: (blur + dx).max(ring),

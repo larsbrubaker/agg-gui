@@ -8,6 +8,14 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ## [Unreleased]
 
+## [0.0.7] - 2026-11-24
+
+### Changed
+
+- A selected hosted card's ring is 3 units wide (was 2) in the theme's accent, with a soft glow
+  of the accent fading out over the 4 units beyond it, so the selection reads at a glance. The
+  card's retained layer grows to hold the glow.
+
 ## [0.0.6] - 2026-11-20
 
 ### Changed

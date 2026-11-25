@@ -1,6 +1,6 @@
 //! Tests for a selected hosted card's selection ring (`hosted_card.rs`),
-//! rendered in software: the ring runs just outside the drawn card
-//! (MatterCAD's `NodeCardSelection.DrawRing`), so selecting a card adds a
+//! rendered in software: the ring runs just outside the drawn card, 3 units
+//! wide in the accent with a soft glow beyond it, so selecting a card adds a
 //! ring round it and leaves the card itself, its 1 px border included,
 //! exactly as it was. Both in canvas units, so they follow the zoom.
 
@@ -136,12 +136,12 @@ fn assert_ring_outside(zoom: f64) {
         along_top as f64 > CARD[0] * zoom * 0.8,
         "the ring runs the length of the top edge (zoom {zoom}: {along_top} pixels)"
     );
-    // 2 units wide, starting 0.5 out: nothing beyond 2.5 units (plus
-    // the anti-aliased pixel the edge falls in).
-    let reach = (2.5 * zoom).ceil() as u32 + 1;
+    // 3 units wide, starting 0.5 out, then 4 units of glow: nothing
+    // beyond 7.5 units (plus the anti-aliased pixel the edge falls in).
+    let reach = (7.5 * zoom).ceil() as u32 + 1;
     assert!(
         outside.iter().all(|(_, y)| *y < top + reach),
-        "the ring stays within 2.5 units of the card (zoom {zoom})"
+        "the ring and its glow stay within 7.5 units of the card (zoom {zoom})"
     );
 }
 
@@ -155,24 +155,60 @@ fn a_selected_cards_ring_lies_outside_it_at_zoom_half() {
     assert_ring_outside(0.5);
 }
 
-/// At zoom 1 the ring covers the pixel row 1 to 2 units above the card
-/// whole, in the theme's accent colour.
-#[test]
-fn a_selected_cards_ring_is_the_accent_colour() {
-    let ringed = render(1.0, true);
+/// The theme's accent as 0-255 channels.
+fn accent_rgb() -> [i32; 3] {
     let accent = agg_gui::theme::current_visuals().accent;
-    let top = (ORIGIN[1] + CARD[1]) as u32;
-    let mid = (ORIGIN[0] + CARD[0] * 0.5) as u32;
-    let p = rgba(&ringed, mid, top + 1);
-    let want = [
+    [
         (accent.r * 255.0).round() as i32,
         (accent.g * 255.0).round() as i32,
         (accent.b * 255.0).round() as i32,
-    ];
-    for c in 0..3 {
+    ]
+}
+
+fn is_accent(p: [u8; 4]) -> bool {
+    let want = accent_rgb();
+    (0..3).all(|c| (p[c] as i32 - want[c]).abs() <= 2)
+}
+
+/// At zoom 1 the ring covers the pixel rows 1 to 3 units above the card
+/// whole, in the theme's accent colour: a ring 3 units wide, which reads at
+/// a glance where a 2 unit one was easy to miss.
+#[test]
+fn a_selected_cards_ring_is_the_accent_colour_three_units_wide() {
+    let ringed = render(1.0, true);
+    let top = (ORIGIN[1] + CARD[1]) as u32;
+    let mid = (ORIGIN[0] + CARD[0] * 0.5) as u32;
+    for row in [top + 1, top + 2] {
+        let p = rgba(&ringed, mid, row);
         assert!(
-            (p[c] as i32 - want[c]).abs() <= 2,
-            "ring pixel {p:?}, accent {want:?}"
+            is_accent(p),
+            "ring pixel {p:?} at row {row}, accent {:?}",
+            accent_rgb()
         );
     }
+}
+
+/// Past the ring a soft glow of the accent fades out: the rows beyond it
+/// are tinted (they differ from the unselected card's) but are not the
+/// solid accent, and each is fainter than the one inside it.
+#[test]
+fn a_selected_cards_ring_has_a_soft_glow() {
+    let plain = render(1.0, false);
+    let ringed = render(1.0, true);
+    let top = (ORIGIN[1] + CARD[1]) as u32;
+    let mid = (ORIGIN[0] + CARD[0] * 0.5) as u32;
+    let alpha = |row: u32| rgba(&ringed, mid, row)[3] as i32 - rgba(&plain, mid, row)[3] as i32;
+    let glow: Vec<i32> = (top + 4..top + 8).map(alpha).collect();
+    let ring = alpha(top + 1);
+    for (i, row) in (top + 4..top + 8).enumerate() {
+        assert!(glow[i] > 0, "the glow tints row {row}: {glow:?}");
+        assert!(
+            glow[i] < ring,
+            "row {row} is glow, fainter than the solid ring ({glow:?}, ring {ring})"
+        );
+    }
+    assert!(
+        glow.windows(2).all(|w| w[0] > w[1]),
+        "the glow fades outward: {glow:?}"
+    );
 }
