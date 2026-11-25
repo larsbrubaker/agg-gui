@@ -246,8 +246,10 @@ impl MenuItem {
     /// Escape go to its `on_event` first wherever the highlight is; while it
     /// is highlighted every other key but Up and Down does too, so Left,
     /// Right, Home and End move its caret and Enter is its own. A key the
-    /// widget ignores goes on to the menu (Escape then closes it). Only the
-    /// first such row of the top level is the text entry.
+    /// widget ignores goes on to the menu: Escape then closes it, and Enter
+    /// picks the first row under the entry that has an action (a search's
+    /// best result). Only the first such row of the top level is the text
+    /// entry.
     ///
     /// [`Event::TextInput`]: crate::event::Event::TextInput
     pub fn takes_text(mut self) -> Self {

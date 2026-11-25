@@ -184,6 +184,30 @@ impl PopupMenu {
         }
     }
 
+    /// Whether the open menu's text entry has the focus, so typed text and the
+    /// input method go to it.
+    pub fn text_entry_focused(&self) -> bool {
+        self.state.open && self.row_widgets.text_entry_focused(&self.items)
+    }
+
+    /// The first top-level row after the text entry that Enter would pick: enabled, with an
+    /// action and no submenu.
+    fn first_pickable_row(&self) -> Option<usize> {
+        let (start, _) = text_row(&self.items)?;
+        self.items
+            .iter()
+            .enumerate()
+            .skip(start + 1)
+            .find_map(|(index, entry)| match entry {
+                MenuEntry::Item(item)
+                    if item.enabled && item.action.is_some() && !item.has_submenu() =>
+                {
+                    Some(index)
+                }
+                _ => None,
+            })
+    }
+
     /// Whether the highlight is on the menu's text entry, which then takes
     /// Left and Right itself.
     pub fn text_row_highlighted(&self) -> bool {
@@ -216,6 +240,20 @@ impl PopupMenu {
                 .key_down(&self.items, hover.as_deref(), event)
             {
                 return (result, MenuResponse::None);
+            }
+        }
+        // Enter the text entry leaves to the menu picks the first row under it
+        // that does something (a search's best result).
+        if matches!(
+            event,
+            Event::KeyDown {
+                key: Key::Enter,
+                ..
+            }
+        ) && self.text_row_highlighted()
+        {
+            if let Some(index) = self.first_pickable_row() {
+                self.state.hover_path = Some(vec![index]);
             }
         }
         let result = self.state.handle_event(&mut self.items, event, viewport);

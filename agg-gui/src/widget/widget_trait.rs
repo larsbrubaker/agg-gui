@@ -159,6 +159,16 @@ pub trait Widget {
         false
     }
 
+    /// Whether this widget's active modal layer is taking typed text now,
+    /// though no widget in the tree has the focus for it (an open menu whose
+    /// search field has the menu's focus). [`App::wants_ime`](crate::App::wants_ime)
+    /// asks the active modal, so the platform input method and on-screen
+    /// keyboard come up for it; its text and composition events reach the
+    /// modal subtree as keys do.
+    fn modal_text_input_active(&self) -> bool {
+        false
+    }
+
     /// Whether, while this widget is the active modal, pointer moves and
     /// wheel turns outside its bounds reach the widgets under the pointer as
     /// usual: their hover state and cursor (a splitter's resize pointer)

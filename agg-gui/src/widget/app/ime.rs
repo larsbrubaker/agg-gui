@@ -1,5 +1,7 @@
 //! Text-input (IME) methods on [`App`]: committed text and composition
-//! (preedit) text routed to the focused widget, and the caret rectangle a
+//! (preedit) text routed to the focused widget (or the active modal layer,
+//! which may be taking text itself, an open menu's search field), whether the
+//! input method is wanted, and the caret rectangle a
 //! shell places the OS candidate window at. Sits beside `keyboard.rs`, whose
 //! key routing it mirrors (modal subtree first, then the focus path) minus the
 //! accelerator and default-action fallbacks, which only make sense for keys.
@@ -51,10 +53,15 @@ impl App {
     }
 
     /// Whether the OS input method should be active: the focused widget
-    /// accepts typed text. Shells enable IME (winit `set_ime_allowed`, the
-    /// web shell's hidden input) exactly while this is true.
+    /// accepts typed text, or the active modal layer is taking typed text
+    /// ([`crate::Widget::modal_text_input_active`], an open menu's search
+    /// field). Shells enable IME (winit `set_ime_allowed`, the web shell's
+    /// hidden input) exactly while this is true.
     pub fn wants_ime(&self) -> bool {
         self.focused_is_text_input()
+            || active_modal_path(self.root.as_ref())
+                .and_then(|path| widget_at_path_ref(self.root.as_ref(), &path))
+                .is_some_and(|w| w.modal_text_input_active())
     }
 
     /// Where the OS candidate window belongs: the caret rectangle of the

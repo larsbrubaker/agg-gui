@@ -594,6 +594,10 @@ impl Widget for MenuBar {
         self.popup.is_open()
     }
 
+    fn modal_text_input_active(&self) -> bool {
+        self.popup.text_entry_focused()
+    }
+
     /// Opening a menu from the bar and choosing a row leave keyboard focus
     /// on the field that had it, so Edit > Paste pastes there.
     fn keeps_focus_on_press(&self) -> bool {

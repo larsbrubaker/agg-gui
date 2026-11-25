@@ -59,6 +59,11 @@ impl RowWidgets {
             Some(row) => {
                 row.widget = widget;
                 row.hover_path = None;
+                // The new widget has not been told it has the focus: the next
+                // sync hands it out afresh.
+                if self.focused.get() == Some(id) {
+                    self.focused.set(None);
+                }
             }
             None => rows.push(RowWidget {
                 id,
@@ -122,10 +127,10 @@ impl RowWidgets {
 
     /// Hands a key press to a row widget before the menu sees it, `Some` when
     /// the widget consumed it. The text entry ([`super::MenuItem::takes_text`])
-    /// gets typing and Escape wherever the highlight is, and every key but Up
-    /// and Down while the highlight (`hover`) is on it; any other
-    /// keyboard-focusable row the highlight is on gets Left, Right, Enter and
-    /// Space only.
+    /// gets typing, Escape and composition ([`Event::ImePreedit`]) wherever
+    /// the highlight is, and every key but Up and Down while the highlight
+    /// (`hover`) is on it; any other keyboard-focusable row the highlight is
+    /// on gets Left, Right, Enter and Space (Space before the text entry).
     pub(super) fn key_down(
         &self,
         items: &[MenuEntry],
@@ -134,13 +139,20 @@ impl RowWidgets {
     ) -> Option<EventResult> {
         let text = text_row(items);
         let row = match event {
-            Event::TextInput { .. } => text.map(|(_, id)| id)?,
+            Event::TextInput { .. } | Event::ImePreedit { .. } => text.map(|(_, id)| id)?,
             Event::KeyDown { key, modifiers } => {
                 let on_text = text.filter(|(index, _)| hover == Some(&[*index][..]));
+                // Space on another highlighted keyboard-focusable row is that
+                // row's (a toggle), not typing.
+                let other_focusable = hover
+                    .and_then(|path| focusable_row(items, path))
+                    .filter(|_| on_text.is_none());
                 if let Some((_, id)) = on_text {
                     if matches!(key, Key::ArrowUp | Key::ArrowDown) {
                         return None;
                     }
+                    id
+                } else if let Some(id) = other_focusable.filter(|_| *key == Key::Char(' ')) {
                     id
                 } else if let Some((_, id)) = text.filter(|_| is_typing(key, *modifiers)) {
                     id
@@ -181,8 +193,14 @@ impl RowWidgets {
         crate::animation::request_draw();
     }
 
-    /// Forgets which row has the focus without telling it (the menu closed:
-    /// the next open hands the focus out afresh).
+    /// Whether the menu's text entry has the focus.
+    pub(super) fn text_entry_focused(&self, items: &[MenuEntry]) -> bool {
+        text_row(items).is_some_and(|(_, id)| self.focused.get() == Some(id))
+    }
+
+    /// Takes the focus from the row that has it, sending it
+    /// [`Event::FocusLost`] (the menu closed: the next open hands the focus
+    /// out afresh).
     pub(super) fn forget_focus(&self) {
         if let Some(id) = self.focused.take() {
             self.with(id, |w| w.on_event(&Event::FocusLost));

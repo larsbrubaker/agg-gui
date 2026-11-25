@@ -18,13 +18,19 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   `Event::TextInput`) and Escape reach the widget first wherever the highlight is, and while it
   is highlighted every key but Up and Down does, so Left and Right move its caret (in a
   `MenuBar` too) and Enter is its own. A key the widget ignores goes on to the menu, so Escape
-  on an empty field closes it. Menus without one are unchanged.
+  on an empty field closes it, and Enter it leaves to the menu picks the first row under it
+  that has an action (a search's best result). Menus without one are unchanged.
 - `PopupMenu::replace_items` swaps an open menu's rows while it stays open and keeps its row
   widgets, so a search field keeps its text and focus while its results change;
   `PopupMenu::focus_text_row` and `PopupMenu::text_row_highlighted` go with it.
 - `TopMenu::with_row_widgets` gives a `MenuBar` menu the widgets its widget rows host, made as
   it opens, and `TopMenu::with_items_update` with a shared `MenuItemsUpdate` lets something
   inside the open menu (its search field) replace the menu's rows.
+- `Widget::modal_text_input_active` lets an active modal layer say it is taking typed text with no
+  focused widget for it; `App::wants_ime` asks it, so the input method and on-screen keyboard come
+  up for an open menu's search field (`MenuBar` answers it, from `PopupMenu::text_entry_focused`),
+  and `Event::ImePreedit` reaches the field as `Event::TextInput` does. Space on another
+  highlighted keyboard-focusable row stays that row's.
 - `PopupMenuState::forget_rows` drops the submenu path, scroll, aim and highlight that indexed
   rows which have been replaced.
 
