@@ -145,6 +145,17 @@ impl PopupMenuState {
         crate::widgets::tooltip::controller::clear();
     }
 
+    /// The rows changed under an open menu: forget the submenu path, the
+    /// scroll, the pointer aim and the highlight, which indexed the old rows.
+    /// The menu stays open where it is.
+    pub fn forget_rows(&mut self) {
+        self.open_path.clear();
+        self.scroll_offsets.clear();
+        self.scroll_drag = None;
+        self.aim.clear();
+        self.hover_path = None;
+    }
+
     pub fn close(&mut self) {
         self.open = false;
         self.open_path.clear();

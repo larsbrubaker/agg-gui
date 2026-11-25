@@ -6,7 +6,8 @@
 //! invisible [`MenuTitle`] child (see `top_menu.rs`) so the tree exposes a
 //! findable, named widget per title.  The popup machinery lives in
 //! `widget/mod.rs` (`PopupMenu`) and `state.rs`; geometry constants in
-//! `geometry.rs`.
+//! `geometry.rs`. What serves a menu with a text entry (its row widgets, the
+//! highlight on the field, rows replaced while open) is `bar_text_entry.rs`.
 
 use std::sync::Arc;
 
@@ -27,6 +28,9 @@ use super::super::state::{MenuAnchorKind, MenuResponse};
 use super::labels::BarLabels;
 use super::top_menu::{MenuTitle, TopMenu};
 use super::{is_touch_synthesized, MenuOrientation, PopupMenu};
+
+#[path = "bar_text_entry.rs"]
+mod text_entry;
 
 pub struct MenuBar {
     bounds: Rect,
@@ -333,6 +337,7 @@ impl MenuBar {
             _ => rect.height,
         };
         self.popup.state.set_anchor_span(span);
+        self.prepare_opened_menu(idx);
         self.open_index = Some(idx);
         self.hover_index = Some(idx);
         self.cache.invalidate();
@@ -391,6 +396,8 @@ impl MenuBar {
 
     fn should_switch_top_menu(&self, key: &Key) -> bool {
         match key {
+            // A highlighted text entry moves its caret with the arrows.
+            Key::ArrowLeft | Key::ArrowRight if self.popup.text_row_highlighted() => false,
             Key::ArrowLeft => self.popup.state.open_path.is_empty(),
             Key::ArrowRight => {
                 if !self.popup.state.open_path.is_empty() {
@@ -624,6 +631,7 @@ impl Widget for MenuBar {
                 }
             }
         }
+        self.apply_items_update();
         if self.popup.is_open() {
             self.sync_popup_measure();
             if let Event::KeyDown { key, .. } = event {
@@ -769,6 +777,7 @@ impl Widget for MenuBar {
         let (mut ox, mut oy) = (0.0, 0.0);
         crate::widget::logical_root_transform(ctx).transform(&mut ox, &mut oy);
         self.popup.state.set_space_origin(Some(Point::new(ox, oy)));
+        self.apply_items_update();
         self.popup.paint(ctx, font, font_size, current_viewport());
     }
 }

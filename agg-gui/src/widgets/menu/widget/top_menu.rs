@@ -15,7 +15,10 @@
 //! ([`TopMenu::with_items_provider`]): the bar calls it each time the menu
 //! opens (and before matching keyboard shortcuts), so apps whose entries
 //! depend on live state (enable gates, check marks) build them only when
-//! they are about to be shown.
+//! they are about to be shown. A menu whose rows host widgets supplies them
+//! with [`TopMenu::with_row_widgets`], made as it opens, and one whose rows
+//! change while it is open (a search field's results) takes them through
+//! [`TopMenu::with_items_update`].
 
 use crate::draw_ctx::DrawCtx;
 use crate::event::{Event, EventResult};
@@ -23,9 +26,14 @@ use crate::geometry::{Point, Rect};
 use crate::widget::Widget;
 
 use super::super::model::MenuEntry;
+use super::items_update::MenuItemsUpdate;
 
 /// Supplies a menu's entries at the moment it opens.
 type ItemsProvider = Box<dyn FnMut() -> Vec<MenuEntry>>;
+
+/// Makes the widgets a menu's [`crate::widgets::menu::MenuItem::widget_row`]
+/// rows host, by row id, as it opens.
+type RowWidgetsProvider = Box<dyn FnMut() -> Vec<(usize, Box<dyn Widget>)>>;
 
 pub struct TopMenu {
     pub label: String,
@@ -35,6 +43,9 @@ pub struct TopMenu {
     /// (see [`TopMenu::title_id`]).
     id: Option<String>,
     provider: Option<ItemsProvider>,
+    row_widgets: Option<RowWidgetsProvider>,
+    /// Rows the menu takes while it is open ([`Self::with_items_update`]).
+    pub(super) update: Option<MenuItemsUpdate>,
 }
 
 impl TopMenu {
@@ -45,6 +56,8 @@ impl TopMenu {
             rect: Rect::default(),
             id: None,
             provider: None,
+            row_widgets: None,
+            update: None,
         }
     }
 
@@ -76,6 +89,29 @@ impl TopMenu {
     ) -> Self {
         self.provider = Some(Box::new(provider));
         self
+    }
+
+    /// Supply the widgets this menu's widget rows host: the bar calls
+    /// `provider` each time the menu opens, after its items, and registers
+    /// each widget under its row id on the popup.
+    pub fn with_row_widgets(
+        mut self,
+        provider: impl FnMut() -> Vec<(usize, Box<dyn Widget>)> + 'static,
+    ) -> Self {
+        self.row_widgets = Some(Box::new(provider));
+        self
+    }
+
+    /// Let the open menu's rows be replaced through `update` (a search
+    /// field's results), the menu and its row widgets staying as they are.
+    pub fn with_items_update(mut self, update: MenuItemsUpdate) -> Self {
+        self.update = Some(update);
+        self
+    }
+
+    /// The widgets the row widgets provider makes now; none without one.
+    pub(super) fn make_row_widgets(&mut self) -> Vec<(usize, Box<dyn Widget>)> {
+        self.row_widgets.as_mut().map(|p| p()).unwrap_or_default()
     }
 
     /// Re-run the items provider, if any, replacing `items`.

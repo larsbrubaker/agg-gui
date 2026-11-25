@@ -14,13 +14,14 @@ use crate::text::Font;
 use super::fit_width::{FitMeasure, MenuWidth};
 use super::model::MenuEntry;
 use super::paint::{paint_panel, MenuStyle};
-use super::row_widgets::RowWidgets;
+use super::row_widgets::{text_row, RowWidgets};
 use super::state::{MenuAnchorKind, MenuResponse, PopupMenuState};
 use super::style::current_menu_style;
 
 use labels::PopupLabels;
 
 mod bar;
+mod items_update;
 mod labels;
 mod named_rows;
 mod popup_local;
@@ -28,6 +29,7 @@ mod popup_paint;
 mod top_menu;
 
 pub use bar::MenuBar;
+pub use items_update::MenuItemsUpdate;
 pub use named_rows::menu_row_name;
 pub use top_menu::{MenuTitle, TopMenu};
 
@@ -142,11 +144,51 @@ impl PopupMenu {
         self.local_anchor = None;
         self.row_widgets.reset_interaction();
         self.state.open_at(pos, MenuAnchorKind::Context);
+        self.focus_text_row();
     }
 
     pub fn close(&mut self) {
         self.row_widgets.reset_interaction();
+        self.row_widgets.forget_focus();
         self.state.close();
+    }
+
+    /// Puts the highlight on the menu's text entry
+    /// ([`crate::widgets::menu::MenuItem::takes_text`]) and gives its widget the
+    /// focus, so typing goes straight in; no change for a menu without one.
+    /// The opens call it; a host that opens the state itself calls it after.
+    pub fn focus_text_row(&mut self) {
+        if !self.state.open {
+            return;
+        }
+        if let Some((index, _)) = text_row(&self.items) {
+            self.state.hover_path = Some(vec![index]);
+            self.row_widgets.sync_focus(&self.items, Some(&[index]));
+            crate::animation::request_draw();
+        }
+    }
+
+    /// Replaces the rows of the menu, keeping it open where it is and keeping
+    /// its row widgets (a row naming an id already registered shows the same
+    /// widget, so a search field keeps its text, caret and focus while the
+    /// rows under it change). The highlight returns to the text entry, if
+    /// there is one; open submenus and scrolling are forgotten.
+    pub fn replace_items(&mut self, items: Vec<MenuEntry>) {
+        self.items = items;
+        self.row_widgets.reset_interaction();
+        if self.state.open {
+            self.state.forget_rows();
+            self.row_widgets.sync_focus(&self.items, None);
+            self.focus_text_row();
+            crate::animation::request_draw();
+        }
+    }
+
+    /// Whether the highlight is on the menu's text entry, which then takes
+    /// Left and Right itself.
+    pub fn text_row_highlighted(&self) -> bool {
+        let hover = self.state.hover_path.as_deref();
+        text_row(&self.items).is_some_and(|(index, _)| hover == Some(&[index][..]))
     }
 
     pub fn is_open(&self) -> bool {
@@ -178,8 +220,12 @@ impl PopupMenu {
         }
         let result = self.state.handle_event(&mut self.items, event, viewport);
         if !self.row_widgets.is_empty() {
-            let hover = self.state.hover_path.clone().filter(|_| self.state.open);
-            self.row_widgets.sync_focus(&self.items, hover.as_deref());
+            if self.state.open {
+                let hover = self.state.hover_path.clone();
+                self.row_widgets.sync_focus(&self.items, hover.as_deref());
+            } else {
+                self.row_widgets.forget_focus();
+            }
         }
         result
     }
@@ -324,6 +370,8 @@ mod tests_rows;
 mod tests_selection_column;
 #[cfg(test)]
 mod tests_style;
+#[cfg(test)]
+mod tests_text_entry;
 #[cfg(test)]
 mod tests_tooltip;
 #[cfg(test)]

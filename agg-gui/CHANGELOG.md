@@ -8,6 +8,26 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ## [Unreleased]
 
+## [0.5.23]
+
+### Added
+
+- A menu can have a text entry, a search field at its top: `MenuItem::takes_text` marks a
+  `widget_row` as the menu's text entry. The menu opens with the highlight on it and its widget
+  keeps the keyboard focus while the menu is open. Typing (characters, Space, Backspace, Delete,
+  `Event::TextInput`) and Escape reach the widget first wherever the highlight is, and while it
+  is highlighted every key but Up and Down does, so Left and Right move its caret (in a
+  `MenuBar` too) and Enter is its own. A key the widget ignores goes on to the menu, so Escape
+  on an empty field closes it. Menus without one are unchanged.
+- `PopupMenu::replace_items` swaps an open menu's rows while it stays open and keeps its row
+  widgets, so a search field keeps its text and focus while its results change;
+  `PopupMenu::focus_text_row` and `PopupMenu::text_row_highlighted` go with it.
+- `TopMenu::with_row_widgets` gives a `MenuBar` menu the widgets its widget rows host, made as
+  it opens, and `TopMenu::with_items_update` with a shared `MenuItemsUpdate` lets something
+  inside the open menu (its search field) replace the menu's rows.
+- `PopupMenuState::forget_rows` drops the submenu path, scroll, aim and highlight that indexed
+  rows which have been replaced.
+
 ## [0.5.22]
 
 ### Added

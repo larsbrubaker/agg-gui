@@ -8,6 +8,10 @@
 //! events to it with the framework's standard hit-test + bubble dispatch,
 //! including hover-leave and press capture (a drag that starts in a row
 //! widget keeps going to it until release).
+//! Keys reach a keyboard-focusable row while it is highlighted, and the
+//! menu's text entry ([`super::MenuItem::takes_text`]) gets typing and
+//! Escape wherever the highlight is and keeps the focus while the menu is
+//! open ([`RowWidgets::key_down`], [`RowWidgets::sync_focus`]).
 //!
 //! The store is shared behind `Rc<RefCell<…>>` so `PopupMenu` stays `Clone`
 //! (clones share the same widgets).
@@ -16,7 +20,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use crate::draw_ctx::DrawCtx;
-use crate::event::{Event, EventResult, Key};
+use crate::event::{Event, EventResult, Key, Modifiers};
 use crate::geometry::{Point, Rect, Size};
 use crate::widget::{dispatch_event_dyn, hit_test_subtree, paint_subtree, Widget};
 
@@ -116,32 +120,54 @@ impl RowWidgets {
         }
     }
 
-    /// Hands a key press to the keyboard-focusable row widget the highlight (`hover`) is on:
-    /// Left, Right, Enter and Space only. `Some` when the widget consumed it.
+    /// Hands a key press to a row widget before the menu sees it, `Some` when
+    /// the widget consumed it. The text entry ([`super::MenuItem::takes_text`])
+    /// gets typing and Escape wherever the highlight is, and every key but Up
+    /// and Down while the highlight (`hover`) is on it; any other
+    /// keyboard-focusable row the highlight is on gets Left, Right, Enter and
+    /// Space only.
     pub(super) fn key_down(
         &self,
         items: &[MenuEntry],
         hover: Option<&[usize]>,
         event: &Event,
     ) -> Option<EventResult> {
-        let Event::KeyDown { key, .. } = event else {
-            return None;
+        let text = text_row(items);
+        let row = match event {
+            Event::TextInput { .. } => text.map(|(_, id)| id)?,
+            Event::KeyDown { key, modifiers } => {
+                let on_text = text.filter(|(index, _)| hover == Some(&[*index][..]));
+                if let Some((_, id)) = on_text {
+                    if matches!(key, Key::ArrowUp | Key::ArrowDown) {
+                        return None;
+                    }
+                    id
+                } else if let Some((_, id)) = text.filter(|_| is_typing(key, *modifiers)) {
+                    id
+                } else {
+                    if !matches!(
+                        key,
+                        Key::ArrowLeft | Key::ArrowRight | Key::Enter | Key::Char(' ')
+                    ) {
+                        return None;
+                    }
+                    focusable_row(items, hover?)?
+                }
+            }
+            _ => return None,
         };
-        if !matches!(
-            key,
-            Key::ArrowLeft | Key::ArrowRight | Key::Enter | Key::Char(' ')
-        ) {
-            return None;
-        }
-        let row = focusable_row(items, hover?)?;
         let result = self.with(row, |w| w.on_event(event))?;
         result.is_consumed().then_some(result)
     }
 
-    /// Sends [`Event::FocusLost`] / [`Event::FocusGained`] as the highlight (`hover`) leaves and
-    /// reaches a keyboard-focusable row.
+    /// Sends [`Event::FocusLost`] / [`Event::FocusGained`] as the focus moves
+    /// between rows: the keyboard-focusable row the highlight (`hover`) is on,
+    /// else the menu's text entry, which keeps the focus while nothing else
+    /// has it.
     pub(super) fn sync_focus(&self, items: &[MenuEntry], hover: Option<&[usize]>) {
-        let now = hover.and_then(|path| focusable_row(items, path));
+        let now = hover
+            .and_then(|path| focusable_row(items, path))
+            .or_else(|| text_row(items).map(|(_, id)| id));
         let before = self.focused.replace(now);
         if before == now {
             return;
@@ -153,6 +179,14 @@ impl RowWidgets {
             self.with(id, |w| w.on_event(&Event::FocusGained));
         }
         crate::animation::request_draw();
+    }
+
+    /// Forgets which row has the focus without telling it (the menu closed:
+    /// the next open hands the focus out afresh).
+    pub(super) fn forget_focus(&self) {
+        if let Some(id) = self.focused.take() {
+            self.with(id, |w| w.on_event(&Event::FocusLost));
+        }
     }
 
     /// The tooltip of the row widget (or the widget inside it) under `pointer`, in the menu's
@@ -283,6 +317,32 @@ fn widget_rows(items: &[MenuEntry], layouts: &[PopupLayout]) -> Vec<(usize, Rect
         }
     }
     out
+}
+
+/// The top-level index and row id of the menu's text entry: its first
+/// [`super::MenuItem::takes_text`] row.
+pub(super) fn text_row(items: &[MenuEntry]) -> Option<(usize, usize)> {
+    items
+        .iter()
+        .enumerate()
+        .find_map(|(index, entry)| match entry {
+            MenuEntry::Item(item) => item
+                .widget_row
+                .filter(|row| row.takes_text)
+                .map(|row| (index, row.id)),
+            _ => None,
+        })
+}
+
+/// Whether `key` is typing for a text entry: a character (Space included)
+/// with no Ctrl, Alt or Meta, Backspace, Delete, or Escape (which a text
+/// entry may take to clear itself before the menu closes).
+fn is_typing(key: &Key, modifiers: Modifiers) -> bool {
+    match key {
+        Key::Char(_) => !(modifiers.ctrl || modifiers.alt || modifiers.meta),
+        Key::Backspace | Key::Delete | Key::Escape => true,
+        _ => false,
+    }
 }
 
 /// The id of the keyboard-focusable widget row at `path`.

@@ -138,6 +138,9 @@ pub struct MenuWidgetRow {
     /// Whether Up / Down step onto this row like onto a text row
     /// ([`MenuItem::keyboard_focusable`]). Off by default.
     pub keyboard_focus: bool,
+    /// Whether the row's widget is where the menu's typing goes
+    /// ([`MenuItem::takes_text`]). Off by default.
+    pub takes_text: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -211,6 +214,7 @@ impl MenuItem {
                 id,
                 height: height.max(0.0),
                 keyboard_focus: false,
+                takes_text: false,
             }),
             tooltip: None,
             row_height: None,
@@ -230,6 +234,26 @@ impl MenuItem {
     pub fn keyboard_focusable(mut self) -> Self {
         if let Some(row) = self.widget_row.as_mut() {
             row.keyboard_focus = true;
+        }
+        self
+    }
+
+    /// Makes a [`MenuItem::widget_row`] the menu's text entry, a search field
+    /// at the top of a menu: it is [`Self::keyboard_focusable`], the menu
+    /// opens with the highlight on it, and its widget keeps the keyboard
+    /// focus while the menu is open, wherever the highlight goes. Typing
+    /// (characters, Space, Backspace, Delete and [`Event::TextInput`]) and
+    /// Escape go to its `on_event` first wherever the highlight is; while it
+    /// is highlighted every other key but Up and Down does too, so Left,
+    /// Right, Home and End move its caret and Enter is its own. A key the
+    /// widget ignores goes on to the menu (Escape then closes it). Only the
+    /// first such row of the top level is the text entry.
+    ///
+    /// [`Event::TextInput`]: crate::event::Event::TextInput
+    pub fn takes_text(mut self) -> Self {
+        if let Some(row) = self.widget_row.as_mut() {
+            row.keyboard_focus = true;
+            row.takes_text = true;
         }
         self
     }
