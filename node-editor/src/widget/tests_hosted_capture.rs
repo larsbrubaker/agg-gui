@@ -3,7 +3,9 @@
 //! layout between press and release): the press raises the card, which
 //! reorders the hosted layer's children, and the moves and the release must
 //! still reach the pressed widget, so a button there works on the first
-//! click and a slider there follows the drag.
+//! click and a slider there follows the drag. A right-click menu open over a
+//! card takes the presses on its rows: the card's button under a row is
+//! never clicked.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -128,4 +130,47 @@ fn a_slider_in_a_lower_card_follows_the_drag_after_the_card_is_raised() {
         changes2.borrow().is_empty(),
         "card 2's slider was never dragged"
     );
+}
+
+/// A click on a right-click menu row drawn over a card's button chooses
+/// the row (the built-in menu's Delete, its first) and leaves the button
+/// unclicked: the editor claims the pointer over its open menu.
+#[test]
+fn a_menu_row_over_a_cards_button_takes_the_click() {
+    let (mut app, clicks1, clicks2) = app_with_button_cards();
+    let none = Modifiers::default();
+    // A right-click on card 1's title, 3 units above its body, opens the
+    // menu with its first row just below the pointer, over the button.
+    let (x, y) = (110.0, VIEW.height - (400.0 - TITLE_HEIGHT + 3.0));
+    app.on_mouse_move(x, y);
+    app.on_mouse_down(x, y, MouseButton::Right, none);
+    app.on_mouse_up(x, y, MouseButton::Right, none);
+    app.layout(VIEW);
+    let editor = |app: &App| {
+        let root = app.root().as_any().unwrap();
+        root.downcast_ref::<NodeEditor>()
+            .unwrap()
+            .open_context_menu()
+            .is_some()
+    };
+    assert!(editor(&app), "the right-click opened the menu");
+    let (cx, cy) = (x + 15.0, y + 12.0);
+    app.on_mouse_move(cx, cy);
+    app.on_mouse_down(cx, cy, MouseButton::Left, none);
+    app.layout(VIEW);
+    app.on_mouse_up(cx, cy, MouseButton::Left, none);
+    app.layout(VIEW);
+    assert_eq!(clicks1.get(), 0, "the button under the row was not clicked");
+    assert_eq!(clicks2.get(), 0);
+    assert!(!editor(&app), "choosing the row closed the menu");
+    let root = app.root().as_any().unwrap();
+    let nodes = root
+        .downcast_ref::<NodeEditor>()
+        .unwrap()
+        .model
+        .lock()
+        .unwrap()
+        .nodes()
+        .len();
+    assert_eq!(nodes, 1, "the row under the click, Delete, was chosen");
 }

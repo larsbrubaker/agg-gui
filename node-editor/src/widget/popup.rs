@@ -2,7 +2,9 @@
 //! menus (the add menu's sources are chosen in `add_menu`), or the host's
 //! own node menu (`NodeGraphModel::node_context_menu`,
 //! whose chosen items go back through `on_node_context_action`) — and the
-//! event-translate helper used by the editor's floating overlays.
+//! event-translate helper used by the editor's floating overlays. While the
+//! menu is open the editor claims the pointer over it (`popup_contains`), so
+//! the hosted cards under it see none of the presses and moves meant for it.
 //!
 //! Lives in its own submodule so [`super::mod`] stays under the
 //! 800-line guardrail without sacrificing the canvas / state-machine
@@ -136,6 +138,20 @@ impl NodeEditor {
         items.extend(build_add_node_popup_items(&self.model));
         self.popup = PopupMenu::new(items);
         true
+    }
+
+    /// Whether `pos` (editor-local, Y up) lies on the open right-click menu:
+    /// any of its panels, the open submenus' included. The editor claims the
+    /// pointer there (`claims_pointer_exclusively`), so a press or move over a
+    /// menu row reaches the menu, never the hosted card's widgets drawn under
+    /// it (a field the click would focus, a button it would fire).
+    pub(super) fn popup_contains(&self, pos: agg_gui::Point) -> bool {
+        if !self.popup.is_open() {
+            return false;
+        }
+        let viewport = agg_gui::Size::new(self.bounds.width, self.bounds.height);
+        let layouts = self.popup.state.layouts(&self.popup.items, viewport);
+        agg_gui::widgets::menu::geometry::hit_test(&layouts, pos).is_some()
     }
 
     /// The right-click menu while it is open (editor-local coordinates,

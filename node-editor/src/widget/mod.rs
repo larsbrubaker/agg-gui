@@ -626,8 +626,12 @@ impl Widget for NodeEditor {
             && local_pos.y <= self.bounds.height
     }
 
-    fn claims_pointer_exclusively(&self, _local_pos: agg_gui::Point) -> bool {
-        !matches!(self.interaction, CanvasState::Idle) || self.hosted_resizing()
+    /// While a drag or a card resize is in flight, and over the open
+    /// right-click menu, whose rows lie over hosted cards' widgets.
+    fn claims_pointer_exclusively(&self, local_pos: agg_gui::Point) -> bool {
+        !matches!(self.interaction, CanvasState::Idle)
+            || self.hosted_resizing()
+            || self.popup_contains(local_pos)
     }
 
     fn on_event(&mut self, event: &Event) -> EventResult {

@@ -16,6 +16,12 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   of the accent fading out over the 4 units beyond it, so the selection reads at a glance. The
   card's retained layer grows to hold the glow.
 
+### Fixed
+
+- A press or move over the open right-click menu goes to the menu, never to a hosted card's
+  widget drawn under it: choosing a row over a card's button no longer fires the button, and a
+  row over a field no longer focuses the field. The editor claims the pointer over the menu.
+
 ## [0.0.6] - 2026-11-20
 
 ### Changed
