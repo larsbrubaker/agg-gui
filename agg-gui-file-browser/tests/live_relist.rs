@@ -1,8 +1,11 @@
 //! The `disk` feature's waking directory monitor, through agg-gui's `App`: with it registered, a
 //! file written into the disk folder a browser shows, by something outside the app, wakes the UI
 //! (the host's waker runs, from the watch's thread) and the list shows the file at its next
-//! frames, with no event from the user.
+//! frames, with no event from the user. The monitor registered here is the waking monitor,
+//! handing each watch over once its first listing is taken, so the file the test writes is never
+//! part of the watch's baseline.
 
+use std::path::Path;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -11,9 +14,26 @@ use std::time::{Duration, Instant};
 use agg_gui::text::Font;
 use agg_gui::{App, Size, Widget};
 use agg_gui_file_browser::{
-    register_directory_monitor, BrowserConfig, BrowserState, FileBrowser, ViewMode,
+    BrowserConfig, BrowserState, FileBrowser, ViewMode, WakingDirectoryMonitor,
 };
-use agg_gui_files::disk::{set_directory_monitor, AllFiles, DiskFolder};
+use agg_gui_files::disk::{
+    set_directory_monitor, AllFiles, DirectoryChanged, DirectoryMonitor, DirectoryWatch, DiskFolder,
+};
+
+/// [`WakingDirectoryMonitor`], returning each watch once its first listing is taken.
+struct ListedWakingMonitor;
+
+impl DirectoryMonitor for ListedWakingMonitor {
+    fn watch(
+        &self,
+        directory_path: &Path,
+        directory_changed: DirectoryChanged,
+    ) -> Option<Box<dyn DirectoryWatch>> {
+        let watch = WakingDirectoryMonitor.watch_directory(directory_path, directory_changed)?;
+        assert!(watch.wait_for_first_listing(Duration::from_secs(30)));
+        Some(Box::new(watch))
+    }
+}
 
 fn font() -> Arc<Font> {
     Arc::new(Font::from_slice(agg_gui::fonts::NOTO_SANS_REGULAR).expect("bundled font loads"))
@@ -36,7 +56,7 @@ fn a_file_written_outside_wakes_the_ui_and_the_list_shows_it() {
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("made");
     std::fs::write(dir.join("gear.stl"), b"solid gear").expect("written");
-    register_directory_monitor();
+    set_directory_monitor(Some(Arc::new(ListedWakingMonitor)));
     agg_gui::set_device_scale(1.0);
     let root = DiskFolder::new(&dir, Rc::new(AllFiles));
     let state = BrowserState::new(Box::new(root), BrowserConfig::default());
@@ -45,8 +65,6 @@ fn a_file_written_outside_wakes_the_ui_and_the_list_shows_it() {
     let size = Size::new(600.0, 400.0);
     app.layout(size);
     assert!(has(app.root(), "Row Item gear.stl"));
-    // Let the watch take its first look before the folder changes.
-    std::thread::sleep(Duration::from_millis(300));
     agg_gui::ui_thread::invoke_pending_actions();
     wakes.store(0, Ordering::SeqCst);
     std::fs::write(dir.join("bolt.stl"), b"solid bolt").expect("written");

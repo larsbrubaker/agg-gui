@@ -8,6 +8,23 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ## [Unreleased]
 
+## [0.0.16]
+
+### Added
+
+- `WakingDirectoryMonitor::watch_directory`: the waking monitor's watch as agg-gui-files'
+  `PollingWatch`, so a caller can wait for its first listing (`wait_for_first_listing`) before
+  changing the folder itself.
+
+### Changed
+
+- Requires agg-gui-files 0.0.8. `WakingDirectoryMonitor::watch` returns at once without reading
+  the disk (the first listing is taken on the watch's thread), and a folder that cannot be read
+  when the watch starts is watched all the same and wakes the UI once it can be read. The UI
+  queue a report wakes is still the one of the thread that asked to watch. A browser showing a
+  folder on disk that is away no longer waits on the disk when the folder becomes the showing
+  one, and lists the folder once it comes back.
+
 ## [0.0.15] - 2026-11-20
 
 ### Added

@@ -77,10 +77,13 @@ impl Clone for LiveRefresh {
 }
 
 impl LiveRefresh {
-    /// Active, and watching when the folder exists and may be watched.
+    /// Active, and watching when the folder may be watched. Whether it exists is not asked
+    /// here: that is a disk read, and a folder on a network share that is away can hold the
+    /// calling thread (the UI) for the share's timeout. The monitor watches a folder that cannot
+    /// be read yet and reports when it can, so an away folder relists when it comes back.
     pub(super) fn activate(&mut self, full_path: &Path, should_monitor: bool) {
         self.is_active = true;
-        if self.watch.is_some() || !full_path.is_dir() || !should_monitor {
+        if self.watch.is_some() || !should_monitor {
             return;
         }
         let Some(monitor) = directory_monitor() else {

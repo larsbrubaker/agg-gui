@@ -23,7 +23,7 @@ features.
 | `folder_listing` | A folder loaded and its listing awaited, for one that lists later |
 | `disk::DiskFolder`, `disk::DiskFolderLink`, `disk::DiskFile`, `disk::DiskRules` | With the `disk` feature: folders on the computer's disk, listing the files the app's rules accept, taking changes and copies (recorded for undo as `disk::DiskStep`s), searching themselves, relisting after an outside change, and removing to the system trash |
 | `zip_folder::ZipFolder`, `zip_folder::ZipFolderLink`, `zip_folder::ZipEntry` | With the `zip` feature: a `.zip` file browsed as a read-only folder (with `disk`, folders on disk list their zip files this way) |
-| `disk::ComputerFolder`, `disk::PollingDirectoryMonitor` | With `disk`: the user's folders and the drives; the directory watch an app registers |
+| `disk::ComputerFolder`, `disk::PollingDirectoryMonitor`, `disk::PollingWatch` | With `disk`: the user's folders and the drives; the directory watch an app registers, which never reads the disk on the caller's thread and watches a folder that is away until it comes back |
 
 Everything is single-threaded (`Rc`, local futures, no async runtime): a folder's `load` lists at
 once or starts the work and raises its content-changed callbacks when the listing lands.

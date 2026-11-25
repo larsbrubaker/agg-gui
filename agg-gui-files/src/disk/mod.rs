@@ -52,7 +52,7 @@ pub use keys::{disk_key_path, disk_key_within};
 pub use live_refresh::RefreshInterval;
 pub use monitor::{
     directory_monitor, set_directory_monitor, DirectoryChanged, DirectoryMonitor, DirectoryWatch,
-    PollingDirectoryMonitor, POLL_INTERVAL,
+    PollingDirectoryMonitor, PollingWatch, POLL_INTERVAL,
 };
 pub use paths::{extension_lower, with_extension};
 pub use quick_look::folder_has_child_containers;

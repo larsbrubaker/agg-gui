@@ -6,6 +6,40 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps.
 
+## [0.0.8]
+
+### Added
+
+- `disk::PollingWatch`, the desktop monitor's watch as a type of its own: `has_first_listing`
+  and `wait_for_first_listing` say when its baseline listing has been taken (a change made
+  before it is part of the baseline and is not reported), and `PollingWatch::start` polls any
+  listing function the same way. `PollingDirectoryMonitor::watch_directory` answers it for a
+  directory; `DirectoryMonitor::watch` boxes the same watch.
+
+### Changed
+
+- `PollingDirectoryMonitor::watch` returns at once without reading the disk: the first listing
+  is taken on the watch's own thread, so asking to watch a folder on a network share that is
+  away no longer holds up the calling thread (the UI) for the share's timeout.
+- A directory that cannot be read when the watch starts (missing, or on a share that is away)
+  is watched all the same: `watch` answers `Some` (it was `None`), and the watch reports once
+  the directory can be read. `None` now means only that nothing can be watched (the browser, or
+  no thread for the watch), so a caller that retried a `None` watch can drop its retry. A
+  directory readable from the start still does not report its first listing.
+- `disk::DiskFolder::activate` no longer checks on the calling thread that its folder exists
+  (a disk read that a network share that is away holds for its timeout): it asks the registered
+  monitor for a watch whatever the folder's state, so a folder that is away when it is shown
+  relists once it comes back.
+- Being unreadable is a state of the listing of its own: a watched directory going away reports
+  even when it was empty (an empty one went unreported before), and reports again when it comes
+  back.
+
+### Fixed
+
+- A watch dropped while one of its listings is running (a slow share) no longer reports what
+  that listing finds: the watch's thread checks again after each listing that it is still
+  wanted.
+
 ## [0.0.7] - 2026-11-07
 
 ### Added

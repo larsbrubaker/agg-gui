@@ -160,6 +160,25 @@ fn activating_a_container_asks_the_platform_to_watch_its_directory() {
     });
 }
 
+/// A folder that is not there (a network share that is away) is not looked up on activation,
+/// which would hold the UI for the share's timeout: the monitor is asked to watch it all the
+/// same and is the one that finds out when it can be read.
+#[test]
+fn activating_a_missing_folder_asks_for_a_watch_all_the_same() {
+    let monitor = Arc::new(FakeDirectoryMonitor::default());
+
+    with_registered_monitor(Arc::clone(&monitor), |directory| {
+        let away = directory.join("away");
+        let mut container = DiskFolder::new(&away, stl_only());
+
+        container.activate();
+
+        assert_eq!(monitor.watch_count(), 1, "the away folder is watched");
+        assert_eq!(monitor.watched_path().as_deref(), Some(away.as_path()));
+        container.dispose();
+    });
+}
+
 #[test]
 fn a_change_reported_through_the_seam_arms_the_containers_refresh() {
     let monitor = Arc::new(FakeDirectoryMonitor::default());
@@ -388,6 +407,23 @@ fn a_copy_task_has_the_showing_folder_relist_at_its_next_turn() {
     set_directory_monitor(saved);
 }
 
+/// The desktop monitor, returning each watch only once its first listing is taken, so a change
+/// the test makes after activating a folder is never part of the watch's baseline.
+struct ListedPollingMonitor;
+
+impl DirectoryMonitor for ListedPollingMonitor {
+    fn watch(
+        &self,
+        directory_path: &Path,
+        directory_changed: DirectoryChanged,
+    ) -> Option<Box<dyn DirectoryWatch>> {
+        let watch = agg_gui_files::disk::PollingDirectoryMonitor
+            .watch_directory(directory_path, directory_changed)?;
+        assert!(watch.wait_for_first_listing(std::time::Duration::from_secs(30)));
+        Some(Box::new(watch))
+    }
+}
+
 /// End to end through the desktop monitor (`PollingDirectoryMonitor`): a folder created outside
 /// the app shows up in an open folder without the user refreshing it. The per-frame turn is
 /// pumped until the folder reports its reload; the deadline only bounds a failure.
@@ -396,7 +432,7 @@ fn a_folder_created_outside_the_app_appears_in_the_open_folder() {
     let _serial = hold_directory_monitor();
     let dir = TempDir::new();
     let saved = directory_monitor();
-    set_directory_monitor(Some(Arc::new(agg_gui_files::disk::PollingDirectoryMonitor)));
+    set_directory_monitor(Some(Arc::new(ListedPollingMonitor)));
 
     let mut folder = DiskFolder::new(dir.path(), stl_only());
     folder.activate();
@@ -428,4 +464,44 @@ fn a_folder_created_outside_the_app_appears_in_the_open_folder() {
         "the watch reports the new folder and the folder relists"
     );
     assert!(names.contains(&"Made Elsewhere".to_string()), "{names:?}");
+}
+
+/// End to end through the desktop monitor: a folder that was away when it was opened shows its
+/// contents once it comes back, without the user refreshing it. The per-frame turn is pumped
+/// until the folder reports its reload; the deadline only bounds a failure.
+#[test]
+fn a_folder_away_when_opened_lists_once_it_comes_back() {
+    let _serial = hold_directory_monitor();
+    let dir = TempDir::new();
+    let away = dir.path().join("away");
+    let saved = directory_monitor();
+    set_directory_monitor(Some(Arc::new(ListedPollingMonitor)));
+
+    let mut folder = DiskFolder::new(&away, stl_only());
+    folder.activate();
+    folder.load();
+    assert_eq!(folder.child_containers().len(), 0);
+
+    let reloaded = Rc::new(std::cell::Cell::new(false));
+    let flag = Rc::clone(&reloaded);
+    folder.subscribe_content_changed(Rc::new(move || flag.set(true)));
+
+    std::fs::create_dir_all(away.join("Came Back")).unwrap();
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    while !reloaded.get() && std::time::Instant::now() < deadline {
+        folder.pump_live_refresh();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let names: Vec<String> = folder
+        .child_containers()
+        .iter()
+        .map(|c| c.name().to_string())
+        .collect();
+    folder.deactivate();
+    folder.dispose();
+    set_directory_monitor(saved);
+
+    assert!(reloaded.get(), "the watch reports the folder coming back");
+    assert!(names.contains(&"Came Back".to_string()), "{names:?}");
 }
