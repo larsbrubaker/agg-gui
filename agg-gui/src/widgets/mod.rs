@@ -76,6 +76,7 @@ pub mod slider_math;
 pub mod spacers;
 pub mod spinner;
 pub mod splitter;
+pub mod splitter_bar_tab;
 pub mod tab_view;
 pub mod table;
 pub mod text_area;
@@ -172,6 +173,7 @@ pub use slider::{HandleShape, Slider, SliderClamping, SliderOrientation, SliderS
 pub use spacers::{Separator, Spacer};
 pub use spinner::{Spinner, SpinnerSize};
 pub use splitter::{Splitter, SplitterRatio};
+pub use splitter_bar_tab::{BarTab, BarTabResponse, CollapseSide, SplitterCollapsed};
 pub use tab_view::TabView;
 pub use table::{
     clip_text_to_width as table_clip_text_to_width, CellInfo, CellPainter, ColumnSize, HeaderClick,

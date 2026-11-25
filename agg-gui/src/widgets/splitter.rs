@@ -10,15 +10,27 @@
 //! it there is no way to either read the ratio back out of a boxed
 //! widget tree or restore one — the field is only reachable while the
 //! host still owns the concrete `Splitter`.
+//!
+//! [`Splitter::with_collapse_tab`] opts into a collapsible side: the bar
+//! carries a pull tab ([`BarTab`], `splitter_bar_tab.rs`) that collapses one
+//! pane to nothing and brings it back, the bar staying at the edge while it
+//! is collapsed. The state is a shared [`SplitterCollapsed`] cell, two-way
+//! like [`SplitterRatio`]; the ratio is left alone while collapsed, so a
+//! click reopens the side at the width it had. Dragging the collapsed bar
+//! reopens the side once the pointer reaches where the open bar can sit
+//! (the ratio's drag range), and the bar follows the pointer from there. A
+//! drag never collapses. Without a tab the splitter is unchanged.
 
 use std::sync::{Arc, Mutex};
 
+use crate::color::Color;
 use crate::cursor::{set_cursor_icon, CursorIcon};
 use crate::draw_ctx::DrawCtx;
 use crate::event::{Event, EventResult, MouseButton};
 use crate::geometry::{Point, Rect, Size};
 use crate::layout_props::{HAnchor, Insets, VAnchor, WidgetBase};
 use crate::widget::Widget;
+use crate::widgets::splitter_bar_tab::{BarTab, BarTabResponse, CollapseSide, SplitterCollapsed};
 
 /// Shared, clonable divider position — the seam between a [`Splitter`]
 /// buried in a widget tree and a host that wants to save or restore it.
@@ -110,6 +122,9 @@ pub struct Splitter {
     dragging: bool,
     /// Optional host channel (see [`SplitterRatio`]).
     ratio_handle: Option<SplitterRatio>,
+    /// The bar's pull tab, when a side is collapsible
+    /// ([`Self::with_collapse_tab`]).
+    collapse: Option<BarTab>,
 }
 
 impl Splitter {
@@ -125,6 +140,7 @@ impl Splitter {
             hovered: false,
             dragging: false,
             ratio_handle: None,
+            collapse: None,
         }
     }
 
@@ -142,6 +158,7 @@ impl Splitter {
             hovered: false,
             dragging: false,
             ratio_handle: None,
+            collapse: None,
         }
     }
 
@@ -172,6 +189,24 @@ impl Splitter {
         }
     }
 
+    /// The resize drag's new ratio. A collapsed side stays collapsed until
+    /// the ratio is inside the drag range (the pointer has reached where
+    /// the open bar can sit), then reopens with the bar there, so the bar
+    /// follows the pointer out from the edge. Open, this is [`Self::set_ratio`].
+    fn drag_to(&mut self, ratio: f64) {
+        if let Some(tab) = self.collapse.as_ref().filter(|tab| tab.collapsed()) {
+            let reachable = match tab.side() {
+                CollapseSide::Second => ratio <= RATIO_MAX,
+                CollapseSide::First => ratio >= RATIO_MIN,
+            };
+            if !reachable {
+                return;
+            }
+            tab.state().set(false);
+        }
+        self.set_ratio(ratio);
+    }
+
     /// Adopt a host-written ratio, if the handle disagrees with ours.
     /// Called at the top of `layout()`.
     fn adopt_handle_ratio(&mut self) {
@@ -181,6 +216,51 @@ impl Splitter {
                 self.ratio = wanted;
             }
         }
+    }
+
+    /// Make `side` collapsible by a pull tab on the bar, its state in
+    /// `state` (see the module docs and [`BarTab`]). A click on the tab or a
+    /// double click on the bar collapses or reopens the side; a drag on the
+    /// bar still resizes. Collapsed, the side takes no room and the bar
+    /// stays at the edge with its tab.
+    pub fn with_collapse_tab(mut self, side: CollapseSide, state: SplitterCollapsed) -> Self {
+        self.collapse = Some(BarTab::new(state, side));
+        self
+    }
+
+    /// The pull tab's tooltip: `hide` while the side is open, `show` while
+    /// it is collapsed (the host localizes both). Call after
+    /// [`Self::with_collapse_tab`]; without a tab it does nothing.
+    pub fn with_collapse_tooltips(
+        mut self,
+        hide: impl Into<String>,
+        show: impl Into<String>,
+    ) -> Self {
+        if let Some(tab) = &mut self.collapse {
+            tab.set_tooltips(hide, show);
+        }
+        self
+    }
+
+    /// The bar's colour with a pull tab (the host's theme splitter colour,
+    /// opaque or translucent); without one the visuals' text colour at a low
+    /// alpha. Call after [`Self::with_collapse_tab`]; without a tab it does
+    /// nothing.
+    pub fn with_bar_color(mut self, color: Color) -> Self {
+        if let Some(tab) = &mut self.collapse {
+            tab.set_bar_color(Some(color));
+        }
+        self
+    }
+
+    /// Whether the collapsible side is collapsed (`false` without one).
+    pub fn is_collapsed(&self) -> bool {
+        self.collapse.as_ref().is_some_and(BarTab::collapsed)
+    }
+
+    /// The bar's pull tab, when a side is collapsible.
+    pub fn collapse_tab(&self) -> Option<&BarTab> {
+        self.collapse.as_ref()
     }
 
     pub fn with_divider_width(mut self, w: f64) -> Self {
@@ -246,7 +326,113 @@ impl Splitter {
     /// `axis_length - divider_width - divider_pos_from_bottom` ... see
     /// the layout / paint / event branches for the worked-out coords.
     fn divider_pos(&self) -> f64 {
-        (self.axis_length() - self.divider_width) * self.ratio
+        self.first_length(self.axis_length())
+    }
+
+    /// The first (left / top) pane's length along the split axis of a
+    /// `total` long splitter: its share of what the bar leaves, or all or
+    /// nothing while a side is collapsed.
+    fn first_length(&self, total: f64) -> f64 {
+        let room = total - self.divider_width;
+        match self.collapse.as_ref() {
+            Some(tab) if tab.collapsed() => match tab.side() {
+                CollapseSide::First => 0.0,
+                CollapseSide::Second => room.max(0.0),
+            },
+            _ => room * self.ratio,
+        }
+    }
+
+    /// The bar's rectangle (local, Y up).
+    pub fn bar_rect(&self) -> Rect {
+        self.bar_rect_in(Size::new(self.bounds.width, self.bounds.height))
+    }
+
+    /// The bar's rectangle in a splitter of `size`.
+    fn bar_rect_in(&self, size: Size) -> Rect {
+        if self.vertical {
+            let room = size.height - self.divider_width;
+            let bot_h = if self.is_collapsed() {
+                (room - self.first_length(size.height)).max(0.0)
+            } else {
+                // The plain splitter's own expression, kept bit for bit.
+                (room * (1.0 - self.ratio)).max(0.0)
+            };
+            Rect::new(0.0, bot_h, size.width, self.divider_width)
+        } else {
+            let first = self.first_length(size.width);
+            Rect::new(first, 0.0, self.divider_width, size.height)
+        }
+    }
+
+    /// Put the pull tab on the bar, centred along it.
+    fn place_tab(&mut self, size: Size) {
+        let bar = self.bar_rect_in(size);
+        let vertical = self.vertical;
+        if let Some(tab) = &mut self.collapse {
+            let center = if vertical {
+                size.width / 2.0
+            } else {
+                size.height / 2.0
+            };
+            tab.place(bar, vertical, center);
+        }
+    }
+
+    /// An event for a splitter with a pull tab: the tab's gestures first,
+    /// then the resize drag it hands over. `None` leaves the event to the
+    /// plain splitter's drag handling.
+    fn tab_event(&mut self, event: &Event) -> Option<EventResult> {
+        // The bar may have moved since the last layout (a drag, a host
+        // write): hit-test the tab where it is now.
+        self.place_tab(Size::new(self.bounds.width, self.bounds.height));
+        let resize = self.resize_cursor();
+        let dragging = self.dragging;
+        let tab = self.collapse.as_mut()?;
+        if let Event::MouseMove { pos } | Event::MouseDown { pos, .. } = event {
+            // Resize on the bar, the normal pointer on the tab.
+            if dragging || (!tab.pressing_tab() && tab.on_bar(*pos) && !tab.on_tab(*pos)) {
+                set_cursor_icon(resize);
+            }
+        }
+        match tab.on_event(event) {
+            BarTabResponse::Consumed => {
+                crate::animation::request_draw();
+                Some(EventResult::Consumed)
+            }
+            BarTabResponse::BeginResize => {
+                self.dragging = true;
+                crate::animation::request_draw();
+                match event {
+                    // A mouse dragging the tab: this move is the drag's
+                    // first, so the plain drag handling below applies it.
+                    Event::MouseMove { .. } => None,
+                    _ => Some(EventResult::Consumed),
+                }
+            }
+            BarTabResponse::Toggled => {
+                // The bar moved: hover and tooltip follow it now, not at
+                // the next pointer move.
+                self.place_tab(Size::new(self.bounds.width, self.bounds.height));
+                if let Event::MouseMove { pos }
+                | Event::MouseDown { pos, .. }
+                | Event::MouseUp { pos, .. } = event
+                {
+                    if let Some(tab) = &mut self.collapse {
+                        tab.update_hover(Some(*pos));
+                    }
+                }
+                crate::animation::request_draw();
+                Some(EventResult::Consumed)
+            }
+            BarTabResponse::Ignored => match event {
+                // Off bar and tab: not the splitter's press.
+                Event::MouseDown { .. } => Some(EventResult::Ignored),
+                // Hover is the tab's (it asked for the draw).
+                Event::MouseMove { .. } if !self.dragging => Some(EventResult::Ignored),
+                _ => None,
+            },
+        }
     }
 }
 
@@ -313,7 +499,7 @@ impl Widget for Splitter {
         if self.vertical {
             // Y-up: children[0] = top, children[1] = bottom. ratio is
             // the fraction of height going to the TOP pane.
-            let top_h = ((available.height - div) * self.ratio).max(0.0);
+            let top_h = self.first_length(available.height).max(0.0);
             let bot_h = (available.height - div - top_h).max(0.0);
             let w = available.width;
 
@@ -326,7 +512,7 @@ impl Widget for Splitter {
             self.children[1].layout(Size::new(w, bot_h));
             self.children[1].set_bounds(Rect::new(0.0, 0.0, w, bot_h));
         } else {
-            let left_w = ((available.width - div) * self.ratio).max(0.0);
+            let left_w = self.first_length(available.width).max(0.0);
             let right_w = (available.width - div - left_w).max(0.0);
             let h = available.height;
 
@@ -338,10 +524,16 @@ impl Widget for Splitter {
             self.children[1].set_bounds(Rect::new(right_x, 0.0, right_w, h));
         }
 
+        self.place_tab(available);
         available
     }
 
     fn paint(&mut self, ctx: &mut dyn DrawCtx) {
+        if self.collapse.is_some() {
+            // Bar and tab paint over the panes (`paint_overlay`): the tab
+            // reaches into the pane beside the bar.
+            return;
+        }
         let v = ctx.visuals();
         let color = if self.dragging {
             v.accent.with_alpha(0.6)
@@ -361,8 +553,7 @@ impl Widget for Splitter {
 
         if self.vertical {
             // Divider is a horizontal strip at Y = bottom_pane_height.
-            let bot_h = ((self.bounds.height - self.divider_width) * (1.0 - self.ratio)).max(0.0);
-            let div_y = bot_h;
+            let div_y = self.bar_rect().y;
             let w = self.bounds.width;
             ctx.begin_path();
             ctx.rect(0.0, div_y, w, self.divider_width);
@@ -399,7 +590,30 @@ impl Widget for Splitter {
         }
     }
 
+    fn paint_overlay(&mut self, ctx: &mut dyn DrawCtx) {
+        self.place_tab(Size::new(self.bounds.width, self.bounds.height));
+        if let Some(tab) = &self.collapse {
+            tab.paint(ctx, self.dragging);
+        }
+    }
+
+    fn claims_pointer_exclusively(&self, local_pos: Point) -> bool {
+        match &self.collapse {
+            Some(tab) => self.dragging || tab.claims(local_pos),
+            None => false,
+        }
+    }
+
+    fn tooltip_text(&self) -> Option<&str> {
+        self.collapse.as_ref().and_then(BarTab::tooltip)
+    }
+
     fn on_event(&mut self, event: &Event) -> EventResult {
+        if self.collapse.is_some() {
+            if let Some(result) = self.tab_event(event) {
+                return result;
+            }
+        }
         // The press ended without a release (the window lost activation
         // mid-drag): the drag ends where it was — the ratio already
         // follows the pointer — instead of tracking the next hover.
@@ -415,8 +629,7 @@ impl Widget for Splitter {
             let div = self.divider_width;
             let total = self.bounds.height;
             // Bottom pane height; divider's bottom edge is at this Y.
-            let bot_h = ((total - div) * (1.0 - self.ratio)).max(0.0);
-            let div_y = bot_h;
+            let div_y = self.bar_rect().y;
             let div_end = div_y + div;
 
             match event {
@@ -432,7 +645,7 @@ impl Widget for Splitter {
                             // Convert pos.y (Y-up) into top fraction.
                             let div_mid = pos.y;
                             let top_h = (total - div_mid).max(0.0);
-                            self.set_ratio(top_h / total);
+                            self.drag_to(top_h / total);
                         }
                         crate::animation::request_draw();
                         EventResult::Consumed
@@ -484,7 +697,7 @@ impl Widget for Splitter {
                     if self.dragging {
                         let total = self.bounds.width;
                         if total > self.divider_width {
-                            self.set_ratio(pos.x / total);
+                            self.drag_to(pos.x / total);
                         }
                         crate::animation::request_draw();
                         EventResult::Consumed

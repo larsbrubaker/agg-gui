@@ -8,6 +8,34 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ## [Unreleased]
 
+## [0.5.24]
+
+### Added
+
+- A `Splitter` side can collapse by a pull tab on its bar:
+  `Splitter::with_collapse_tab(CollapseSide, SplitterCollapsed)`. The bar carries a 48-unit tab
+  on the side facing the pane that stays, painted with the bar as one shape, with a chevron
+  pointing the way the side will move. A click on the tab, or a double click on the bar,
+  collapses the side or brings it back (the second press of a double click on the tab, which
+  lands where the tab was, is swallowed so the pane there never sees it); a finger dragged
+  across the tab toward the middle opens it and toward the edge closes it; a mouse drag on the
+  tab, like a plain drag on the bar, only resizes. Collapsed, the
+  side takes no room and the bar stays at the edge with its tab; a click brings it back at the
+  width it had (the ratio is kept while collapsed), and dragging that bar pulls the side out,
+  the bar following the pointer once it reaches where the open bar can sit. No drag collapses.
+  `with_collapse_tooltips(hide, show)` gives the tab its tooltip, `with_bar_color` the bar's
+  colour (translucent colours darken on hover too), and `is_collapsed`, `bar_rect` and
+  `collapse_tab` read it back. Splitters without a tab are unchanged.
+- `SplitterCollapsed` is the shared, clonable collapsed state, two-way like `SplitterRatio`: the
+  tab writes it, and a host write lands at the next layout, so a host can save the choice and
+  make other views follow it.
+- `BarTab` is the bar and tab on their own (placement, paint, gestures, tooltip, hover), for a
+  host whose collapsible side is not a `Splitter` pane: it places the bar with `BarTab::place`,
+  routes pointer events through `BarTab::on_event` (which hands a plain bar press back as
+  `BarTabResponse::BeginResize`, and answers a toggle with `BarTabResponse::Toggled`, after
+  which the host re-places the bar and calls `BarTab::update_hover`), paints it from `paint_overlay`, claims the pointer where
+  `BarTab::claims` says and answers `tooltip_text` from `BarTab::tooltip`.
+
 ## [0.5.23]
 
 ### Added
