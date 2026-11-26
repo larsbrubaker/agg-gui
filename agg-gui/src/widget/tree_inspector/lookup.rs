@@ -1,6 +1,8 @@
 //! Widget lookup for the inspector and tests: depth-first search by id or
-//! type name, a widget's on-screen rectangle, and the thread-local world
-//! mouse position and viewport the shells record each frame.
+//! type name, a widget's on-screen rectangle and the part of it that shows
+//! (through `widget/paint_geometry.rs`, painting's clip chain), and the
+//! thread-local world mouse position and viewport the shells record each
+//! frame.
 //!
 //! Part of `tree_inspector`; shares its transform helpers from `mod.rs`.
 
@@ -127,6 +129,70 @@ fn find_widget_screen_rect_inner(
         }
     }
     None
+}
+
+/// The part of the first painted widget carrying `id` that shows on screen:
+/// its rectangle cut by every clip painting puts it under, as
+/// [`paint_geometry`](crate::widget::paint_geometry) replays them: each
+/// ancestor's `clip_children_rect`, a row's per-column `child_paint_clip`,
+/// child transforms (pan/zoom), and the window alone for a subtree painted in
+/// the overlay pass. A widget scrolled half out of a `ScrollView` gives the
+/// half that shows.
+///
+/// The rectangle is in root logical space (Y-up, the space of the root's
+/// `bounds()`), the space [`find_widget_screen_rect`] and the overlay queues
+/// use. The window is the root's bounds (`App` lays the root out to fill it)
+/// cut to the part left on screen while the on-screen keyboard lifts the
+/// tree ([`visible_root_rect`](crate::widget::visible_root_rect)), so a widget
+/// the lift has pushed off the top shows only below it. The rectangle is
+/// where painting puts the widget, so a widget that snaps to whole pixels
+/// gives its snapped place; it matches [`find_widget_screen_rect`] wherever
+/// that place is already whole.
+///
+/// `None` when no painted widget carries `id` (it or an ancestor reports
+/// `!is_visible()` or [`Widget::suppresses_paint`], as an `Opacity` faded to
+/// 0 does, or it is not in the tree) or when nothing of it shows.
+pub fn find_widget_visible_rect(root: &dyn Widget, id: &str) -> Option<Rect> {
+    let mut path = Vec::new();
+    if !painted_path_to_id(root, id, &mut path) {
+        return None;
+    }
+    let widget = super::walk_path(root, &path)?;
+    let b = root.bounds();
+    let shown_root = crate::widget::visible_root_rect(Size::new(b.width, b.height));
+    let window = Rect::new(
+        b.x + shown_root.x,
+        b.y + shown_root.y,
+        shown_root.width,
+        shown_root.height,
+    );
+    let painted = crate::widget::paint_geometry::paint_placement_in(root, &path, window)?;
+    let own = widget.bounds();
+    let screen_rect = painted.screen_rect(Size::new(own.width, own.height));
+    let shown = crate::widget::paint_geometry::intersect(painted.clip, screen_rect);
+    (painted.visible_chain && shown.width > 0.0 && shown.height > 0.0).then_some(shown)
+}
+
+/// Fill `path` with the child indices from `widget` down to the first widget
+/// carrying `id`, in the order [`find_widget_screen_rect`] searches, skipping
+/// the subtrees painting skips: hidden ones, as that search does, and ones
+/// whose root [`Widget::suppresses_paint`] (neither painted in place nor in
+/// the overlay pass). False when there is none.
+fn painted_path_to_id(widget: &dyn Widget, id: &str, path: &mut Vec<usize>) -> bool {
+    if !widget.is_visible() || widget.suppresses_paint() {
+        return false;
+    }
+    if widget.id() == Some(id) {
+        return true;
+    }
+    for (index, child) in widget.children().iter().enumerate() {
+        path.push(index);
+        if painted_path_to_id(child.as_ref(), id, path) {
+            return true;
+        }
+        path.pop();
+    }
+    false
 }
 
 /// Depth-first search for a widget by its [`Widget::type_name`].  Returns

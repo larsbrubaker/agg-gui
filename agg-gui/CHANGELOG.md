@@ -8,6 +8,31 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ## [Unreleased]
 
+## [0.6.1]
+
+### Added
+
+- `find_widget_visible_rect(root, id)` gives the part of a widget that shows on screen: its
+  rectangle in root logical space cut by every clip painting puts it under (each ancestor's
+  `clip_children_rect`, a row's per-column `child_paint_clip`, child transforms, and the window
+  alone for a subtree painted in the overlay pass). A widget scrolled wholly out of a
+  `ScrollView` gives `None`, one scrolled half out gives the half that shows. `None` too when no
+  painted widget carries the id: it or an ancestor is hidden or suppresses paint (an `Opacity`
+  faded to 0). The window is the root's bounds, wherever the root is placed, less what the
+  on-screen keyboard's lift pushes off its top. `find_widget_screen_rect` is unchanged.
+- `widget::paint_geometry` is the replay of painting's transform and clip chain this answers
+  from (`paint_placement`, `PaintPlacement`, `intersect`, `screen_aabb`, `to_whole_pixels` and
+  the transform steps), moved here from agg-gui-automation, which re-exports it unchanged.
+  `paint_placement_in` takes the window as a rectangle, for a window away from the origin.
+- `Widget::passes_scroll_zoom_and_drops` (default `false`) lets a widget take presses while
+  scrolling, zooming and file drops pass through it and its subtree to whatever lies beneath, a
+  sibling layer under it included, as if its `hit_test` were false for those events alone: the
+  wheel (a trackpad pinch included, which arrives as a marked wheel), a two-finger touch gesture
+  that starts over it (`MultiTouch`), and file drags and drops (`FileDragHover`, `FileDropped`,
+  `FileDataDropped`). Inside an active modal the wheel passes the same way; an app-level overlay
+  (`hit_test_global_overlay`) still takes it. Presses (a one-finger touch included), hover and
+  keys are unchanged, and so is every widget that does not opt in.
+
 ## [0.6.0]
 
 ### Added

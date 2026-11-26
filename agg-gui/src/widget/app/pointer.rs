@@ -1,15 +1,19 @@
 //! Pointer-input methods on [`App`] — mouse move/down/up plus the
 //! modal-subtree hit extension they share, with the hover (and wheel) a
 //! modal lets pass outside its bounds; a move inside a modal clears the
-//! hover of the widget it left as the ordinary route does. The press and release entry points keep
+//! hover of the widget it left as the ordinary route does. The hit routes
+//! (`routed_hit`, `wheel_hit`) live here too: a wheel, a two-finger gesture
+//! or a file drop passes the subtrees that `Widget::passes_scroll_zoom_and_drops`. The press and release entry points keep
 //! [`crate::event::mouse_button_held`] current before dispatching. Split out of `app.rs`
-//! (800-line guardrail); keyboard routing is in `keyboard.rs`, wheel
-//! routing stays in `app.rs`.
+//! (800-line guardrail); keyboard routing is in `keyboard.rs`, the wheel
+//! entry point stays in `app.rs`.
 
 use super::tree_paths::widget_at_path_ref;
 use crate::event::{Event, Modifiers, MouseButton};
 use crate::geometry::Point;
-use crate::widget::tree::{active_modal_path, dispatch_event, hit_test_subtree};
+use crate::widget::tree::{
+    active_modal_path, dispatch_event, global_overlay_hit_path, hit_test_routed, HitFor,
+};
 use crate::widget::tree_inspector::set_current_mouse_world;
 use crate::widget::{App, Widget};
 
@@ -62,9 +66,19 @@ impl App {
     /// fields, scroll views) receive pointer events. Falls back to the
     /// modal widget itself when nothing inside is hit (the scrim).
     pub(crate) fn extend_modal_path(&self, modal_path: &[usize], pos_in_root: Point) -> Vec<usize> {
+        self.extend_modal_path_for(modal_path, pos_in_root, HitFor::Pointer)
+    }
+
+    /// [`Self::extend_modal_path`] for the events `hit_for` names.
+    fn extend_modal_path_for(
+        &self,
+        modal_path: &[usize],
+        pos_in_root: Point,
+        hit_for: HitFor,
+    ) -> Vec<usize> {
         let mut full = modal_path.to_vec();
         if let Some((widget, pos)) = self.modal_local(modal_path, pos_in_root) {
-            if let Some(sub_path) = hit_test_subtree(widget, pos) {
+            if let Some(sub_path) = hit_test_routed(widget, pos, hit_for) {
                 full.extend(sub_path);
             }
         }
@@ -79,6 +93,11 @@ impl App {
     /// so the widgets beside a light-dismiss panel still show their cursors
     /// and still scroll and zoom.
     pub(super) fn modal_hover_path(&self, pos: Point) -> Option<Vec<usize>> {
+        self.modal_route(pos, HitFor::Pointer)
+    }
+
+    /// [`Self::modal_hover_path`] for the events `hit_for` names.
+    fn modal_route(&self, pos: Point, hit_for: HitFor) -> Option<Vec<usize>> {
         let modal_path = active_modal_path(self.root.as_ref())?;
         if let Some((widget, local)) = self.modal_local(&modal_path, pos) {
             let bounds = widget.bounds();
@@ -90,7 +109,24 @@ impl App {
                 return None;
             }
         }
-        Some(self.extend_modal_path(&modal_path, pos))
+        Some(self.extend_modal_path_for(&modal_path, pos, hit_for))
+    }
+
+    /// The widget under `pos` (root space) for the events `hit_for` names:
+    /// an app-level overlay first, then the topmost widget that hits, a
+    /// [`HitFor::ScrollZoomAndDrops`] event passing the subtrees that
+    /// [`Widget::passes_scroll_zoom_and_drops`].
+    pub(super) fn routed_hit(&self, pos: Point, hit_for: HitFor) -> Option<Vec<usize>> {
+        global_overlay_hit_path(self.root.as_ref(), pos)
+            .or_else(|| hit_test_routed(self.root.as_ref(), pos, hit_for))
+    }
+
+    /// Where a wheel turn (a trackpad pinch included) at `pos` goes: inside
+    /// an active modal as a hover would, else the widget under it, passing
+    /// the subtrees that [`Widget::passes_scroll_zoom_and_drops`].
+    pub(super) fn wheel_hit(&self, pos: Point) -> Option<Vec<usize>> {
+        self.modal_route(pos, HitFor::ScrollZoomAndDrops)
+            .or_else(|| self.routed_hit(pos, HitFor::ScrollZoomAndDrops))
     }
 
     /// Announce the hovered chain for a pointer at `path` inside the active

@@ -456,7 +456,8 @@ impl App {
     /// While a modal is active the wheel goes into the modal's subtree,
     /// except outside a modal that lets the pointer pass
     /// ([`Widget::modal_hover_passes_outside`]): there it reaches the widget
-    /// under the pointer, as a move's hover does (`modal_hover_path`).
+    /// under the pointer, as a move's hover does (`modal_hover_path`). It
+    /// passes widgets that [`Widget::passes_scroll_zoom_and_drops`].
     pub fn on_mouse_wheel_xy_mods(
         &mut self,
         screen_x: f64,
@@ -469,7 +470,7 @@ impl App {
         self.resolve_tracked_paths();
         let pos = super::keyboard_scroll::lift_to_world(self.flip_y(screen_x, screen_y));
         set_current_mouse_world(pos);
-        let hit = self.modal_hover_path(pos).or_else(|| self.compute_hit(pos));
+        let hit = self.wheel_hit(pos);
         let event = Event::MouseWheel {
             pos,
             delta_y,
@@ -662,8 +663,7 @@ impl App {
     }
 
     fn compute_hit(&self, pos: Point) -> Option<Vec<usize>> {
-        global_overlay_hit_path(self.root.as_ref(), pos)
-            .or_else(|| hit_test_subtree(self.root.as_ref(), pos))
+        self.routed_hit(pos, tree::HitFor::Pointer)
     }
 
     /// Start the central tooltip controller's frame from the current hover

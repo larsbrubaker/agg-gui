@@ -14,7 +14,8 @@ use crate::widget::App;
 impl App {
     /// Native drag-and-drop landed `paths` on the window at the given
     /// screen position. Dispatches an [`Event::FileDropped`] to the
-    /// widget under the cursor (same hit-test path as `on_mouse_down`),
+    /// widget under the cursor (the press's hit test, passing widgets that
+    /// `passes_scroll_zoom_and_drops`),
     /// so a widget can opt in by handling the event in `on_event`.
     ///
     /// Native shells typically receive one path per `DroppedFile` event
@@ -99,11 +100,12 @@ impl App {
         crate::widget::keyboard_scroll::lift_to_world(self.flip_y(screen_x, screen_y))
     }
 
-    /// Hit-test and bubble `event` from the widget under `pos`; if nothing on
-    /// that path consumes it, offer it to the rest of the tree.
+    /// Hit-test and bubble `event` from the widget under `pos`, passing the
+    /// widgets that [`Widget::passes_scroll_zoom_and_drops`](crate::widget::Widget::passes_scroll_zoom_and_drops);
+    /// if nothing on that path consumes it, offer it to the rest of the tree.
     fn route_file_event(&mut self, event: &Event, pos: Point) {
         self.resolve_tracked_paths();
-        let hit = self.compute_hit(pos);
+        let hit = self.routed_hit(pos, crate::widget::tree::HitFor::ScrollZoomAndDrops);
         let consumed = match hit {
             Some(path) => dispatch_event(&mut self.root, &path, event, pos),
             // No hit target: dispatch to the root anyway so app-level

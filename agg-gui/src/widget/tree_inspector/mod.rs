@@ -30,7 +30,8 @@ pub use edit::{apply_inspector_edit, InspectorEdit};
 pub use edit::{apply_widget_base_edit, walk_path, walk_path_mut, WidgetBaseEdit, WidgetBaseField};
 pub use lookup::{
     current_mouse_world, current_viewport, find_widget_by_id, find_widget_by_id_mut,
-    find_widget_by_type, find_widget_screen_rect, set_current_mouse_world, set_current_viewport,
+    find_widget_by_type, find_widget_screen_rect, find_widget_visible_rect,
+    set_current_mouse_world, set_current_viewport,
 };
 
 /// Flat snapshot of one widget for the inspector panel.

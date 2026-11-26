@@ -123,6 +123,23 @@ pub trait Widget {
             && local_pos.y <= b.height
     }
 
+    /// When `true`, scrolling, zooming and file drops pass through this widget
+    /// and its whole subtree to whatever lies beneath, a sibling layer under
+    /// it included, as if its [`hit_test`](Self::hit_test) were `false` for
+    /// those events alone: the wheel (a trackpad pinch included, which
+    /// arrives as a marked wheel), a two-finger touch gesture that starts
+    /// over it (`MultiTouch`), and file drags and drops (`FileDragHover`,
+    /// `FileDropped`, `FileDataDropped`). Presses (a one-finger touch
+    /// included), hover and keys still reach it. For a layer the user clicks
+    /// but that must not swallow scrolling or zooming of the view under it
+    /// (a hint card floating over a 3D view). Within an active modal the
+    /// wheel passes the same way; an app-level overlay hit
+    /// ([`hit_test_global_overlay`](Self::hit_test_global_overlay)) still
+    /// takes it. Default: `false`.
+    fn passes_scroll_zoom_and_drops(&self) -> bool {
+        false
+    }
+
     /// When `true`, `hit_test_subtree` stops recursing into this widget's
     /// children and returns this widget as the hit target.  Used for floating
     /// overlays (e.g. a scrollbar painted above its content) that must claim

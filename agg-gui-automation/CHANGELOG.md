@@ -8,6 +8,13 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ## [Unreleased]
 
+### Changed
+
+- `paint_geometry` re-exports agg-gui's `widget::paint_geometry` (agg-gui 0.6.1), where the
+  replay of painting's transform and clip chain now lives, so agg-gui's
+  `find_widget_visible_rect` and this crate's lookups follow the same rules. Its items and their
+  behaviour are unchanged.
+
 ## [0.1.1] - 2026-11-01
 
 ### Changed

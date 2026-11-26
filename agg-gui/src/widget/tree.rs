@@ -5,7 +5,9 @@
 //! [`hit_test_subtree`], [`active_modal_path`], [`global_overlay_hit_path`]
 //! — returns a `Vec<usize>` path of child indices identifying the deepest
 //! widget that claims a position; the App event router uses that path to
-//! dispatch mouse events to the right subtree. Routed dispatch offers the
+//! dispatch mouse events to the right subtree; a wheel, a two-finger gesture
+//! or a file drop walks it as [`HitFor::ScrollZoomAndDrops`], passing through the subtrees that
+//! [`Widget::passes_scroll_zoom_and_drops`]. Routed dispatch offers the
 //! event to each ancestor's `preview_event` root-first before delivering it
 //! to the target and bubbling it back up; during each preview,
 //! [`previewed_child`](super::previewed_child) names the child the event goes
@@ -69,7 +71,34 @@ pub fn mark_subtree_dirty(widget: &mut dyn Widget) {
 /// Returns `Some(vec![])` if `widget` itself is hit but no child is.
 /// Returns `None` if nothing is hit.
 pub fn hit_test_subtree(widget: &dyn Widget, local_pos: Point) -> Option<Vec<usize>> {
+    hit_test_routed(widget, local_pos, HitFor::Pointer)
+}
+
+/// What a hit test routes. A wheel, a two-finger gesture or a file drag/drop
+/// passes through every
+/// subtree whose root [`Widget::passes_scroll_zoom_and_drops`]; anything else
+/// stops at the topmost widget that hits.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum HitFor {
+    /// Presses, hover, touch: every widget that hits can take it.
+    Pointer,
+    /// Scrolling and zooming (the wheel, a trackpad pinch, a two-finger
+    /// touch gesture's start) and file drags and drops.
+    ScrollZoomAndDrops,
+}
+
+/// [`hit_test_subtree`] for the events `hit_for` names: the one walk both
+/// routes share, a wheel or a drop skipping the subtrees that pass them as
+/// if their `hit_test` were false.
+pub(crate) fn hit_test_routed(
+    widget: &dyn Widget,
+    local_pos: Point,
+    hit_for: HitFor,
+) -> Option<Vec<usize>> {
     if !widget.is_visible() || !widget.hit_test(local_pos) {
+        return None;
+    }
+    if hit_for == HitFor::ScrollZoomAndDrops && widget.passes_scroll_zoom_and_drops() {
         return None;
     }
     // Let overlays (e.g. a floating scrollbar) claim the pointer before any
@@ -81,7 +110,7 @@ pub fn hit_test_subtree(widget: &dyn Widget, local_pos: Point) -> Option<Vec<usi
     // Check children in reverse order (last drawn = topmost = highest priority).
     for (i, child) in widget.children().iter().enumerate().rev() {
         let child_local = child_local_pos(widget, child.bounds(), local_pos);
-        if let Some(mut sub_path) = hit_test_subtree(child.as_ref(), child_local) {
+        if let Some(mut sub_path) = hit_test_routed(child.as_ref(), child_local, hit_for) {
             sub_path.insert(0, i);
             return Some(sub_path);
         }

@@ -14,7 +14,9 @@
 //! # Capture semantics
 //!
 //! On the frame the aggregate transitions `None → Some`, the centroid is
-//! hit-tested down the tree exactly like a `MouseDown`. The deepest widget
+//! hit-tested down the tree like a `MouseDown`, except that, like the wheel,
+//! it passes the widgets that `Widget::passes_scroll_zoom_and_drops` (the
+//! scroll and zoom route, `HitFor::ScrollZoomAndDrops`). The deepest widget
 //! that consumes the event captures the gesture: every later frame delivers
 //! along that captured path, even if the centroid drifts outside the widget.
 //! If the start hit-test finds no consumer, the gesture routes nowhere for
@@ -22,7 +24,7 @@
 //! `None`.
 
 use crate::event::Event;
-use crate::widget::tree::dispatch_event;
+use crate::widget::tree::{dispatch_event, HitFor};
 use crate::widget::App;
 
 impl App {
@@ -36,10 +38,11 @@ impl App {
                 let event = Event::MultiTouch { info };
                 if !self.gesture_in_progress {
                     // None → Some: the gesture just started. Hit-test the
-                    // centroid the same way a MouseDown routes, deliver once,
+                    // centroid on the scroll and zoom route, deliver once,
                     // and capture the hit path if anything along it consumed.
                     self.gesture_in_progress = true;
-                    if let Some(path) = self.compute_hit(info.center_pos) {
+                    if let Some(path) = self.routed_hit(info.center_pos, HitFor::ScrollZoomAndDrops)
+                    {
                         let consumed =
                             dispatch_event(&mut self.root, &path, &event, info.center_pos)
                                 .is_consumed();
