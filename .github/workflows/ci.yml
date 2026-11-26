@@ -260,8 +260,11 @@ jobs:
       # The automation crate, with the stack dump: a real minidump of the test
       # process, written by a forked child that ptraces it (named its tracer
       # with PR_SET_PTRACER, so Yama's ptrace_scope 1 allows it), and walked.
+      # The real-dump tests walk the capturing thread's own frames by name,
+      # which the workflow's line-tables-only debug info cannot give, so this
+      # step builds the crate under test, and only it, with full debug info.
       - name: Run automation tests (stack dump)
-        run: cargo test -p agg-gui-automation --features stack-dump
+        run: cargo test -p agg-gui-automation --features stack-dump --config 'profile.dev.package.agg-gui-automation.debug=true'
 
       # The safe wrappers over the workspace's unsafe code, every feature on.
       - name: Run agg-os tests
@@ -368,9 +371,12 @@ jobs:
 
       # A real minidump of the test process, written and walked. macOS only:
       # Windows has no writer, so the real-dump tests skip themselves there.
+      # They walk the capturing thread's own frames by name, which the
+      # workflow's line-tables-only debug info cannot give, so this step
+      # builds the crate under test, and only it, with full debug info.
       - name: Run automation tests (stack dump)
         if: runner.os == 'macOS'
-        run: cargo test -p agg-gui-automation --features stack-dump
+        run: cargo test -p agg-gui-automation --features stack-dump --config 'profile.dev.package.agg-gui-automation.debug=true'
 
       # agg-os's unsafe code as this OS compiles it (each module picks its
       # calls per OS), linted and tested with every feature on.
