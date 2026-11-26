@@ -51,10 +51,12 @@ use agg_rust::basics::VertexSource;
 /// One vertex of an AA-texture mesh: position in path/screen space + a
 /// 2-D texcoord into the 1024-wide alpha-step texture.
 ///
-/// `#[repr(C)]` with no padding — four `f32`s = 16 bytes per vertex —
-/// so callers can `bytemuck::cast_slice` straight from this slice.
+/// `#[repr(C)]` with no padding — four `f32`s = 16 bytes per vertex.
+/// The `bytemuck` feature gives it `bytemuck::Pod` and `Zeroable`, so a
+/// renderer can view a slice of them as bytes with `bytemuck::cast_slice`.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[cfg_attr(feature = "bytemuck", derive(bytemuck::Pod, bytemuck::Zeroable))]
 pub struct AaTexVertex {
     pub pos: [f32; 2],
     pub uv: [f32; 2],

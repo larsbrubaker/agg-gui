@@ -30,3 +30,7 @@ reflect = ["agg-gui/reflect"]
 # above); the node editor needs none of agg-gui's optional features.
 agg-gui = { path = "../agg-gui", version = "0.6.0", default-features = false }
 web-time = "1"
+
+# No unsafe code in this crate: the compiler refuses it.
+[lints.rust]
+unsafe_code = "forbid"

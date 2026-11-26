@@ -704,15 +704,17 @@ fn test_measure_text_metrics_positive() {
 #[test]
 fn test_y_flip_at_ingestion() {
     use crate::text::Font;
+    use std::cell::Cell;
+    use std::rc::Rc;
     use std::sync::Arc;
 
     let font = Arc::new(Font::from_slice(TEST_FONT).unwrap());
-    let mut clicked = false;
-    let clicked_ptr = &mut clicked as *mut bool;
+    let clicked = Rc::new(Cell::new(false));
+    let clicked_in_click = Rc::clone(&clicked);
 
     let mut button = Button::new("X", Arc::clone(&font))
         .with_font_size(14.0)
-        .on_click(move || unsafe { *clicked_ptr = true });
+        .on_click(move || clicked_in_click.set(true));
 
     // Lay out button to fill a 200×100 viewport.
     button.layout(Size::new(200.0, 100.0));
@@ -727,5 +729,5 @@ fn test_y_flip_at_ingestion() {
     app.on_mouse_down(100.0, 50.0, MouseButton::Left, Modifiers::default());
     app.on_mouse_up(100.0, 50.0, MouseButton::Left, Modifiers::default());
 
-    assert!(clicked, "button inside viewport should be clicked");
+    assert!(clicked.get(), "button inside viewport should be clicked");
 }

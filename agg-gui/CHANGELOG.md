@@ -10,6 +10,12 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ## [0.6.0]
 
+### Added
+
+- A `bytemuck` feature (off by default): `gl_renderer::AaTexVertex` implements `bytemuck::Pod`
+  and `Zeroable`, so a renderer views a slice of them as bytes with `bytemuck::cast_slice`.
+  agg-gui-wgpu turns it on.
+
 ### Changed
 
 - **Breaking for crates that also depend on agg-rust:** agg-gui builds on agg-rust 2.0.0 (it

@@ -109,3 +109,7 @@ web-sys = { version = "0.3.82", features = [
     "SubtleCrypto",
     "Performance",
 ] }
+
+# No unsafe code in this crate: the compiler refuses it.
+[lints.rust]
+unsafe_code = "forbid"

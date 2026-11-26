@@ -38,6 +38,10 @@ flate2 = "1"
 [build-dependencies]
 winresource = "0.1.31"
 
+# No unsafe code in this crate: the compiler refuses it.
+[lints.rust]
+unsafe_code = "forbid"
+
 [package.metadata.bundle]
 name = "agg-gui Demo"
 identifier = "com.matterhackers.agg-gui.demo"

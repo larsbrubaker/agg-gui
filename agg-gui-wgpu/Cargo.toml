@@ -30,10 +30,11 @@ reflect = ["agg-gui/reflect"]
 
 [dependencies]
 # `version` is required for a `path` dependency to be publishable.
-# `default-features = false`: the renderer needs none of agg-gui's optional
-# features (reflect, clipboard, winit-adapter), so depending on them would
-# force `bevy_reflect` on every consumer of this crate.
-agg-gui  = { path = "../agg-gui", version = "0.6.0", default-features = false }
+# `default-features = false`: the renderer needs none of agg-gui's other
+# optional features (reflect, clipboard, winit-adapter), so depending on them
+# would force `bevy_reflect` on every consumer of this crate. `bytemuck` gives
+# `AaTexVertex` the `Pod` impl its vertex upload casts through.
+agg-gui  = { path = "../agg-gui", version = "0.6.0", default-features = false, features = ["bytemuck"] }
 # Sibling checkout locally and in CI, crates.io `version` when published
 # (see agg-gui/Cargo.toml).
 agg-rust = { version = "2.0.0", path = "../../agg-rust" }
@@ -59,6 +60,10 @@ pollster = "0.3"
 # The WGSL front end and validator wgpu already uses (same version in the lockfile), for the
 # browser-validation test over every shader the crate ships.
 naga = { version = "29", default-features = false, features = ["wgsl-in"] }
+
+# No unsafe code in this crate: the compiler refuses it.
+[lints.rust]
+unsafe_code = "forbid"
 
 # as_chunks (stable 1.88) became suggestable when rust-version reached 1.88;
 # adopting it is left to the same crate-wide sweep as agg-gui's (see its

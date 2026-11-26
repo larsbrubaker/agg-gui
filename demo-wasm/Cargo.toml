@@ -41,3 +41,7 @@ features = [
     "Location",
     "console",
 ]
+
+# No unsafe code in this crate: the compiler refuses it.
+[lints.rust]
+unsafe_code = "forbid"

@@ -74,15 +74,15 @@ mod system {
         /// picture types to it), checked without fetching the data.
         #[cfg(target_os = "macos")]
         fn has_image(&mut self) -> bool {
-            use objc2_app_kit::{NSPasteboard, NSPasteboardTypeTIFF};
-            use objc2_foundation::NSArray;
+            use objc2_app_kit::NSPasteboard;
+            use objc2_foundation::{NSArray, NSString};
 
             let pasteboard = NSPasteboard::generalPasteboard();
-            // SAFETY: `NSPasteboardTypeTIFF` is an immutable AppKit string
-            // constant that lives for the whole process.
-            let tiff = unsafe { NSPasteboardTypeTIFF };
+            // The value of AppKit's `NSPasteboardTypeTIFF`: the uniform type
+            // identifier `public.tiff`.
+            let tiff = NSString::from_str("public.tiff");
             pasteboard
-                .availableTypeFromArray(&NSArray::from_slice(&[tiff]))
+                .availableTypeFromArray(&NSArray::from_slice(&[&*tiff]))
                 .is_some()
         }
 

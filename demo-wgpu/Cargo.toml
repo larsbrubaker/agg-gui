@@ -45,3 +45,7 @@ features = ["webgl"]
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 agg-gui-web-shell = { path = "../agg-gui-web-shell", default-features = false, features = ["webgl"] }
 log = "0.4"
+
+# No unsafe code in this crate: the compiler refuses it.
+[lints.rust]
+unsafe_code = "forbid"

@@ -35,18 +35,6 @@ use crate::pipelines::{
 use crate::texture_life::TextureLedger;
 use crate::{DrawCommand, LayerRoundedClip};
 
-/// Reinterpret a slice of `AaTexVertex` as raw bytes for upload.  The
-/// type is `#[repr(C)]` with only `f32` fields (pos:vec2 + uv:vec2 =
-/// 16 bytes, no padding, no Drop), so a flat byte view is sound.  We
-/// hand-roll this rather than pulling `bytemuck` into the agg-gui crate
-/// just for one type.
-fn aa_tex_verts_as_bytes(verts: &[agg_gui::gl_renderer::AaTexVertex]) -> &[u8] {
-    let ptr = verts.as_ptr() as *const u8;
-    let len = std::mem::size_of_val(verts);
-    // SAFETY: see doc above.
-    unsafe { std::slice::from_raw_parts(ptr, len) }
-}
-
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn prepare_all(
     device: &wgpu::Device,
@@ -153,7 +141,7 @@ pub(crate) fn prepare_all(
                 };
                 let ub = alloc_uniform(device, arenas, bytemuck::bytes_of(&uniforms));
                 let bg0 = bind_groups.uniform(device, &pipelines.aa_texture_bgl0, &ub);
-                let vb = alloc_vertex(device, arenas, aa_tex_verts_as_bytes(verts));
+                let vb = alloc_vertex(device, arenas, bytemuck::cast_slice(verts));
                 let ib = alloc_index(device, arenas, bytemuck::cast_slice(indices.as_slice()));
                 out.push(Prepared::AaTexture {
                     vb,

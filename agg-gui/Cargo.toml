@@ -53,6 +53,10 @@ base64 = "0.22.1"
 # (`text/shape_cache.rs`). Zlib; already in the tree through bevy_reflect
 # (bevy_platform) and wgpu (hashbrown), so it adds no new crate there.
 foldhash = { version = "0.2", default-features = false }
+# `Pod`/`Zeroable` on `gl_renderer::AaTexVertex` (the `bytemuck` feature), so
+# a GPU renderer uploads a vertex slice as bytes without copying it.
+# MIT OR Apache-2.0 OR Zlib.
+bytemuck = { version = "1", optional = true, features = ["derive"] }
 
 [features]
 default        = ["reflect", "svg-text"]
@@ -74,6 +78,10 @@ reflect        = ["dep:bevy_reflect"]
 # image-extra-formats: every other format the `image` crate decodes by
 # default, for an app whose Markdown or SVG pictures use them.
 image-extra-formats = ["image/default"]
+# bytemuck: derives `bytemuck::Pod` and `Zeroable` on
+# `gl_renderer::AaTexVertex`, so a renderer views a slice of them as bytes
+# with `bytemuck::cast_slice`. agg-gui-wgpu turns it on.
+bytemuck       = ["dep:bytemuck"]
 # svg-text: lets usvg turn an SVG's `<text>` into paths, with the fonts the
 # parse options hold. `SvgParseOptions::new()` holds none; the default options
 # the convenience helpers (`render_svg` and friends) use load the system's
