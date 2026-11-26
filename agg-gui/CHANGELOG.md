@@ -8,6 +8,18 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ## [Unreleased]
 
+## [0.6.0]
+
+### Changed
+
+- **Breaking for crates that also depend on agg-rust:** agg-gui builds on agg-rust 2.0.0 (it
+  required 1.1.0). `CompOp`, `LineCap`, `LineJoin` and `TransAffine`, which agg-gui re-exports,
+  and every other agg-rust type in its API (`PathStorage`, ...) are agg-rust 2.0.0's. Such a
+  crate must require agg-rust `2.0.0` too, or its agg-rust types are not the ones agg-gui takes
+  and returns. agg-rust 2.0.0's own break is in its pixel buffers: a `RowAccessor` borrows the
+  bytes (`RowAccessor::new_with_buf(&mut pixels, width, height, stride)`, a safe call) where it
+  took a raw pointer inside `unsafe`, and `row_ptr`, `RowInfo` and `ConstRowInfo` are gone.
+
 ## [0.5.24]
 
 ### Added

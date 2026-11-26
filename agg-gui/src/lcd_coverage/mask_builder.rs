@@ -190,9 +190,7 @@ where
     }
     let stride = gray_w as i32;
     let mut ra = RowAccessor::new();
-    unsafe {
-        ra.attach(gray.as_mut_ptr(), gray_w, gray_h, stride);
-    }
+    ra.attach(gray, gray_w, gray_h, stride);
     let pf = PixfmtGray8::new(&mut ra);
     let mut rb = RendererBase::new(pf);
     if let Some((cx, cy, cw, ch)) = clip {

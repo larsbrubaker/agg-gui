@@ -8,6 +8,14 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ## [Unreleased]
 
+## [0.7.0]
+
+### Changed
+
+- **Breaking:** agg-gui-web-shell requires agg-gui 0.6.0 and agg-gui-wgpu 0.8.0 (it required 0.5.21
+  and 0.7.3), which build on agg-rust 2.0.0. An app moves to agg-gui 0.6.0 with it, and to
+  agg-rust 2.0.0 if it depends on agg-rust itself.
+
 ## [0.6.5] - 2026-11-22
 
 The first release on crates.io since 0.6.1: it also carries 0.6.2 to 0.6.4, which were not

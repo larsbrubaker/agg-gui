@@ -15,6 +15,8 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 - A selected hosted card's ring is 3 units wide (was 2) in the theme's accent, with a soft glow
   of the accent fading out over the 4 units beyond it, so the selection reads at a glance. The
   card's retained layer grows to hold the glow.
+- **Breaking:** agg-gui-node-editor requires agg-gui 0.6.0 (it required 0.5.17), which builds on
+  agg-rust 2.0.0. An app moves to agg-gui 0.6.0 with it.
 
 ### Fixed
 

@@ -40,11 +40,11 @@ cargo add agg-gui
 
 ```toml
 [dependencies]
-agg-gui = "0.5"
+agg-gui = "0.6"
 # Optional: winit event-type adapters (for desktop hosts)
-# agg-gui = { version = "0.5", features = ["winit-adapter", "clipboard"] }
+# agg-gui = { version = "0.6", features = ["winit-adapter", "clipboard"] }
 # Optional: the hardware-accelerated wgpu renderer
-# agg-gui-wgpu = "0.5"
+# agg-gui-wgpu = "0.8"
 ```
 
 The published crates are `agg-gui` and `agg-gui-wgpu` (the hardware-accelerated
@@ -271,7 +271,7 @@ uses the crates.io versions. agg-gui-whistle depends on a `../whistle-rust` chec
 (it is not published until whistle-rust is):
 
 ```toml
-agg-rust   = { version = "1.1.0", path = "../../agg-rust" }
+agg-rust   = { version = "2.0.0", path = "../../agg-rust" }
 tess2-rust = { version = "1.1.8", path = "../../tess2-rust" }
 ```
 

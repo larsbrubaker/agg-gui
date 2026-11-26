@@ -1,6 +1,6 @@
 [package]
 name = "agg-gui"
-version = "0.5.24"
+version = "0.6.0"
 edition = "2021"
 # agg-rust (a path dependency) requires 1.88; wgpu 29 needs 1.87 and arboard 3.6 needs 1.71.
 rust-version = "1.88"
@@ -29,7 +29,7 @@ exclude = [
 # in CI, so a sibling fix is usable at once; `cargo publish` drops the path and
 # depends on the crates.io `version`, so a release that needs a newer sibling
 # waits for that sibling's release.
-agg-rust = { version = "1.1.0", path = "../../agg-rust" }
+agg-rust = { version = "2.0.0", path = "../../agg-rust" }
 ttf-parser = "0.25"
 rustybuzz = "0.20"
 tess2-rust = { version = "1.1.8", path = "../../tess2-rust" }

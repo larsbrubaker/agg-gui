@@ -235,8 +235,7 @@ fn fill_destination(ctx: &mut WgpuGfxCtx, color: Color) {
 fn software_blend(op: CompOp, pixel: [u8; 4], color: Color, cover: u8) -> [u8; 4] {
     let mut buf = pixel;
     let mut ra = RowAccessor::new();
-    // SAFETY: `buf` is a live 4-byte, 1x1 RGBA buffer that outlives `ra`.
-    unsafe { ra.attach(buf.as_mut_ptr(), 1, 1, 4) };
+    ra.attach(&mut buf, 1, 1, 4);
     let mut pf = PixfmtRgba32CompOp::new_with_op(&mut ra, op);
     let c: Rgba8 = color.to_rgba8();
     pf.blend_pixel(0, 0, &c, cover);
@@ -429,9 +428,7 @@ fn rust_only_straight_alpha_source_over_saturates() {
             if c > 0 {
                 // blender_rgba_pre: the colour bytes as they are, prelerp'd.
                 let mut ra = RowAccessor::new();
-                // SAFETY: `want` is a live 4-byte, 1x1 RGBA buffer that
-                // outlives `ra`.
-                unsafe { ra.attach(want.as_mut_ptr(), 1, 1, 4) };
+                ra.attach(&mut want, 1, 1, 4);
                 let mut pf = PixfmtRgba32Pre::new(&mut ra);
                 let [r, g, b, a] = straight;
                 pf.blend_pixel(0, 0, &Rgba8::new(r as u32, g as u32, b as u32, a as u32), c);

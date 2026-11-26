@@ -119,8 +119,7 @@ fn render_unclipped(
     for op in ops {
         let stride = (W * 4) as i32;
         let mut ra = RowAccessor::new();
-        // SAFETY: `fb` owns W*H*4 bytes and outlives `ra`/`rb` in this block.
-        unsafe { ra.attach(fb.pixels_mut().as_mut_ptr(), W, H, stride) };
+        ra.attach(fb.pixels_mut(), W, H, stride);
         let pf = PixfmtRgba32CompOp::new_with_op(&mut ra, CompOp::SrcOver);
         let mut rb = RendererBase::new(pf);
         apply_clip(&mut rb, clip);

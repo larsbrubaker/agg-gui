@@ -52,7 +52,7 @@ pub(crate) fn rasterize_fill(
     let h = fb.height();
     let stride = (w * 4) as i32;
     let mut ra = RowAccessor::new();
-    unsafe { ra.attach(fb.pixels_mut().as_mut_ptr(), w, h, stride) };
+    ra.attach(fb.pixels_mut(), w, h, stride);
     let pf = PixfmtRgba32CompOp::new_with_op(&mut ra, mode);
     let mut rb = RendererBase::new(pf);
     apply_clip(&mut rb, clip);
@@ -146,7 +146,7 @@ fn rasterize_stroke_source<VS: VertexSource>(
     let h = fb.height();
     let stride = (w * 4) as i32;
     let mut ra = RowAccessor::new();
-    unsafe { ra.attach(fb.pixels_mut().as_mut_ptr(), w, h, stride) };
+    ra.attach(fb.pixels_mut(), w, h, stride);
     let pf = PixfmtRgba32CompOp::new_with_op(&mut ra, mode);
     let mut rb = RendererBase::new(pf);
     apply_clip(&mut rb, clip);

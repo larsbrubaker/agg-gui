@@ -24,6 +24,8 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   queue a report wakes is still the one of the thread that asked to watch. A browser showing a
   folder on disk that is away no longer waits on the disk when the folder becomes the showing
   one, and lists the folder once it comes back.
+- **Breaking:** agg-gui-file-browser requires agg-gui 0.6.0 (it required 0.5.5), which builds on
+  agg-rust 2.0.0. An app moves to agg-gui 0.6.0 with it.
 
 ## [0.0.15] - 2026-11-20
 
