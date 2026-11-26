@@ -40,6 +40,33 @@ desktop-settings = ["dep:windows-sys-052"]
 # `windows::recycle_bin`: moving an item to the Windows Recycle Bin, a path's
 # long form and the bin's item count, for agg-gui-files' trash.
 recycle-bin = ["dep:windows-sys-061"]
+# `macos::open_files`: makes the application delegate answer
+# `application:openFiles:`, for agg-gui-shell's OS-delivered open requests.
+open-files = [
+    "dep:objc2",
+    "dep:objc2-foundation",
+    "dep:objc2-app-kit",
+    "objc2-foundation/std",
+    "objc2-foundation/NSArray",
+    "objc2-foundation/NSEnumerator",
+    "objc2-foundation/NSString",
+    "objc2-app-kit/std",
+    "objc2-app-kit/NSApplication",
+    "objc2-app-kit/NSResponder",
+]
+# `macos::menu`: the Objective-C delegate and action target of agg-gui-shell's
+# native menu bar, calling back into a handler the shell implements.
+app-menu = [
+    "dep:objc2",
+    "dep:objc2-foundation",
+    "dep:objc2-app-kit",
+    "objc2-foundation/std",
+    "objc2-foundation/NSString",
+    "objc2-app-kit/std",
+    "objc2-app-kit/NSEvent",
+    "objc2-app-kit/NSMenu",
+    "objc2-app-kit/NSMenuItem",
+]
 
 # The `libc` FFI bindings (MIT OR Apache-2.0, no compiled C).
 [target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]
@@ -64,6 +91,42 @@ windows-sys-061 = { package = "windows-sys", version = "0.61", optional = true, 
     "Win32_Storage_FileSystem",
     "Win32_UI_Shell",
 ] }
+
+# The objc2 bindings (objc2 and objc2-foundation: MIT; objc2-app-kit: Zlib OR
+# Apache-2.0 OR MIT; no compiled C), the versions winit 0.30 and wgpu already
+# build on the mac. Enabled by the macOS features only; each feature turns on
+# the binding features its module uses (in `[features]` above), so one does
+# not build the other's.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = { version = "0.6", optional = true }
+objc2-foundation = { version = "0.3", optional = true, default-features = false }
+objc2-app-kit = { version = "0.3", optional = true, default-features = false }
+
+# The real-menu test (`tests/macos_menu.rs`) also makes the application, a key
+# event (whose constructor names NSGraphicsContext) and a point.
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = [
+    "std",
+    "NSGeometry",
+    "NSString",
+] }
+objc2-app-kit = { version = "0.3", default-features = false, features = [
+    "std",
+    "NSApplication",
+    "NSEvent",
+    "NSGraphicsContext",
+    "NSMenu",
+    "NSMenuItem",
+    "NSResponder",
+] }
+
+# AppKit objects are main-thread only, and the test harness runs tests on
+# other threads: this test is its own `main`, run on the main thread.
+[[test]]
+name = "macos_menu"
+harness = false
+required-features = ["app-menu"]
 
 # The unsafe code here is held to account: an unsafe fn's body is not one
 # implicit unsafe block, and every unsafe block says why it is sound.

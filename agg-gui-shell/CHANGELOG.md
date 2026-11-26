@@ -20,6 +20,10 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   session and display rotation) go through the new `agg-os` crate, which it now depends on there,
   in place of its own `windows-sys` calls. No change in behavior; the same windows-sys 0.52 is
   built.
+- On macOS, the native menu bar's Objective-C class (the menus' delegate and the items' action
+  target) and the `application:openFiles:` hook for OS-delivered open requests now live in
+  `agg-os` (its `app-menu` and `open-files` features), which the shell now depends on there too.
+  The shell has no unsafe code left and forbids it. No change in behavior.
 
 ## [0.7.2] - 2026-11-22
 

@@ -28,15 +28,20 @@
 //! | `thread_id` | `thread-id` | The calling thread's id as the OS knows it |
 //! | `windows::desktop_settings` | `desktop-settings` | Reads of the Windows desktop's settings (hover and double-click time, cursor position, font smoothing, display rotation) |
 //! | `windows::recycle_bin` | `recycle-bin` | Moving an item to the Windows Recycle Bin, a path's long form, the bin's item count |
+//! | `macos::open_files` | `open-files` | Making the app delegate answer `application:openFiles:`, handing the paths to a callback |
+//! | `macos::menu` | `app-menu` | The Objective-C delegate and action target of native menus, calling a `MenuHandler` |
 //!
-//! The `windows` module exists on Windows only; its two features do nothing
-//! on other targets.
+//! The `windows` module exists on Windows only and the `macos` module on
+//! macOS only; their features do nothing on other targets.
 
 #[cfg(feature = "counting-alloc")]
 pub mod alloc_count;
 
 #[cfg(feature = "thread-id")]
 pub mod thread_id;
+
+#[cfg(target_os = "macos")]
+pub mod macos;
 
 #[cfg(windows)]
 pub mod windows;

@@ -48,15 +48,21 @@ log = "0.4"
 [target.'cfg(windows)'.dependencies]
 agg-os = { path = "../agg-os", version = "0.1.0", features = ["desktop-settings"] }
 
-# The native menu bar (`menu_bar/macos.rs`) and the double-click interval
+# On macOS the Objective-C runtime code goes through agg-os too: the native
+# menu bar's delegate and action target (`menu_bar/macos.rs`, feature
+# `app-menu`) and the `application:openFiles:` hook (`open_files/macos.rs`,
+# feature `open-files`).
+#
+# The rest of the native menu bar (`menu_bar/macos.rs`: filling the menus,
+# making the bar the main menu, reading it back) and the double-click interval
 # (`click_policy.rs`, `NSEvent.doubleClickInterval`) talk to AppKit through
-# objc2, the same binding winit and wgpu already use on the mac. objc2 and objc2-foundation:
-# MIT; objc2-app-kit: Zlib OR Apache-2.0 OR MIT.
+# objc2's safe bindings, the same binding winit and wgpu already use on the
+# mac. objc2 and objc2-foundation: MIT; objc2-app-kit: Zlib OR Apache-2.0 OR MIT.
 [target.'cfg(target_os = "macos")'.dependencies]
+agg-os = { path = "../agg-os", version = "0.1.0", features = ["open-files", "app-menu"] }
 objc2 = "0.6"
 objc2-foundation = { version = "0.3", default-features = false, features = [
     "std",
-    "NSArray",
     "NSProcessInfo",
     "NSString",
 ] }
@@ -75,3 +81,8 @@ objc2-app-kit = { version = "0.3", default-features = false, features = [
 # `png` agg-gui encodes them with.
 [dev-dependencies]
 png = "0.17"
+
+# No unsafe code in this crate: the compiler refuses it. The workspace's
+# rule on unsafe is in agg-os (its src/lib.rs).
+[lints.rust]
+unsafe_code = "forbid"
