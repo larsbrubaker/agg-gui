@@ -71,6 +71,7 @@ mod focus_blur;
 mod focus_follows_rebuilt_list;
 mod focus_follows_replacement;
 mod focus_replaced_subtree;
+mod framebuffer_size;
 mod horizontal_wheel_routing;
 mod hover_cursor_tests;
 mod hover_enter_leave;

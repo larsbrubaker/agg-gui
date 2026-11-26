@@ -20,6 +20,16 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   bytes (`RowAccessor::new_with_buf(&mut pixels, width, height, stride)`, a safe call) where it
   took a raw pointer inside `unsafe`, and `row_ptr`, `RowInfo` and `ConstRowInfo` are gone.
 
+### Fixed
+
+- `Framebuffer::new` and `Framebuffer::resize` no longer wrap the size of a huge framebuffer. The
+  byte count is computed without overflow, so on a 64-bit target 32768 x 32768 gets a buffer of
+  the right length, and a size that cannot be drawn into panics at once with a message that
+  names it: one whose bytes do not fit an allocation (over `isize::MAX`, which wasm32 reaches at
+  2 GiB), or whose row does not fit the renderer's `i32` stride (a width of 2^29 pixels or more,
+  whatever the height, which `Framebuffer::new(1 << 29, 0)` used to accept). Before, a release
+  build made the buffer too short and the first draw into it failed.
+
 ## [0.5.24]
 
 ### Added

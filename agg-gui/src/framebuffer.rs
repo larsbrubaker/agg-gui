@@ -21,11 +21,63 @@ pub struct Framebuffer {
     height: u32,
 }
 
+/// Byte length of a `width x height` RGBA8 buffer, or `None` when no
+/// framebuffer of that size can be drawn into.
+///
+/// See [`rgba8_byte_len_within`]; the limit here is `isize::MAX`, the longest
+/// allocation Rust allows on the target.
+pub(crate) fn rgba8_byte_len(width: u32, height: u32) -> Option<usize> {
+    rgba8_byte_len_within(width, height, isize::MAX as usize)
+}
+
+/// Byte length of a `width x height` RGBA8 buffer, or `None` when it is more
+/// than `max_len` bytes or one row does not fit the renderer's stride.
+///
+/// The product is computed in `usize` with `checked_mul`, so it never wraps.
+/// `max_len` is the longest allocation the target allows (`isize::MAX` in
+/// production); a parameter so the limit a 32-bit target meets can be tested
+/// on a 64-bit one. A length over it would reach `vec!` and panic there with
+/// a generic "capacity overflow" instead of a message naming the size.
+///
+/// The row limit applies whatever the height, zero included: the result is
+/// `None` when one row (`width * 4` bytes) does not fit `i32`. Every draw site
+/// attaches the buffer with an `i32` row stride, and a wrapped stride would
+/// read as a bottom-up buffer, so every `Framebuffer` keeps
+/// `width * 4 <= i32::MAX`, which [`Framebuffer::pixels_flipped`] and every
+/// stride computation rely on.
+pub(crate) fn rgba8_byte_len_within(width: u32, height: u32, max_len: usize) -> Option<usize> {
+    let row_bytes = (width as usize).checked_mul(4)?;
+    if row_bytes > i32::MAX as usize {
+        return None;
+    }
+    let len = row_bytes.checked_mul(height as usize)?;
+    (len <= max_len).then_some(len)
+}
+
+/// [`rgba8_byte_len`], panicking with a message that names the size when it
+/// is `None`. Shared by [`Framebuffer::new`] and [`Framebuffer::resize`].
+fn rgba8_byte_len_or_panic(width: u32, height: u32) -> usize {
+    match rgba8_byte_len(width, height) {
+        Some(len) => len,
+        None => panic!(
+            "framebuffer of {width} x {height} pixels is too large: its RGBA8 bytes do not fit \
+             an allocation (more than isize::MAX), or one row does not fit the renderer's i32 \
+             stride"
+        ),
+    }
+}
+
 impl Framebuffer {
     /// Create a new zeroed framebuffer.
+    ///
+    /// # Panics
+    ///
+    /// Panics, naming the size, when `width x height` RGBA8 bytes do not fit
+    /// an allocation (more than `isize::MAX`), or one row (`width * 4` bytes)
+    /// does not fit the renderer's `i32` stride, whatever the height.
     pub fn new(width: u32, height: u32) -> Self {
         Self {
-            pixels: vec![0u8; (width * height * 4) as usize],
+            pixels: vec![0u8; rgba8_byte_len_or_panic(width, height)],
             width,
             height,
         }
@@ -58,11 +110,19 @@ impl Framebuffer {
     }
 
     /// Resize the framebuffer (pixels are zeroed on resize).
+    ///
+    /// # Panics
+    ///
+    /// Panics, naming the size, when `width x height` RGBA8 bytes do not fit
+    /// an allocation (more than `isize::MAX`), or one row (`width * 4` bytes)
+    /// does not fit the renderer's `i32` stride, whatever the height. The
+    /// framebuffer is left unchanged when it panics.
     pub fn resize(&mut self, width: u32, height: u32) {
         if self.width != width || self.height != height {
+            let len = rgba8_byte_len_or_panic(width, height);
             self.width = width;
             self.height = height;
-            self.pixels = vec![0u8; (width * height * 4) as usize];
+            self.pixels = vec![0u8; len];
         }
     }
 
