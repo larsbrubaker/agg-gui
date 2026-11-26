@@ -1,0 +1,47 @@
+# agg-os: the operating system calls and the other unsafe code of the agg-gui
+# workspace's crates, each behind a safe function or type. It holds the
+# workspace's unsafe code; a member whose manifest sets
+# `unsafe_code = "forbid"` cannot contain any, and tests/unsafe_placement.rs
+# checks that every member does so except the ones it lists by name, which
+# still call the operating system directly (the rule: src/lib.rs).
+#
+# Each area is a Cargo feature, off by default, so a consumer compiles only
+# the bindings it uses. No dependency on any other workspace crate, and no
+# build script.
+[package]
+name = "agg-os"
+version = "0.1.0"
+edition = "2021"
+# Matches the rest of the agg-gui workspace.
+rust-version = "1.88"
+license = "MIT"
+description = "The operating system calls and other unsafe code of the agg-gui crates, each behind a safe function and a Cargo feature."
+authors = ["Lars Brubaker <larsbrubaker@matterhackers.com>"]
+repository = "https://github.com/larsbrubaker/agg-gui"
+readme = "README.md"
+keywords = ["agg-gui", "os", "ffi", "safe-wrapper"]
+categories = ["os", "api-bindings"]
+
+[lib]
+name = "agg_os"
+path = "src/lib.rs"
+
+[features]
+# `alloc_count`: a global allocator that forwards to the system allocator and
+# counts allocations, for benches that report allocations per pass.
+counting-alloc = []
+# `thread_id`: the calling thread's id as the operating system knows it, which
+# a stack dump records (libc on macOS and Linux).
+thread-id = ["dep:libc"]
+
+# The `libc` FFI bindings (MIT OR Apache-2.0, no compiled C).
+[target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]
+libc = { version = "0.2", optional = true }
+
+# The unsafe code here is held to account: an unsafe fn's body is not one
+# implicit unsafe block, and every unsafe block says why it is sound.
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[lints.clippy]
+undocumented_unsafe_blocks = "deny"

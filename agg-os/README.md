@@ -1,0 +1,19 @@
+# agg-os
+
+The operating system calls and the other unsafe code of the
+[agg-gui](https://github.com/larsbrubaker/agg-gui) crates, each behind a safe function or type.
+
+This crate holds the agg-gui workspace's unsafe code. A member whose manifest sets
+`unsafe_code = "forbid"` cannot contain any, and a test in this crate checks that every member
+does so except the ones it lists by name, which still call the operating system directly.
+Everything public here is safe to call: a caller that uses only safe Rust cannot
+cause undefined behavior through it, so no function takes a raw pointer, a raw handle or a size
+that the unsafe code then trusts.
+
+Each area is a Cargo feature, none on by default, so a consumer compiles only the bindings it
+uses. No build script, and no dependency on the other agg-gui crates.
+
+| Feature | Module | What it is |
+|---|---|---|
+| `counting-alloc` | `alloc_count` | `CountingAlloc`, a global allocator that forwards to the system allocator and counts allocations; `allocations()` reads the count |
+| `thread-id` | `thread_id` | `current_thread_os_id()`, the calling thread's Mach port name on macOS, kernel tid on Linux, 0 elsewhere |

@@ -31,6 +31,10 @@ backtrace = { version = "0.3", optional = true }
 # The `live` feature's real window (`LiveDriver` over `ShellSession`): winit
 # and wgpu through the shell, which core agg-gui must not depend on.
 agg-gui-shell = { path = "../agg-gui-shell", optional = true }
+# The `stack-dump` feature's thread ids (the key of its thread labels), read
+# through agg-os, the workspace's one crate with unsafe code. Path only: this
+# crate is not published.
+agg-os = { path = "../agg-os", features = ["thread-id"], optional = true }
 
 # The minidump writer (MIT; pure Rust over mach2 on macOS and ptrace on
 # Linux) and the `libc` FFI bindings (no compiled C) for thread ids, fork and
@@ -50,6 +54,7 @@ stack-dump = [
     "dep:backtrace",
     "dep:minidump-writer",
     "dep:libc",
+    "dep:agg-os",
 ]
 
 # The live window driver (`src/driver/live.rs`): `LiveDriver` over

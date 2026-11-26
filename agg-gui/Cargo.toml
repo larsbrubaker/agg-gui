@@ -21,6 +21,9 @@ exclude = [
     # repository URL, and dropping it keeps the upload under a flaky ~1.2MB
     # network limit on the publish path.
     "readme_hero.png",
+    # Needs a font from outside the package and the dev-dependency agg-os,
+    # which the published manifest drops, so it cannot build from the package.
+    "examples/text_measure_bench.rs",
 ]
 
 [dependencies]
@@ -161,6 +164,12 @@ web-sys = { version = "0.3.82", features = [
     "OffscreenCanvasRenderingContext2d",
 ] }
 
+# The example text_measure_bench installs agg-os's counting allocator. Path
+# only, with no `version`: cargo drops a path-only dev-dependency when it
+# publishes, so agg-gui's release does not wait on agg-os's.
+[dev-dependencies]
+agg-os = { path = "../agg-os", features = ["counting-alloc"] }
+
 # Lints that only fire once rust-version reaches the release that stabilised
 # their suggestion (Option::is_none_or 1.82, is_multiple_of 1.87, as_chunks
 # 1.88). Raising the MSRV from 1.70 to 1.88 surfaced ~90 such sites across the
@@ -170,3 +179,8 @@ web-sys = { version = "0.3.82", features = [
 chunks_exact_to_as_chunks = "allow"
 unnecessary_map_or = "allow"
 manual_is_multiple_of = "allow"
+
+# No unsafe code in this crate: the compiler refuses it. The workspace's
+# rule on unsafe is in agg-os (its src/lib.rs).
+[lints.rust]
+unsafe_code = "forbid"

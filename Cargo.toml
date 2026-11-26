@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "agg-os",
     "agg-gui",
     "agg-gui-files",
     "agg-gui-file-browser",
@@ -17,6 +18,7 @@ members = [
     "node-editor",
 ]
 default-members = [
+    "agg-os",
     "agg-gui",
     "agg-gui-files",
     "agg-gui-file-browser",

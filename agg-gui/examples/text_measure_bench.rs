@@ -16,7 +16,8 @@
 //!   for identical output.
 //!
 //! It ends with the shape cache's entry count, the working set this
-//! MatterCAD-like column keeps hot.
+//! MatterCAD-like column keeps hot. Allocations are counted by agg-os's
+//! `CountingAlloc`, installed as the global allocator.
 //!
 //! Run in release; the shape cache is warm after the first pass, so every
 //! timed pass measures the steady state:
@@ -25,36 +26,15 @@
 //! cargo run --release -p agg-gui --example text_measure_bench
 //! ```
 
-use std::alloc::{GlobalAlloc, Layout, System};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
 use agg_gui::text::{measure_advance, measure_text_metrics, shape_cache_len, Font};
 use agg_gui::widgets::{Button, FlexColumn, Label};
 use agg_gui::{Color, Framebuffer, GfxCtx, Size, Widget};
+use agg_os::alloc_count::{allocations, CountingAlloc};
 
 /// Counts every allocation (and reallocation) the process makes.
-struct CountingAlloc;
-
-static ALLOCS: AtomicU64 = AtomicU64::new(0);
-
-// SAFETY: forwards every call unchanged to the system allocator; the only
-// addition is a relaxed counter increment, which cannot affect allocation.
-unsafe impl GlobalAlloc for CountingAlloc {
-    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        ALLOCS.fetch_add(1, Ordering::Relaxed);
-        System.alloc(layout)
-    }
-    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        System.dealloc(ptr, layout)
-    }
-    unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
-        ALLOCS.fetch_add(1, Ordering::Relaxed);
-        System.realloc(ptr, layout, new_size)
-    }
-}
-
 #[global_allocator]
 static GLOBAL: CountingAlloc = CountingAlloc;
 
@@ -71,13 +51,13 @@ fn time(name: &str, mut f: impl FnMut()) {
     let mut best = f64::INFINITY;
     let mut allocs = 0;
     for _ in 0..ROUNDS {
-        let a0 = ALLOCS.load(Ordering::Relaxed);
+        let a0 = allocations();
         let t0 = Instant::now();
         for _ in 0..PASSES {
             f();
         }
         let us = t0.elapsed().as_secs_f64() * 1e6 / PASSES as f64;
-        allocs = ALLOCS.load(Ordering::Relaxed) - a0;
+        allocs = allocations() - a0;
         best = best.min(us);
     }
     println!(

@@ -61,7 +61,8 @@ pollster = "0.3"
 # browser-validation test over every shader the crate ships.
 naga = { version = "29", default-features = false, features = ["wgsl-in"] }
 
-# No unsafe code in this crate: the compiler refuses it.
+# No unsafe code in this crate: the compiler refuses it. The workspace's
+# rule on unsafe is in agg-os (its src/lib.rs).
 [lints.rust]
 unsafe_code = "forbid"
 

@@ -119,6 +119,11 @@ jobs:
       - name: Clippy (agg-gui-automation, stack dump and live)
         run: cargo clippy -p agg-gui-automation --all-targets --features stack-dump,live -- -D warnings
 
+      # agg-os, the workspace's one crate with unsafe code, with every
+      # feature on: its lints (every unsafe block documented) see all of it.
+      - name: Clippy (agg-os, all features)
+        run: cargo clippy -p agg-os --all-targets --all-features -- -D warnings
+
   test:
     runs-on: ubuntu-26.04
     defaults:
@@ -258,6 +263,10 @@ jobs:
       - name: Run automation tests (stack dump)
         run: cargo test -p agg-gui-automation --features stack-dump
 
+      # The safe wrappers over the workspace's unsafe code, every feature on.
+      - name: Run agg-os tests
+        run: cargo test -p agg-os --all-features
+
       # What the job left of the disk, so a build creeping back towards the
       # runner's limit shows in a passing run's log before it fails one.
       - name: Disk left
@@ -269,11 +278,12 @@ jobs:
   # The Windows and macOS code that the Linux jobs never compile: the
   # clipboard feature (`clipboard::has_image` asks the Windows and macOS
   # clipboards for a picture format directly), agg-mic's captures, the file
-  # model's disk and trash calls, agg-gui-shell's Win32 and AppKit code, and
-  # agg-gui-automation's stack dump. Linted everywhere; tested where the
-  # tests reach that code (agg-mic, agg-gui-shell, the disk feature, and the
-  # stack dump on macOS, the one of the two with a dump writer). The job is named for the
-  # first of these checks.
+  # model's disk and trash calls, agg-gui-shell's Win32 and AppKit code,
+  # agg-gui-automation's stack dump, and agg-os's per-OS unsafe code. Linted
+  # everywhere; tested where the tests reach that code (agg-mic,
+  # agg-gui-shell, the disk feature, agg-os, and the stack dump on macOS, the
+  # one of the two with a dump writer). The job is named for the first of
+  # these checks.
   check-clipboard:
     strategy:
       fail-fast: false
@@ -361,6 +371,14 @@ jobs:
       - name: Run automation tests (stack dump)
         if: runner.os == 'macOS'
         run: cargo test -p agg-gui-automation --features stack-dump
+
+      # agg-os's unsafe code as this OS compiles it (each module picks its
+      # calls per OS), linted and tested with every feature on.
+      - name: Clippy (agg-os, all features)
+        run: cargo clippy -p agg-os --all-targets --all-features -- -D warnings
+
+      - name: Run agg-os tests
+        run: cargo test -p agg-os --all-features
 
   build-wasm:
     runs-on: ubuntu-26.04

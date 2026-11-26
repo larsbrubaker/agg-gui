@@ -57,6 +57,7 @@ agg-gui-files = { path = "../agg-gui-files", version = ">=0.0.8, <0.1.0", featur
 name = "live_relist"
 required-features = ["disk"]
 
-# No unsafe code in this crate: the compiler refuses it.
+# No unsafe code in this crate: the compiler refuses it. The workspace's
+# rule on unsafe is in agg-os (its src/lib.rs).
 [lints.rust]
 unsafe_code = "forbid"

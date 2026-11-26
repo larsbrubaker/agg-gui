@@ -46,6 +46,7 @@ features = ["webgl"]
 agg-gui-web-shell = { path = "../agg-gui-web-shell", default-features = false, features = ["webgl"] }
 log = "0.4"
 
-# No unsafe code in this crate: the compiler refuses it.
+# No unsafe code in this crate: the compiler refuses it. The workspace's
+# rule on unsafe is in agg-os (its src/lib.rs).
 [lints.rust]
 unsafe_code = "forbid"
