@@ -36,24 +36,17 @@ wgpu = { version = "29", default-features = false, features = ["wgsl"] }
 # in which case every call compiles down to a branch on a static).
 log = "0.4"
 
-# Reuse the same windows-sys major winit 0.30 already pulls in (0.52) so no
-# second copy is linked. `Win32_UI_WindowsAndMessaging` carries
-# SystemParametersInfoW(SPI_GETMOUSEHOVERTIME) for OS tooltip hover timing and
-# GetCursorPos for the file-drop position workaround (winit's OLE drop path
-# discards the drop point); `Win32_Foundation` is POINT for the latter. The
-# LCD display reader (`lcd_display.rs`) reads the font smoothing settings and
-# SM_REMOTESESSION from `Win32_UI_WindowsAndMessaging` and the primary display's
-# rotation through `Win32_Graphics_Gdi`'s EnumDisplaySettingsW. The click
-# policy (`click_policy.rs`) reads GetDoubleClickTime from
-# `Win32_UI_Input_KeyboardAndMouse` and SM_CXDOUBLECLK/SM_CYDOUBLECLK through
-# GetSystemMetrics.
+# The Windows desktop settings the shell honours go through agg-os, the
+# workspace's one crate with unsafe code (its rule: agg-os/src/lib.rs):
+# the tooltip hover time (`tooltip.rs`), the double-click time and rectangle
+# (`click_policy.rs`), the live cursor position for the file-drop position
+# workaround (`input.rs`; winit's OLE drop path discards the drop point), and
+# the font smoothing settings, remote session and primary display rotation
+# (`lcd_display.rs`). agg-os builds them on windows-sys 0.52, the version
+# winit 0.30 already pulls in, so no second copy is linked. `version` is
+# required for a `path` dependency to be publishable.
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.52", features = [
-    "Win32_Foundation",
-    "Win32_Graphics_Gdi",
-    "Win32_UI_Input_KeyboardAndMouse",
-    "Win32_UI_WindowsAndMessaging",
-] }
+agg-os = { path = "../agg-os", version = "0.1.0", features = ["desktop-settings"] }
 
 # The native menu bar (`menu_bar/macos.rs`) and the double-click interval
 # (`click_policy.rs`, `NSEvent.doubleClickInterval`) talk to AppKit through

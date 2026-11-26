@@ -9,20 +9,18 @@
 //! large for it, Windows deletes it permanently and still reports success. The Recycle Bin's item
 //! count, read before and after, tells the two apart, so the caller is never told an item is in
 //! the Recycle Bin when Windows erased it.
+//!
+//! The three Windows calls (the recycle, a path's long form, the item count) are agg-os's
+//! `windows::recycle_bin`, the workspace's home for unsafe code; the search and the messages are
+//! here.
 
 use std::path::{Path, PathBuf};
 
-use windows_sys::Win32::Foundation::S_OK;
-use windows_sys::Win32::Storage::FileSystem::GetLongPathNameW;
-use windows_sys::Win32::UI::Shell::{
-    SHFileOperationW, SHQueryRecycleBinW, FOF_ALLOWUNDO, FOF_NOCONFIRMATION, FOF_NOERRORUI,
-    FOF_SILENT, FO_DELETE, SHFILEOPSTRUCTW, SHQUERYRBINFO,
-};
+use agg_os::windows::recycle_bin::{long_path_name, recycle, recycle_bin_item_count, RecycleError};
 
 use super::TrashedItem;
 
 pub(super) fn trash(original: &Path) -> Result<TrashedItem, String> {
-    use std::os::windows::ffi::OsStrExt;
     let root = original
         .ancestors()
         .last()
@@ -30,31 +28,33 @@ pub(super) fn trash(original: &Path) -> Result<TrashedItem, String> {
         .to_path_buf();
     // Both spellings are read while the item still exists: the long form needs it on disk.
     let mut wanted = vec![original.to_string_lossy().to_string()];
-    if let Some(long) = long_path(original).filter(|l| l.as_path() != original) {
+    if let Some(long) = long_path_name(original).filter(|l| l.as_path() != original) {
         wanted.push(long.to_string_lossy().to_string());
     }
-    let items_before = recycle_bin_items(&root);
-    // The source list is double-null terminated.
-    let mut from: Vec<u16> = original.as_os_str().encode_wide().collect();
-    from.extend([0, 0]);
-    let mut operation = SHFILEOPSTRUCTW {
-        wFunc: FO_DELETE,
-        pFrom: from.as_ptr(),
-        // The flags fit the struct's 16-bit field: all are below 0x10000.
-        fFlags: (FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_NOERRORUI | FOF_SILENT) as u16,
-        ..Default::default()
-    };
-    // SAFETY: `operation` is fully initialised and `from` (the only pointer it carries) outlives
-    // the call; the call reads them and writes only `fAnyOperationsAborted`.
-    let code = unsafe { SHFileOperationW(&mut operation) };
-    if code != 0 || operation.fAnyOperationsAborted != 0 {
-        return Err(format!(
-            "{}: couldn't move it to the Recycle Bin (error {code})",
-            original.display()
-        ));
+    let items_before = recycle_bin_item_count(&root);
+    match recycle(original) {
+        Ok(()) => {}
+        Err(RecycleError::Failed { code, .. }) => {
+            return Err(format!(
+                "{}: couldn't move it to the Recycle Bin (error {code})",
+                original.display()
+            ));
+        }
+        Err(RecycleError::InteriorNul) => {
+            return Err(format!(
+                "{}: couldn't move it to the Recycle Bin (its path holds a NUL character)",
+                original.display()
+            ));
+        }
+        Err(other) => {
+            return Err(format!(
+                "{}: couldn't move it to the Recycle Bin ({other})",
+                original.display()
+            ));
+        }
     }
     let Some((in_trash, info_file)) = find_recycled(&root, &wanted) else {
-        let recycled = match (items_before, recycle_bin_items(&root)) {
+        let recycled = match (items_before, recycle_bin_item_count(&root)) {
             (Some(before), Some(after)) => after > before,
             // Without counts nothing says it was erased; the plainer claim is that it went in.
             _ => true,
@@ -79,45 +79,6 @@ pub(super) fn trash(original: &Path) -> Result<TrashedItem, String> {
         in_trash,
         info_file: Some(info_file),
     })
-}
-
-/// `path` with every short 8.3 component spelled out (`RUNNER~1` → `runneradmin`), or `None`
-/// when Windows can't say (the path is missing, or the call fails).
-fn long_path(path: &Path) -> Option<PathBuf> {
-    use std::os::windows::ffi::{OsStrExt, OsStringExt};
-    let short: Vec<u16> = path.as_os_str().encode_wide().chain([0]).collect();
-    let mut buffer: Vec<u16> = vec![0; 512];
-    loop {
-        // A path longer than u32::MAX characters can't exist; the clamp only keeps the cast exact.
-        let capacity = u32::try_from(buffer.len()).unwrap_or(u32::MAX);
-        // SAFETY: `short` is null terminated and `buffer` holds `capacity` writable characters;
-        // the call writes at most that many.
-        let written = unsafe { GetLongPathNameW(short.as_ptr(), buffer.as_mut_ptr(), capacity) };
-        let written = written as usize;
-        if written == 0 {
-            return None;
-        }
-        if written < buffer.len() {
-            buffer.truncate(written);
-            return Some(PathBuf::from(std::ffi::OsString::from_wide(&buffer)));
-        }
-        // Too small: `written` is the size needed, null included.
-        buffer = vec![0; written];
-    }
-}
-
-/// How many items the Recycle Bin of the drive at `root` holds, or `None` when Windows can't say.
-fn recycle_bin_items(root: &Path) -> Option<i64> {
-    use std::os::windows::ffi::OsStrExt;
-    let root: Vec<u16> = root.as_os_str().encode_wide().chain([0]).collect();
-    let mut info = SHQUERYRBINFO {
-        // The struct's size, a few dozen bytes: the cast can't overflow.
-        cbSize: std::mem::size_of::<SHQUERYRBINFO>() as u32,
-        ..Default::default()
-    };
-    // SAFETY: `root` is null terminated and `info` is a writable struct of the size it declares.
-    let result = unsafe { SHQueryRecycleBinW(root.as_ptr(), &mut info) };
-    (result == S_OK).then_some(info.i64NumItems)
 }
 
 /// The `$R` item and `$I` record of the newest recycle of the path spelled `wanted`, searched in

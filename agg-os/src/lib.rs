@@ -26,9 +26,17 @@
 //! |---|---|---|
 //! | `alloc_count` | `counting-alloc` | A global allocator that counts allocations |
 //! | `thread_id` | `thread-id` | The calling thread's id as the OS knows it |
+//! | `windows::desktop_settings` | `desktop-settings` | Reads of the Windows desktop's settings (hover and double-click time, cursor position, font smoothing, display rotation) |
+//! | `windows::recycle_bin` | `recycle-bin` | Moving an item to the Windows Recycle Bin, a path's long form, the bin's item count |
+//!
+//! The `windows` module exists on Windows only; its two features do nothing
+//! on other targets.
 
 #[cfg(feature = "counting-alloc")]
 pub mod alloc_count;
 
 #[cfg(feature = "thread-id")]
 pub mod thread_id;
+
+#[cfg(windows)]
+pub mod windows;

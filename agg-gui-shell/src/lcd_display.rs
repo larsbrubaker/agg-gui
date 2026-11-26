@@ -30,81 +30,37 @@ impl LcdDisplayEnvironmentProvider for WindowsLcdDisplayEnvironmentProvider {
 #[cfg(windows)]
 fn read_environment() -> Option<LcdDisplayEnvironment> {
     use agg_gui::lcd_display_detection::{LcdFontSmoothingStyle, LcdStripeOrder};
-    use windows_sys::Win32::UI::WindowsAndMessaging::{
-        GetSystemMetrics, SM_REMOTESESSION, SPI_GETFONTSMOOTHING, SPI_GETFONTSMOOTHINGORIENTATION,
-        SPI_GETFONTSMOOTHINGTYPE,
+    use agg_os::windows::desktop_settings::{
+        font_smoothing_enabled, font_smoothing_orientation, font_smoothing_type, is_remote_session,
+        primary_display_rotated_quarter_turn,
     };
 
     // Smoothing on/off and its style are the two the answer really hinges on;
     // if either read fails we know nothing useful and say so rather than
     // filling in a plausible value.
-    let smoothing_enabled = system_parameter(SPI_GETFONTSMOOTHING)?;
-    let smoothing_type = system_parameter(SPI_GETFONTSMOOTHINGTYPE)?;
+    let smoothing_enabled = font_smoothing_enabled()?;
+    let smoothing_type = font_smoothing_type()?;
 
     // Orientation is missing on some drivers. RGB is the overwhelmingly common
     // panel layout and is also what Windows itself assumes, so an unreadable
     // orientation is treated as RGB rather than as a reason to give up the
     // whole detection (`1` is FE_FONTSMOOTHINGORIENTATIONRGB).
-    let orientation = system_parameter(SPI_GETFONTSMOOTHINGORIENTATION).unwrap_or(1);
+    let orientation = font_smoothing_orientation().unwrap_or(1);
 
-    // Safety: GetSystemMetrics takes an index by value and has no pointer
-    // arguments; an unknown index returns 0.
-    let remote_session = unsafe { GetSystemMetrics(SM_REMOTESESSION) } != 0;
+    let remote_session = is_remote_session();
+
+    // Whether the primary display is turned on its side, which puts its colour
+    // stripes on the vertical axis. False when the mode cannot be read - the
+    // unrotated case is the overwhelming majority.
+    let rotated = primary_display_rotated_quarter_turn().unwrap_or(false);
 
     Some(LcdDisplayEnvironment {
-        font_smoothing_enabled: smoothing_enabled != 0,
+        font_smoothing_enabled: smoothing_enabled,
         font_smoothing_style: LcdFontSmoothingStyle::from_windows(smoothing_type),
         stripe_order: LcdStripeOrder::from_windows(orientation),
         is_remote_session: remote_session,
-        display_rotated_quarter_turn: primary_display_is_rotated_quarter_turn(),
+        display_rotated_quarter_turn: rotated,
     })
-}
-
-/// One `SystemParametersInfoW` query whose answer is a single `UINT`/`BOOL`
-/// (all three font smoothing actions are), or `None` when the call fails.
-#[cfg(windows)]
-fn system_parameter(
-    action: windows_sys::Win32::UI::WindowsAndMessaging::SYSTEM_PARAMETERS_INFO_ACTION,
-) -> Option<u32> {
-    use windows_sys::Win32::UI::WindowsAndMessaging::SystemParametersInfoW;
-
-    let mut value: u32 = 0;
-    // Safety: each action passed here writes one 32-bit value (a BOOL for
-    // SPI_GETFONTSMOOTHING, a UINT for the type and orientation) into
-    // `pvParam`; we pass a pointer to a live `u32` and read it only after a
-    // non-zero (success) return.
-    let ok = unsafe { SystemParametersInfoW(action, 0, (&mut value as *mut u32).cast(), 0) };
-    (ok != 0).then_some(value)
-}
-
-/// Whether the primary display is turned on its side, which puts its colour
-/// stripes on the vertical axis. False when the mode cannot be read - the
-/// unrotated case is the overwhelming majority.
-#[cfg(windows)]
-fn primary_display_is_rotated_quarter_turn() -> bool {
-    use windows_sys::Win32::Graphics::Gdi::{
-        EnumDisplaySettingsW, DEVMODEW, DMDO_270, DMDO_90, ENUM_CURRENT_SETTINGS,
-    };
-
-    // Safety: DEVMODEW is plain old data (integers, u16 arrays and a union of
-    // integer structs), so the all-zero bit pattern is a valid value.
-    let mut device_mode: DEVMODEW = unsafe { std::mem::zeroed() };
-    device_mode.dmSize = std::mem::size_of::<DEVMODEW>() as u16;
-
-    // A null device name asks for the display the calling thread is on, which
-    // at startup is the primary display.
-    // Safety: `device_mode` is a live DEVMODEW whose dmSize says how much the
-    // call may write; a null device name is documented as "the current display".
-    let ok =
-        unsafe { EnumDisplaySettingsW(std::ptr::null(), ENUM_CURRENT_SETTINGS, &mut device_mode) };
-    if ok == 0 {
-        return false;
-    }
-
-    // Safety: for a display device the union holds the display half
-    // (position, orientation, fixed output), which EnumDisplaySettingsW filled.
-    let orientation = unsafe { device_mode.Anonymous1.Anonymous2.dmDisplayOrientation };
-    orientation == DMDO_90 || orientation == DMDO_270
 }
 
 /// C#'s provider returns false when `!OperatingSystem.IsWindows()`: nothing on

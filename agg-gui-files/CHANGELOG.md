@@ -33,6 +33,10 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 - Being unreadable is a state of the listing of its own: a watched directory going away reports
   even when it was empty (an empty one went unreported before), and reports again when it comes
   back.
+- On Windows, the trash's calls (`SHFileOperationW`, `GetLongPathNameW` and
+  `SHQueryRecycleBinW`) go through the new `agg-os` crate, which the `disk` feature now depends
+  on there, in place of `windows-sys` directly; the crate has no unsafe code left and its manifest
+  forbids it. No change in behavior.
 
 ### Fixed
 

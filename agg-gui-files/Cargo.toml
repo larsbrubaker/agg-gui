@@ -38,9 +38,10 @@ indexmap = { version = "2", optional = true }
 [features]
 # Folders on the computer's disk (`disk`): listing, writes and the system trash. The trash needs
 # the operating system's own calls: NSFileManager through objc2 on macOS (MIT), the Shell's
-# recycle bin through windows-sys on Windows (MIT OR Apache-2.0); the freedesktop trash is plain
-# file work. Neither compiles C. On wasm32 the disk code compiles and every read fails.
-disk = ["dep:objc2-foundation", "dep:windows-sys"]
+# recycle bin through agg-os on Windows (the workspace's one crate with unsafe code, MIT, on
+# windows-sys 0.61, MIT OR Apache-2.0); the freedesktop trash is plain file work. Neither
+# compiles C. On wasm32 the disk code compiles and every read fails.
+disk = ["dep:objc2-foundation", "dep:agg-os"]
 # A `.zip` file browsed as a read-only folder (`zip`): the `zip` crate, pure Rust with Deflate
 # only (MIT), and `indexmap` (MIT OR Apache-2.0) for listing entries in archive order. With
 # `disk` too, a folder on disk lists its zip files as folders.
@@ -49,6 +50,12 @@ zip = ["dep:zip", "dep:indexmap"]
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-foundation = { version = "0.3", optional = true, default-features = false, features = ["std", "NSString", "NSURL", "NSError", "NSFileManager"] }
 
+# `version` is required for a `path` dependency to be publishable.
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", optional = true, features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_UI_Shell"] }
+agg-os = { path = "../agg-os", version = "0.1.0", optional = true, features = ["recycle-bin"] }
+
+# No unsafe code in this crate: the compiler refuses it. The workspace's
+# rule on unsafe is in agg-os (its src/lib.rs).
+[lints.rust]
+unsafe_code = "forbid"
 

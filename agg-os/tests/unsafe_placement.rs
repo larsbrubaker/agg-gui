@@ -23,12 +23,7 @@ const UNSAFE_HOME: &str = "agg-os";
 /// and so do not forbid unsafe code. Each leaves this list in the change that
 /// moves its calls behind an agg-os function and adds the lint to its
 /// manifest.
-const NOT_YET_FORBIDDEN: &[&str] = &[
-    "agg-gui-automation",
-    "agg-gui-files",
-    "agg-gui-shell",
-    "agg-mic",
-];
+const NOT_YET_FORBIDDEN: &[&str] = &["agg-gui-automation", "agg-gui-shell", "agg-mic"];
 
 /// `line` without its `#` comment, trimmed. A `#` inside a quoted string is
 /// kept (manifest strings here are simple: no escaped quotes are expected).

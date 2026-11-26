@@ -17,3 +17,11 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   `alloc_count::allocations()`, the count so far.
 - `thread-id` feature: `thread_id::current_thread_os_id()`, the calling thread's id as a dump
   records it (its Mach port name on macOS, its kernel tid on Linux, 0 elsewhere).
+- `desktop-settings` feature (Windows): `windows::desktop_settings`, one read of a desktop setting
+  per function: `mouse_hover_time_ms()`, `double_click_time_ms()`, `double_click_rect_px()`,
+  `cursor_pos()`, `font_smoothing_enabled()`, `font_smoothing_type()`,
+  `font_smoothing_orientation()`, `is_remote_session()` and
+  `primary_display_rotated_quarter_turn()`. Built on windows-sys 0.52.
+- `recycle-bin` feature (Windows): `windows::recycle_bin`, with `recycle()` (moves an item to the
+  Recycle Bin, failing with a `RecycleError`), `long_path_name()` and `recycle_bin_item_count()`.
+  A path holding a NUL character is refused before any call. Built on windows-sys 0.61.

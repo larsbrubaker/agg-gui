@@ -33,10 +33,37 @@ counting-alloc = []
 # `thread_id`: the calling thread's id as the operating system knows it, which
 # a stack dump records (libc on macOS and Linux).
 thread-id = ["dep:libc"]
+# `windows::desktop_settings`: reads of the Windows desktop's settings for
+# agg-gui-shell (tooltip hover time, double-click time and rectangle, the
+# cursor position, font smoothing, remote session, display rotation).
+desktop-settings = ["dep:windows-sys-052"]
+# `windows::recycle_bin`: moving an item to the Windows Recycle Bin, a path's
+# long form and the bin's item count, for agg-gui-files' trash.
+recycle-bin = ["dep:windows-sys-061"]
 
 # The `libc` FFI bindings (MIT OR Apache-2.0, no compiled C).
 [target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]
 libc = { version = "0.2", optional = true }
+
+# The `windows-sys` FFI bindings (MIT OR Apache-2.0, no compiled C), in two
+# versions so that each consumer builds the one it built before: agg-gui-shell
+# uses 0.52 because winit 0.30 already builds it, and agg-gui-files uses 0.61.
+# Each is enabled by its feature only, with only the bindings its module uses.
+[target.'cfg(windows)'.dependencies]
+# `desktop-settings`: POINT; EnumDisplaySettingsW and DEVMODEW;
+# GetDoubleClickTime; GetCursorPos, GetSystemMetrics, SystemParametersInfoW.
+windows-sys-052 = { package = "windows-sys", version = "0.52", optional = true, features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_WindowsAndMessaging",
+] }
+# `recycle-bin`: S_OK; GetLongPathNameW; SHFileOperationW, SHQueryRecycleBinW.
+windows-sys-061 = { package = "windows-sys", version = "0.61", optional = true, features = [
+    "Win32_Foundation",
+    "Win32_Storage_FileSystem",
+    "Win32_UI_Shell",
+] }
 
 # The unsafe code here is held to account: an unsafe fn's body is not one
 # implicit unsafe block, and every unsafe block says why it is sound.

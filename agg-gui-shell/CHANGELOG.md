@@ -15,6 +15,11 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 - **Breaking:** agg-gui-shell requires agg-gui 0.6.0 and agg-gui-wgpu 0.8.0 (it required 0.5.21
   and 0.7.3), which build on agg-rust 2.0.0. An app moves to agg-gui 0.6.0 with it, and to
   agg-rust 2.0.0 if it depends on agg-rust itself.
+- On Windows, the shell's reads of the desktop's settings (the tooltip hover time, the
+  double-click time and rectangle, the cursor position during a file drop, font smoothing, remote
+  session and display rotation) go through the new `agg-os` crate, which it now depends on there,
+  in place of its own `windows-sys` calls. No change in behavior; the same windows-sys 0.52 is
+  built.
 
 ## [0.7.2] - 2026-11-22
 

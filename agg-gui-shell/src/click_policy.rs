@@ -99,20 +99,10 @@ pub(crate) fn read_os_double_click() -> OsDoubleClick {
 /// rectangle (physical pixels; winit makes the process per-monitor DPI aware).
 #[cfg(windows)]
 pub(crate) fn read_os_double_click() -> OsDoubleClick {
-    use windows_sys::Win32::UI::Input::KeyboardAndMouse::GetDoubleClickTime;
-    use windows_sys::Win32::UI::WindowsAndMessaging::{
-        GetSystemMetrics, SM_CXDOUBLECLK, SM_CYDOUBLECLK,
-    };
-    // Safety: all three are argument-free (or take a plain index) reads of
-    // system settings with no pointers involved; zero means "unavailable",
-    // which `policy_from_os` treats as missing.
-    let (ms, cx, cy) = unsafe {
-        (
-            GetDoubleClickTime(),
-            GetSystemMetrics(SM_CXDOUBLECLK),
-            GetSystemMetrics(SM_CYDOUBLECLK),
-        )
-    };
+    use agg_os::windows::desktop_settings::{double_click_rect_px, double_click_time_ms};
+    // Zero means "unavailable", which `policy_from_os` treats as missing.
+    let ms = double_click_time_ms();
+    let (cx, cy) = double_click_rect_px();
     OsDoubleClick {
         interval_secs: Some(ms as f64 / 1000.0),
         rect_physical_px: Some((cx as f64, cy as f64)),

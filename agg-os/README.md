@@ -17,3 +17,5 @@ uses. No build script, and no dependency on the other agg-gui crates.
 |---|---|---|
 | `counting-alloc` | `alloc_count` | `CountingAlloc`, a global allocator that forwards to the system allocator and counts allocations; `allocations()` reads the count |
 | `thread-id` | `thread_id` | `current_thread_os_id()`, the calling thread's Mach port name on macOS, kernel tid on Linux, 0 elsewhere |
+| `desktop-settings` | `windows::desktop_settings` | Windows only: one read of a desktop setting per function (mouse hover time, double-click time and rectangle, cursor position, font smoothing on/type/orientation, remote session, primary display rotation); windows-sys 0.52 |
+| `recycle-bin` | `windows::recycle_bin` | Windows only: `recycle()` moves an item to the Recycle Bin, `long_path_name()` spells out a path's 8.3 components, `recycle_bin_item_count()` reads a drive's bin; windows-sys 0.61 |
