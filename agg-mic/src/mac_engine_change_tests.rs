@@ -1,12 +1,11 @@
-//! Tests for `mac_engine_change.rs` without a microphone: the configuration change is posted by
-//! hand, for a stand-in object in place of the engine. A posted change fails the recording once;
-//! one for another engine, or after the observer is dropped (a stop), reports nothing. That a real
-//! AVAudioEngine posts it when a device is unplugged can only be seen live (`tests/live_mic.rs`,
+//! Tests for `mac_engine_change.rs` without a microphone: the configuration change's reporter,
+//! called as agg-os's observer calls it, fails the recording once however often the change comes.
+//! That the observer calls it for its own engine only, and not after a stop removed it, is tested
+//! beside the observer in agg-os (`macos/audio_input/tests.rs`). That a real AVAudioEngine posts
+//! the change when a device is unplugged can only be seen live (`tests/live_mic.rs`,
 //! `AGG_MIC_UNPLUG_TEST=1`).
 
 use std::sync::{Arc, Mutex};
-
-use objc2_foundation::{NSNotificationCenter, NSObject};
 
 use super::*;
 
@@ -21,47 +20,15 @@ fn delivery() -> (Delivery, Arc<Mutex<Vec<MicError>>>) {
     (delivery, failed)
 }
 
-/// Posts the engine's configuration change for `object`, as AVAudioEngine does.
-fn post_change(object: &NSObject) {
-    // SAFETY: the notification name AVFAudio defines and a plain object as its poster.
-    unsafe {
-        NSNotificationCenter::defaultCenter().postNotificationName_object(
-            AVAudioEngineConfigurationChangeNotification,
-            Some(object.as_ref()),
-        );
-    }
-}
-
 #[test]
 fn a_configuration_change_fails_the_recording_once() {
-    let engine = NSObject::new();
     let (delivery, failed) = delivery();
-    let _observer = ChangeObserver::watch(engine.as_ref(), delivery.clone());
-    post_change(&engine);
-    post_change(&engine);
+    let on_change = input_change_reporter(delivery.clone());
+    on_change();
+    on_change();
     assert_eq!(
         *failed.lock().unwrap(),
         vec![MicError::NoDevice(INPUT_CHANGED_MESSAGE.to_owned())]
     );
     assert!(!delivery.is_open(), "no chunk follows the failure");
-}
-
-#[test]
-fn another_engines_change_is_not_ours() {
-    let (engine, other) = (NSObject::new(), NSObject::new());
-    let (delivery, failed) = delivery();
-    let _observer = ChangeObserver::watch(engine.as_ref(), delivery.clone());
-    post_change(&other);
-    assert!(failed.lock().unwrap().is_empty());
-    assert!(delivery.is_open());
-}
-
-#[test]
-fn nothing_is_reported_once_the_observer_is_dropped() {
-    let engine = NSObject::new();
-    let (delivery, failed) = delivery();
-    drop(ChangeObserver::watch(engine.as_ref(), delivery.clone()));
-    post_change(&engine);
-    assert!(failed.lock().unwrap().is_empty());
-    assert!(delivery.is_open(), "the observer is gone, not the delivery");
 }

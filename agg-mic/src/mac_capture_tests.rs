@@ -1,12 +1,12 @@
 //! Tests for `mac_capture.rs` without a microphone: what each permission status becomes (a
-//! policy block doesn't send the user to System Settings, which can't lift it), and the sink
-//! node's AudioBufferList read to mono (planar and interleaved, a buffer shorter than the call or
-//! without data). That the engine delivers, and how close to a stop its last chunk lands, can only
-//! be seen live (`tests/live_mic.rs`).
+//! policy block doesn't send the user to System Settings, which can't lift it), and a sink node
+//! cycle, as agg-os hands over the AudioBufferList's buffers, delivered as mono (planar and
+//! interleaved, a buffer shorter than the call or without data). How agg-os reads the
+//! AudioBufferList into those buffers is tested beside it (agg-os's `macos/audio_input/tests.rs`).
+//! That the engine delivers, and how close to a stop its last chunk lands, can only be seen live
+//! (`tests/live_mic.rs`).
 
-use std::ffi::c_void;
-
-use objc2_core_audio_types::{AudioBuffer, AudioBufferList};
+use std::sync::{Arc, Mutex};
 
 use super::*;
 use crate::{MAC_PERMISSION_DENIED_MESSAGE, MAC_RESTRICTED_MESSAGE};
@@ -45,63 +45,54 @@ fn a_policy_block_does_not_send_the_user_to_system_settings() {
     assert!(!MAC_RESTRICTED_MESSAGE.contains("System Settings"));
 }
 
-/// An AudioBufferList with room for two buffers, as the engine hands a planar stereo input.
-#[repr(C)]
-struct TwoBuffers {
-    count: u32,
-    buffers: [AudioBuffer; 2],
-}
+/// Delivered chunks: each one's samples and rate.
+type Chunks = Vec<(Vec<f32>, u32)>;
 
-fn buffer(channels: u32, samples: &mut [f32]) -> AudioBuffer {
-    AudioBuffer {
-        mNumberChannels: channels,
-        mDataByteSize: std::mem::size_of_val(samples) as u32,
-        mData: samples.as_mut_ptr() as *mut c_void,
-    }
-}
-
-/// `list` read as the receiver block reads it.
-fn read(list: &mut TwoBuffers, frames: u32) -> Vec<f32> {
-    // SAFETY: TwoBuffers is laid out as an AudioBufferList of `count` (at most 2) buffers, each
-    // pointing at live samples of the size it says.
-    unsafe {
-        mono_from_buffer_list(
-            &*(list as *mut TwoBuffers as *const AudioBufferList),
-            frames,
-        )
-    }
+/// The chunks `buffers` (one sink node cycle of `frames` frames at 48 kHz) deliver.
+fn read(buffers: &[(&[f32], usize)], frames: usize) -> Chunks {
+    let chunks: Arc<Mutex<Chunks>> = Arc::default();
+    let into = Arc::clone(&chunks);
+    let delivery = Delivery::new(
+        Box::new(move |samples: &[f32], rate: u32| {
+            into.lock().unwrap().push((samples.to_vec(), rate))
+        }),
+        Box::new(|_| {}),
+    );
+    let cycle = InputCycle {
+        buffers,
+        frames,
+        sample_rate: 48_000,
+    };
+    deliver_cycle(&delivery, cycle);
+    let delivered = chunks.lock().unwrap().clone();
+    delivered
 }
 
 #[test]
 fn a_planar_buffer_list_averages_to_mono() {
-    let (mut left, mut right) = ([1.0f32, 0.5], [0.0f32, -0.5]);
-    let mut list = TwoBuffers {
-        count: 2,
-        buffers: [buffer(1, &mut left), buffer(1, &mut right)],
-    };
-    assert_eq!(read(&mut list, 2), vec![0.5, 0.0]);
+    let (left, right) = ([1.0f32, 0.5], [0.0f32, -0.5]);
+    assert_eq!(
+        read(&[(&left, 1), (&right, 1)], 2),
+        vec![(vec![0.5, 0.0], 48_000)]
+    );
 }
 
 #[test]
 fn an_interleaved_buffer_list_averages_to_mono() {
-    let mut stereo = [1.0f32, 0.0, 0.5, 0.5];
-    let mut unused = [0.0f32];
-    let mut list = TwoBuffers {
-        count: 1,
-        buffers: [buffer(2, &mut stereo), buffer(1, &mut unused)],
-    };
-    assert_eq!(read(&mut list, 2), vec![0.5, 0.5]);
+    let stereo = [1.0f32, 0.0, 0.5, 0.5];
+    assert_eq!(read(&[(&stereo, 2)], 2), vec![(vec![0.5, 0.5], 48_000)]);
 }
 
 #[test]
 fn a_buffer_is_read_no_further_than_its_size_says() {
-    let (mut left, mut right) = ([1.0f32, 1.0], [1.0f32]);
-    let mut list = TwoBuffers {
-        count: 2,
-        buffers: [buffer(1, &mut left), buffer(1, &mut right)],
-    };
-    assert_eq!(read(&mut list, 2), vec![1.0, 0.5]);
-    // A buffer without data reads as silence.
-    list.buffers[1].mData = std::ptr::null_mut();
-    assert_eq!(read(&mut list, 2), vec![0.5, 0.5]);
+    let (left, right) = ([1.0f32, 1.0], [1.0f32]);
+    assert_eq!(
+        read(&[(&left, 1), (&right, 1)], 2),
+        vec![(vec![1.0, 0.5], 48_000)]
+    );
+    // A buffer without data (agg-os hands it over empty) reads as silence.
+    assert_eq!(
+        read(&[(&left, 1), (&[], 1)], 2),
+        vec![(vec![0.5, 0.5], 48_000)]
+    );
 }

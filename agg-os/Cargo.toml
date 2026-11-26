@@ -67,6 +67,43 @@ app-menu = [
     "objc2-app-kit/NSMenu",
     "objc2-app-kit/NSMenuItem",
 ]
+# `macos::audio_input`: agg-mic's macOS capture, an AVAudioEngine whose input
+# feeds an AVAudioSinkNode, the microphone permission and the default input
+# device. No AppKit: AVFoundation's AVCaptureDevice (and AVMediaFormat's
+# media type), AVFAudio's engine and nodes (and the CoreAudio buffer types
+# the sink node's receiver block takes), Foundation's notification center
+# (NSNotification, NSOperation: the observer of the engine's configuration
+# changes), and block2 for the blocks.
+microphone = [
+    "dep:objc2",
+    "dep:block2",
+    "dep:objc2-foundation",
+    "dep:objc2-av-foundation",
+    "dep:objc2-avf-audio",
+    "dep:objc2-core-audio-types",
+    "objc2-foundation/std",
+    "objc2-foundation/block2",
+    "objc2-foundation/NSString",
+    "objc2-foundation/NSError",
+    "objc2-foundation/NSObject",
+    "objc2-foundation/NSNotification",
+    "objc2-foundation/NSOperation",
+    "objc2-av-foundation/std",
+    "objc2-av-foundation/block2",
+    "objc2-av-foundation/AVCaptureDevice",
+    "objc2-av-foundation/AVMediaFormat",
+    "objc2-avf-audio/std",
+    "objc2-avf-audio/block2",
+    "objc2-avf-audio/objc2-core-audio-types",
+    "objc2-avf-audio/AVAudioEngine",
+    "objc2-avf-audio/AVAudioFormat",
+    "objc2-avf-audio/AVAudioIONode",
+    "objc2-avf-audio/AVAudioNode",
+    "objc2-avf-audio/AVAudioSinkNode",
+    "objc2-avf-audio/AVAudioTypes",
+    "objc2-core-audio-types/std",
+    "objc2-core-audio-types/CoreAudioBaseTypes",
+]
 # `linux::fork_minidump`: a minidump of this process written by a forked
 # child that ptraces it, for agg-gui-automation's all-thread stack dump on
 # Linux (libc for fork, PR_SET_PTRACER and waitpid; minidump-writer for the
@@ -104,15 +141,21 @@ windows-sys-061 = { package = "windows-sys", version = "0.61", optional = true, 
     "Win32_UI_Shell",
 ] }
 
-# The objc2 bindings (objc2 and objc2-foundation: MIT; objc2-app-kit: Zlib OR
+# The objc2 bindings (objc2, block2 and objc2-foundation: MIT; objc2-app-kit,
+# objc2-av-foundation, objc2-avf-audio and objc2-core-audio-types: Zlib OR
 # Apache-2.0 OR MIT; no compiled C), the versions winit 0.30 and wgpu already
-# build on the mac. Enabled by the macOS features only; each feature turns on
-# the binding features its module uses (in `[features]` above), so one does
-# not build the other's.
+# build on the mac (the audio ones: the versions agg-mic built). Enabled by
+# the macOS features only; each feature turns on the binding features its
+# module uses (in `[features]` above), so one does not build the other's:
+# `microphone` builds no AppKit, `open-files` and `app-menu` no audio.
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = { version = "0.6", optional = true }
+block2 = { version = "0.6", optional = true }
 objc2-foundation = { version = "0.3", optional = true, default-features = false }
 objc2-app-kit = { version = "0.3", optional = true, default-features = false }
+objc2-av-foundation = { version = "0.3", optional = true, default-features = false }
+objc2-avf-audio = { version = "0.3", optional = true, default-features = false }
+objc2-core-audio-types = { version = "0.3", optional = true, default-features = false }
 
 # The real-menu test (`tests/macos_menu.rs`) also makes the application, a key
 # event (whose constructor names NSGraphicsContext) and a point.

@@ -1,8 +1,10 @@
-//! The macOS capture, over the objc2 bindings to AVFoundation/AVFAudio: an AVAudioEngine's input
-//! node feeds an AVAudioSinkNode, whose receiver block gets every I/O cycle's input (at the
-//! device's own rate, one or more channels of 32-bit float in an AudioBufferList), mixes it to
-//! mono (`mixdown`) and delivers it at that rate. [`MacBackend`] is the [`Backend`]
-//! `Microphone::default_input` picks on macOS.
+//! The macOS capture, over AVFoundation/AVFAudio through agg-os (`agg_os::macos::audio_input`,
+//! which makes every Objective-C call): an AVAudioEngine's input node feeds an
+//! AVAudioSinkNode, whose receiver block gets every I/O cycle's input (at the device's own rate,
+//! one or more channels of 32-bit float in an AudioBufferList, which agg-os hands over as
+//! slices); here each cycle is mixed to mono (`mixdown`) and delivered at that rate.
+//! [`MacBackend`] is the [`Backend`] `Microphone::default_input` picks on macOS; this module keeps
+//! the permission logic and its wording, the engine's lifetime and the fast stop.
 //!
 //! A sink node rather than a tap on the input node: a tap collects a buffer of the size it asks
 //! for (4096 frames, about 85 ms at 48 kHz) before handing it over, and removing the tap discards
@@ -13,9 +15,9 @@
 //! on the real-time audio thread, so it does only the mixing and the hand-on.
 //!
 //! A microphone that goes away while recording (unplugged, or the default input switched) stops
-//! the engine, which `mac_engine_change` hears and reports through [`Delivery::fail`]. Dropping
-//! the [`Engine`] removes that observer first, so a stop is never reported as a lost device, then
-//! stops the engine and detaches the sink node.
+//! the engine, which agg-os's observer hears and `mac_engine_change` reports through
+//! [`Delivery::fail`]. Dropping the [`InputEngine`] removes that observer first, so a stop is never
+//! reported as a lost device, then stops the engine and detaches the sink node.
 //!
 //! **A fast stop.** `AVAudioEngine.stop()` and the detach take tens of milliseconds (a stop took
 //! 46 ms on a Mac, then 18 ms, against agg-gui-whistle's UI-thread budget of well under a
@@ -33,21 +35,16 @@
 //! microphone; it tapped the input node); its 16 kHz WAV and its level meter stay in MatterCAD.
 
 use std::panic::{catch_unwind, AssertUnwindSafe};
-use std::ptr::NonNull;
 use std::sync::mpsc::{self, Sender};
 use std::sync::{Mutex, PoisonError};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
-use block2::RcBlock;
-use objc2::rc::{autoreleasepool, Retained};
-use objc2::runtime::Bool;
-use objc2::AnyThread;
-use objc2_av_foundation::{AVAuthorizationStatus, AVCaptureDevice, AVMediaTypeAudio};
-use objc2_avf_audio::{AVAudioCommonFormat, AVAudioEngine, AVAudioSinkNode};
-use objc2_core_audio_types::{AudioBufferList, AudioTimeStamp};
+use agg_os::macos::audio_input::{
+    self, AudioAuthorization, InputCycle, InputEngine, InputEngineError,
+};
 
 use crate::delivery::Delivery;
-use crate::mac_engine_change::ChangeObserver;
+use crate::mac_engine_change::input_change_reporter;
 use crate::microphone::Backend;
 use crate::mixdown::mono_from_buffers;
 use crate::teardown::Teardown;
@@ -67,18 +64,14 @@ pub const AUTHORIZATION_AUTHORIZED: i64 = 3;
 
 /// The current AVAuthorizationStatus for audio capture. Never prompts.
 pub fn authorization_status() -> i64 {
-    // SAFETY: reading an extern static AVFoundation defines.
-    let Some(audio) = (unsafe { AVMediaTypeAudio }) else {
-        return AUTHORIZATION_DENIED;
-    };
-    // SAFETY: AVMediaTypeAudio is one of the two media types the method documents.
-    let status: AVAuthorizationStatus =
-        unsafe { AVCaptureDevice::authorizationStatusForMediaType(audio) };
-    status.0 as i64
+    match audio_input::audio_authorization() {
+        AudioAuthorization::NotDetermined => AUTHORIZATION_NOT_DETERMINED,
+        AudioAuthorization::Restricted => AUTHORIZATION_RESTRICTED,
+        AudioAuthorization::Denied => AUTHORIZATION_DENIED,
+        AudioAuthorization::Authorized => AUTHORIZATION_AUTHORIZED,
+        AudioAuthorization::Unknown(status) => status as i64,
+    }
 }
-
-/// kIOAudioDeviceTransportTypeBuiltIn (`'bltn'`): a device built into the Mac.
-const TRANSPORT_BUILT_IN: i32 = 0x626C_746E;
 
 /// The system's default input device, as macOS names it (what a recording records from).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -91,18 +84,9 @@ pub struct InputDevice {
 
 /// The default input device, or `None` when there is none. Never prompts for permission.
 pub fn default_input_device() -> Option<InputDevice> {
-    autoreleasepool(|_| {
-        // SAFETY: reading an extern static AVFoundation defines.
-        let audio = unsafe { AVMediaTypeAudio }?;
-        // SAFETY: AVMediaTypeAudio is a media type the method documents; the device's name and
-        // transport type are plain property reads.
-        unsafe {
-            let device = AVCaptureDevice::defaultDeviceWithMediaType(audio)?;
-            Some(InputDevice {
-                name: device.localizedName().to_string(),
-                built_in: device.transportType() == TRANSPORT_BUILT_IN,
-            })
-        }
+    audio_input::default_audio_input().map(|device| InputDevice {
+        name: device.name,
+        built_in: device.built_in,
     })
 }
 
@@ -137,94 +121,31 @@ fn request_permission() -> bool {
     } else {
         *pending = Some(vec![sender]);
         drop(pending);
-        // Called by AVFoundation on one of its own queues, not the thread that asked.
-        let handler = RcBlock::new(|granted: Bool| {
+        // Called by AVFoundation on one of its own queues, not the thread that asked (or at once
+        // with `false` when AVFoundation has no audio media type).
+        audio_input::request_audio_access(|granted| {
             let answered = PENDING_PERMISSION
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
                 .take();
             for waiting in answered.into_iter().flatten() {
-                let _ = waiting.send(granted.as_bool());
+                let _ = waiting.send(granted);
             }
         });
-        // SAFETY: reading an extern static AVFoundation defines.
-        match unsafe { AVMediaTypeAudio } {
-            // SAFETY: a valid media type and a block of the documented `void (^)(BOOL)` shape;
-            // AVFoundation copies the block.
-            Some(audio) => unsafe {
-                AVCaptureDevice::requestAccessForMediaType_completionHandler(audio, &handler);
-            },
-            None => handler.call((Bool::NO,)),
-        }
     }
     answer.recv().unwrap_or(false)
-}
-
-/// The sink node's receiver block.
-type Receiver = RcBlock<dyn Fn(NonNull<AudioTimeStamp>, u32, NonNull<AudioBufferList>) -> i32>;
-
-/// A running engine: its sink node, the block that node calls, and the observer of its
-/// configuration changes. AVAudioEngine is not marked thread-safe, so it is only ever touched
-/// with the backend's lock held (start and stop, and this drop), never from two threads at once.
-struct Engine {
-    engine: Retained<AVAudioEngine>,
-    sink: Retained<AVAudioSinkNode>,
-    /// Kept alive as long as the node that calls it.
-    _receiver: Receiver,
-    /// Taken (removed) first when the engine stops.
-    observer: Option<ChangeObserver>,
-    /// Whether `shut_down` has run.
-    shut: bool,
-}
-
-// SAFETY: an engine is used by one thread at a time: under `MacBackend::engine`'s mutex while it
-// runs, then only by the teardown it is handed to. Objective-C objects may be retained and
-// released from any thread, and the receiver block only holds a `Delivery` (Send + Sync).
-unsafe impl Send for Engine {}
-
-impl Engine {
-    /// Stops listening for configuration changes, so a stop is never reported as a lost device.
-    fn unobserve(&mut self) {
-        drop(self.observer.take());
-    }
-
-    /// Stops the engine and detaches the sink node; returns how long each took. The slow part of
-    /// a stop (tens of ms), so `MacBackend::stop` runs it on a teardown thread.
-    fn shut_down(&mut self) -> (Duration, Duration) {
-        self.unobserve();
-        self.shut = true;
-        // Reached from a teardown thread, which has no autorelease pool of its own.
-        // SAFETY: the engine and node are ours; the node is attached to this engine.
-        autoreleasepool(|_| unsafe {
-            let began = Instant::now();
-            self.engine.stop();
-            let stopped = began.elapsed();
-            self.engine.detachNode(&self.sink);
-            (stopped, began.elapsed() - stopped)
-        })
-    }
-}
-
-impl Drop for Engine {
-    /// An engine dropped unhanded (a start that failed after building it, a teardown thread that
-    /// could not start) still stops.
-    fn drop(&mut self) {
-        if !self.shut {
-            self.shut_down();
-        }
-    }
 }
 
 /// The macOS capture (see the module docs).
 #[derive(Default)]
 pub(crate) struct MacBackend {
-    engine: Mutex<Option<Engine>>,
+    engine: Mutex<Option<InputEngine>>,
     /// The last stopped engine's teardown, which the next start waits for.
     teardown: Teardown,
 }
 
 impl MacBackend {
-    fn engine(&self) -> std::sync::MutexGuard<'_, Option<Engine>> {
+    fn engine(&self) -> std::sync::MutexGuard<'_, Option<InputEngine>> {
         self.engine.lock().unwrap_or_else(PoisonError::into_inner)
     }
 }
@@ -296,96 +217,26 @@ fn no_input(detail: &str) -> MicError {
 }
 
 // Starts an engine whose input feeds a sink node delivering to `delivery`.
-fn start_engine(delivery: Delivery) -> Result<Engine, MicError> {
-    // Reached from a caller's thread, which may drain no autorelease pool of its own.
-    // SAFETY: plain AVAudioEngine calls on an engine this function owns; the sink node's
-    // preconditions are checked and stated below.
-    autoreleasepool(|_| unsafe {
-        let engine = AVAudioEngine::new();
-        let input = engine.inputNode();
-        let format = input.outputFormatForBus(0);
-        // No input device leaves the bus without a format; connecting it would raise an
-        // exception.
-        if format.sampleRate() <= 0.0 || format.channelCount() == 0 {
-            return Err(no_input("the input has no format (no input device)"));
-        }
-        // The receiver reads 32-bit floats: the input node's output is the engine's standard
-        // format, which is.
-        if format.commonFormat() != AVAudioCommonFormat::PCMFormatFloat32 {
-            return Err(no_input("the input's format is not 32-bit float"));
-        }
-        // Device rates are whole numbers of Hz well inside u32.
-        let rate = format.sampleRate().round() as u32;
-        // Watching from before the start, so a change as it starts is heard too.
-        let observer = ChangeObserver::watch(engine.as_ref(), delivery.clone());
-        let receiver: Receiver = RcBlock::new(
-            move |_when: NonNull<AudioTimeStamp>, frames: u32, input: NonNull<AudioBufferList>| {
-                // A panic must not unwind into the audio thread (an Objective-C block, where it
-                // would abort the process): it ends the recording instead.
-                let read = catch_unwind(AssertUnwindSafe(|| {
-                    // SAFETY: the engine hands the block a valid buffer list, consistent with
-                    // `frames`, for the call's duration.
-                    let mono = mono_from_buffer_list(input.as_ref(), frames);
-                    delivery.deliver(&mono, rate);
-                }));
-                if read.is_err() {
-                    delivery.fail(MicError::Failed(HANDLER_PANICKED_MESSAGE.to_owned()));
-                }
-                0
-            },
-        );
-        // SAFETY: a block of the documented receiver shape; it is kept alive in the `Engine` as
-        // long as the node.
-        let sink = AVAudioSinkNode::initWithReceiverBlock(
-            AVAudioSinkNode::alloc(),
-            RcBlock::as_ptr(&receiver),
-        );
-        engine.attachNode(&sink);
-        // SAFETY: both nodes are attached to this engine, and the format is the input node's own
-        // output format, the one a sink node must be connected with (it converts nothing).
-        engine.connect_to_format(&input, &sink, Some(&format));
-        let running = Engine {
-            engine,
-            sink,
-            _receiver: receiver,
-            observer: Some(observer),
-            shut: false,
-        };
-        running.engine.prepare();
-        if let Err(error) = running.engine.startAndReturnError() {
-            let detail = error.localizedDescription().to_string();
-            drop(running);
-            return Err(no_input(&detail));
-        }
-        Ok(running)
-    })
+fn start_engine(delivery: Delivery) -> Result<InputEngine, MicError> {
+    let audio = delivery.clone();
+    InputEngine::start(
+        move |cycle| deliver_cycle(&audio, cycle),
+        input_change_reporter(delivery),
+    )
+    .map_err(|error: InputEngineError| no_input(&error.to_string()))
 }
 
-/// The receiver block's input as mono: every buffer of `list` (one per channel when planar, one
-/// with every channel when interleaved), read no further than its byte size says.
-///
-/// # Safety
-///
-/// `list` holds `mNumberBuffers` buffers, each with `mData` null or pointing at `mDataByteSize`
-/// bytes of 32-bit floats, all valid for the call.
-unsafe fn mono_from_buffer_list(list: &AudioBufferList, frames: u32) -> Vec<f32> {
-    let first = list.mBuffers.as_ptr();
-    let buffers: Vec<(&[f32], usize)> = (0..list.mNumberBuffers as usize)
-        .map(|i| {
-            // SAFETY: the list holds `mNumberBuffers` buffers, laid out after the first.
-            let buffer = unsafe { &*first.add(i) };
-            let samples: &[f32] = if buffer.mData.is_null() {
-                &[]
-            } else {
-                let len = buffer.mDataByteSize as usize / std::mem::size_of::<f32>();
-                // SAFETY: `mData` points at `mDataByteSize` bytes of floats (the caller's
-                // promise).
-                unsafe { std::slice::from_raw_parts(buffer.mData as *const f32, len) }
-            };
-            (samples, buffer.mNumberChannels as usize)
-        })
-        .collect();
-    mono_from_buffers(&buffers, frames as usize)
+/// The receiver block's work, on the real-time audio thread: the cycle mixed to mono and handed
+/// on at the input's rate. A panic must not unwind into the audio thread (an Objective-C block,
+/// where it would abort the process): it ends the recording instead.
+fn deliver_cycle(delivery: &Delivery, cycle: InputCycle<'_>) {
+    let read = catch_unwind(AssertUnwindSafe(|| {
+        let mono = mono_from_buffers(cycle.buffers, cycle.frames);
+        delivery.deliver(&mono, cycle.sample_rate);
+    }));
+    if read.is_err() {
+        delivery.fail(MicError::Failed(HANDLER_PANICKED_MESSAGE.to_owned()));
+    }
 }
 
 #[cfg(test)]

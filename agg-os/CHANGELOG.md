@@ -38,6 +38,21 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   answers. An application makes one `MenuTarget`: its Objective-C object and its handler live for
   the rest of the process, so the menus and items, which hold it weakly, always have it, and the
   handler is never dropped. Built on objc2 0.6 and objc2-app-kit 0.3.
+- `microphone` feature (macOS): `macos::audio_input`, agg-mic's macOS capture.
+  `audio_authorization()` reads the microphone permission as an `AudioAuthorization` without
+  prompting; `request_audio_access()` asks for it, handing the answer to a closure on
+  AVFoundation's queue; `default_audio_input()` names the default input device (`AudioInputInfo`:
+  its name, whether it is built in). `InputEngine::start()` builds and starts an AVAudioEngine
+  whose input node feeds an AVAudioSinkNode: each I/O cycle's 32-bit float buffers reach a closure
+  on the real-time audio thread as slices with their channel counts, frame count and sample rate
+  (`InputCycle`), and each `AVAudioEngineConfigurationChangeNotification` of that engine reaches
+  another closure; a panic in either is caught and drops that cycle or event. It fails with an
+  `InputEngineError` (no input format, a format that is not 32-bit float, or the engine's start
+  error). `unobserve()` removes the observer; `shut_down()`, or a drop, removes it, stops the
+  engine and detaches the node, returning how long the stop and the detach took. An engine shut
+  down or dropped from inside one of its own callbacks is left running and never released (hand it
+  to another thread to stop it). Built on objc2 0.6, block2 0.6, objc2-foundation,
+  objc2-av-foundation, objc2-avf-audio and objc2-core-audio-types 0.3, with no AppKit.
 - `fork-minidump` feature (Linux): `linux::fork_minidump::write_minidump_from_fork()`, which writes
   a minidump of this process to a file from a forked child that ptraces it, the calling thread as
   the blamed thread. The parent names the child its tracer with `PR_SET_PTRACER` (for Yama's

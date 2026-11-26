@@ -18,12 +18,14 @@ compiling and leave no code in a binary, so they are not listed.
 
 ### objc2, objc2-encode, block2 and objc2-foundation (MIT); objc2-av-foundation, objc2-avf-audio and objc2-core-audio-types (Zlib OR Apache-2.0 OR MIT)
 
-Source: https://github.com/madsmtm/objc2. These are crates.io dependencies of `agg-mic`, used for
-the microphone capture (`mac_capture`, its sink node's audio types, and `mac_engine_change`,
-which hears a lost device). They are pure-Rust bindings to the system's Objective-C runtime and
-its Foundation, AVFoundation, AVFAudio and CoreAudio types, with no build script. Only the
-classes the capture uses are enabled. objc2, block2 and objc2-foundation were already in
-agg-gui's build through winit.
+Source: https://github.com/madsmtm/objc2. These come into `agg-mic`'s build through agg-os (MIT,
+the same author's, in this repository), whose `microphone` feature makes the microphone capture's
+Objective-C calls (`agg_os::macos::audio_input`: the permission, the default device, the engine
+with its sink node's audio types, and the observer that hears a lost device) for `mac_capture`
+and `mac_engine_change`. They are pure-Rust bindings to the system's Objective-C runtime and its
+Foundation, AVFoundation, AVFAudio and CoreAudio types, with no build script. Only the classes
+the capture uses are enabled. objc2, block2 and objc2-foundation were already in agg-gui's build
+through winit.
 
     Copyright 2026 Mads Marquart
 

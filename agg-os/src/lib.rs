@@ -30,6 +30,7 @@
 //! | `windows::recycle_bin` | `recycle-bin` | Moving an item to the Windows Recycle Bin, a path's long form, the bin's item count |
 //! | `macos::open_files` | `open-files` | Making the app delegate answer `application:openFiles:`, handing the paths to a callback |
 //! | `macos::menu` | `app-menu` | The Objective-C delegate and action target of native menus, calling a `MenuHandler` |
+//! | `macos::audio_input` | `microphone` | The microphone permission, the default input device, and an AVAudioEngine whose sink node hands each I/O cycle's samples to a closure |
 //! | `linux::fork_minidump` | `fork-minidump` | A minidump of this process written by a forked child that ptraces it |
 //!
 //! The `windows` module exists on Windows only, the `macos` module on macOS
