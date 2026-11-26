@@ -3,9 +3,9 @@
 The operating system calls and the other unsafe code of the
 [agg-gui](https://github.com/larsbrubaker/agg-gui) crates, each behind a safe function or type.
 
-This crate holds the agg-gui workspace's unsafe code. A member whose manifest sets
-`unsafe_code = "forbid"` cannot contain any, and a test in this crate checks that every member
-does so except the ones it lists by name, which still call the operating system directly.
+This crate holds the agg-gui workspace's unsafe code. Every other member of the workspace sets
+`unsafe_code = "forbid"` in its manifest, so it cannot contain any, and a test in this crate
+checks that every member but this one does so.
 Everything public here is safe to call: a caller that uses only safe Rust cannot
 cause undefined behavior through it, so no function takes a raw pointer, a raw handle or a size
 that the unsafe code then trusts.
@@ -22,4 +22,5 @@ uses. No build script, and no dependency on the other agg-gui crates.
 | `open-files` | `macos::open_files` | macOS only: `install()` makes the application delegate answer `application:openFiles:` (Finder double-click, Open With, a drop on the Dock icon), handing each batch of paths to a callback and replying success to AppKit; objc2 0.6 |
 | `app-menu` | `macos::menu` | macOS only: `MenuTarget`, the delegate of the `NSMenu`s and the target of the `NSMenuItem`s it makes, calling a `MenuHandler` (menu about to open, item picked, key equivalent claimed and fired); `AppAction` items for Hide, Hide Others and Show All; objc2 0.6 |
 | `microphone` | `macos::audio_input` | macOS only: `audio_authorization()` and `request_audio_access()` (the microphone permission), `default_audio_input()` (its name, whether built in), and `InputEngine`, an AVAudioEngine whose input feeds an AVAudioSinkNode, handing each I/O cycle's float samples to a closure as slices (`InputCycle`) and each configuration change of the engine (a device unplugged or switched) to another, with `unobserve()` and a timed `shut_down()`; a panic in either closure is caught; for agg-mic; objc2 0.6, block2 0.6, objc2-foundation, objc2-av-foundation, objc2-avf-audio and objc2-core-audio-types 0.3 |
+| `microphone` | `windows::audio_capture` | Windows only: `ComApartment` (COM on the calling thread, `CoInitializeEx` multithreaded and `CoUninitialize` on drop) and `CaptureStream`, a started WASAPI shared-mode capture on the default endpoint that borrows it: opened as 16-bit mono PCM the engine converts to, or, when the caller falls back, in the device's mix format if the caller accepts it (`MixFormat`); `next_packet()` appends a packet's bytes (`Packet`: frames, silent) and the drop stops it; errors are `CaptureError` (HRESULT and message) and `OpenError`; for agg-mic; windows 0.62 |
 | `fork-minidump` | `linux::fork_minidump` | Linux only: `write_minidump_from_fork()` writes a minidump of this process from a forked child that ptraces it (named its tracer with `PR_SET_PTRACER` for Yama), killed at a timeout, failing with a `ForkDumpError`; libc and minidump-writer 0.13 |

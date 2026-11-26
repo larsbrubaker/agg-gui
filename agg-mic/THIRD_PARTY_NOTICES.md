@@ -43,10 +43,11 @@ its flag types. It is also in the Linux build, under pulseaudio.
 
 ### windows and its crates (MIT OR Apache-2.0)
 
-Source: https://github.com/microsoft/windows-rs. It is a crates.io dependency of `agg-mic` on
-Windows only, used for the microphone capture (`windows_capture`). These are pure-Rust bindings
-to COM and WASAPI, linked through windows-link with no build script. Only the APIs the capture
-calls are enabled. Its own crates come from the same repository under the same license and
+Source: https://github.com/microsoft/windows-rs. It comes into `agg-mic`'s build on Windows only,
+through agg-os (MIT, the same author's, in this repository), whose `microphone` feature makes the
+microphone capture's COM and WASAPI calls (`agg_os::windows::audio_capture`) for
+`windows_capture`. These are pure-Rust bindings to COM and WASAPI, linked through windows-link
+with no build script. Only the APIs the capture calls are enabled. Its own crates come from the same repository under the same license and
 notice: windows-core, windows-link, windows-result, windows-strings, windows-collections,
 windows-future, windows-numerics and windows-threading. It was already in agg-gui's build
 through wgpu.

@@ -7,7 +7,8 @@
 # Every platform's capture is pure Rust with no build script and no `-sys`
 # crate: AVFoundation's AVAudioEngine on macOS (objc2, through agg-os's
 # `microphone` feature, where its unsafe code lives), WASAPI on Windows
-# (Microsoft's `windows` bindings, raw-dylib linking), and the PulseAudio
+# (Microsoft's `windows` bindings, raw-dylib linking, through the same agg-os
+# feature), and the PulseAudio
 # native protocol on Linux (spoken by PulseAudio and PipeWire's pulse server,
 # so no libpulse or ALSA). Anywhere else, wasm32 included, it builds and
 # reports that there is no microphone.
@@ -42,12 +43,14 @@ publish = false
 [target.'cfg(target_os = "macos")'.dependencies]
 agg-os = { path = "../agg-os", features = ["microphone"] }
 
-# The Windows capture (`windows`): WASAPI through Microsoft's pure-Rust
-# `windows` bindings (raw-dylib linking through windows-link, no build
-# script), only the COM and audio APIs it calls. Already in agg-gui's build
-# through wgpu. MIT OR Apache-2.0.
+# The Windows capture (`windows_capture`): WASAPI through Microsoft's
+# pure-Rust `windows` bindings 0.62 (raw-dylib linking through windows-link,
+# no build script), only the COM and audio APIs it calls. The calls are
+# agg-os's `microphone` feature (`agg_os::windows::audio_capture`), which
+# builds that binding; agg-mic names no `windows` type. Already in agg-gui's
+# build through wgpu. MIT OR Apache-2.0.
 [target.'cfg(target_os = "windows")'.dependencies]
-windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Media_Audio", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Variant"] }
+agg-os = { path = "../agg-os", features = ["microphone"] }
 
 # The Linux capture (`linux`): the PulseAudio native protocol in pure Rust, no
 # build script and no libpulse. Its own dependencies (mio, futures, thiserror,
@@ -55,3 +58,8 @@ windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Media_Audio
 # Apache-2.0 or Unlicense. MIT.
 [target.'cfg(target_os = "linux")'.dependencies]
 pulseaudio = "0.3"
+
+# No unsafe code in this crate: the compiler refuses it. The workspace's
+# rule on unsafe is in agg-os (its src/lib.rs).
+[lints.rust]
+unsafe_code = "forbid"

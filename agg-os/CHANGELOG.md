@@ -53,6 +53,19 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   down or dropped from inside one of its own callbacks is left running and never released (hand it
   to another thread to stop it). Built on objc2 0.6, block2 0.6, objc2-foundation,
   objc2-av-foundation, objc2-avf-audio and objc2-core-audio-types 0.3, with no AppKit.
+- `microphone` feature (Windows): `windows::audio_capture`, agg-mic's Windows capture.
+  `ComApartment::multithreaded()` initializes COM on the calling thread (`COINIT_MULTITHREADED`)
+  and uninitializes it on drop if that succeeded. `CaptureStream::open_default()` opens the
+  default capture endpoint in shared mode and starts it: as 16-bit mono PCM at the given rate,
+  converted by the audio engine, or, when that `Initialize` fails and the caller's `fall_back`
+  closure says so, in the device's mix format if its `accept_mix` closure accepts the
+  `MixFormat` (tag, channels, rate, block align, bits, sub-format); it fails with an `OpenError`
+  (a call's `CaptureError`, or the mix format rejected). `format()` says which (`CaptureFormat`).
+  `next_packet()` appends the next packet's bytes, frames times the block align the stream was
+  initialized with, and returns its `Packet` (frames, whether silent; a silent packet's bytes are
+  not copied); `ReleaseBuffer` runs on every path. Dropping the stream calls
+  `IAudioClient::Stop`. Neither type is `Send` or `Sync`, and the stream borrows the apartment.
+  Built on windows 0.62.
 - `fork-minidump` feature (Linux): `linux::fork_minidump::write_minidump_from_fork()`, which writes
   a minidump of this process to a file from a forked child that ptraces it, the calling thread as
   the blamed thread. The parent names the child its tracer with `PR_SET_PTRACER` (for Yama's

@@ -1,9 +1,9 @@
 # agg-os: the operating system calls and the other unsafe code of the agg-gui
 # workspace's crates, each behind a safe function or type. It holds the
-# workspace's unsafe code; a member whose manifest sets
-# `unsafe_code = "forbid"` cannot contain any, and tests/unsafe_placement.rs
-# checks that every member does so except the ones it lists by name, which
-# still call the operating system directly (the rule: src/lib.rs).
+# workspace's unsafe code; every other member's manifest sets
+# `unsafe_code = "forbid"`, so it cannot contain any, and
+# tests/unsafe_placement.rs checks that every member but this one does so
+# (the rule: src/lib.rs).
 #
 # Each area is a Cargo feature, off by default, so a consumer compiles only
 # the bindings it uses. No dependency on any other workspace crate, and no
@@ -67,6 +67,10 @@ app-menu = [
     "objc2-app-kit/NSMenu",
     "objc2-app-kit/NSMenuItem",
 ]
+# `windows::audio_capture`: agg-mic's Windows capture, WASAPI through
+# Microsoft's `windows` bindings (the COM, WASAPI and PROPVARIANT APIs its
+# calls name).
+#
 # `macos::audio_input`: agg-mic's macOS capture, an AVAudioEngine whose input
 # feeds an AVAudioSinkNode, the microphone permission and the default input
 # device. No AppKit: AVFoundation's AVCaptureDevice (and AVMediaFormat's
@@ -75,6 +79,7 @@ app-menu = [
 # (NSNotification, NSOperation: the observer of the engine's configuration
 # changes), and block2 for the blocks.
 microphone = [
+    "dep:windows-062",
     "dep:objc2",
     "dep:block2",
     "dep:objc2-foundation",
@@ -124,7 +129,8 @@ minidump-writer = { version = "0.13", optional = true }
 # The `windows-sys` FFI bindings (MIT OR Apache-2.0, no compiled C), in two
 # versions so that each consumer builds the one it built before: agg-gui-shell
 # uses 0.52 because winit 0.30 already builds it, and agg-gui-files uses 0.61.
-# Each is enabled by its feature only, with only the bindings its module uses.
+# Each is enabled by its feature only, with only the bindings its module uses;
+# so is the `windows` crate below, for agg-mic.
 [target.'cfg(windows)'.dependencies]
 # `desktop-settings`: POINT; EnumDisplaySettingsW and DEVMODEW;
 # GetDoubleClickTime; GetCursorPos, GetSystemMetrics, SystemParametersInfoW.
@@ -139,6 +145,20 @@ windows-sys-061 = { package = "windows-sys", version = "0.61", optional = true, 
     "Win32_Foundation",
     "Win32_Storage_FileSystem",
     "Win32_UI_Shell",
+] }
+# `microphone`: Microsoft's pure-Rust `windows` bindings (MIT OR Apache-2.0;
+# raw-dylib linking through windows-link, no build script), the binding and
+# version agg-mic's WASAPI capture has always used, carried over with the
+# capture so agg-mic builds no binding it did not build before: its COM
+# interfaces come with reference counting and `Result`s, and it was already
+# in agg-gui's build through wgpu. Only the COM and audio APIs the capture
+# calls (Activate's PROPVARIANT parameter needs StructuredStorage and Variant).
+windows-062 = { package = "windows", version = "0.62", optional = true, features = [
+    "Win32_Foundation",
+    "Win32_Media_Audio",
+    "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_Variant",
 ] }
 
 # The objc2 bindings (objc2, block2 and objc2-foundation: MIT; objc2-app-kit,

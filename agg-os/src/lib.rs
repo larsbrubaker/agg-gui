@@ -4,10 +4,10 @@
 //! # The workspace's rule on `unsafe`
 //!
 //! This crate holds the workspace's unsafe code, where it is reviewed and
-//! linted as such. A member whose manifest sets `unsafe_code = "forbid"`
-//! cannot contain any: the compiler refuses it. `tests/unsafe_placement.rs`
-//! checks that every member sets it except this crate and the members the
-//! test lists by name, which still call the operating system directly.
+//! linted as such. Every other member of the workspace sets
+//! `unsafe_code = "forbid"` in its manifest, so it cannot contain any: the
+//! compiler refuses it. `tests/unsafe_placement.rs` checks that every member
+//! but this one sets it.
 //!
 //! Everything public here is safe to call: a caller that uses only safe Rust
 //! cannot cause undefined behavior through it. So a wrapper never takes a raw
@@ -30,6 +30,7 @@
 //! | `windows::recycle_bin` | `recycle-bin` | Moving an item to the Windows Recycle Bin, a path's long form, the bin's item count |
 //! | `macos::open_files` | `open-files` | Making the app delegate answer `application:openFiles:`, handing the paths to a callback |
 //! | `macos::menu` | `app-menu` | The Objective-C delegate and action target of native menus, calling a `MenuHandler` |
+//! | `windows::audio_capture` | `microphone` | COM on the calling thread and a WASAPI shared-mode capture on the default endpoint, converted to 16-bit mono or in the device's mix format, read one packet at a time |
 //! | `macos::audio_input` | `microphone` | The microphone permission, the default input device, and an AVAudioEngine whose sink node hands each I/O cycle's samples to a closure |
 //! | `linux::fork_minidump` | `fork-minidump` | A minidump of this process written by a forked child that ptraces it |
 //!

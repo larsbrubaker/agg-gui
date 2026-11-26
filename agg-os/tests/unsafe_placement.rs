@@ -3,8 +3,9 @@
 //! member whose manifest sets `unsafe_code = "forbid"` under `[lints.rust]`
 //! cannot contain any, because the compiler refuses it. This test reads the
 //! root `Cargo.toml`'s `[workspace] members` and checks each member's manifest:
-//! agg-os does not set the lint, every member in [`NOT_YET_FORBIDDEN`] does not
-//! set it yet, and every other member sets it.
+//! agg-os does not set the lint and every other member sets it. A member that
+//! still calls the operating system directly is excused only while its calls
+//! move into agg-os, by naming it in [`NOT_YET_FORBIDDEN`], which is empty.
 //!
 //! The manifests are read with plain string handling (no TOML dependency):
 //! table headers, `key = value` lines, and `#` comments.
@@ -19,11 +20,11 @@ use std::path::{Path, PathBuf};
 /// The crate where unsafe code is allowed: it must not forbid it.
 const UNSAFE_HOME: &str = "agg-os";
 
-/// Members, by directory name, that still call the operating system directly
-/// and so do not forbid unsafe code. Each leaves this list in the change that
-/// moves its calls behind an agg-os function and adds the lint to its
-/// manifest.
-const NOT_YET_FORBIDDEN: &[&str] = &["agg-mic"];
+/// Members, by directory name, excused from forbidding unsafe code: empty, as
+/// every member but agg-os forbids it. A member is named here only for the
+/// time it takes to move its operating system calls behind agg-os functions,
+/// and leaves the list in the change that adds the lint to its manifest.
+const NOT_YET_FORBIDDEN: &[&str] = &[];
 
 /// `line` without its `#` comment, trimmed. A `#` inside a quoted string is
 /// kept (manifest strings here are simple: no escaped quotes are expected).
@@ -213,7 +214,7 @@ fn violations(lints: &[(String, bool)], not_yet: &[&str]) -> Vec<String> {
 }
 
 #[test]
-fn every_member_forbids_unsafe_except_agg_os_and_the_listed_ones() {
+fn every_member_but_agg_os_forbids_unsafe() {
     let Some(root) = repo_root() else {
         eprintln!("unsafe_placement: not a checkout of the repository (no .git); skipped");
         return;
