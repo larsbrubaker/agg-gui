@@ -8,6 +8,38 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ## [Unreleased]
 
+## [0.6.2]
+
+### Added
+
+- `walk_painted(root, visit)` visits every painted widget in the order painting paints it, each
+  with its `PaintPlacement` (where painting puts it and the clip it paints under, the window the
+  one `find_widget_visible_rect` uses). Children drawn on top of their siblings come after the
+  rest; a subtree painted in the overlay pass comes after the whole tree, in that pass's order,
+  clipped by the window alone; hidden subtrees and those under a widget that suppresses paint are
+  never visited. The visitor returns a `PaintWalk`: `Descend`, `Skip` (leave out what the subtree
+  paints in place; its overlay-pass descendants are still visited) or `Stop`. Each widget's
+  visible rect from the walk equals `find_widget_visible_rect`'s.
+- `PaintPlacement::visible_rect(size)`: the part of a placed widget that shows, `None` when
+  nothing does. `find_widget_visible_rect` answers through it, unchanged.
+- `painted_over(root, target_id, stop_before_id, is_layer)` lists the rects of what paints after a
+  widget and overlaps the part of it that shows: later siblings and panels, what floats over it,
+  and its own descendants. Every such widget is listed whole (its visible rect) and not looked
+  into, so an opaque page over the target lists as the page; only the widgets `is_layer` accepts,
+  which the host knows paint nothing of their own (a full-window overlay holding a few buttons),
+  are looked into instead of listed. A listed widget whose children are clipped to a rect wider
+  than its bounds lists the box around its visible rect and what of that clip lies over the
+  target. The walk ends at `stop_before_id`, which with everything after it is left out. It errs
+  on the side of listing too much, so a spot clear of every rectangle is clear of every widget
+  painted over the target, as far as `is_layer` is right; what a widget paints past its own bounds
+  (a shadow, under its parent's clip), `paint_overlay` drawing and app-level popups are not listed.
+- `nearest_clear_spot(region, hard, soft, size, ideal)` places a box of `size` inside `region`,
+  overlapping no hard obstacle, covering the least area of the soft ones, then as near its ideal
+  lower-left corner as that allows (ties: the higher, then the further left), or `None` exactly
+  when no position fits. The search is exact, over the grid every grown obstacle edge and bend of
+  the covered area makes, with no sampling, and a box wholly inside a soft obstacle covers exactly
+  its own area of it wherever it sits, so only the distance decides between such spots.
+
 ## [0.6.1]
 
 ### Added

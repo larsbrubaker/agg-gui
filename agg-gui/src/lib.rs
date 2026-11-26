@@ -270,10 +270,11 @@ pub use widget::{
     apply_widget_base_edit, collect_inspector_nodes, current_mouse_world, current_viewport,
     debug_draw_report, event_pointer_local, event_rect_to_root, event_root_transform,
     find_widget_by_id, find_widget_by_id_mut, find_widget_by_type, find_widget_screen_rect,
-    find_widget_visible_rect, logical_root_transform, observe_events, under_mouse_state_of,
-    visible_root_rect, App, BackbufferKind, BackbufferSpec, BackbufferState, EventObserver,
-    InspectorNode, InspectorOverlay, NamedTarget, TextSelection, UnderMouseState, Widget,
-    WidgetAnchor, WidgetBaseEdit, WidgetBaseField, WidgetId,
+    find_widget_visible_rect, logical_root_transform, nearest_clear_spot, observe_events,
+    painted_over, under_mouse_state_of, visible_root_rect, walk_painted, App, BackbufferKind,
+    BackbufferSpec, BackbufferState, EventObserver, InspectorNode, InspectorOverlay, NamedTarget,
+    PaintWalk, TextSelection, UnderMouseState, Widget, WidgetAnchor, WidgetBaseEdit,
+    WidgetBaseField, WidgetId,
 };
 pub use widget_background::{render_background, render_progress_fill};
 pub use widgets::{

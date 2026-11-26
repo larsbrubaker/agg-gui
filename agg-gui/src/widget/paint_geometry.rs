@@ -6,7 +6,8 @@
 //! answers from it, and agg-gui-automation's name lookups and visibility
 //! checks re-export and call it, so this file is the one statement of those
 //! rules outside painting itself: a change to painting's transforms or clips
-//! changes this walk in the same commit.
+//! changes this walk in the same commit. `widget/paint_walk.rs` replays the
+//! same rules over the whole tree in paint order.
 //!
 //! The rules followed, each as painting applies it:
 //! - a child is clipped and offset by its exact `bounds()` origin in its
@@ -37,7 +38,8 @@ use crate::TransAffine;
 
 /// The walk's result for one widget: how its own local space maps to the
 /// window, the clip its own paint is under, and whether it and every
-/// ancestor are visible.
+/// ancestor are visible. [`walk_painted`](super::walk_painted) hands one to
+/// each widget it visits.
 #[derive(Clone, Copy, Debug)]
 pub struct PaintPlacement {
     /// The widget's local space (origin at its lower-left corner) to window
@@ -58,6 +60,14 @@ impl PaintPlacement {
             &self.local_to_screen,
             Rect::new(0.0, 0.0, size.width, size.height),
         )
+    }
+
+    /// The part of the widget's rectangle (`width` × `height` from its
+    /// origin) that shows: its window rectangle cut by [`clip`](Self::clip).
+    /// `None` when nothing of it shows or it or an ancestor is hidden.
+    pub fn visible_rect(&self, size: Size) -> Option<Rect> {
+        let shown = intersect(self.clip, self.screen_rect(size));
+        (self.visible_chain && shown.width > 0.0 && shown.height > 0.0).then_some(shown)
     }
 }
 
@@ -133,7 +143,7 @@ pub fn to_whole_pixels(clip: Rect, device_scale: f64) -> Rect {
 
 /// The window-space rectangle `widget` clips its children to
 /// (`clip_children_rect`, its bounds when it returns `None`).
-fn children_clip_rect(widget: &dyn Widget, local_to_screen: &TransAffine) -> Rect {
+pub(crate) fn children_clip_rect(widget: &dyn Widget, local_to_screen: &TransAffine) -> Rect {
     let b = widget.bounds();
     let (x, y, w, h) = widget
         .clip_children_rect()

@@ -158,19 +158,10 @@ pub fn find_widget_visible_rect(root: &dyn Widget, id: &str) -> Option<Rect> {
         return None;
     }
     let widget = super::walk_path(root, &path)?;
-    let b = root.bounds();
-    let shown_root = crate::widget::visible_root_rect(Size::new(b.width, b.height));
-    let window = Rect::new(
-        b.x + shown_root.x,
-        b.y + shown_root.y,
-        shown_root.width,
-        shown_root.height,
-    );
+    let window = crate::widget::paint_walk::painted_window(root);
     let painted = crate::widget::paint_geometry::paint_placement_in(root, &path, window)?;
     let own = widget.bounds();
-    let screen_rect = painted.screen_rect(Size::new(own.width, own.height));
-    let shown = crate::widget::paint_geometry::intersect(painted.clip, screen_rect);
-    (painted.visible_chain && shown.width > 0.0 && shown.height > 0.0).then_some(shown)
+    painted.visible_rect(Size::new(own.width, own.height))
 }
 
 /// Fill `path` with the child indices from `widget` down to the first widget

@@ -28,6 +28,7 @@ pub use widget_trait::{TextSelection, Widget};
 
 mod app;
 mod backbuffer;
+mod clear_spot;
 pub mod coords;
 mod event_observer;
 pub(crate) mod event_root;
@@ -38,6 +39,7 @@ mod named_target;
 mod paint;
 pub mod paint_geometry;
 pub(crate) mod paint_timing;
+pub(crate) mod paint_walk;
 mod preview_route;
 mod tree;
 mod tree_inspector;
@@ -48,6 +50,7 @@ pub use backbuffer::{
     BackbufferBand, BackbufferCache, BackbufferKind, BackbufferMode, BackbufferSpec,
     BackbufferState, CompositingLayer,
 };
+pub use clear_spot::nearest_clear_spot;
 pub use event_observer::{observe_events, EventObserver};
 pub use event_root::{event_pointer_local, event_rect_to_root, event_root_transform};
 pub use named_target::NamedTarget;
@@ -56,6 +59,7 @@ pub use paint::{
     current_paint_clip, is_local_rect_in_paint_clip, logical_root_transform, paint_global_overlays,
     paint_subtree, visible_root_rect,
 };
+pub use paint_walk::{painted_over, walk_painted, PaintWalk};
 pub use preview_route::previewed_child;
 pub use tree::{
     activate_action_at, active_modal_path, cancel_action_path, default_action_path, dispatch_event,
