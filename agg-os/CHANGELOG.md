@@ -38,3 +38,11 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
   answers. An application makes one `MenuTarget`: its Objective-C object and its handler live for
   the rest of the process, so the menus and items, which hold it weakly, always have it, and the
   handler is never dropped. Built on objc2 0.6 and objc2-app-kit 0.3.
+- `fork-minidump` feature (Linux): `linux::fork_minidump::write_minidump_from_fork()`, which writes
+  a minidump of this process to a file from a forked child that ptraces it, the calling thread as
+  the blamed thread. The parent names the child its tracer with `PR_SET_PTRACER` (for Yama's
+  `ptrace_scope` 1) and lets it go through a pipe; the child is killed at the given timeout. What
+  the child does is fixed, since only some work is sound in the child of a multi-threaded process.
+  It fails with a `ForkDumpError` (this process's id, creating the file, a pipe or the child, the
+  child's exit code and report, a signal, the wait, or the timeout). Built on libc and
+  minidump-writer 0.13.

@@ -67,10 +67,22 @@ app-menu = [
     "objc2-app-kit/NSMenu",
     "objc2-app-kit/NSMenuItem",
 ]
+# `linux::fork_minidump`: a minidump of this process written by a forked
+# child that ptraces it, for agg-gui-automation's all-thread stack dump on
+# Linux (libc for fork, PR_SET_PTRACER and waitpid; minidump-writer for the
+# child's dump).
+fork-minidump = ["dep:libc", "dep:minidump-writer"]
 
 # The `libc` FFI bindings (MIT OR Apache-2.0, no compiled C).
 [target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]
 libc = { version = "0.2", optional = true }
+
+# The minidump writer (rust-minidump's minidump-writer, MIT; pure Rust over
+# ptrace and /proc on Linux), the version agg-gui-automation builds: the
+# `fork-minidump` child runs it, so it is called from here, where the
+# argument for what that child may do lives.
+[target.'cfg(target_os = "linux")'.dependencies]
+minidump-writer = { version = "0.13", optional = true }
 
 # The `windows-sys` FFI bindings (MIT OR Apache-2.0, no compiled C), in two
 # versions so that each consumer builds the one it built before: agg-gui-shell

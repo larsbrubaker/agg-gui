@@ -18,13 +18,12 @@
 //!   the capture can come back torn, which the walker's capturing-thread
 //!   check and the retry treat as a lost race.
 //! - **Linux: a forked child.** ptrace cannot attach to the caller's own
-//!   threads, so a child forked here does it. Yama (`ptrace_scope` 1) only
-//!   lets an ancestor trace, so the parent first names the child as its
-//!   tracer with `PR_SET_PTRACER` (what the .NET runtime does before it starts
-//!   createdump), and the child waits on a pipe until it has. The child
-//!   stops this process (SIGSTOP plus ptrace), writes the dump, resumes it and
-//!   exits; its error, if any, comes back through a second pipe rather than
-//!   the console.
+//!   threads, so a forked child does it: agg-os's
+//!   `linux::fork_minidump::write_minidump_from_fork` (feature
+//!   `fork-minidump`), which holds the fork, the `PR_SET_PTRACER` that lets
+//!   the child trace this process under Yama, the child's body and the wait,
+//!   since what a child of a multi-threaded process may do is part of that
+//!   code's soundness. Here its errors become this module's messages.
 //! - Elsewhere there is no writer yet and every capture fails with a reason.
 //!
 //! The writer runs under part 1's [`DUMP_WRITER_TIMEOUT`]: a forked writer
@@ -91,130 +90,39 @@ fn write_dump(_dump_path: &Path) -> Result<(), CaptureFailure> {
 
 #[cfg(target_os = "linux")]
 mod linux {
-    use std::fs::File;
-    use std::io::{self, Read, Write};
-    use std::os::fd::{FromRawFd, OwnedFd};
     use std::path::Path;
-    use std::time::{Duration, Instant};
+
+    use agg_os::linux::fork_minidump::{write_minidump_from_fork, ForkDumpError};
 
     use super::{CaptureFailure, DUMP_WRITER_TIMEOUT};
 
-    /// How often the parent checks whether the forked writer has exited.
-    const EXIT_POLL_INTERVAL: Duration = Duration::from_millis(5);
-
-    fn pipe() -> io::Result<(File, File)> {
-        let mut fds = [0; 2];
-        // SAFETY: `fds` is a valid two-element array for pipe to fill.
-        if unsafe { libc::pipe(fds.as_mut_ptr()) } != 0 {
-            return Err(io::Error::last_os_error());
-        }
-        // SAFETY: pipe succeeded, so both descriptors are open and owned
-        // by nothing else.
-        let (read, write) = unsafe { (OwnedFd::from_raw_fd(fds[0]), OwnedFd::from_raw_fd(fds[1])) };
-        Ok((File::from(read), File::from(write)))
-    }
-
     pub(super) fn write_dump(dump_path: &Path) -> Result<(), CaptureFailure> {
-        // Everything the child needs is made before the fork, so the child
-        // only writes.
-        let parent = libc::pid_t::try_from(std::process::id())?;
-        // SAFETY: gettid has no preconditions.
-        let blamed_thread = unsafe { libc::gettid() };
-        let mut dump_file = File::create(dump_path)?;
-        let (mut go_read, mut go_write) = pipe()?;
-        let (mut error_read, mut error_write) = pipe()?;
-
-        // SAFETY: the child runs only the dump writer and then `_exit`s, never
-        // returning into the caller's stack or running its destructors.
-        // glibc keeps malloc usable in the child of a multithreaded fork.
-        let child = unsafe { libc::fork() };
-        if child < 0 {
-            return Err(io::Error::last_os_error().into());
-        }
-        if child == 0 {
-            drop(go_write);
-            drop(error_read);
-            // Wait for the parent to allow tracing (or to give up).
-            let mut go = [0u8; 1];
-            let _ = go_read.read(&mut go);
-            let result =
-                minidump_writer::minidump_writer::MinidumpWriterConfig::new(parent, blamed_thread)
-                    .write(&mut dump_file);
-            let code = match result {
-                Ok(_) => 0,
-                Err(error) => {
-                    let _ = write!(error_write, "minidump-writer failed: {error}");
-                    1
-                }
-            };
-            // SAFETY: _exit ends the child without running the parent's
-            // atexit handlers or flushing its copied stdio buffers.
-            unsafe { libc::_exit(code) }
-        }
-
-        drop(go_read);
-        drop(error_write);
-        drop(dump_file);
-        // Yama's ptrace_scope 1 only lets an ancestor trace this process;
-        // name the child. Without Yama this fails with EINVAL and is not
-        // needed.
-        // SAFETY: prctl with PR_SET_PTRACER takes a pid and has no pointers.
-        unsafe { libc::prctl(libc::PR_SET_PTRACER, child as libc::c_ulong, 0, 0, 0) };
-        let _ = go_write.write_all(&[1]);
-        drop(go_write);
-
-        let status = wait_for_exit(child);
-        // SAFETY: as above; 0 clears the tracer exception.
-        unsafe { libc::prctl(libc::PR_SET_PTRACER, 0 as libc::c_ulong, 0, 0, 0) };
-
-        let mut error = String::new();
-        let _ = error_read.read_to_string(&mut error);
-        match status {
-            Err(timeout) => Err(timeout.into()),
-            Ok(0) => Ok(()),
-            Ok(code) if error.is_empty() => {
-                Err(format!("the forked dump writer exited with {code}").into())
-            }
-            Ok(_) => Err(error.into()),
-        }
+        write_minidump_from_fork(dump_path, DUMP_WRITER_TIMEOUT).map_err(capture_failure)
     }
 
-    /// The forked writer's exit code, or why there is none (it was killed at
-    /// the timeout, or died of a signal).
-    fn wait_for_exit(child: libc::pid_t) -> Result<i32, String> {
-        let deadline = Instant::now() + DUMP_WRITER_TIMEOUT;
-        loop {
-            let mut status = 0;
-            // SAFETY: `status` is a valid out pointer; `child` is our child.
-            let waited = unsafe { libc::waitpid(child, &mut status, libc::WNOHANG) };
-            if waited == child {
-                if libc::WIFEXITED(status) {
-                    return Ok(libc::WEXITSTATUS(status));
-                }
-                if libc::WIFSIGNALED(status) {
-                    return Err(format!(
-                        "the forked dump writer (pid {child}) died of signal {}",
-                        libc::WTERMSIG(status)
-                    ));
-                }
-            } else if waited < 0 {
-                return Err(format!(
-                    "waiting for the forked dump writer failed: {}",
-                    io::Error::last_os_error()
-                ));
+    /// The capture's failure for the forked writer's error: the OS error
+    /// itself, or the message saying what became of the writer.
+    fn capture_failure(error: ForkDumpError) -> CaptureFailure {
+        match error {
+            ForkDumpError::ParentPid(error) => error.into(),
+            ForkDumpError::Io(error) => error.into(),
+            ForkDumpError::WriterFailed { code, message } if message.is_empty() => {
+                format!("the forked dump writer exited with {code}").into()
             }
-            if Instant::now() >= deadline {
-                // SAFETY: signalling and reaping our own child.
-                unsafe {
-                    libc::kill(child, libc::SIGKILL);
-                    libc::waitpid(child, &mut status, 0);
-                }
-                return Err(format!(
-                    "the forked dump writer (pid {child}) did not exit within {} s and was killed",
-                    DUMP_WRITER_TIMEOUT.as_secs()
-                ));
+            ForkDumpError::WriterFailed { message, .. } => message.into(),
+            ForkDumpError::Signaled { pid, signal } => {
+                format!("the forked dump writer (pid {pid}) died of signal {signal}").into()
             }
-            std::thread::sleep(EXIT_POLL_INTERVAL);
+            ForkDumpError::WaitFailed(error) => {
+                format!("waiting for the forked dump writer failed: {error}").into()
+            }
+            ForkDumpError::TimedOut { pid } => format!(
+                "the forked dump writer (pid {pid}) did not exit within {} s and was killed",
+                DUMP_WRITER_TIMEOUT.as_secs()
+            )
+            .into(),
+            // `ForkDumpError` is non-exhaustive: a reason added later.
+            other => other.into(),
         }
     }
 }

@@ -30,15 +30,20 @@
 //! | `windows::recycle_bin` | `recycle-bin` | Moving an item to the Windows Recycle Bin, a path's long form, the bin's item count |
 //! | `macos::open_files` | `open-files` | Making the app delegate answer `application:openFiles:`, handing the paths to a callback |
 //! | `macos::menu` | `app-menu` | The Objective-C delegate and action target of native menus, calling a `MenuHandler` |
+//! | `linux::fork_minidump` | `fork-minidump` | A minidump of this process written by a forked child that ptraces it |
 //!
-//! The `windows` module exists on Windows only and the `macos` module on
-//! macOS only; their features do nothing on other targets.
+//! The `windows` module exists on Windows only, the `macos` module on macOS
+//! only and the `linux` module on Linux only; their features do nothing on
+//! other targets.
 
 #[cfg(feature = "counting-alloc")]
 pub mod alloc_count;
 
 #[cfg(feature = "thread-id")]
 pub mod thread_id;
+
+#[cfg(target_os = "linux")]
+pub mod linux;
 
 #[cfg(target_os = "macos")]
 pub mod macos;
