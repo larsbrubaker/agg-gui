@@ -9,11 +9,18 @@
 //!
 //! A trash directory set with `set_trash_directory` replaces the system's for the whole process:
 //! tests point it at a temporary folder so they never fill the developer's real Trash. The browser
-//! build has no disk folders, so there is nothing to trash there and every call fails.
+//! build has no disk folders, so there is nothing to trash there and every call fails. A move into
+//! that directory and back out on restore crosses volumes when it has to (`cross_volume.rs`: a
+//! rename, else a copy and the original's removal).
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
+use cross_volume::{move_item, FileOps, SYSTEM};
+
+mod cross_volume;
+#[cfg(test)]
+mod cross_volume_tests;
 #[cfg(unix)]
 mod freedesktop;
 #[cfg(target_os = "macos")]
@@ -98,8 +105,14 @@ fn system_trash(original: &Path) -> Result<TrashedItem, String> {
 }
 
 /// Puts a trashed item back at its original path. Refuses when something new already has that
-/// path, so a restore never overwrites the user's work.
+/// path, so a restore never overwrites the user's work. An item on another volume than its
+/// original path is copied back and removed from the trash (`cross_volume::move_item`).
 pub fn restore_from_trash(item: &TrashedItem) -> Result<(), String> {
+    restore_with(item, &SYSTEM)
+}
+
+/// [`restore_from_trash`] with the file operations as a parameter (the tests' cross-device rename).
+fn restore_with(item: &TrashedItem, ops: &FileOps) -> Result<(), String> {
     if std::fs::symlink_metadata(&item.original).is_ok() {
         return Err(format!(
             "{}: an item with this name is already there",
@@ -109,7 +122,7 @@ pub fn restore_from_trash(item: &TrashedItem) -> Result<(), String> {
     if let Some(parent) = item.original.parent() {
         std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
     }
-    std::fs::rename(&item.in_trash, &item.original)
+    move_item(&item.in_trash, &item.original, ops)
         .map_err(|e| format!("{}: {e}", item.original.display()))?;
     if let Some(info) = &item.info_file {
         // The item is back; a leftover record would only list a missing file in the trash.
@@ -119,14 +132,25 @@ pub fn restore_from_trash(item: &TrashedItem) -> Result<(), String> {
 }
 
 /// The trash as a plain folder (the test directory): the item moves in under a name no other
-/// item there has.
+/// item there has. A directory on another volume than the item gets a copy of it, and the
+/// original is removed (`cross_volume::move_item`).
 fn move_into_directory(original: &Path, directory: &Path) -> Result<TrashedItem, String> {
+    move_into_directory_with(original, directory, &SYSTEM)
+}
+
+/// [`move_into_directory`] with the file operations as a parameter (the tests' cross-device
+/// rename).
+fn move_into_directory_with(
+    original: &Path,
+    directory: &Path,
+    ops: &FileOps,
+) -> Result<TrashedItem, String> {
     std::fs::create_dir_all(directory).map_err(|e| format!("{}: {e}", directory.display()))?;
     let name = original
         .file_name()
         .ok_or_else(|| format!("{}: no name", original.display()))?;
     let in_trash = unique_path(directory, Path::new(name));
-    std::fs::rename(original, &in_trash).map_err(|e| format!("{}: {e}", original.display()))?;
+    move_item(original, &in_trash, ops).map_err(|e| format!("{}: {e}", original.display()))?;
     Ok(TrashedItem {
         original: original.to_path_buf(),
         in_trash,

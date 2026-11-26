@@ -43,6 +43,13 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 - A watch dropped while one of its listings is running (a slow share) no longer reports what
   that listing finds: the watch's thread checks again after each listing that it is still
   wanted.
+- Moving an item to a trash directory set with `set_trash_directory`, and restoring it, works
+  when that directory is on another volume than the item: where the rename reports a
+  cross-device move, the item is copied and the original removed, and a copy that fails leaves
+  the original in place. Before, both failed (a test's trash under the system temp folder and
+  its files on another drive, as on GitHub's Windows runners).
+- A folder holding a symbolic link or a special file (a named pipe, a socket, a device) is not
+  moved across volumes: the move fails and the item stays where it is.
 
 ## [0.0.7] - 2026-11-07
 
