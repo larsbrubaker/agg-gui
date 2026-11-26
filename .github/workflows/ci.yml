@@ -113,6 +113,12 @@ jobs:
           RUSTFLAGS="-C target-feature=+simd128" CARGO_TARGET_DIR=target/wasm-simd128 \
             cargo clippy -p agg-gui-whistle-worker --target wasm32-unknown-unknown -- -D warnings
 
+      # agg-gui-automation's all-thread stack dump (the forked ptrace writer
+      # here) and its live window driver over agg-gui-shell, which no
+      # workspace member turns on.
+      - name: Clippy (agg-gui-automation, stack dump and live)
+        run: cargo clippy -p agg-gui-automation --all-targets --features stack-dump,live -- -D warnings
+
   test:
     runs-on: ubuntu-26.04
     defaults:
@@ -246,6 +252,12 @@ jobs:
       - name: Run dictation tests
         run: cargo test -p agg-gui-whistle --features native-mic,native-download
 
+      # The automation crate, with the stack dump: a real minidump of the test
+      # process, written by a forked child that ptraces it (named its tracer
+      # with PR_SET_PTRACER, so Yama's ptrace_scope 1 allows it), and walked.
+      - name: Run automation tests (stack dump)
+        run: cargo test -p agg-gui-automation --features stack-dump
+
       # What the job left of the disk, so a build creeping back towards the
       # runner's limit shows in a passing run's log before it fails one.
       - name: Disk left
@@ -254,9 +266,14 @@ jobs:
           df -h .
           du -sh target
 
-  # The clipboard feature's per-platform code (`clipboard::has_image` asks the
-  # Windows and macOS clipboards for a picture format directly). A check, not
-  # a test run, to keep these runners cheap.
+  # The Windows and macOS code that the Linux jobs never compile: the
+  # clipboard feature (`clipboard::has_image` asks the Windows and macOS
+  # clipboards for a picture format directly), agg-mic's captures, the file
+  # model's disk and trash calls, agg-gui-shell's Win32 and AppKit code, and
+  # agg-gui-automation's stack dump. Linted everywhere; tested where the
+  # tests reach that code (agg-mic, agg-gui-shell, the disk feature, and the
+  # stack dump on macOS, the one of the two with a dump writer). The job is named for the
+  # first of these checks.
   check-clipboard:
     strategy:
       fail-fast: false
@@ -319,6 +336,31 @@ jobs:
 
       - name: Run microphone tests
         run: cargo test -p agg-mic
+
+      # agg-gui-shell's Win32 and AppKit code (window placement, menus, the
+      # double-click and LCD settings), which the Linux jobs never compile.
+      # Its headless GPU tests skip themselves when no adapter is available.
+      - name: Clippy (agg-gui-shell)
+        run: cargo clippy -p agg-gui-shell --all-targets -- -D warnings
+
+      - name: Run shell tests
+        run: cargo test -p agg-gui-shell
+
+      # Folders on disk through this OS's calls, including one real round trip
+      # through the runner user's Recycle Bin or Trash.
+      - name: Run file model disk tests
+        run: cargo test -p agg-gui-files --features disk
+
+      # The stack dump's per-OS writer: in-process on macOS, none yet on
+      # Windows (where every capture fails with a reason).
+      - name: Clippy (agg-gui-automation, stack dump)
+        run: cargo clippy -p agg-gui-automation --all-targets --features stack-dump -- -D warnings
+
+      # A real minidump of the test process, written and walked. macOS only:
+      # Windows has no writer, so the real-dump tests skip themselves there.
+      - name: Run automation tests (stack dump)
+        if: runner.os == 'macOS'
+        run: cargo test -p agg-gui-automation --features stack-dump
 
   build-wasm:
     runs-on: ubuntu-26.04
