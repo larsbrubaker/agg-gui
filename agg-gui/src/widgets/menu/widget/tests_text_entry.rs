@@ -556,6 +556,9 @@ fn an_open_field_raises_the_on_screen_keyboard_and_closing_lowers_it() {
     crate::widget::set_current_viewport(Size::new(300.0, 300.0));
     let (mut bar, _logs) = field_and_plain_bar();
     let a = centre(bar.menus()[0].rect);
+    // A finger opens the menu (the keyboard rises for a finger, not a
+    // mouse; the press here goes to the bar without an `App` to note it).
+    crate::touch_emulation::long_press::set_last_press_was_touch_for_testing(true);
     press(&mut bar, a);
     let mut app = crate::App::new(Box::new(bar));
     assert!(!keyboard_up());
@@ -567,4 +570,73 @@ fn an_open_field_raises_the_on_screen_keyboard_and_closing_lowers_it() {
     assert!(!app.wants_ime());
     assert!(!keyboard_up(), "closing the menu lowers it");
     test_hook::reset();
+}
+
+/// A menu with a text entry opened by the mouse, in an `App` with the
+/// on-screen keyboard on; the keyboard state is put back on drop.
+struct MouseOpenedSearch {
+    _guard: std::sync::MutexGuard<'static, ()>,
+    app: crate::App,
+    field_row: Rect,
+}
+
+impl MouseOpenedSearch {
+    fn new() -> Self {
+        use crate::widgets::on_screen_keyboard::{self, test_hook};
+        let guard = crate::input_profile::profile_test_lock();
+        reset_env();
+        test_hook::reset();
+        on_screen_keyboard::set_enabled(true);
+        let viewport = Size::new(300.0, 300.0);
+        crate::widget::set_current_viewport(viewport);
+        let (mut bar, _logs) = field_and_plain_bar();
+        let a = centre(bar.menus()[0].rect);
+        // The mouse opened the menu (the press goes to the bar without an
+        // `App` to note it).
+        crate::touch_emulation::long_press::set_last_press_was_touch_for_testing(false);
+        press(&mut bar, a);
+        let field_row = bar.popup.state.layouts(&bar.popup.items, viewport)[0].rows[0].rect;
+        let mut app = crate::App::new(Box::new(bar));
+        app.layout(viewport);
+        Self {
+            _guard: guard,
+            app,
+            field_row,
+        }
+    }
+}
+
+impl Drop for MouseOpenedSearch {
+    fn drop(&mut self) {
+        crate::widgets::on_screen_keyboard::test_hook::reset();
+    }
+}
+
+fn keyboard_up() -> bool {
+    crate::widgets::on_screen_keyboard::state::with_state_ref(|s| {
+        s.text_input_focused && s.slide.target() > 0.5
+    })
+}
+
+#[test]
+fn a_menu_the_mouse_opens_does_not_raise_the_on_screen_keyboard_for_its_field() {
+    let mut menu = MouseOpenedSearch::new();
+    assert!(menu.app.wants_ime(), "the field takes typing");
+    assert!(!keyboard_up(), "a mouse user types on a physical keyboard");
+    menu.app.layout(Size::new(300.0, 300.0));
+    assert!(!keyboard_up());
+}
+
+#[test]
+fn a_finger_tap_on_the_field_of_a_menu_the_mouse_opened_raises_the_keyboard() {
+    let mut menu = MouseOpenedSearch::new();
+    assert!(!keyboard_up());
+    let at = centre(menu.field_row);
+    let (screen, finger) = (crate::TouchDeviceId(0), crate::TouchId(1));
+    menu.app
+        .on_touch_start(screen, finger, at.x, 300.0 - at.y, None);
+    menu.app.on_touch_end(screen, finger);
+    menu.app.layout(Size::new(300.0, 300.0));
+    assert!(menu.app.wants_ime(), "the menu and its field stay open");
+    assert!(keyboard_up(), "the finger on the field raises the keyboard");
 }

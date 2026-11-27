@@ -1,6 +1,6 @@
 [package]
 name = "agg-gui-wgpu"
-version = "0.8.0"
+version = "0.9.0"
 edition = "2021"
 # agg-rust (a path dependency) requires 1.88; wgpu 29 needs 1.87 and arboard 3.6 needs 1.71.
 rust-version = "1.88"
@@ -34,7 +34,7 @@ reflect = ["agg-gui/reflect"]
 # optional features (reflect, clipboard, winit-adapter), so depending on them
 # would force `bevy_reflect` on every consumer of this crate. `bytemuck` gives
 # `AaTexVertex` the `Pod` impl its vertex upload casts through.
-agg-gui  = { path = "../agg-gui", version = "0.6.0", default-features = false, features = ["bytemuck"] }
+agg-gui  = { path = "../agg-gui", version = "0.7.0", default-features = false, features = ["bytemuck"] }
 # Sibling checkout locally and in CI, crates.io `version` when published
 # (see agg-gui/Cargo.toml).
 agg-rust = { version = "2.0.0", path = "../../agg-rust" }

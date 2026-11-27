@@ -30,11 +30,31 @@ impl App {
     /// focusable widget takes focus, a widget that
     /// [keeps focus on press](Widget::keeps_focus_on_press) (a menu host)
     /// leaves it alone, and anything else — or no widget — clears it.
+    ///
+    /// A finger's press on the text field that already has focus raises the
+    /// on-screen keyboard when it is down (the mouse focused the field, or
+    /// nothing pressed before a focus request), as a tap on a field does
+    /// when it takes focus: there is no focus change to raise it.
     fn focus_for_press(&mut self, hit: Option<&[usize]>) {
         self.set_focus_visible(false);
         let widget = hit.and_then(|path| widget_at_path_ref(self.root.as_ref(), path));
         match (hit, widget) {
-            (Some(path), Some(w)) if takes_click_focus(w) => self.set_focus(Some(path.to_vec())),
+            (Some(path), Some(w)) if takes_click_focus(w) => {
+                let tap_on_focused_field = self.focus.as_deref() == Some(path)
+                    && w.accepts_text_input()
+                    && crate::touch_emulation::last_press_raises_on_screen_keyboard()
+                    && crate::widgets::on_screen_keyboard::is_enabled()
+                    && !crate::widgets::on_screen_keyboard::is_raised();
+                self.set_focus(Some(path.to_vec()));
+                if tap_on_focused_field {
+                    super::super::keyboard_scroll::notify_focus_change(
+                        Some(path),
+                        self.viewport_size.width,
+                        self.root.as_mut(),
+                        super::super::keyboard_scroll::FocusCause::Moved,
+                    );
+                }
+            }
             (Some(_), Some(w)) if w.keeps_focus_on_press() => {}
             _ => self.set_focus(None),
         }
@@ -246,7 +266,6 @@ impl App {
         crate::event::begin_press(clicks, stated);
         // Held from here, whoever (if anyone) handles the press.
         crate::event::note_button_down(button);
-        crate::touch_emulation::long_press::note_press();
         self.on_modifiers_changed(mods);
         self.resolve_tracked_paths();
         let screen = self.flip_y(screen_x, screen_y);
@@ -259,6 +278,10 @@ impl App {
         ) {
             return;
         }
+        // Noted only for presses the tree gets: a click on a key leaves the
+        // latest press a finger's, so a focus its Enter moves keeps the
+        // keyboard up.
+        crate::touch_emulation::long_press::note_press();
         let pos = super::keyboard_scroll::lift_to_world(screen);
         set_current_mouse_world(pos);
         // A press hides any visible central tooltip and keeps it suppressed
@@ -281,8 +304,12 @@ impl App {
             let path = self.extend_modal_path(&path, pos);
             self.update_hover_chain(Some(&path), None);
             self.focus_for_press(Some(&path));
+            crate::widgets::on_screen_keyboard::take_modal_text_entry_press();
             if dispatch_event(&mut self.root, &path, &event, pos).is_consumed() {
                 self.store_captured(Some(path));
+            }
+            if crate::widgets::on_screen_keyboard::take_modal_text_entry_press() {
+                self.raise_keyboard_for_modal_entry_tap();
             }
             return;
         }

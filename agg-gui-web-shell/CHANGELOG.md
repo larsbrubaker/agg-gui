@@ -8,6 +8,21 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ## [Unreleased]
 
+## [0.8.0]
+
+### Changed
+
+- **Breaking:** agg-gui-web-shell requires agg-gui 0.7.0 and agg-gui-wgpu 0.9.0 (it required 0.6.0
+  and 0.8.0), whose on-screen keyboard rises only after a finger's or a pen's press. An app moves
+  to agg-gui 0.7.0 with it.
+- A stylus's press (`pointerType` `"pen"`: an Apple Pencil, an S Pen) is forwarded as
+  `ForwarderEvent::PenDown`: it still presses, drags and releases as a mouse does, and a text field
+  it focuses raises the on-screen keyboard.
+- A touchscreen Windows, Linux or ChromeOS desktop runs with the desktop input profile (agg-gui
+  0.7.0's `input_profile_from_hint`), and agg-gui's on-screen keyboard is on wherever the screen
+  takes touch (`navigator.maxTouchPoints` above 0), rising only for a finger or a pen. The
+  `?agg_input=mobile` switch forces a mobile profile (`MobileOther` on a desktop system).
+
 ## [0.7.0]
 
 ### Changed

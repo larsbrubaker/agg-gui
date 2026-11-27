@@ -20,6 +20,9 @@ fn layout_corrects_stale_keyboard_lift() {
     let font = Arc::new(Font::from_slice(TEST_FONT).unwrap());
     keyboard_scroll::reset_lift_for_test();
     crate::widgets::on_screen_keyboard::set_enabled(true);
+    // A phone user: the latest press was a finger's, so the focused field
+    // raises the keyboard.
+    crate::touch_emulation::long_press::set_last_press_was_touch_for_testing(true);
 
     const FIELD_ID: u64 = 777;
     // Field pinned near the top of a tall viewport — far above any

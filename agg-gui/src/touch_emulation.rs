@@ -85,8 +85,9 @@ use crate::touch_state::{TouchDeviceId, TouchId};
 pub mod fling;
 pub mod long_press;
 pub use long_press::{
-    claim_long_press_drag, last_press_was_touch, long_press_cue, long_press_ring_drawn,
-    on_long_press, set_long_press_ring_drawn, LongPressCue, LONG_PRESS_CUE_DELAY, LONG_PRESS_DELAY,
+    claim_long_press_drag, last_press_raises_on_screen_keyboard, last_press_was_pen,
+    last_press_was_touch, long_press_cue, long_press_ring_drawn, on_long_press,
+    set_long_press_ring_drawn, LongPressCue, LONG_PRESS_CUE_DELAY, LONG_PRESS_DELAY,
     LONG_PRESS_RING_RADIUS, LONG_PRESS_SLOP,
 };
 

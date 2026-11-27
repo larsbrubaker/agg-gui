@@ -14,8 +14,8 @@
 
 use crate::widgets::on_screen_keyboard::{self, state::with_state_ref, test_hook};
 use crate::{
-    App, Button, DrawCtx, Event, EventResult, Font, Key, Label, Modifiers, MouseButton, Rect, Size,
-    TextField, Widget,
+    App, Button, DrawCtx, Event, EventResult, Font, Key, Label, Modifiers, Rect, Size, TextField,
+    Widget,
 };
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -92,10 +92,10 @@ fn field(cell: &Text) -> Box<dyn Widget> {
     Box::new(TextField::new(font()).with_text_cell(Rc::clone(cell)))
 }
 
-fn click(app: &mut App, x: f64) {
-    let y = SIZE.height * 0.5;
-    app.on_mouse_down(x, y, MouseButton::Left, Modifiers::default());
-    app.on_mouse_up(x, y, MouseButton::Left, Modifiers::default());
+/// A finger's tap at `x`: the on-screen keyboard rises for a finger, not for
+/// a mouse click.
+fn tap(app: &mut App, x: f64) {
+    super::touch_pan_fixtures::tap_screen(app, x, SIZE.height * 0.5);
 }
 
 fn type_text(app: &mut App, s: &str) {
@@ -130,11 +130,11 @@ impl Drop for KeyboardOn {
 }
 
 /// Two fields side by side under a counting root, the left one focused by a
-/// click (one `FocusGained`), with the keyboard up for it.
+/// tap (one `FocusGained`), with the keyboard up for it.
 fn focused_left(left: &Text, right: &Text, gains: &Rc<Cell<usize>>) -> App {
     let mut app = App::new(row(vec![field(left), field(right)], gains));
     app.layout(SIZE);
-    click(&mut app, 50.0);
+    tap(&mut app, 50.0);
     assert_eq!(app.focused_path(), Some(&[0usize][..]));
     assert_eq!(gains.get(), 1);
     assert_eq!(keyboard_up(), (true, true), "focusing the field raises it");
@@ -252,7 +252,7 @@ fn removed_focused_field_clears_focus_and_lowers_keyboard() {
     let (only, gains) = (text(), Rc::default());
     let mut app = App::new(row(vec![field(&only)], &gains));
     app.layout(SIZE);
-    click(&mut app, 50.0);
+    tap(&mut app, 50.0);
     assert_eq!(keyboard_up(), (true, true));
 
     app.root_mut().children_mut().clear();
@@ -333,4 +333,28 @@ fn reparented_field_keeps_focus_without_second_gain() {
     assert_eq!(keyboard_up(), (true, true));
     type_text(&mut app, "ab");
     assert_eq!(left.borrow().as_str(), "ab");
+}
+
+/// A click with the mouse on the field the keyboard is up for, then the app
+/// rebuilds that field: the replacement keeps the keyboard up. The rebuild
+/// is no focus move by the user, so the mouse's press doesn't put it away.
+#[test]
+fn replaced_field_keeps_the_keyboard_up_after_a_mouse_click_on_it() {
+    let _kb = KeyboardOn::new();
+    let (left, right, fresh, gains) = (text(), text(), text(), Rc::default());
+    let mut app = focused_left(&left, &right, &gains);
+    let y = SIZE.height * 0.5;
+    app.on_mouse_down(50.0, y, crate::MouseButton::Left, Modifiers::default());
+    app.on_mouse_up(50.0, y, crate::MouseButton::Left, Modifiers::default());
+    assert_eq!(
+        keyboard_up(),
+        (true, true),
+        "a click on the field leaves it up"
+    );
+    type_text(&mut app, "a");
+
+    app.root_mut().children_mut()[0] = field(&fresh);
+    app.layout(SIZE);
+
+    assert_replacement_focused(&mut app, &gains, &fresh, &left);
 }

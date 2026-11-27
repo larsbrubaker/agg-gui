@@ -8,6 +8,13 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ## [Unreleased]
 
+## [0.9.0]
+
+### Changed
+
+- **Breaking:** agg-gui-wgpu requires agg-gui 0.7.0 (it required 0.6.0), whose on-screen keyboard
+  rises only after a finger's or a pen's press. An app moves to agg-gui 0.7.0 with it.
+
 ## [0.8.0]
 
 ### Changed

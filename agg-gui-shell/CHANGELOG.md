@@ -8,6 +8,16 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ## [Unreleased]
 
+## [0.9.0]
+
+### Changed
+
+- **Breaking:** agg-gui-shell requires agg-gui 0.7.0 and agg-gui-wgpu 0.9.0 (it required 0.6.0
+  and 0.8.0), whose on-screen keyboard rises only after a finger's or a pen's press. An app moves
+  to agg-gui 0.7.0 with it. A pen on Windows already arrives as touches (winit reports pen pointers
+  as `Touch` events), so it raises the keyboard; on macOS winit reports a tablet pen as a mouse,
+  which this shell can't tell apart.
+
 ## [0.8.0]
 
 ### Changed

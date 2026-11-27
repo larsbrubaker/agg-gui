@@ -11,9 +11,14 @@
 //!   fallback).
 //! - [`agg_gui::widgets::on_screen_keyboard::set_enabled`] — turns the
 //!   keyboard module on (mobile profiles) or off (desktop).
+//! - [`agg_gui::widgets::on_screen_keyboard::set_rises_for_mouse`] — on
+//!   with a mobile profile. An app raises the keyboard only for a field a
+//!   finger or a pen focused (a mouse user has a physical keyboard); this
+//!   bench is usually driven with a mouse, so it asks for the keyboard
+//!   whatever pressed.
 //!
-//! When the user taps the demo's TextField with `Enabled = true` the
-//! keyboard auto-raises because TextField overrides
+//! When the user taps or clicks the demo's TextField with a mobile profile
+//! the keyboard raises because TextField overrides
 //! `Widget::accepts_text_input`. Picking "Desktop" both disables the
 //! keyboard and dismisses it.
 //!
@@ -71,8 +76,8 @@ pub fn mobile_keyboard(font: Arc<Font>) -> Box<dyn Widget> {
         Box::new(
             Label::new(
                 "Picking iPhone or Android flips the global agg-gui input \
-                 profile and enables the on-screen keyboard. Tap the field \
-                 below — the keyboard slides up and types into it.",
+                 profile and enables the on-screen keyboard. Click or tap \
+                 the field below and the keyboard slides up and types in it.",
                 Arc::clone(&font),
             )
             .with_font_size(11.0)
@@ -130,7 +135,7 @@ pub fn mobile_keyboard(font: Arc<Font>) -> Box<dyn Widget> {
             SizedBox::new().with_height(34.0).with_child(Box::new(
                 TextField::new(Arc::clone(&font))
                     .with_font_size(14.0)
-                    .with_placeholder("Tap to focus, then type / tap keys…")
+                    .with_placeholder("Tap or click to focus, then type / tap keys…")
                     .with_keyboard_mode_cell(Rc::clone(&primary_mode)),
             )),
         ),
@@ -178,7 +183,8 @@ pub fn mobile_keyboard(font: Arc<Font>) -> Box<dyn Widget> {
 }
 
 /// Map the radio-button index to an [`InputProfile`] and apply it
-/// globally. Index `0` (Desktop) also dismisses any currently-raised
+/// globally, with the keyboard raised for mouse clicks while a mobile
+/// profile is on. Index `0` (Desktop) also dismisses any currently-raised
 /// keyboard so the demo doesn't leave it hanging.
 fn apply_profile_choice(idx: usize) {
     let profile = match idx {
@@ -187,12 +193,20 @@ fn apply_profile_choice(idx: usize) {
         _ => InputProfile::Desktop,
     };
     set_input_profile(profile);
+    keyboard_for_profile(profile);
+    agg_gui::animation::request_draw();
+}
+
+/// The keyboard settings for `profile`: on for a phone, raised for a mouse
+/// click too (the bench is driven with a mouse; in an app only a finger or
+/// a pen raises it), and off and put away on the desktop.
+fn keyboard_for_profile(profile: InputProfile) {
     let enable = profile.is_mobile_touch();
     on_screen_keyboard::set_enabled(enable);
+    on_screen_keyboard::set_rises_for_mouse(enable);
     if !enable {
         on_screen_keyboard::dismiss();
     }
-    agg_gui::animation::request_draw();
 }
 
 /// Stamp the radio-button index into the shared keyboard-mode cell.
@@ -207,4 +221,38 @@ fn apply_mode_choice(cell: &Rc<Cell<KeyboardInputMode>>, idx: usize) {
     };
     cell.set(mode);
     agg_gui::animation::request_draw();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use agg_gui::{App, Modifiers, MouseButton, Size};
+
+    const TEST_FONT: &[u8] = include_bytes!("../../../demo/assets/CascadiaCode.ttf");
+
+    /// With a phone picked, a mouse click on the bench's field raises the
+    /// keyboard; with the desktop picked, it doesn't. The keyboard's state is
+    /// per thread, and the profile itself is left alone.
+    #[test]
+    fn a_mouse_click_on_the_field_raises_the_keyboard_with_a_phone_picked() {
+        let font = Arc::new(Font::from_slice(TEST_FONT).expect("test font must load"));
+        let size = Size::new(300.0, 60.0);
+        let mut app = App::new(Box::new(TextField::new(font)));
+        app.layout(size);
+        let click = |app: &mut App| {
+            app.on_mouse_down(150.0, 30.0, MouseButton::Left, Modifiers::default());
+            app.on_mouse_up(150.0, 30.0, MouseButton::Left, Modifiers::default());
+        };
+        let keyboard_up = || {
+            on_screen_keyboard::state::with_state_ref(|s| {
+                s.enabled && s.text_input_focused && s.slide.target() > 0.5
+            })
+        };
+        keyboard_for_profile(InputProfile::MobileAndroid);
+        click(&mut app);
+        assert!(app.has_focus() && keyboard_up(), "the click raises it");
+        keyboard_for_profile(InputProfile::Desktop);
+        assert!(!keyboard_up(), "the desktop puts it away");
+        assert!(!on_screen_keyboard::rises_for_mouse());
+    }
 }

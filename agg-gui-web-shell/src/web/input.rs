@@ -263,19 +263,31 @@ pub(super) fn install_pointer_listeners(canvas: &web_sys::HtmlCanvasElement, nee
             // A pointerdown is a user gesture — when iOS grants tilt access.
             sensors::service_tilt_permission_gesture();
             let (x, y) = pos(&c, e.client_x(), e.client_y());
-            if PointerKind::from_dom(&e.pointer_type()) == PointerKind::Touch {
+            let kind = PointerKind::from_dom(&e.pointer_type());
+            if kind == PointerKind::Touch {
                 e.prevent_default();
                 lifecycle::touch_down(e.pointer_id());
                 forward_at(touch(TouchPhase::Start, &e, x, y), dom_event_time(&e));
             } else {
                 lifecycle::sync_buttons(pressed_button_count(e.buttons()));
-                let button = mouse_button_from_dom(e.button());
-                let mods = event_mods(&e);
-                forward(ForwarderEvent::MouseDown {
-                    at: Some((x, y)),
-                    button,
-                    modifiers: Some(mods),
-                    clicks: ClickCount::Auto,
+                let (at, button) = (Some((x, y)), mouse_button_from_dom(e.button()));
+                let (modifiers, clicks) = (Some(event_mods(&e)), ClickCount::Auto);
+                // A pen presses as a mouse does, marked as a pen's so a field
+                // it focuses raises the on-screen keyboard.
+                forward(if kind == PointerKind::Pen {
+                    ForwarderEvent::PenDown {
+                        at,
+                        button,
+                        modifiers,
+                        clicks,
+                    }
+                } else {
+                    ForwarderEvent::MouseDown {
+                        at,
+                        button,
+                        modifiers,
+                        clicks,
+                    }
                 });
                 // A press can claim a drag cursor before any move arrives.
                 super::sync_cursor(&c);

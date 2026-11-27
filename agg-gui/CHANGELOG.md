@@ -8,6 +8,43 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ## [Unreleased]
 
+## [0.7.0]
+
+### Added
+
+- `ForwarderEvent::PenDown`: a stylus's press, delivered as a mouse press and marked as a pen's
+  (`touch_emulation::last_press_was_pen`). The web shell sends it for a `pointerType` of `"pen"`. A host that matches
+  `ForwarderEvent` exhaustively needs an arm for it, one reason this release is `0.7.0`.
+- `touch_emulation::last_press_raises_on_screen_keyboard`: whether a text field focused now raises
+  the on-screen keyboard (the latest press was a finger's or a pen's, or the app asked for any
+  press with `on_screen_keyboard::set_rises_for_mouse`, for a test bench driven with a mouse).
+- `input_profile::on_screen_keyboard_wanted(profile, max_touch_points)`: whether a shell turns the
+  on-screen keyboard on (a phone or tablet, or any screen that takes touch), and
+  `input_profile::forced_mobile_profile`, the profile a page forcing the mobile layout gets.
+
+### Changed
+
+- **Breaking:** `input_profile_from_hint` lets the operating system decide: a Windows, Linux or
+  ChromeOS user agent (or `userAgentData.platform`) is `Desktop` whatever `pointer_coarse` says,
+  where a coarse pointer alone used to make it `MobileOther`. A touchscreen desktop with a mouse
+  (Chrome on Windows reports `(pointer: coarse)` there) no longer runs as a phone: no 1.15 UX
+  zoom, no finger-sized menu bar, and popup menus sized by the press that opens them. Mobile
+  profiles come from iPhone, iPad, iPod and iOS names, Android, a Mac user agent with a coarse
+  pointer (iPad-mode Safari), or a coarse pointer on a system this doesn't name.
+- **Breaking:** the on-screen keyboard rises for a text field only when the latest press was a
+  finger's or a pen's: a tap on the field, or a tap that led to its focus (a tapped button opening
+  a dialog that focuses its field). A field focused by a mouse click, or with no press at all (Tab
+  before any press, a focus requested at startup), gets no keyboard and no lift, and a mouse click
+  that moves focus to another field puts a raised keyboard away. A page that reports a phone on a
+  desktop with a mouse (device emulation, a coarse-pointer report) no longer slides the keyboard
+  up over a dialog the mouse opened. A finger's or pen's tap on the field that already has focus,
+  or on an open menu's search field, raises a keyboard that is down, and a focused field the app
+  rebuilds in place keeps the keyboard as it was. A menu's text entry raises the keyboard only
+  after a finger or a pen too. A press the on-screen keyboard takes (a tap or click on a key)
+  leaves the latest press as it was, so a focus its Enter moves keeps the keyboard up. Migration:
+  a test or host that focuses a field without a finger and expects the keyboard now taps the field
+  (`App::on_touch_start` / `on_touch_end`), or raises it itself with `set_text_input_focused`.
+
 ## [0.6.2]
 
 ### Added

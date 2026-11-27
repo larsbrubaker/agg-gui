@@ -14,8 +14,9 @@
 //! - still at the focus path: nothing to do;
 //! - moved elsewhere in the tree (re-parented): focus follows it;
 //! - gone, with a focusable widget now at the focus path: that widget takes
-//!   focus and is sent `FocusGained`, and the keyboard layer is re-told (it
-//!   stays up for a text field and lowers for anything else);
+//!   focus and is sent `FocusGained`, and the keyboard layer is re-told (a
+//!   text field keeps the keyboard as it was, up or down, whatever pressed
+//!   last; anything else lowers it);
 //! - gone, with nothing focusable at the focus path (including a path that
 //!   indexes past the tree): focus clears, as a click on an unfocusable
 //!   widget clears it, and the keyboard lowers.
@@ -41,6 +42,7 @@ use super::tree_paths::{widget_at_path, widget_at_path_ref};
 use crate::event::Event;
 use crate::focus::FocusStamp;
 use crate::geometry::Point;
+use crate::widget::keyboard_scroll::FocusCause;
 use crate::widget::tree::dispatch_event;
 use crate::widget::{App, Widget};
 
@@ -65,12 +67,12 @@ impl App {
                 dispatch_event(&mut self.root, &old, &Event::FocusLost, Point::ORIGIN);
             }
         }
-        self.enter_focus(new_path);
+        self.enter_focus(new_path, FocusCause::Moved);
     }
 
     /// Store `new_path` as focus, stamp and tell the widget there, and tell
-    /// the keyboard layer which widget (if any) now has focus.
-    fn enter_focus(&mut self, new_path: Option<Vec<usize>>) {
+    /// the keyboard layer which widget (if any) now has focus and why.
+    fn enter_focus(&mut self, new_path: Option<Vec<usize>>, cause: FocusCause) {
         self.store_focus(new_path.clone());
         self.focus_stamp = None;
         if let Some(new) = new_path.as_deref() {
@@ -87,6 +89,7 @@ impl App {
             new_path.as_deref(),
             self.viewport_size.width,
             self.root.as_mut(),
+            cause,
         );
     }
 
@@ -148,7 +151,7 @@ impl App {
         }
         let focusable =
             widget_at_path_ref(self.root.as_ref(), &path).is_some_and(|w| w.is_focusable());
-        self.enter_focus(focusable.then_some(path.clone()));
+        self.enter_focus(focusable.then_some(path.clone()), FocusCause::Replaced);
         // A dictation goes on into the same field rebuilt, once it has been
         // told it has focus; for any other widget (or none) it ends, its
         // words kept from the newcomer.

@@ -1,6 +1,6 @@
 [package]
 name = "agg-gui-node-editor"
-version = "0.0.8"
+version = "0.0.9"
 edition = "2021"
 # agg-rust (a path dependency) requires 1.88; wgpu 29 needs 1.87 and arboard 3.6 needs 1.71.
 rust-version = "1.88"
@@ -28,7 +28,7 @@ reflect = ["agg-gui/reflect"]
 [dependencies]
 # Default features off so they stay the consumer's choice (see `reflect`
 # above); the node editor needs none of agg-gui's optional features.
-agg-gui = { path = "../agg-gui", version = "0.6.0", default-features = false }
+agg-gui = { path = "../agg-gui", version = "0.7.0", default-features = false }
 web-time = "1"
 
 # No unsafe code in this crate: the compiler refuses it. The workspace's

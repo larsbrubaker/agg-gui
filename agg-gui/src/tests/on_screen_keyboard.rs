@@ -27,6 +27,10 @@ fn fresh_state() {
     // `set_input_profile`. Pin to 1.0 anyway so tests don't depend on
     // whatever an earlier test happened to set.
     crate::ux_scale::set_ux_scale(1.0);
+    // A phone user: the latest press was a finger's, so a field focused by
+    // Tab or by request raises the keyboard (it rises for a finger, not a
+    // mouse: `tests/on_screen_keyboard_mouse_focus.rs`).
+    crate::touch_emulation::long_press::set_last_press_was_touch_for_testing(true);
 }
 
 /// Historically did "set mobile profile + pin ux_scale". Now that
@@ -221,11 +225,10 @@ fn dismiss_clears_text_field_focus_and_drops_lift() {
     let mut app = App::new(Box::new(field));
     app.layout(Size::new(400.0, 800.0));
 
-    // Click anywhere inside the field — small `y` (Y-down screen
+    // Tap anywhere inside the field — small `y` (Y-down screen
     // pixels) maps to the top of the viewport in Y-up, well above the
     // keyboard panel which sits at the bottom.
-    app.on_mouse_down(50.0, 50.0, MouseButton::Left, Modifiers::default());
-    app.on_mouse_up(50.0, 50.0, MouseButton::Left, Modifiers::default());
+    super::touch_pan_fixtures::tap_screen(&mut app, 50.0, 50.0);
     assert!(app.has_focus(), "TextField should be focused after tap");
     // The keyboard's slide tween hasn't ticked yet, so `is_visible()`
     // (value-threshold) reports false here — but `text_input_focused`

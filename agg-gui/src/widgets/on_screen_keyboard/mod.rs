@@ -123,7 +123,19 @@
 //!   which the App runs at the same moments and answers.
 //! - Show / hide is driven by the focused widget — when the App's focus
 //!   changes to a widget whose [`Widget::accepts_text_input`] returns
-//!   `true`, the keyboard slides up. Losing focus slides it down.
+//!   `true` and the latest press was a finger's or a pen's
+//!   ([`crate::touch_emulation::last_press_raises_on_screen_keyboard`]),
+//!   the keyboard slides up (any press, with [`set_rises_for_mouse`] on). A finger's press is a tap on the field, or a tap that led
+//!   to the focus (a tapped button opening a dialog that focuses its
+//!   field). A field the mouse focuses gets no keyboard, and a mouse click
+//!   that moves focus to another field puts a raised keyboard away: a
+//!   mouse user types on a physical keyboard, even where the page
+//!   reported a phone (device emulation, a coarse-pointer report). A tap
+//!   on the field that already has focus, or on an open menu's search
+//!   field, raises a keyboard that is down,
+//!   and a field the app rebuilds in place keeps the keyboard as it was.
+//!   Losing focus slides it down. A press on the keyboard itself leaves the
+//!   latest press as it was, so its keys never decide whether it stays.
 //! - The chrome style follows [`crate::input_profile::current_input_profile`]
 //!   so an iPad and a Pixel see different keyboards from the same Rust
 //!   binary.
@@ -227,7 +239,9 @@ pub enum KeyboardInputMode {
 /// ```ignore
 /// let profile = input_profile_from_hint(&user_agent, pointer_coarse);
 /// set_input_profile(profile);
-/// set_enabled(profile.is_mobile_touch());
+/// // On for a phone or tablet, and for a touchscreen desktop, where it
+/// // rises only after a finger's or pen's press.
+/// set_enabled(on_screen_keyboard_wanted(profile, max_touch_points));
 /// ```
 pub fn set_enabled(on: bool) {
     with_state_mut(|s| s.enabled = on);
@@ -238,11 +252,51 @@ pub fn is_enabled() -> bool {
     with_state_ref(|s| s.enabled)
 }
 
+/// Raise the keyboard for a focused text field whatever pressed last, a
+/// mouse included, instead of only after a finger's or a pen's press. For a
+/// test bench driven with a mouse (the demo's Mobile Keyboard page); an app
+/// leaves it off, so a mouse user, who types on a physical keyboard, never
+/// gets the panel over the app. Off by default.
+pub fn set_rises_for_mouse(on: bool) {
+    with_state_mut(|s| s.rises_for_mouse = on);
+}
+
+/// Whether [`set_rises_for_mouse`] is on.
+pub fn rises_for_mouse() -> bool {
+    with_state_ref(|s| s.rises_for_mouse)
+}
+
+/// Note that a press landed on the active modal layer's text entry (an
+/// open menu's search field); the menu's row routing calls it. `App` reads
+/// it back after dispatching the press ([`take_modal_text_entry_press`]):
+/// a finger's or pen's tap there raises a keyboard that is down, as a tap
+/// on a focused field does.
+pub(crate) fn note_modal_text_entry_press() {
+    MODAL_ENTRY_PRESSED.with(|c| c.set(true));
+}
+
+/// Read and clear [`note_modal_text_entry_press`].
+pub(crate) fn take_modal_text_entry_press() -> bool {
+    MODAL_ENTRY_PRESSED.with(|c| c.replace(false))
+}
+
+thread_local! {
+    static MODAL_ENTRY_PRESSED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
 /// Whether the keyboard is currently visible (visible-fraction > 0 in the
 /// slide animation). The host shell uses this to (a) skip the native
 /// keyboard hack, and (b) potentially reserve safe-area space.
 pub fn is_visible() -> bool {
     with_state_ref(|s| s.visible_fraction() > 0.001)
+}
+
+/// Whether the keyboard is up or sliding up (enabled, with its slide headed
+/// open), from the frame it was raised on, before the slide has moved. The
+/// focused field is lifted clear of it only then: a field the mouse focused
+/// has no keyboard under it.
+pub(crate) fn is_raised() -> bool {
+    with_state_ref(|s| s.enabled && s.slide.target() > 0.5)
 }
 
 /// Top edge of the keyboard panel in viewport coordinates (Y-up). When

@@ -17,7 +17,10 @@
 //!     a thin ring filling around the finger ([`paint_ring`]);
 //!   - whether the latest press came from a finger
 //!     ([`last_press_was_touch`]), so a menu opened by it gets
-//!     finger-sized rows and a menu the mouse opens does not;
+//!     finger-sized rows and a menu the mouse opens does not, or from a pen
+//!     ([`last_press_was_pen`]); a text field either focuses raises the
+//!     on-screen keyboard where a mouse click does not
+//!     ([`last_press_raises_on_screen_keyboard`]);
 //!   - listeners told when a long press fires ([`on_long_press`]), which is
 //!     where a shell plays a haptic tick;
 //!   - the claim a widget makes on the finger while it handles the right
@@ -72,6 +75,8 @@ thread_local! {
     static RING_DRAWN: Cell<bool> = const { Cell::new(true) };
     static EMULATING: Cell<bool> = const { Cell::new(false) };
     static LAST_PRESS_FROM_TOUCH: Cell<bool> = const { Cell::new(false) };
+    static PEN_PRESSING: Cell<bool> = const { Cell::new(false) };
+    static LAST_PRESS_FROM_PEN: Cell<bool> = const { Cell::new(false) };
     static LISTENERS: RefCell<Listeners> = RefCell::new(Vec::new());
     static DRAG_CLAIMED: Cell<bool> = const { Cell::new(false) };
 }
@@ -124,8 +129,10 @@ pub fn long_press_ring_drawn() -> bool {
 /// Whether the most recent mouse press was made by a finger: a tap, a
 /// touch drag's press or a long press's right click. A popup menu opened
 /// from that press lays itself out for fingers (taller rows,
-/// [`crate::widgets::menu::geometry::popup_touch_sized`]). A real mouse
-/// press clears it.
+/// [`crate::widgets::menu::geometry::popup_touch_sized`]), and a text
+/// field focused after it raises the on-screen keyboard
+/// ([`last_press_raises_on_screen_keyboard`]). A real mouse press clears it; a press the
+/// on-screen keyboard takes (a tap or click on a key) leaves it as it was.
 pub fn last_press_was_touch() -> bool {
     LAST_PRESS_FROM_TOUCH.with(|c| c.get())
 }
@@ -140,10 +147,42 @@ pub(crate) fn while_emulating<R>(f: impl FnOnce() -> R) -> R {
 }
 
 /// Record where the press now being dispatched came from (`App` calls this
-/// for every press).
+/// for every press the widget tree gets).
 pub(crate) fn note_press() {
     let from_touch = EMULATING.with(|c| c.get());
     LAST_PRESS_FROM_TOUCH.with(|c| c.set(from_touch));
+    let from_pen = PEN_PRESSING.with(|c| c.get());
+    LAST_PRESS_FROM_PEN.with(|c| c.set(from_pen));
+}
+
+/// Whether the most recent press was a stylus's: a pen on the screen, which
+/// a shell delivers as a mouse press (`ForwarderEvent::PenDown`). It isn't a
+/// finger for gestures (a pen drag selects text, as a mouse drag does), but
+/// it is a hand on the screen with no keyboard under it, so a text field it
+/// focuses raises the on-screen keyboard
+/// ([`last_press_raises_on_screen_keyboard`]).
+pub fn last_press_was_pen() -> bool {
+    LAST_PRESS_FROM_PEN.with(|c| c.get())
+}
+
+/// Run `f` (a press's dispatch) with the press marked as a stylus's
+/// ([`last_press_was_pen`]); the shell input forwarder delivers
+/// `ForwarderEvent::PenDown` inside it.
+pub(crate) fn while_pen_pressing<R>(f: impl FnOnce() -> R) -> R {
+    let previous = PEN_PRESSING.with(|c| c.replace(true));
+    let result = f();
+    PEN_PRESSING.with(|c| c.set(previous));
+    result
+}
+
+/// Whether a text field focused now raises the on-screen keyboard: the most
+/// recent press was a finger's or a pen's, or the app asked for the keyboard
+/// whatever pressed (`on_screen_keyboard::set_rises_for_mouse`, a test bench
+/// driven with a mouse). A mouse user types on a physical keyboard.
+pub fn last_press_raises_on_screen_keyboard() -> bool {
+    last_press_was_touch()
+        || last_press_was_pen()
+        || crate::widgets::on_screen_keyboard::rises_for_mouse()
 }
 
 /// Mark the latest press as a finger's or not, as `App` does for each press
@@ -151,6 +190,7 @@ pub(crate) fn note_press() {
 #[cfg(test)]
 pub(crate) fn set_last_press_was_touch_for_testing(from_touch: bool) {
     LAST_PRESS_FROM_TOUCH.with(|c| c.set(from_touch));
+    LAST_PRESS_FROM_PEN.with(|c| c.set(false));
 }
 
 /// Call `listener` each time a long press fires, with the touch-down point

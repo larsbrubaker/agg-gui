@@ -42,6 +42,9 @@ impl Fixture {
         keyboard_scroll::reset_lift_for_test();
         on_screen_keyboard::set_enabled(true);
         on_screen_keyboard::set_resizes_layout(resizes);
+        // A phone user: the latest press was a finger's, so a field
+        // focused by request raises the keyboard.
+        crate::touch_emulation::long_press::set_last_press_was_touch_for_testing(true);
         Self { _lock: lock }
     }
 }

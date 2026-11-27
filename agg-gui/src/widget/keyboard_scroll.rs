@@ -187,9 +187,25 @@ pub(crate) fn paint_lifted_tree(
     }
 }
 
+/// Why focus arrived at a widget, for whether the on-screen keyboard rises
+/// ([`notify_focus_change`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum FocusCause {
+    /// Focus moved: a press, a key (Tab), a focus request, or a tap on the
+    /// field already focused. The keyboard rises for a text field when the
+    /// latest press was a finger's.
+    Moved,
+    /// The app rebuilt the focused widget in place and the new one took
+    /// over (`app/focus_change.rs`). A text field keeps the keyboard as it
+    /// was.
+    Replaced,
+}
+
 /// Combined "focus changed" hook called from `App`'s focus changes (`app/focus_change.rs`).
 /// Pushes the newly-focused widget's text-input affordance into the
-/// on-screen keyboard (so it slides up / down) and immediately runs
+/// on-screen keyboard (so it slides up / down; up only when the latest
+/// press was a finger's, [`crate::touch_emulation::last_press_was_touch`])
+/// and immediately runs
 /// the auto-scroll so the field clears the keyboard panel.  Doing
 /// both in one place keeps `app.rs` tiny — the dependency chain
 /// (read affordance / set keyboard / lift scroll) is the same every
@@ -198,6 +214,7 @@ pub(crate) fn notify_focus_change(
     new_path: Option<&[usize]>,
     viewport_width: f64,
     root: &mut dyn Widget,
+    cause: FocusCause,
 ) {
     use crate::widgets::on_screen_keyboard::{
         set_text_input_focused_with_hints, KeyboardInputMode, TextInputHints,
@@ -224,16 +241,28 @@ pub(crate) fn notify_focus_change(
         },
         None => none,
     };
-    set_text_input_focused_with_hints(accepts, existing_text.as_deref(), mode, hints);
+    // The keyboard rises only for a finger: a field focused by a mouse
+    // click (or with no press at all) is typed on with a physical keyboard,
+    // so the panel would only cover the app. A focus that follows a tap (a
+    // tapped button opening a dialog that focuses its field) still raises
+    // it, as the latest press was the finger's. A field rebuilt in place
+    // keeps the keyboard as it was: the user moved nothing.
+    let raise = accepts
+        && match cause {
+            FocusCause::Moved => crate::touch_emulation::last_press_raises_on_screen_keyboard(),
+            FocusCause::Replaced => crate::widgets::on_screen_keyboard::is_raised(),
+        };
+    set_text_input_focused_with_hints(raise, existing_text.as_deref(), mode, hints);
     if super::keyboard_resize::active() {
         // The next layout, in the keyboard's new room, places the field.
         super::keyboard_resize::note_focus_change();
-    } else if accepts {
+    } else if raise {
         ensure_focused_visible_above_keyboard(new_path, viewport_width, root);
     } else {
-        // Focus left a text-input widget — slide the global lift back
-        // to zero so the tree settles into its natural layout as the
-        // keyboard slides down.
+        // Focus left a text-input widget, or a mouse moved it to one
+        // (no keyboard rises) — slide the global lift back to zero so the
+        // tree settles into its natural layout as the keyboard slides
+        // down.
         request_lift(0.0);
     }
 }
@@ -245,9 +274,11 @@ pub(crate) fn notify_focus_change(
 /// bounds there), so the lift computed at that instant can be wildly
 /// wrong — and nothing else would ever correct it. Doing it after
 /// every layout self-heals within a frame and tracks the field if the
-/// layout moves it. Gated on the enabled flag, not `is_visible()` —
+/// layout moves it. Gated on the keyboard being raised, not
+/// `is_visible()` —
 /// the slide fraction is still zero on the very frame the stale lift
-/// needs correcting.
+/// needs correcting. With the keyboard enabled but not raised (a field
+/// the mouse focused) the lift settles back to none.
 ///
 /// Only runs when the focused widget actually ACCEPTS TEXT INPUT —
 /// the same gate [`notify_focus_change`] applies. Without it, any
@@ -266,6 +297,12 @@ pub(crate) fn relift_after_layout(
         return;
     }
     if !crate::widgets::on_screen_keyboard::is_enabled() {
+        return;
+    }
+    if !crate::widgets::on_screen_keyboard::is_raised() {
+        // No keyboard under the field (the mouse focused it, or it was put
+        // away): any lift left over settles back to none.
+        request_lift(0.0);
         return;
     }
     let Some(path) = focus else {
@@ -599,6 +636,12 @@ mod tests {
             lift_target_for_test, relift_after_layout, reset_lift_for_test,
         };
         crate::widgets::on_screen_keyboard::set_enabled(true);
+        // The keyboard is up, so only the focused widget's kind decides.
+        crate::widgets::on_screen_keyboard::set_text_input_focused(
+            true,
+            None,
+            crate::widgets::on_screen_keyboard::KeyboardInputMode::Text,
+        );
         reset_lift_for_test();
 
         // A viewport-filling, bottom-touching focusable leaf.

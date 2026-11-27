@@ -98,6 +98,9 @@ impl Fixture {
         // Virtual clock BEFORE focus so the lift tween's start time is virtual.
         let clock = crate::clock::scoped_virtual(None);
         on_screen_keyboard::set_enabled(true);
+        // A phone user: the latest press was a finger's, so the field
+        // focused by request raises the keyboard.
+        crate::touch_emulation::long_press::set_last_press_was_touch_for_testing(true);
         Self {
             snap_was_enabled,
             _clock: clock,

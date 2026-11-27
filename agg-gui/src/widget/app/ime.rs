@@ -82,25 +82,34 @@ impl App {
     /// Raises the on-screen keyboard while the active modal layer's text
     /// entry has the menu's focus, and lowers it when that ends, as a focus
     /// change into or out of a text field does
-    /// (`keyboard_scroll::notify_focus_change`). A focused text field
-    /// already holds the keyboard up, so then this leaves it alone. Runs at
-    /// the end of each layout: a menu's focus moves inside the menu, not
-    /// through the App's focus.
+    /// (`keyboard_scroll::notify_focus_change`), when the latest press was a
+    /// finger's or a pen's. A focused text field already holds the keyboard
+    /// up, so then this leaves it alone. Runs at the end of each layout: a
+    /// menu's focus moves inside the menu, not through the App's focus.
     pub(super) fn sync_modal_text_entry(&mut self) {
         let active = self.modal_text_entry_active();
         if MODAL_TEXT_ENTRY.with(|c| c.replace(active)) == active || self.focused_is_text_input() {
             return;
         }
-        use crate::widgets::on_screen_keyboard::{
-            set_text_input_focused_with_hints, EnterAction, KeyboardInputMode, TextInputHints,
-        };
-        // A menu's text entry is a search: lower case, Enter picks a result.
-        let hints = TextInputHints {
-            enter_action: EnterAction::Search,
-            auto_capitalize: false,
-            ..TextInputHints::default()
-        };
-        set_text_input_focused_with_hints(active, None, KeyboardInputMode::Text, hints);
+        // Up only for a finger or a pen, as for a focused field
+        // (`keyboard_scroll::notify_focus_change`).
+        let raise = active && crate::touch_emulation::last_press_raises_on_screen_keyboard();
+        tell_keyboard_about_modal_entry(raise);
+    }
+
+    /// A press landed on the active modal layer's text entry (an open
+    /// menu's search field): a finger's or pen's raises the keyboard when it
+    /// is down (the mouse opened the menu), as a tap on a focused field does.
+    pub(super) fn raise_keyboard_for_modal_entry_tap(&mut self) {
+        use crate::widgets::on_screen_keyboard as osk;
+        if osk::is_enabled()
+            && !osk::is_raised()
+            && !self.focused_is_text_input()
+            && self.modal_text_entry_active()
+            && crate::touch_emulation::last_press_raises_on_screen_keyboard()
+        {
+            tell_keyboard_about_modal_entry(true);
+        }
     }
 
     /// Where the OS candidate window belongs: the caret rectangle of the
@@ -150,4 +159,19 @@ impl App {
         let result = dispatch_event(&mut self.root, &target, &event, Point::ORIGIN);
         matches!(result, EventResult::Consumed | EventResult::ConsumedQuiet)
     }
+}
+
+/// Raise (or lower) the on-screen keyboard for the active modal layer's
+/// text entry. A menu's text entry is a search: lower case, Enter picks a
+/// result.
+fn tell_keyboard_about_modal_entry(raise: bool) {
+    use crate::widgets::on_screen_keyboard::{
+        set_text_input_focused_with_hints, EnterAction, KeyboardInputMode, TextInputHints,
+    };
+    let hints = TextInputHints {
+        enter_action: EnterAction::Search,
+        auto_capitalize: false,
+        ..TextInputHints::default()
+    };
+    set_text_input_focused_with_hints(raise, None, KeyboardInputMode::Text, hints);
 }

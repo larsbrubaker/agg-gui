@@ -92,6 +92,17 @@ pub enum ForwarderEvent {
         modifiers: Option<Modifiers>,
         clicks: ClickCount,
     },
+    /// A stylus's press on the screen (a DOM `pointerType` of `"pen"`):
+    /// delivered as [`ForwarderEvent::MouseDown`], so a pen drag selects and
+    /// moves as a mouse's does, with the press marked as a pen's
+    /// ([`crate::touch_emulation::last_press_was_pen`]) so a text field it
+    /// focuses raises the on-screen keyboard. Its release is a `MouseUp`.
+    PenDown {
+        at: Option<(f64, f64)>,
+        button: MouseButton,
+        modifiers: Option<Modifiers>,
+        clicks: ClickCount,
+    },
     MouseUp {
         at: Option<(f64, f64)>,
         button: MouseButton,
@@ -295,6 +306,26 @@ impl InputForwarder {
         self.forward_at(app, source, event, None)
     }
 
+    /// A press of `button` (a mouse's or a pen's), with its click count.
+    fn press(
+        &mut self,
+        app: &mut App,
+        at: Option<(f64, f64)>,
+        button: MouseButton,
+        modifiers: Option<Modifiers>,
+        clicks: ClickCount,
+    ) {
+        let (x, y) = self.place(at);
+        let mods = self.resolve(modifiers);
+        self.buttons_down = self.buttons_down.saturating_add(1);
+        if !self.held.contains(&button) {
+            self.held.push(button);
+        }
+        let count = self.register_press(button, (x, y), clicks);
+        let stated = matches!(clicks, ClickCount::Explicit(_));
+        app.on_mouse_down_counted(x, y, button, mods, count, stated);
+    }
+
     /// [`Self::forward`] for an event that happened at `event_time` on the UI
     /// clock (`None`: when it is handled); see [`Self::platform_at`].
     pub fn forward_at(
@@ -323,17 +354,15 @@ impl InputForwarder {
                 button,
                 modifiers,
                 clicks,
-            } => {
-                let (x, y) = self.place(at);
-                let mods = self.resolve(modifiers);
-                self.buttons_down = self.buttons_down.saturating_add(1);
-                if !self.held.contains(&button) {
-                    self.held.push(button);
-                }
-                let count = self.register_press(button, (x, y), clicks);
-                let stated = matches!(clicks, ClickCount::Explicit(_));
-                app.on_mouse_down_counted(x, y, button, mods, count, stated);
-            }
+            } => self.press(app, at, button, modifiers, clicks),
+            ForwarderEvent::PenDown {
+                at,
+                button,
+                modifiers,
+                clicks,
+            } => crate::touch_emulation::long_press::while_pen_pressing(|| {
+                self.press(app, at, button, modifiers, clicks)
+            }),
             ForwarderEvent::MouseUp {
                 at,
                 button,

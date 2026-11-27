@@ -65,6 +65,9 @@ impl Phone {
         osk::set_enabled(true);
         let mut app = App::new(root);
         app.layout(size);
+        // A phone user: the latest press was a finger's, so the field
+        // Tab focuses (and any later one) raises the keyboard.
+        crate::touch_emulation::long_press::set_last_press_was_touch_for_testing(true);
         app.on_key_down(Key::Tab, Modifiers::default());
         assert!(app.has_focus(), "the field takes focus");
         test_hook::force_visible();

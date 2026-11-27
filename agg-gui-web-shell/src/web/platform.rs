@@ -22,34 +22,45 @@ pub(super) fn find_canvas(id: &str) -> Result<web_sys::HtmlCanvasElement, WebShe
         .ok_or_else(|| WebShellError::CanvasNotFound(id.to_string()))
 }
 
-/// Detect the client platform once at boot: OS name for shortcut labels,
-/// `(pointer: coarse)` for the touch input profile / on-screen keyboard /
-/// UX scale.
+/// Detect the client platform once at boot: the OS name for shortcut
+/// labels, and the input profile (UX scale, phone layouts) from the user
+/// agent, with `(pointer: coarse)` telling iPad-mode Safari from a Mac
+/// (`input_profile_from_hint`: a touchscreen Windows, Linux or ChromeOS
+/// desktop stays a desktop). agg-gui's on-screen keyboard is on for a phone
+/// or tablet and for any screen that takes touch (`navigator.maxTouchPoints`
+/// above 0, `on_screen_keyboard_wanted`); it rises only after a finger's or
+/// pen's press, so a mouse user on a touchscreen never sees it.
 ///
 /// Debug override: `?agg_input=mobile` (or `=desktop`) in the page URL forces
-/// the result, so a desktop browser can exercise the mobile layout.
+/// the profile (`forced_mobile_profile`), so a desktop browser can exercise
+/// the mobile layout.
 pub(super) fn apply_client_platform() {
     let Some(window) = web_sys::window() else {
         return;
     };
-    let name = window.navigator().user_agent().unwrap_or_default();
-    let mut pointer_coarse = window
+    let navigator = window.navigator();
+    let name = navigator.user_agent().unwrap_or_default();
+    let pointer_coarse = window
         .match_media("(pointer: coarse)")
         .ok()
         .flatten()
         .map(|m| m.matches())
         .unwrap_or(false);
+    let mut profile = agg_gui::input_profile::input_profile_from_hint(&name, pointer_coarse);
     if let Ok(search) = window.location().search() {
         if search.contains("agg_input=mobile") {
-            pointer_coarse = true;
+            profile = agg_gui::input_profile::forced_mobile_profile(&name);
         } else if search.contains("agg_input=desktop") {
-            pointer_coarse = false;
+            profile = agg_gui::input_profile::InputProfile::Desktop;
         }
     }
+    // A negative count from a broken browser is no touch.
+    let touch_points = u32::try_from(navigator.max_touch_points()).unwrap_or(0);
     agg_gui::set_platform(agg_gui::platform_from_name(&name));
-    let profile = agg_gui::input_profile::input_profile_from_hint(&name, pointer_coarse);
     agg_gui::input_profile::set_input_profile(profile);
-    agg_gui::widgets::on_screen_keyboard::set_enabled(profile.is_mobile_touch());
+    agg_gui::widgets::on_screen_keyboard::set_enabled(
+        agg_gui::input_profile::on_screen_keyboard_wanted(profile, touch_points),
+    );
     // UX zoom only at the platform-shell boundary, where the device class is
     // genuinely known — programmatic profile flips never resize the UI.
     agg_gui::ux_scale::set_ux_scale(profile.recommended_ux_scale());

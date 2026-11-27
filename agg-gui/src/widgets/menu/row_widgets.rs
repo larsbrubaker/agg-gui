@@ -316,6 +316,11 @@ impl RowWidgets {
         match event {
             Event::MouseMove { .. } => None,
             Event::MouseDown { .. } => {
+                if text_row(items).is_some_and(|(_, text_id)| text_id == id) {
+                    // A tap on the search field raises a keyboard that is
+                    // down (`App` decides, knowing what pressed).
+                    crate::widgets::on_screen_keyboard::note_modal_text_entry_press();
+                }
                 *self.captured.borrow_mut() = Some((id, path));
                 Some(result.max_consumed())
             }

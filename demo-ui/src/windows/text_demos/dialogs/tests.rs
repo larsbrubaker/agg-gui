@@ -408,6 +408,12 @@ impl LiftedApp {
             _clock: clock,
         };
         lifted.app.layout(viewport);
+        // A phone user's finger taps the spacer first: the on-screen keyboard
+        // rises for a field focused after a finger's press, not a mouse's.
+        let (screen, finger) = (agg_gui::TouchDeviceId(0), agg_gui::TouchId(1));
+        let (x, y) = (viewport.width / 2.0, viewport.height / 2.0);
+        lifted.app.on_touch_start(screen, finger, x, y, None);
+        lifted.app.on_touch_end(screen, finger);
         agg_gui::focus::request_focus(FIELD);
         lifted.app.layout(viewport);
         assert_eq!(

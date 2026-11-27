@@ -79,6 +79,9 @@ pub struct KeyboardState {
     /// Host opted in via [`super::set_resizes_layout`]: while the keyboard
     /// is up the App lays the tree out in the room above it.
     pub resizes_layout: bool,
+    /// Set by [`super::set_rises_for_mouse`]: a focus raises the keyboard
+    /// whatever pressed last, not only a finger or a pen.
+    pub rises_for_mouse: bool,
     /// The focused field's hints (its Enter action and whether it starts
     /// sentences with a capital), set on focus.
     pub hints: TextInputHints,
@@ -144,6 +147,7 @@ impl Default for KeyboardState {
             last_painted_keys: Vec::new(),
             last_panel_height: None,
             resizes_layout: false,
+            rises_for_mouse: false,
             pressed_key_index: None,
             captured_pointer: false,
             caps_lock: false,

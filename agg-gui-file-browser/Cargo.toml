@@ -11,7 +11,7 @@
 # author), published here under agg-gui's MIT licence.
 [package]
 name = "agg-gui-file-browser"
-version = "0.0.16"
+version = "0.0.17"
 edition = "2021"
 # Matches the rest of the agg-gui workspace.
 rust-version = "1.88"
@@ -41,7 +41,7 @@ disk = ["agg-gui-files/disk"]
 
 [dependencies]
 # Default features off so they stay the consumer's choice (see `reflect`).
-agg-gui = { path = "../agg-gui", version = "0.6.0", default-features = false }
+agg-gui = { path = "../agg-gui", version = "0.7.0", default-features = false }
 # A 0.0.x requirement is written as a range: plain "0.0.2" would pin that one version.
 agg-gui-files = { path = "../agg-gui-files", version = ">=0.0.8, <0.1.0" }
 # The UI clock's instants (std's own Instant natively; the browser's clock on wasm32), as agg-gui

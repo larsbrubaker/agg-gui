@@ -139,6 +139,7 @@ mod on_screen_keyboard_cursor_edges;
 mod on_screen_keyboard_cursor_editors;
 mod on_screen_keyboard_cursor_snapshot;
 mod on_screen_keyboard_longpress;
+mod on_screen_keyboard_mouse_focus;
 mod on_screen_keyboard_preview;
 mod on_screen_keyboard_touch;
 mod on_screen_keyboard_voice;

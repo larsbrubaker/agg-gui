@@ -175,6 +175,14 @@ pub fn scroll_at<'a>(app: &'a mut App, path: &[usize]) -> &'a mut ScrollView {
         .expect("a ScrollView at the path")
 }
 
+/// A finger's tap at `(x, y)` in the Y-down screen space of
+/// `App::on_touch_*`: how the keyboard tests focus a field the way a phone
+/// user does (the on-screen keyboard rises for a finger, not a mouse).
+pub fn tap_screen(app: &mut App, x: f64, y: f64) {
+    app.on_touch_start(DEV, FINGER, x, y, None);
+    app.on_touch_end(DEV, FINGER);
+}
+
 /// A Y-up window position `(x, y)` as Y-down screen space.
 pub fn screen(window_height: f64, x: f64, y: f64) -> (f64, f64) {
     (x, window_height - y)

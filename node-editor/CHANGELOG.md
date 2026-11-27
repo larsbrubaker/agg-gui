@@ -8,6 +8,13 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ## [Unreleased]
 
+## [0.0.9]
+
+### Changed
+
+- **Breaking:** agg-gui-node-editor requires agg-gui 0.7.0 (it required 0.6.0). An app moves to
+  agg-gui 0.7.0 with it.
+
 ## [0.0.8] - 2026-11-27
 
 ### Fixed

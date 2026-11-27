@@ -14,9 +14,14 @@
 //! - Long-press gesture timing (future)
 //!
 //! Native builds default to [`InputProfile::Desktop`]. WASM hosts call
-//! [`set_input_profile`] after sniffing `navigator.userAgent` +
-//! `matchMedia("(pointer: coarse)")` so the agg-gui-side mobile features
-//! activate. The host can also call [`platform_from_name`] /
+//! [`set_input_profile`] with [`input_profile_from_hint`] of
+//! `navigator.userAgent` and `matchMedia("(pointer: coarse)")`, so the
+//! agg-gui-side mobile features activate on phones and tablets. The
+//! operating system decides: a touchscreen Windows, Linux or ChromeOS
+//! desktop reports a coarse pointer and stays [`InputProfile::Desktop`].
+//! Its screen still takes touch, so the shell turns the on-screen keyboard
+//! on there too ([`on_screen_keyboard_wanted`]); the keyboard rises only
+//! after a finger's or pen's press. The host can also call [`platform_from_name`] /
 //! [`set_platform`](crate::platform::set_platform) so shortcut labels match
 //! the user's keyboard while the on-screen keyboard mimics their phone OS.
 
@@ -155,13 +160,25 @@ pub fn touch_ui_active() -> bool {
     is_mobile_touch() || crate::touch_state::touch_seen_this_session()
 }
 
-/// Parse a coarse browser identifier ("iPhone", "iPad", "Android", …)
-/// into an [`InputProfile`]. Defaults to [`InputProfile::Desktop`] so a
-/// non-matching string (any desktop UA) keeps mobile features disabled.
+/// Parse a browser identifier (the user agent, or
+/// `navigator.userAgentData.platform`) into an [`InputProfile`].
 ///
-/// `pointer_coarse` should reflect `window.matchMedia('(pointer: coarse)')`
-/// — true on iPad-mode Safari that hides "iPad" from the UA, false on a
-/// MacBook trackpad. Set it to `false` if you don't have a reliable read.
+/// The operating system decides, not the pointer: an iPhone, iPad, iPod or
+/// an `iOS` / `iPadOS` platform is [`InputProfile::MobileIOS`], Android is
+/// [`InputProfile::MobileAndroid`], and Windows, Linux and ChromeOS are
+/// [`InputProfile::Desktop`] whatever `pointer_coarse` says. A touchscreen
+/// desktop with a mouse reports `(pointer: coarse)` and no fine pointer
+/// (Chrome on Windows does), and running it as a phone gives a mouse user
+/// a zoomed UI, finger-sized menus and an on-screen keyboard; a finger
+/// still works the desktop UI, whose menus size themselves for the press
+/// that opened them (`widgets::menu::geometry::popup_touch_sized`).
+///
+/// `pointer_coarse` (`window.matchMedia('(pointer: coarse)')`) only tells
+/// the rest apart: a Mac user agent with a coarse pointer is iPad-mode
+/// Safari, which hides "iPad" from the UA ([`InputProfile::MobileIOS`]),
+/// and a device naming no system this knows, with a coarse pointer, is a
+/// touch device ([`InputProfile::MobileOther`]). Pass `false` without a
+/// reliable read.
 pub fn input_profile_from_hint(user_agent_or_platform: &str, pointer_coarse: bool) -> InputProfile {
     let ua = user_agent_or_platform.to_ascii_lowercase();
     if ua.contains("iphone") || ua.contains("ipad") || ua.contains("ipod") || names_ios(&ua) {
@@ -169,6 +186,9 @@ pub fn input_profile_from_hint(user_agent_or_platform: &str, pointer_coarse: boo
     }
     if ua.contains("android") {
         return InputProfile::MobileAndroid;
+    }
+    if names_desktop_os(&ua) {
+        return InputProfile::Desktop;
     }
     // iPad-mode Safari masquerades as macOS in the UA. Coarse-pointer +
     // mac signals an iPad-class device in practice.
@@ -179,6 +199,45 @@ pub fn input_profile_from_hint(user_agent_or_platform: &str, pointer_coarse: boo
         return InputProfile::MobileOther;
     }
     InputProfile::Desktop
+}
+
+/// The mobile profile the device `user_agent_or_platform` names would get,
+/// for a page that forces the mobile layout (a debug switch): its own
+/// ([`input_profile_from_hint`] with a coarse pointer), or
+/// [`InputProfile::MobileOther`] for a desktop system.
+pub fn forced_mobile_profile(user_agent_or_platform: &str) -> InputProfile {
+    match input_profile_from_hint(user_agent_or_platform, true) {
+        InputProfile::Desktop => InputProfile::MobileOther,
+        mobile => mobile,
+    }
+}
+
+/// Whether a shell turns agg-gui's on-screen keyboard on: on a phone or
+/// tablet (`profile`), and on any screen that takes touch
+/// (`max_touch_points > 0`, `navigator.maxTouchPoints`: a touchscreen
+/// laptop or desktop). It rises only after a finger's or a pen's press
+/// ([`crate::touch_emulation::last_press_raises_on_screen_keyboard`]), so a
+/// touchscreen user with no physical keyboard can type and a mouse user
+/// never sees it.
+pub fn on_screen_keyboard_wanted(profile: InputProfile, max_touch_points: u32) -> bool {
+    profile.is_mobile_touch() || max_touch_points > 0
+}
+
+/// Whether the (lower-case) hint names a desktop system: Windows, Linux
+/// (Android is matched before this) or ChromeOS.
+fn names_desktop_os(hint: &str) -> bool {
+    [
+        "windows",
+        "win32",
+        "win64",
+        "linux",
+        "x11",
+        "cros",
+        "chromeos",
+        "chrome os",
+    ]
+    .iter()
+    .any(|name| hint.contains(name))
 }
 
 /// Whether the (lower-case) hint names Apple's mobile OS as a word: the
@@ -259,10 +318,56 @@ mod tests {
             ),
             InputProfile::Desktop
         );
-        // Unknown touch device.
+        // A Chromebook is a desktop whatever its pointer.
         assert_eq!(
             input_profile_from_hint("CrOS x86_64", true),
+            InputProfile::Desktop
+        );
+        // A touch device naming no system this knows.
+        assert_eq!(
+            input_profile_from_hint("Mozilla/5.0 (Mobile; rv:48.0) Gecko/48.0", true),
             InputProfile::MobileOther
+        );
+    }
+
+    /// Lars's Windows desktop Chrome on a touchscreen with a mouse: it
+    /// reports `(pointer: coarse)`, `(any-pointer: fine)` false, `(hover:
+    /// hover)` false and `maxTouchPoints` 10, and is a desktop.
+    #[test]
+    fn a_touchscreen_windows_desktop_is_a_desktop_with_the_keyboard_on() {
+        let ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/158.0.0.0 Safari/537.36";
+        assert_eq!(input_profile_from_hint(ua, true), InputProfile::Desktop);
+        // Its `userAgentData.platform`.
+        assert_eq!(
+            input_profile_from_hint("Windows", true),
+            InputProfile::Desktop
+        );
+        assert_eq!(
+            input_profile_from_hint("Mozilla/5.0 (X11; Linux x86_64)", true),
+            InputProfile::Desktop
+        );
+        assert_eq!(
+            input_profile_from_hint("Chrome OS", true),
+            InputProfile::Desktop
+        );
+        // Its screen takes touch: the keyboard is on, rising for a finger.
+        assert!(on_screen_keyboard_wanted(InputProfile::Desktop, 10));
+        // A desktop without touch has none; a phone always has it.
+        assert!(!on_screen_keyboard_wanted(InputProfile::Desktop, 0));
+        assert!(on_screen_keyboard_wanted(InputProfile::MobileAndroid, 0));
+    }
+
+    #[test]
+    fn forcing_the_mobile_layout_keeps_a_phones_own_profile() {
+        let windows = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/158.0.0.0";
+        assert_eq!(forced_mobile_profile(windows), InputProfile::MobileOther);
+        assert_eq!(
+            forced_mobile_profile("Mozilla/5.0 (Linux; Android 14; Pixel 8)"),
+            InputProfile::MobileAndroid
+        );
+        assert_eq!(
+            forced_mobile_profile("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"),
+            InputProfile::MobileIOS
         );
     }
 
@@ -284,9 +389,14 @@ mod tests {
                 crate::platform::Platform::MacOS
             );
         }
-        // A word, not any "ios" inside one.
+        // A word, not any "ios" inside one: a Linux kiosk is a desktop, a
+        // kiosk naming no system a touch device.
         assert_eq!(
             input_profile_from_hint("Kiosk Linux", true),
+            InputProfile::Desktop
+        );
+        assert_eq!(
+            input_profile_from_hint("Kiosk", true),
             InputProfile::MobileOther
         );
         assert_eq!(
