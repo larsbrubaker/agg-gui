@@ -8,7 +8,7 @@
 //!
 //! # Snapshot model
 //!
-//! `nodes()` and `edges()` return owned `Vec`s every paint. That trades
+//! `nodes()` and `noodles()` return owned `Vec`s every paint. That trades
 //! a few allocations per frame for *zero* borrow-vs-mutate complexity in
 //! the widget. With typical graph sizes (low hundreds of nodes / edges)
 //! this is well under the 10 ms frame budget agg-gui targets — measured
@@ -518,7 +518,8 @@ pub trait NodeGraphModel {
         }
     }
 
-    /// Update a property value (only invoked for `Number` / `Bool`).
+    /// Update a property value: called with `Number`, `Bool`, `Color` and
+    /// `Text` values (an enum row writes its variant as `Text`), never `Other`.
     ///
     /// A numeric row's scrub calls this live, on every pointer move.
     /// Escape during the scrub cancels it with one more call carrying the

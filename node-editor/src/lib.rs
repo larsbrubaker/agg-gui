@@ -11,12 +11,12 @@
 //!
 //! ```ignore
 //! use std::sync::{Arc, Mutex};
-//! use agg_gui_node_editor::{NodeEditor, NodeGraphModel};
+//! use agg_gui_node_editor::{NodeEditor, NodeGraphModel, SharedModel};
 //!
 //! struct MyModel { /* ... */ }
 //! impl NodeGraphModel for MyModel { /* ... */ }
 //!
-//! let model: Arc<Mutex<dyn NodeGraphModel + Send>> =
+//! let model: SharedModel =
 //!     Arc::new(Mutex::new(MyModel { /* ... */ }));
 //! let editor = NodeEditor::new(model);
 //! ```
@@ -29,7 +29,8 @@
 //!   never holds a long-lived borrow into the host graph.
 //! - [`NodeEditor`] — the widget itself. Implements `agg_gui::Widget`.
 //! - [`arrange()`] — automatic layout of a graph into tidy columns;
-//!   [`NodeEditor::arrange_plan`] runs it on the live graph.
+//!   [`NodeEditor::arrange_plan`] plans it for the live graph and returns
+//!   the moves for the host to apply.
 //! - [`CanvasPalette`] — theme-driven colour bundle (auto-rebuilt
 //!   from `ctx.visuals()` per paint, or set manually with
 //!   [`NodeEditor::set_palette`]).
