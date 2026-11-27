@@ -124,6 +124,13 @@ jobs:
       - name: Clippy (agg-os, all features)
         run: cargo clippy -p agg-os --all-targets --all-features -- -D warnings
 
+      # agg-gui-node-editor's docs with warnings as errors: a broken or
+      # private intra-doc link fails here, not on its published pages.
+      - name: Docs (agg-gui-node-editor)
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc -p agg-gui-node-editor --no-deps
+
   test:
     runs-on: ubuntu-26.04
     defaults:

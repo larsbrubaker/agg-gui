@@ -214,7 +214,7 @@ and feature set using agg-gui's own widgets:
 | `demo-wgpu` | wgpu demo widgets on top of `agg-gui-wgpu` (its `native_shell` / `web_shell` are deprecated wrappers over `agg-gui-shell` / `agg-gui-web-shell`) |
 | `demo-native` | Desktop demo shim on `agg-gui-shell` |
 | `demo-wasm` | WASM cdylib deployed to GitHub Pages |
-| `node-editor` | Node-graph editor demo built on agg-gui |
+| `node-editor` | The `agg-gui-node-editor` crate: a reusable, model-agnostic node-graph editor widget (pan, zoom, noodles, property rows, hosted cards) over a graph the host owns through `NodeGraphModel` |
 | `demo/` | Frontend — TypeScript + Bun dev server on port 3001 |
 
 ## Getting Started

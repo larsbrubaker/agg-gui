@@ -10,11 +10,11 @@
 //!
 //! Two callers, one implementation:
 //!
-//! - the **live** canvas: [`super::widget::nodes::NodeWidget::paint`]
+//! - the **live** canvas: [`crate::widget::nodes::NodeWidget`]'s `paint`
 //!   draws the outline and its `NodeHeaderWidget` child draws the badge,
 //!   both in screen-space widget-local coordinates. This is what the
 //!   user sees.
-//! - the immediate-mode [`crate::draw::draw_node`], in canvas space, for
+//! - the immediate-mode [`crate::draw_immediate::draw_node`], in canvas space, for
 //!   hosts that render nodes themselves rather than mounting the
 //!   editor's retained widget tree.
 //!

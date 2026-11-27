@@ -2,15 +2,16 @@
 //! reads/writes to drive any host application's node graph.
 //!
 //! The widget never talks to a concrete graph type; it always goes through
-//! this trait. That means a host can plug in any backing store — an
-//! AtomArtist [`atomartist_lib::Graph`], a `petgraph` `DiGraph`, a `serde_json`
+//! this trait. That means a host can plug in any backing store — its own
+//! graph type, a `petgraph` `DiGraph`, a `serde_json`
 //! `Value`, anything — by implementing this trait.
 //!
 //! # Snapshot model
 //!
-//! `nodes()` and `noodles()` return owned `Vec`s every paint. That trades
-//! a few allocations per frame for *zero* borrow-vs-mutate complexity in
-//! the widget. With typical graph sizes (low hundreds of nodes / edges)
+//! `nodes()` and `noodles()` return owned `Vec`s, read on layout, on events and
+//! on a paint (one whose canvas content is unchanged reuses its last read).
+//! That trades a few allocations per read for *zero* borrow-vs-mutate
+//! complexity in the widget. With typical graph sizes (low hundreds of nodes / edges)
 //! this is well under the 10 ms frame budget agg-gui targets — measured
 //! on a representative AtomArtist scene the snapshot cost is < 50 µs.
 //!
@@ -81,7 +82,7 @@ impl PropertyValue {
 #[derive(Clone, Debug)]
 pub struct SocketView {
     /// Stable name — must round-trip through `try_add_noodle` /
-    /// `remove_edges_to`.  Typically a `&'static str` interned by the
+    /// `remove_noodle`.  Typically a `&'static str` interned by the
     /// host's node-type registry.
     pub name: String,
     /// Type id used for connection-compatibility checks + render

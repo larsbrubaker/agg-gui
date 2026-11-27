@@ -8,6 +8,18 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ## [Unreleased]
 
+## [0.0.8] - 2026-11-27
+
+### Fixed
+
+- The crate's documentation builds with no broken links: the link to agg-gui resolves, links to
+  private items are plain code, and `draw_error`'s links name the real `draw_node` and
+  `NodeWidget` paths. No API or behaviour changes.
+- The docs say when the editor reads `nodes()` and `noodles()` (on layout, on events and on a
+  paint, a paint of unchanged content reusing its last read), and that a `SocketView`'s name
+  round-trips through `try_add_noodle` and `remove_noodle`. The README says re-locking the
+  model's `Arc` from a trait method deadlocks or panics.
+
 ## [0.0.7] - 2026-11-24
 
 ### Changed

@@ -43,7 +43,7 @@ impl NodePaintContext {
         Self::from_model_scaled(palette, model, 1.0)
     }
 
-    /// Same as [`from_model`] with an explicit canvas zoom factor.
+    /// Same as [`Self::from_model`] with an explicit canvas zoom factor.
     pub fn from_model_scaled<M: NodeGraphModel + ?Sized>(
         palette: CanvasPalette,
         model: &M,

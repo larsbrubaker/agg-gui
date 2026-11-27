@@ -1,5 +1,5 @@
 //! `agg-gui-node-editor` — a reusable, model-agnostic node-graph editor
-//! widget for [`agg-gui`].
+//! widget for [`agg-gui`](agg_gui).
 //!
 //! # Overview
 //!

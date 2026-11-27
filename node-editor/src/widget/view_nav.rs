@@ -8,7 +8,7 @@
 //! widget's private state, so only the widget can frame content or
 //! redefine what a left-drag means.
 //!
-//! The animation is ticked from [`NodeEditor::layout`] rather than
+//! The animation is ticked from `NodeEditor::layout` rather than
 //! driven by repeated host commands, for the same reason: `layout` is
 //! the one call guaranteed to run on every frame a `request_draw`
 //! schedules, and it already owns the pan / zoom fields the tween writes.

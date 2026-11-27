@@ -8,14 +8,14 @@
 //!
 //! Interaction is a small state machine — see `CanvasState`. Drawing is
 //! delegated to [`crate::draw`]. Event handlers (mouse / wheel / key)
-//! live in the [`events`] submodule and paint-cache fingerprinting in
-//! [`fingerprint`], so this file stays under the 800-line guardrail.
+//! live in the `events` submodule and paint-cache fingerprinting in
+//! `fingerprint`, so this file stays under the 800-line guardrail.
 //! Hosted cards (node bodies built by the host as real widgets) live in
-//! [`hosted`], [`hosted_card`], [`hosted_resize`] and [`hosted_events`].
+//! `hosted`, `hosted_card`, `hosted_resize` and `hosted_events`.
 //! Which card, socket or row a point lands on — the one painted on top —
-//! is [`hit_test`]; selecting cards with a dragged rectangle is
-//! [`rubber_band`]. Reading the nodes' layouts from the model and building
-//! the card widgets from them is [`layout_snapshot`].
+//! is `hit_test`; selecting cards with a dragged rectangle is
+//! `rubber_band`. Reading the nodes' layouts from the model and building
+//! the card widgets from them is `layout_snapshot`.
 
 mod add_menu;
 mod arrange_plan;

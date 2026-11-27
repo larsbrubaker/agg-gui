@@ -36,7 +36,7 @@ use crate::model::{NodeId, NodeView, PropertyValue, PropertyView, SocketTypeId};
 // --- Layout constants ------------------------------------------------------
 
 /// Minimum width every node renders at. Nodes whose labels need
-/// more space auto-grow past this — see [`compute_node_width`].
+/// more space auto-grow past this — see `compute_node_width`.
 pub const NODE_WIDTH: f64 = 200.0;
 pub const TITLE_HEIGHT: f64 = 26.0;
 pub const ROW_HEIGHT: f64 = 22.0;
@@ -63,7 +63,7 @@ pub const SOCKET_INNER_REACH: f64 = 8.5;
 /// Whether `p` lands on the socket centred at `center`: inside the box of
 /// `half` extents either side when given (MatterCAD's NodeDesigner hit
 /// area), otherwise within [`SOCKET_HIT_RADIUS`]. A noodle drop uses this
-/// whole area; a press uses [`socket_press_hit`].
+/// whole area; a press uses `socket_press_hit`.
 pub fn socket_hit(center: [f64; 2], p: [f64; 2], half: Option<[f64; 2]>) -> bool {
     let dx = center[0] - p[0];
     let dy = center[1] - p[1];
@@ -231,7 +231,7 @@ impl NodeRow {
     /// builder (`NodeRowWidget::from_row`) advance by exactly this, so
     /// what the user sees and what the canvas hit-tests cannot drift.
     /// They did: rows were painted at a fixed `ROW_HEIGHT` pitch while
-    /// the layout advanced by [`row_height_for_property`], and a
+    /// the layout advanced by `row_height_for_property`, and a
     /// read-only string row (two rows tall) pushed everything below it
     /// out of reach of its own clicks.
     pub fn height(&self) -> f64 {

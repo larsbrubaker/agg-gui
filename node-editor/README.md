@@ -26,7 +26,7 @@ the live graph and returns the moves for the host to apply. `NodeEditor::set_pal
 
 ```toml
 [dependencies]
-agg-gui-node-editor = "0.0.7"
+agg-gui-node-editor = "0.0.8"
 ```
 
 ```rust,ignore
@@ -50,7 +50,7 @@ let editor = NodeEditor::new(model); // a Widget: put it in the tree like any ot
 is single-threaded, so a host that evaluates its graph on another thread keeps that data behind
 its own lock inside the model. Two editors in one tree need distinct ids (`NodeEditor::with_id`).
 The editor calls the trait's methods with the model locked, so a method must not lock the same
-`Arc` again: the mutex is not reentrant and it would deadlock.
+`Arc` again: the mutex is not reentrant and it would deadlock or panic.
 
 ## Features
 
