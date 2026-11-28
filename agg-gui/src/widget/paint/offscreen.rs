@@ -293,6 +293,9 @@ pub(super) fn paint_subtree_backbuffered(widget: &mut dyn Widget, ctx: &mut dyn 
     };
 
     if needs_raster {
+        // One raster of the published pixels: exactly one of the strip path
+        // and the full path below runs, and each stamps `content_version` once.
+        crate::paint_work::record_backbuffer_raster();
         // Allocate a fresh render target whose format matches the
         // widget's chosen backbuffer mode, paint the subtree into it,
         // then convert to top-down RGBA for the cache (the blit lane

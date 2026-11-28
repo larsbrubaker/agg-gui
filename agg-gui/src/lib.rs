@@ -32,6 +32,9 @@
 //!   through; [`gfx_ctx`] is the software AGG implementation.
 //! - [`clock`] — the UI clock (real, or virtual for tests) behind every
 //!   behavioural time read: animation deadlines, click and tooltip timing.
+//! - [`paint_work`](mod@paint_work) — per-thread counts of the raster work
+//!   paints do (widget backbuffers, text masks), for tests and diagnostics
+//!   that compare frames.
 //! - [`ui_thread`] — work queued for the UI thread (`run_on_idle`, delays,
 //!   intervals), drained by the shells each frame; failures in it reach
 //!   [`unhandled`]'s per-thread handler ([`report_unhandled`]).
@@ -140,6 +143,7 @@ pub mod lcd_coverage;
 pub mod lcd_display_detection;
 pub mod lcd_gfx_ctx;
 pub mod overlay_insets;
+pub mod paint_work;
 pub mod paints;
 pub mod persistence;
 pub mod pixel_bounds;
@@ -218,6 +222,7 @@ pub use gfx_ctx::GfxCtx;
 pub use icon_image::{IconImage, IconPixelFilter};
 pub use image_density::{encode_png_rgba_at_density, image_pixel_density};
 pub use layout_props::{resolve_fit_or_stretch, HAnchor, Insets, VAnchor, WidgetBase};
+pub use paint_work::{paint_work, PaintWork};
 pub use platform::{current_platform, platform_from_name, set_platform, Platform};
 pub use screenshot::ScreenshotHandle;
 pub use selection_control_size::{

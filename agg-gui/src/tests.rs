@@ -150,6 +150,7 @@ mod on_screen_keyboard_zoom;
 mod opacity;
 pub(crate) mod paint_recorder;
 mod paint_walk;
+mod paint_work;
 mod platform_multi_click;
 mod platform_surface_bounds_tests;
 mod pointer_modifiers;

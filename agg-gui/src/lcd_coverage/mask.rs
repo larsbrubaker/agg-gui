@@ -194,6 +194,7 @@ fn rasterize_text_mask_cached(
     }
 
     // Cache miss — run the rasteriser.
+    crate::paint_work::record_text_mask_raster();
     let m = measure_text_metrics(font, text, size);
     // Extra horizontal slack when Width != 1.0 (last glyph outline is
     // scaled beyond its advance) or Faux Italic != 0 (shear lifts the

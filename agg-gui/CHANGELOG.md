@@ -8,6 +8,18 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ## [Unreleased]
 
+## [0.7.1]
+
+### Added
+
+- `paint_work::paint_work()` (also `agg_gui::paint_work()`) returns a `PaintWork`: the calling
+  thread's running totals of widget CPU backbuffer rasters (`backbuffer_rasters`: first rasters,
+  re-rasters of a stale cache and band dirty-strip updates, not cached blits) and text-mask
+  rasters (`text_mask_rasters`: text mask cache misses, not hits). Read it before and after a
+  frame and take `PaintWork::since` to see the raster work that frame did, so a test can prove a
+  widget warmed up ahead of time paints its next frame from its caches. The totals are per
+  thread and only grow.
+
 ## [0.7.0]
 
 ### Added
