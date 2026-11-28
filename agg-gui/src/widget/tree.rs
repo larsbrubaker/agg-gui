@@ -1,7 +1,8 @@
 //! Widget-tree traversal helpers: dirty marking and hit-test path lookup.
 //!
-//! [`mark_subtree_dirty`] is called by the frame loop after off-event-path
-//! async work finishes (font load, image decode). The hit-test family —
+//! [`mark_async_state_dependents_dirty`] is called by `App::paint` after
+//! off-event-path async work finishes (font load, image decode) or idle work
+//! is queued; [`mark_subtree_dirty`] marks a whole subtree. The hit-test family —
 //! [`hit_test_subtree`], [`active_modal_path`], [`global_overlay_hit_path`]
 //! — returns a `Vec<usize>` path of child indices identifying the deepest
 //! widget that claims a position; the App event router uses that path to
@@ -48,17 +49,33 @@ pub(crate) fn child_local_pos(
     Point::new(x - child_bounds.x, y - child_bounds.y)
 }
 
-/// Recursively call `mark_dirty` on `widget` and every visible
-/// descendant.  Used by the host frame loop after an async data
-/// source (image fetch + decode, font load, etc.) finishes outside
-/// the normal event-dispatch path that would otherwise mark widgets
-/// dirty as the event bubbles.  Called explicitly at the top of the
-/// frame so the user-visible "freshly-decoded data lands in stale
-/// FBO contents" bug never opens a one-frame race window.
+/// Recursively call `mark_dirty` on `widget` and every descendant in
+/// `children()`, whatever each answers to
+/// [`Widget::depends_on_async_state`]: for a caller that must re-raster a
+/// whole subtree. [`App::paint`](crate::App::paint)'s async-state walk
+/// leaves alone the widgets that opt out instead.
 pub fn mark_subtree_dirty(widget: &mut dyn Widget) {
     widget.mark_dirty();
     for child in widget.children_mut().iter_mut() {
         mark_subtree_dirty(child.as_mut());
+    }
+}
+
+/// The walk `App::paint` runs when the async-state epoch
+/// ([`crate::animation::async_state_epoch`]) moved since its last paint: an
+/// image load (or other async source) finished outside the event-dispatch
+/// path that marks widgets dirty as an event bubbles, or idle work was
+/// queued. Calls `mark_dirty` on every widget whose
+/// [`Widget::depends_on_async_state`] says that can stale its retained
+/// pixels, at the top of the frame, so freshly-arrived data never lands in a
+/// stale cache. The children of a widget that answers `false` are still
+/// visited: its answer covers its own cache only.
+pub(crate) fn mark_async_state_dependents_dirty(widget: &mut dyn Widget) {
+    if widget.depends_on_async_state() {
+        widget.mark_dirty();
+    }
+    for child in widget.children_mut().iter_mut() {
+        mark_async_state_dependents_dirty(child.as_mut());
     }
 }
 

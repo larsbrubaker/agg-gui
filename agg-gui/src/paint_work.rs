@@ -41,7 +41,8 @@ thread_local! {
 pub struct PaintWork {
     /// Times a widget's CPU backbuffer was rastered: its first raster, and
     /// every re-raster after its cache went stale (dirty, resized, mode,
-    /// theme, typography or async-state change). A band widget's dirty-strip
+    /// theme, typography, or an async-state change for a widget whose
+    /// `Widget::depends_on_async_state` is `true`). A band widget's dirty-strip
     /// update counts as one raster too. A paint that only blits the cached
     /// bitmap counts nothing; retained GL layers are not counted.
     pub backbuffer_rasters: u64,

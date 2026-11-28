@@ -89,7 +89,7 @@ fn paint_subtree_gl_backbuffer(
     // thread's caches.
     let typography_epoch = crate::font_settings::current_thread_typography_epoch();
     let async_state_epoch = crate::animation::async_state_epoch();
-    let (key, needs_draw) = {
+    let (key, needs, async_moved) = {
         let Some(state) = widget.backbuffer_state_mut() else {
             paint_subtree_direct(widget, ctx);
             return;
@@ -97,17 +97,29 @@ fn paint_subtree_gl_backbuffer(
         let w = layer_w.ceil().max(1.0) as u32;
         let h = layer_h.ceil().max(1.0) as u32;
         let changed = state.width != w || state.height != h || state.spec_kind != spec.kind;
-        let style_changed = state.theme_epoch != theme_epoch
-            || state.typography_epoch != typography_epoch
-            || state.async_state_epoch != async_state_epoch;
+        let style_changed =
+            state.theme_epoch != theme_epoch || state.typography_epoch != typography_epoch;
         let needs = !spec.cached || state.dirty || changed || style_changed || subtree_needs_draw;
         if changed {
             state.width = w;
             state.height = h;
             state.spec_kind = spec.kind;
         }
-        (state.id(), needs)
+        (
+            state.id(),
+            needs,
+            state.async_state_epoch != async_state_epoch,
+        )
     };
+    // As in the CPU path: the async-state epoch stales only a layer whose
+    // widget can depend on it, asked only when the epoch moved; an opted-out
+    // layer is stamped with this epoch (it holds this epoch's pixels).
+    let needs_draw = needs || (async_moved && widget.depends_on_async_state());
+    if async_moved && !needs_draw {
+        if let Some(state) = widget.backbuffer_state_mut() {
+            state.async_state_epoch = async_state_epoch;
+        }
+    }
 
     if spec.cached && !needs_draw {
         ctx.save();
@@ -276,7 +288,7 @@ pub(super) fn paint_subtree_backbuffered(widget: &mut dyn Widget, ctx: &mut dyn 
     // thread's caches.
     let typography_epoch = crate::font_settings::current_thread_typography_epoch();
     let async_state_epoch = crate::animation::async_state_epoch();
-    let (needs_raster, has_bitmap) = {
+    let (needs, has_bitmap, async_moved) = {
         let cache = widget
             .backbuffer_cache_mut()
             .expect("backbuffered widget must return Some from backbuffer_cache_mut");
@@ -287,10 +299,19 @@ pub(super) fn paint_subtree_backbuffered(widget: &mut dyn Widget, ctx: &mut dyn 
             || cache.height != h_phys
             || cache_is_lcd != mode_is_lcd
             || cache.theme_epoch != theme_epoch
-            || cache.typography_epoch != typography_epoch
-            || cache.async_state_epoch != async_state_epoch;
-        (needs, cache.pixels.is_some())
+            || cache.typography_epoch != typography_epoch;
+        let async_moved = cache.async_state_epoch != async_state_epoch;
+        (needs, cache.pixels.is_some(), async_moved)
     };
+    // The async-state epoch stales only a widget whose pixels can depend on
+    // it (`Widget::depends_on_async_state`), asked only when the epoch moved.
+    let async_stale = async_moved && widget.depends_on_async_state();
+    let needs_raster = needs || async_stale;
+    if async_moved && !needs_raster {
+        // An opted-out widget's cache holds this epoch's pixels: stamp it, so
+        // later frames do not ask again until the epoch moves again.
+        widget.backbuffer_cache_mut().unwrap().async_state_epoch = async_state_epoch;
+    }
 
     if needs_raster {
         // One raster of the published pixels: exactly one of the strip path
@@ -328,7 +349,7 @@ pub(super) fn paint_subtree_backbuffered(widget: &mut dyn Widget, ctx: &mut dyn 
             cache.pixels.is_some()
                 && cache.theme_epoch == theme_epoch
                 && cache.typography_epoch == typography_epoch
-                && cache.async_state_epoch == async_state_epoch
+                && !async_stale
                 && cache
                     .lcd_buffer
                     .as_ref()

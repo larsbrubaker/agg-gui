@@ -226,6 +226,16 @@ impl Widget for TextField {
         }
     }
 
+    /// `false` while the cache signature is current (`text_field/sig.rs`)
+    /// and no child was pushed into the field (it would paint into the
+    /// cache too): everything the cached body shows is then in the signature
+    /// or follows the theme and typography epochs. The field invalidates only
+    /// in `layout`, so a bound cell changed after this frame's layout makes it
+    /// `true` until then.
+    fn depends_on_async_state(&self) -> bool {
+        !self.children.is_empty() || !self.sig_is_current()
+    }
+
     fn layout(&mut self, available: Size) -> Size {
         // An owner's cell can disable a focused field without a call into it.
         // Release before the cache signature below reads `focused`; the app

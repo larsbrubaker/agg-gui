@@ -166,15 +166,19 @@ std::thread_local! {
     static LAYOUT_REQUESTED:  Cell<bool>            = const { Cell::new(false) };
     static INVALIDATION_EPOCH: Cell<u64>             = const { Cell::new(0) };
     /// Bumped whenever an async source (image fetch + decode, font
-    /// load, etc.) finishes outside the event-dispatch path.  Retained
-    /// backbuffers (Window FBOs, in-process bitmap caches) compare
-    /// their stored value against this epoch on each paint and force
-    /// a re-raster on mismatch — there is no widget reference at the
-    /// callback site to walk the ancestor chain via the usual
-    /// `mark_dirty` route, so without this signal a freshly-decoded
-    /// image draws into the placeholder-sized rect the previous
-    /// layout reserved (the user-visible "wrong scale on first
-    /// frame" bug).
+    /// load, etc.) finishes outside the event-dispatch path, and when
+    /// idle work is queued (`crate::ui_thread`).  There is no widget
+    /// reference at the callback site to walk the ancestor chain via
+    /// the usual `mark_dirty` route, so this epoch stands in for it: a
+    /// widget whose `Widget::depends_on_async_state` is `true` is
+    /// marked dirty by `App::paint` when the epoch moves, and its
+    /// retained backbuffer (Window FBO, in-process bitmap cache)
+    /// re-rasters when its stored epoch no longer matches.  Without
+    /// that a freshly-decoded image draws into the placeholder-sized
+    /// rect the previous layout reserved (the "wrong scale on first
+    /// frame" bug).  A widget whose cache only its own setters and
+    /// layout invalidate (a `Label`) answers `false`, so a result that
+    /// changed nothing it shows costs it no raster.
     static ASYNC_STATE_EPOCH: Cell<u64> = const { Cell::new(0) };
     /// Per-thread snapshot of its queue's wakeup count last observed by
     /// [`pump_async_wakeup`].  When the count differs from this, the
@@ -495,8 +499,10 @@ pub fn signal_async_state_change() {
     crate::ui_thread::current_queue().signal_async_state_change();
 }
 
-/// Current async-state epoch.  Backbuffer caches store this and force
-/// a re-raster when it doesn't match.
+/// Current async-state epoch.  Backbuffer caches store this, and the
+/// cache of a widget whose `Widget::depends_on_async_state` is `true`
+/// re-rasters when it doesn't match; one whose widget answers `false`
+/// is only brought up to date.
 ///
 /// Pumps cross-thread wakeups first so a worker-thread
 /// [`signal_async_state_change`] surfaces on the next read.

@@ -128,6 +128,35 @@ macro_rules! widget_paint_hooks {
             }
         }
 
+        /// Whether an async-state change ([`crate::animation::async_state_epoch`]
+        /// advancing: a worker's result arriving, idle work being queued) can
+        /// leave this widget's retained pixels stale right now.
+        ///
+        /// `true` (the default): `App::paint`'s async-state walk calls
+        /// [`mark_dirty`](Self::mark_dirty) on this widget when the epoch has
+        /// moved, and its own retained surface
+        /// ([`backbuffer_cache_mut`](Self::backbuffer_cache_mut) /
+        /// [`backbuffer_state_mut`](Self::backbuffer_state_mut)) rasters again
+        /// when it finds the epoch it was rastered at is not the current one.
+        /// That is how a result landing in shared state, outside every setter,
+        /// reaches the screen through a cache nothing else invalidated.
+        ///
+        /// Return `false` only while everything drawn into that surface (this
+        /// widget's own paint and, for a widget with children, every descendant
+        /// painted into it, including widgets it paints that are not in
+        /// [`children`](Self::children)) is already invalidated by its setters,
+        /// its layout signature, the theme or typography epochs, a size change
+        /// or event dispatch: its cache then survives a worker's result or
+        /// queued idle work that changed nothing it shows. A child's `false`
+        /// never vouches for an ancestor (a child's setter dirties the child's
+        /// cache, not the ancestor's), so a container keeps `true`; the walk
+        /// still visits the children of a widget that answers `false`. The
+        /// answer may change between calls, e.g. `false` only while a layout
+        /// signature is current.
+        fn depends_on_async_state(&self) -> bool {
+            true
+        }
+
         /// Opt into per-widget CPU bitmap caching with a dirty flag.
         ///
         /// Widgets that return `Some(&mut cache)` get their paint +

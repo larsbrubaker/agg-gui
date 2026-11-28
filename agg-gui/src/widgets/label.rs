@@ -263,7 +263,10 @@ impl Label {
     }
     /// Setter form of [`with_dim`](Label::with_dim).
     pub fn set_dim(&mut self, dim: bool) {
-        self.dim = dim;
+        if self.dim != dim {
+            self.dim = dim;
+            self.cache.invalidate();
+        }
     }
     /// Emphasise this label with a "strong" text colour, agg-gui's analog
     /// of egui's `ui.strong(...)`.  Has no effect when an explicit
@@ -499,6 +502,15 @@ impl Widget for Label {
         } else {
             None
         }
+    }
+
+    /// A label's bitmap shows only its own text and styling: every setter
+    /// invalidates it, `layout` drops it on a font or size swap, and the
+    /// theme and typography epochs and its size cover the rest. A worker's
+    /// result or queued idle work therefore leaves it cached, unless a child
+    /// was pushed into it, which would paint into that bitmap too.
+    fn depends_on_async_state(&self) -> bool {
+        !self.children.is_empty()
     }
 
     fn backbuffer_ink_outset(&self) -> Option<(f64, f64)> {

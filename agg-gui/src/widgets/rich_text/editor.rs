@@ -422,6 +422,15 @@ impl Widget for RichTextEdit {
         Some(&mut self.cache)
     }
 
+    /// `false` while the cache signature is current and no child was pushed
+    /// into the editor (it would paint into the cache too): the bitmap is
+    /// painted from the cached layout and the core's state, which the
+    /// signature tracks (`invalidate_layout` folds in a reshape the core does
+    /// not see), and follows the theme and typography epochs otherwise.
+    fn depends_on_async_state(&self) -> bool {
+        !self.children.is_empty() || self.last_sig.as_ref() != Some(&self.cache_sig())
+    }
+
     fn backbuffer_mode(&self) -> BackbufferMode {
         // Same decision as `Label` / `TextField` / `TextArea`: LCD coverage
         // buffer when the global toggle is on, grayscale RGBA otherwise. The

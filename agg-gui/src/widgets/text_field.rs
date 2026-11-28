@@ -216,6 +216,10 @@ pub struct TextField {
 
     /// Per-widget colour overrides — `None` colours fall back to
     /// the ambient `visuals()` palette. Set via [`with_theme`].
+    /// After construction, change it through
+    /// [`set_theme`](Self::set_theme), which clears the layout signature
+    /// so the cached bitmap repaints; a direct assignment to this field is
+    /// not seen by the cache.
     pub theme: TextFieldTheme,
     /// Paint the background and border (default); `false` leaves both to the
     /// host. See `with_frame` in `text_field/theme.rs`.

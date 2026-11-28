@@ -8,6 +8,48 @@ Because the crate is pre-1.0, breaking changes are released in `0.MINOR.0` bumps
 
 ## [Unreleased]
 
+## [0.7.2]
+
+### Added
+
+- `Widget::depends_on_async_state`: whether an async-state change (`animation::async_state_epoch`
+  advancing: a worker's result arriving through `UiQueue::signal_async_state_change`, idle work
+  queued with `ui_thread::run_on_idle`, `run_on_idle_after` or `set_interval`) can leave the
+  widget's retained pixels stale right now. `true` by default, which keeps the old behaviour:
+  `App::paint` marks the widget dirty when the epoch moves, and its CPU backbuffer or retained GL
+  layer rasters again. A widget whose cache is already invalidated by its setters, its layout
+  signature, the theme and typography epochs, a size change or event dispatch answers `false`,
+  and then keeps its cache through a wake that changed nothing it shows. The walk still visits
+  the children of a widget that answers `false`; a container keeps `true`, as a child's setter
+  dirties the child's cache, not its ancestor's.
+
+### Changed
+
+- A cached `Label`, `Hyperlink`, `TextField`, `TextArea` or `RichTextEdit` no longer re-rasters
+  when a worker's result arrives or idle work is queued, unless that changed something it shows.
+  Before, every such wake re-rastered every cached widget on screen, though a label's pixels
+  depend only on its own text and styling. `Label` and `Hyperlink` answer `false` while they have
+  no children; `TextField`, `TextArea` and `RichTextEdit` answer `false` while they have no
+  children and their cache signature is current (for a `TextField`, with its bound text, hint,
+  enabled, reveal and insets cells read as its next layout would), so a bound cell changed after
+  this frame's layout is still caught; a `TextArea` with a highlighter keeps `true`, as the
+  highlighter may read any state. `MenuBar`, `Window`, `MarkdownView`, image widgets and every
+  container keep `true`.
+
+  Migration: a custom widget with its own retained cache (`backbuffer_cache_mut` or
+  `backbuffer_state_mut`) that wants the same answers `false` from `depends_on_async_state`
+  while everything drawn into its cache is invalidated without the epoch, and `true` otherwise.
+  A widget that delegates its cache to an inner built-in (a host wrapping a `RichTextEdit`, say)
+  forwards `depends_on_async_state` too, or keeps re-rastering after each wake as before.
+
+### Fixed
+
+- `Label::set_dim` invalidates the label's cached bitmap, so the dimmed colour shows on the next
+  frame; before, it showed only after something else re-rastered the label.
+- `TextArea::set_word_wrap` shows the new wrapping on the next frame: whether lines wrap is part of
+  the area's cache signature, where before the cached bitmap kept the old wrapping until something
+  else re-rastered it.
+
 ## [0.7.1]
 
 ### Added

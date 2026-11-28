@@ -171,6 +171,8 @@ struct TextAreaSig {
     /// How far the text has scrolled sideways (`no_wrap.rs`); always `0`
     /// bits while the area wraps.
     h_offset_bits: u64,
+    /// Whether lines wrap (`no_wrap.rs`): switching re-flows every line.
+    word_wrap: bool,
     /// Whether the area is enabled: a disabled area draws its hint faded.
     enabled: bool,
     /// The muted byte range (`muted.rs`): text that turns final keeps its
@@ -452,6 +454,7 @@ impl TextArea {
                 self.vbar.offset.to_bits()
             },
             h_offset_bits: self.h_offset.to_bits(),
+            word_wrap: self.word_wrap,
             enabled: self.enabled_now(),
             muted: self.muted_range(),
         }
@@ -736,6 +739,8 @@ mod wrap;
 
 use wrap::{wrap_text_indexed, WrappedLine};
 
+#[cfg(test)]
+mod async_state_tests;
 #[cfg(test)]
 mod band_tests;
 #[cfg(test)]

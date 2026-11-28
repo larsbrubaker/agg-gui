@@ -112,6 +112,19 @@ impl Widget for TextArea {
         self.backbuffer_band_impl()
     }
 
+    /// A highlighter closure may read state outside the area, and a child
+    /// pushed into it would paint into its cache, so with either the area
+    /// follows async-state changes. Otherwise `false` while the cache
+    /// signature is current: everything the cached bitmap shows is in it
+    /// (`layout` compares it: text, caret, selection, wrapping, scroll,
+    /// alignment, focus, hover, size) or follows the theme and typography
+    /// epochs.
+    fn depends_on_async_state(&self) -> bool {
+        self.highlighter.is_some()
+            || !self.children.is_empty()
+            || self.last_sig.as_ref() != Some(&self.cache_sig())
+    }
+
     fn backbuffer_mode(&self) -> BackbufferMode {
         // Same decision as `Label` / `TextField`: LCD-subpixel coverage buffer
         // when the global toggle is on (default at scale ≤ 1.25; an explicit choice at any scale), grayscale

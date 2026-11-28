@@ -37,6 +37,7 @@ const TEST_FONT: &[u8] = include_bytes!("../../demo/assets/CascadiaCode.ttf");
 
 mod absolute_layout;
 mod arc_to_join;
+mod async_state_retained_layer;
 mod async_wakeup_paint;
 mod back_buffer_tests;
 mod backbuffer_scale;

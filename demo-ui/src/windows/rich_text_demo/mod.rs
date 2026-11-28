@@ -394,6 +394,13 @@ impl Widget for RichEditHost {
     fn backbuffer_mode(&self) -> agg_gui::widget::BackbufferMode {
         self.editor.backbuffer_mode()
     }
+    // The cache is the editor's and the host paints nothing of its own, so
+    // the editor's answer holds for the host while it has no children (one
+    // pushed into it would paint into that cache too, as for the built-ins):
+    // it keeps its cache through a wake that changed nothing it shows.
+    fn depends_on_async_state(&self) -> bool {
+        !self.children.is_empty() || self.editor.depends_on_async_state()
+    }
 
     fn measure_min_height(&self, available_w: f64) -> f64 {
         self.editor.measure_min_height(available_w)
@@ -491,6 +498,23 @@ mod tests {
             engaged,
             "editor backbuffer cache must populate after a framework paint — \
              the cached LCD/RGBA path did not engage"
+        );
+    }
+
+    /// The host owns no cache of its own, so it answers the async-state walk
+    /// with the editor's answer: `true` before the editor's first layout (no
+    /// signature yet), `false` once laid out, so a wake that changed nothing
+    /// it shows leaves the demo editor's cache alone.
+    #[test]
+    fn host_forwards_the_editors_async_state_answer() {
+        let font = Arc::new(Font::from_slice(TEST_FONT).expect("test font must load"));
+        let editor = RichTextEdit::new(seed_doc(), make_resolver(font)).with_font_size(16.0);
+        let mut host = RichEditHost::new(editor);
+        assert!(host.depends_on_async_state(), "no signature before layout");
+        host.layout(Size::new(400.0, 300.0));
+        assert!(
+            !host.depends_on_async_state(),
+            "a laid-out host opts out, as its editor does"
         );
     }
 

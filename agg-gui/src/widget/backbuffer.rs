@@ -154,8 +154,12 @@ pub struct BackbufferCache {
     /// [`crate::animation::async_state_epoch`]) — bumped when an
     /// off-thread / async source (e.g. an image fetch + decode)
     /// finishes outside the normal event-dispatch path that would
-    /// otherwise mark widgets dirty.  Mismatch forces a re-raster
-    /// so freshly-loaded data lands in newly-laid-out bounds.
+    /// otherwise mark widgets dirty, or idle work is queued.  A
+    /// mismatch forces a re-raster, so freshly-loaded data lands in
+    /// newly-laid-out bounds, for a widget whose
+    /// [`Widget::depends_on_async_state`](crate::widget::Widget::depends_on_async_state)
+    /// is `true` (the default).  For one that answers `false` it is only
+    /// brought up to date, as nothing it shows depends on the change.
     pub async_state_epoch: u64,
     /// Retained `LcdCoverage` planes (Y-up) kept alive between paints so an
     /// over-scan-band widget can *partially* re-raster only the edited line
@@ -245,7 +249,9 @@ pub struct BackbufferState {
     /// Async-state epoch (see [`crate::animation::async_state_epoch`])
     /// recorded the last paint.  Mismatch forces a re-raster so a
     /// freshly-arrived async result (image fetch, font load) doesn't
-    /// composite the previous frame's stale FBO contents.
+    /// composite the previous frame's stale FBO contents, unless the
+    /// widget's [`Widget::depends_on_async_state`](crate::widget::Widget::depends_on_async_state)
+    /// is `false`: then the layer is kept and the epoch brought up to date.
     pub async_state_epoch: u64,
     pub repaint_count: u64,
     pub composite_count: u64,

@@ -128,6 +128,15 @@ impl Widget for Hyperlink {
         Some(&mut self.cache)
     }
 
+    /// Its text and font never change after construction, hover reaches it
+    /// through event dispatch (and its layout signature), and the size, theme
+    /// and typography epochs cover the rest, so an async-state change leaves
+    /// its bitmap cached, unless a child was pushed into it (it would paint
+    /// into that bitmap too).
+    fn depends_on_async_state(&self) -> bool {
+        !self.children.is_empty()
+    }
+
     fn backbuffer_mode(&self) -> crate::widget::BackbufferMode {
         if crate::font_settings::lcd_enabled() {
             crate::widget::BackbufferMode::LcdCoverage

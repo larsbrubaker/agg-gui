@@ -102,13 +102,13 @@ pub struct App {
     /// A trackpad's pinch and rotate as two virtual fingers, fed into
     /// `touch_state` on their own device. See `app/pinch.rs`.
     trackpad_fingers: crate::trackpad_pinch_fingers::TrackpadPinchFingers,
-    /// Last `async_state_epoch` `App::paint` observed.  At the top of
-    /// each paint, if the current epoch differs we explicitly mark
-    /// every widget dirty via `mark_subtree_dirty`, so a freshly-
-    /// loaded image (or any other async result that landed outside
-    /// the event-dispatch dirty-propagation path) lands in newly-
-    /// rasterised retained backbuffers, not the previous frame's
-    /// stale FBO contents.
+    /// Last `async_state_epoch` `App::paint` observed.  When a paint finds
+    /// it moved, it marks dirty every widget whose `depends_on_async_state`
+    /// says the change can stale its retained pixels
+    /// (`tree::mark_async_state_dependents_dirty`), so a freshly-loaded
+    /// image (or any async result that landed outside event dispatch)
+    /// lands in newly-rasterised retained backbuffers, not stale FBO
+    /// contents, while caches only their own setters invalidate stay.
     last_async_state_epoch: u64,
     /// `async_state_epoch` snapshot taken at the start of the most recent
     /// [`App::layout`] (`None` until the first layout).  When
@@ -320,19 +320,19 @@ impl App {
         // A cursor changed by code since the last frame (see
         // `crate::invalidate_cursor`); shells apply the cursor after paint.
         self.refresh_cursor();
-        // Async-state dirty walk: an image load (or other async source)
-        // that finished outside event dispatch bumped
-        // `async_state_epoch`.  Walk the whole tree and mark every
-        // widget dirty so retained backbuffers re-rasterise on this
-        // frame — without this, the freshly-decoded pixels would land
-        // inside a Window FBO whose cache check sees no other change
-        // and composites the previous frame's stale bitmap.  The
-        // explicit walk replaces a brittle "compare an extra epoch
-        // inside every cache" mechanism with a single deterministic
-        // hook at the start of paint.
+        // Async-state walk: an image load (or other async source) that
+        // finished outside event dispatch, or queued idle work, advanced
+        // `async_state_epoch`.  Mark dirty every widget whose
+        // `depends_on_async_state` says that can stale its retained
+        // pixels, so freshly-decoded pixels never land inside a Window FBO
+        // whose cache check sees no other change and composites the
+        // previous frame's bitmap.  A widget that opts out (a `Label`,
+        // whose setters and layout invalidate it) keeps its cache, and the
+        // backbuffer paths skip the epoch for it (`paint/offscreen.rs`).
+        // One deterministic hook at the start of paint.
         let async_epoch = crate::animation::async_state_epoch();
         if async_epoch != self.last_async_state_epoch {
-            tree::mark_subtree_dirty(self.root.as_mut());
+            tree::mark_async_state_dependents_dirty(self.root.as_mut());
             self.last_async_state_epoch = async_epoch;
         }
         // The dirty walk fixes pixels, not layout.  If the async change
